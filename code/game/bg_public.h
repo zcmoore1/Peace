@@ -138,10 +138,11 @@ typedef enum {
 } pmtype_t;
 
 typedef enum {
-	WEAPON_READY, 
+	WEAPON_READY,
 	WEAPON_RAISING,
 	WEAPON_DROPPING,
-	WEAPON_FIRING
+	WEAPON_FIRING,
+	WEAPON_RELOADING
 } weaponstate_t;
 
 // pmove->pm_flags
@@ -202,6 +203,9 @@ typedef struct {
 void PM_UpdateViewAngles( playerState_t *ps, const usercmd_t *cmd );
 void Pmove (pmove_t *pmove);
 
+int  BG_WeaponMagSize( int weapon );
+int  BG_WeaponReloadTime( int weapon );
+
 //===================================================================================
 
 
@@ -216,6 +220,8 @@ typedef enum {
 	STAT_WEAPONS,					// 16 bit fields
 	STAT_ARMOR,
 	STAT_SECONDARY_WEAPON,			// weapon in the off-slot for the CoD-style 2-weapon swap
+	STAT_CUR_AMMO,					// magazine ammo for the active weapon
+	STAT_CUR_AMMO_SEC,				// magazine ammo for the secondary weapon
 	STAT_DEAD_YAW,					// look this direction when dead (FIXME: get rid of?)
 	STAT_CLIENTS_READY,				// bit mask of clients wishing to exit the intermission (FIXME: configstring?)
 	STAT_MAX_HEALTH					// health / armor limit, changeable by handicap
@@ -384,6 +390,7 @@ typedef enum {
 	EV_NOAMMO,
 	EV_CHANGE_WEAPON,
 	EV_FIRE_WEAPON,
+	EV_RELOAD,
 
 	EV_USE_ITEM0,
 	EV_USE_ITEM1,

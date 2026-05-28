@@ -1170,6 +1170,13 @@ void ClientSpawn(gentity_t *ent) {
 	} else {
 		client->ps.ammo[WP_MACHINEGUN] = 100;
 	}
+	// Load the starting magazine; deduct it from reserve.
+	{
+		int mag = BG_WeaponMagSize( WP_MACHINEGUN );
+		int load = client->ps.ammo[WP_MACHINEGUN] < mag ? client->ps.ammo[WP_MACHINEGUN] : mag;
+		client->ps.stats[STAT_CUR_AMMO] = load;
+		client->ps.ammo[WP_MACHINEGUN] -= load;
+	}
 
 	client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_GAUNTLET );
 	client->ps.ammo[WP_GAUNTLET] = -1;

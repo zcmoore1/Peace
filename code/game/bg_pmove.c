@@ -1460,6 +1460,53 @@ static void PM_WaterEvents( void ) {		// FIXME?
 }
 
 
+// Magazine capacity per weapon (0 = no magazine / infinite).
+// Indexed by WP_* enum; sized to MAX_WEAPONS for safety.
+static const int bg_weaponMagSize[MAX_WEAPONS] = {
+	0,		// WP_NONE
+	0,		// WP_GAUNTLET      (melee)
+	30,		// WP_MACHINEGUN
+	8,		// WP_SHOTGUN
+	6,		// WP_GRENADE_LAUNCHER
+	6,		// WP_ROCKET_LAUNCHER
+	100,	// WP_LIGHTNING
+	10,		// WP_RAILGUN
+	30,		// WP_PLASMAGUN
+	1,		// WP_BFG
+	0,		// WP_GRAPPLING_HOOK (infinite)
+	20,		// WP_NAILGUN
+	5,		// WP_PROX_LAUNCHER
+	60,		// WP_CHAINGUN
+};
+
+// Reload duration in milliseconds per weapon.
+static const int bg_weaponReloadTime[MAX_WEAPONS] = {
+	0,		// WP_NONE
+	0,		// WP_GAUNTLET
+	2000,	// WP_MACHINEGUN
+	1500,	// WP_SHOTGUN
+	1800,	// WP_GRENADE_LAUNCHER
+	1800,	// WP_ROCKET_LAUNCHER
+	1500,	// WP_LIGHTNING
+	1800,	// WP_RAILGUN
+	1500,	// WP_PLASMAGUN
+	2500,	// WP_BFG
+	0,		// WP_GRAPPLING_HOOK
+	2000,	// WP_NAILGUN
+	2000,	// WP_PROX_LAUNCHER
+	2000,	// WP_CHAINGUN
+};
+
+int BG_WeaponMagSize( int weapon ) {
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
+	return bg_weaponMagSize[weapon];
+}
+
+int BG_WeaponReloadTime( int weapon ) {
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
+	return bg_weaponReloadTime[weapon];
+}
+
 /*
 ===============
 PM_BeginWeaponChange
@@ -1480,8 +1527,13 @@ static void PM_BeginWeaponChange( int weapon ) {
 
 	pm->ps->pm_flags &= ~PMF_QUICKSWAP_PENDING;
 	PM_AddEvent( EV_CHANGE_WEAPON );
+	// Aborting a reload resets the timer so the drop takes exactly 200ms.
+	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
+		pm->ps->weaponTime = 200;
+	} else {
+		pm->ps->weaponTime += 200;
+	}
 	pm->ps->weaponstate = WEAPON_DROPPING;
-	pm->ps->weaponTime += 200;
 	PM_StartTorsoAnim( TORSO_DROP );
 }
 
@@ -1494,6 +1546,10 @@ PM_FinishWeaponChange
 static void PM_FinishWeaponChange( void ) {
 	int		weapon;
 	int		oldWeapon;
+	int		tmpClip;
+	int		magSize;
+	int		reserve;
+	int		load;
 
 	oldWeapon = pm->ps->weapon;
 
@@ -1509,6 +1565,26 @@ static void PM_FinishWeaponChange( void ) {
 	// stowed weapon becomes the secondary slot
 	if ( oldWeapon > WP_NONE ) {
 		pm->ps->stats[STAT_SECONDARY_WEAPON] = oldWeapon;
+	}
+
+	// Swap the magazine ammo between the two slots so each weapon remembers
+	// how many rounds it had loaded when it was last stowed.
+	tmpClip = pm->ps->stats[STAT_CUR_AMMO];
+	pm->ps->stats[STAT_CUR_AMMO]     = pm->ps->stats[STAT_CUR_AMMO_SEC];
+	pm->ps->stats[STAT_CUR_AMMO_SEC] = tmpClip;
+
+	// If the incoming weapon has never been loaded (empty mag), pull one
+	// full magazine from reserve automatically so it raises ready-to-fire.
+	magSize = BG_WeaponMagSize( weapon );
+	if ( magSize > 0 && pm->ps->stats[STAT_CUR_AMMO] == 0 ) {
+		reserve = pm->ps->ammo[weapon];
+		if ( reserve == -1 ) {
+			pm->ps->stats[STAT_CUR_AMMO] = magSize;
+		} else if ( reserve > 0 ) {
+			load = reserve < magSize ? reserve : magSize;
+			pm->ps->stats[STAT_CUR_AMMO] = load;
+			pm->ps->ammo[weapon] -= load;
+		}
 	}
 
 	pm->ps->weapon = weapon;
@@ -1635,10 +1711,38 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
+	// reload complete: refill magazine from reserve
+	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
+		int magSize = BG_WeaponMagSize( pm->ps->weapon );
+		int reserve = pm->ps->ammo[pm->ps->weapon];
+		int needed  = magSize - pm->ps->stats[STAT_CUR_AMMO];
+		int load    = ( reserve == -1 ) ? needed :
+		              ( reserve < needed ? reserve : needed );
+		pm->ps->stats[STAT_CUR_AMMO] += load;
+		if ( reserve != -1 ) {
+			pm->ps->ammo[pm->ps->weapon] -= load;
+		}
+		pm->ps->weaponstate = WEAPON_READY;
+		PM_StartTorsoAnim( TORSO_STAND );
+		return;
+	}
+
 	// check for fire
 	if ( ! (pm->cmd.buttons & BUTTON_ATTACK) ) {
-		pm->ps->weaponTime = 0;
-		pm->ps->weaponstate = WEAPON_READY;
+		// Manual reload: player pressed R while not firing
+		if ( pm->cmd.buttons & BUTTON_RELOAD ) {
+			int magSize = BG_WeaponMagSize( pm->ps->weapon );
+			if ( magSize > 0 &&
+			     pm->ps->stats[STAT_CUR_AMMO] < magSize &&
+			     pm->ps->ammo[pm->ps->weapon] != 0 ) {
+				PM_AddEvent( EV_RELOAD );
+				pm->ps->weaponstate = WEAPON_RELOADING;
+				pm->ps->weaponTime  = BG_WeaponReloadTime( pm->ps->weapon );
+			}
+		} else {
+			pm->ps->weaponTime = 0;
+			pm->ps->weaponstate = WEAPON_READY;
+		}
 		return;
 	}
 
@@ -1657,16 +1761,31 @@ static void PM_Weapon( void ) {
 
 	pm->ps->weaponstate = WEAPON_FIRING;
 
-	// check for out of ammo
-	if ( ! pm->ps->ammo[ pm->ps->weapon ] ) {
-		PM_AddEvent( EV_NOAMMO );
-		pm->ps->weaponTime += 500;
-		return;
-	}
-
-	// take an ammo away if not infinite
-	if ( pm->ps->ammo[ pm->ps->weapon ] != -1 ) {
-		pm->ps->ammo[ pm->ps->weapon ]--;
+	// Ammo check: magazine-based weapons use STAT_CUR_AMMO; others use ammo[] directly.
+	if ( BG_WeaponMagSize( pm->ps->weapon ) > 0 ) {
+		if ( pm->ps->stats[STAT_CUR_AMMO] <= 0 ) {
+			// Auto-reload if reserve available, otherwise dry-fire event.
+			if ( pm->ps->ammo[pm->ps->weapon] != 0 ) {
+				PM_AddEvent( EV_RELOAD );
+				pm->ps->weaponstate = WEAPON_RELOADING;
+				pm->ps->weaponTime  = BG_WeaponReloadTime( pm->ps->weapon );
+			} else {
+				PM_AddEvent( EV_NOAMMO );
+				pm->ps->weaponTime += 500;
+			}
+			return;
+		}
+		pm->ps->stats[STAT_CUR_AMMO]--;
+	} else {
+		// No magazine (gauntlet, grapple hook): legacy ammo[] path.
+		if ( ! pm->ps->ammo[ pm->ps->weapon ] ) {
+			PM_AddEvent( EV_NOAMMO );
+			pm->ps->weaponTime += 500;
+			return;
+		}
+		if ( pm->ps->ammo[ pm->ps->weapon ] != -1 ) {
+			pm->ps->ammo[ pm->ps->weapon ]--;
+		}
 	}
 
 	// fire weapon
@@ -1892,11 +2011,17 @@ void PmoveSingle (pmove_t *pmove) {
 	}
 
 	// set the firing flag for continuous beam weapons
-	if ( !(pm->ps->pm_flags & PMF_RESPAWNED) && pm->ps->pm_type != PM_INTERMISSION && pm->ps->pm_type != PM_NOCLIP
-		&& ( pm->cmd.buttons & BUTTON_ATTACK ) && pm->ps->ammo[ pm->ps->weapon ] ) {
-		pm->ps->eFlags |= EF_FIRING;
-	} else {
-		pm->ps->eFlags &= ~EF_FIRING;
+	{
+		int hasAmmo = ( BG_WeaponMagSize( pm->ps->weapon ) > 0 )
+		              ? ( pm->ps->stats[STAT_CUR_AMMO] > 0 )
+		              : ( pm->ps->ammo[ pm->ps->weapon ] != 0 );
+		if ( !(pm->ps->pm_flags & PMF_RESPAWNED) && pm->ps->pm_type != PM_INTERMISSION && pm->ps->pm_type != PM_NOCLIP
+			&& ( pm->cmd.buttons & BUTTON_ATTACK ) && hasAmmo
+			&& pm->ps->weaponstate != WEAPON_RELOADING ) {
+			pm->ps->eFlags |= EF_FIRING;
+		} else {
+			pm->ps->eFlags &= ~EF_FIRING;
+		}
 	}
 
 	// clear the respawned flag if attack and use are cleared

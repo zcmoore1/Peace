@@ -1639,6 +1639,48 @@ void CG_Weapon_f( void ) {
 }
 
 /*
+===============
+CG_SwapWeapon_f
+
+Toggle between the primary (ps.weapon) and secondary (STAT_SECONDARY_WEAPON) slots.
+Pressing this twice quickly at the start of a raise animation triggers a quick-swap:
+the raise is cancelled server-side and the weapon becomes immediately ready.
+===============
+*/
+void CG_SwapWeapon_f( void ) {
+	int primary;
+	int secondary;
+
+	if ( !cg.snap ) {
+		return;
+	}
+	if ( cg.snap->ps.pm_flags & PMF_FOLLOW ) {
+		return;
+	}
+
+	primary   = cg.snap->ps.weapon;
+	secondary = cg.snap->ps.stats[STAT_SECONDARY_WEAPON];
+
+	if ( secondary <= WP_NONE || secondary >= MAX_WEAPONS ) {
+		return;  // no secondary weapon yet
+	}
+	if ( !( cg.snap->ps.stats[STAT_WEAPONS] & ( 1 << secondary ) ) ) {
+		return;  // don't own it
+	}
+
+	cg.weaponSelectTime = cg.time;
+
+	// Toggle: if we're already selecting the secondary, flip back to primary.
+	// This is the second press of a double-tap while raising, which triggers
+	// the quick-swap instant-ready on the server.
+	if ( cg.weaponSelect == secondary ) {
+		cg.weaponSelect = primary;
+	} else {
+		cg.weaponSelect = secondary;
+	}
+}
+
+/*
 ===================
 CG_OutOfAmmoChange
 

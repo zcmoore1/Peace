@@ -1473,11 +1473,12 @@ static void PM_BeginWeaponChange( int weapon ) {
 	if ( !( pm->ps->stats[STAT_WEAPONS] & ( 1 << weapon ) ) ) {
 		return;
 	}
-	
+
 	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
 		return;
 	}
 
+	pm->ps->pm_flags &= ~PMF_QUICKSWAP_PENDING;
 	PM_AddEvent( EV_CHANGE_WEAPON );
 	pm->ps->weaponstate = WEAPON_DROPPING;
 	pm->ps->weaponTime += 200;
@@ -1492,6 +1493,9 @@ PM_FinishWeaponChange
 */
 static void PM_FinishWeaponChange( void ) {
 	int		weapon;
+	int		oldWeapon;
+
+	oldWeapon = pm->ps->weapon;
 
 	weapon = pm->cmd.weapon;
 	if ( weapon < WP_NONE || weapon >= WP_NUM_WEAPONS ) {
@@ -1500,6 +1504,11 @@ static void PM_FinishWeaponChange( void ) {
 
 	if ( !( pm->ps->stats[STAT_WEAPONS] & ( 1 << weapon ) ) ) {
 		weapon = WP_NONE;
+	}
+
+	// stowed weapon becomes the secondary slot
+	if ( oldWeapon > WP_NONE ) {
+		pm->ps->stats[STAT_SECONDARY_WEAPON] = oldWeapon;
 	}
 
 	pm->ps->weapon = weapon;
@@ -1581,7 +1590,27 @@ static void PM_Weapon( void ) {
 	// again if lowering or raising
 	if ( pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ) {
 		if ( pm->ps->weapon != pm->cmd.weapon ) {
-			PM_BeginWeaponChange( pm->cmd.weapon );
+			// During raise: check for quick-swap double-tap window
+			if ( pm->ps->weaponstate == WEAPON_RAISING &&
+			     pm->ps->weaponTime > QUICKSWAP_RAISE_THRESHOLD ) {
+				// First swap press within the window - absorb it and arm pending flag.
+				// The weapon will drop normally if the second press doesn't arrive in time.
+				pm->ps->pm_flags |= PMF_QUICKSWAP_PENDING;
+			} else {
+				PM_BeginWeaponChange( pm->cmd.weapon );
+			}
+		} else if ( (pm->ps->pm_flags & PMF_QUICKSWAP_PENDING) &&
+		            pm->ps->weaponstate == WEAPON_RAISING ) {
+			// Second press confirmed (player toggled back to the raising weapon) -
+			// cancel the remainder of the raise and make the weapon immediately ready.
+			pm->ps->weaponstate = WEAPON_READY;
+			pm->ps->weaponTime = 0;
+			pm->ps->pm_flags &= ~PMF_QUICKSWAP_PENDING;
+			if ( pm->ps->weapon == WP_GAUNTLET ) {
+				PM_StartTorsoAnim( TORSO_STAND2 );
+			} else {
+				PM_StartTorsoAnim( TORSO_STAND );
+			}
 		}
 	}
 
@@ -1597,6 +1626,7 @@ static void PM_Weapon( void ) {
 
 	if ( pm->ps->weaponstate == WEAPON_RAISING ) {
 		pm->ps->weaponstate = WEAPON_READY;
+		pm->ps->pm_flags &= ~PMF_QUICKSWAP_PENDING;
 		if ( pm->ps->weapon == WP_GAUNTLET ) {
 			PM_StartTorsoAnim( TORSO_STAND2 );
 		} else {

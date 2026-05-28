@@ -605,6 +605,7 @@ typedef struct {
 	int			itemPickupBlendTime;	// the pulse around the crosshair is timed separately
 
 	int			weaponSelectTime;
+	int			reloadStartTime;		// cg.time when WEAPON_RELOADING began, 0 when not reloading
 	int			weaponAnimation;
 	int			weaponAnimationTime;
 

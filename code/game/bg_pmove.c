@@ -1509,6 +1509,18 @@ int BG_WeaponReloadTime( int weapon ) {
 
 /*
 ===============
+PM_BeginReload
+===============
+*/
+static void PM_BeginReload( void ) {
+	PM_AddEvent( EV_RELOAD );
+	pm->ps->weaponstate = WEAPON_RELOADING;
+	pm->ps->weaponTime  = BG_WeaponReloadTime( pm->ps->weapon );
+	PM_StartTorsoAnim( TORSO_GESTURE );	// placeholder reload animation
+}
+
+/*
+===============
 PM_BeginWeaponChange
 ===============
 */
@@ -1730,9 +1742,7 @@ static void PM_Weapon( void ) {
 			if ( magSize > 0 &&
 			     pm->ps->stats[STAT_CUR_AMMO] < magSize &&
 			     pm->ps->ammo[pm->ps->weapon] != 0 ) {
-				PM_AddEvent( EV_RELOAD );
-				pm->ps->weaponstate = WEAPON_RELOADING;
-				pm->ps->weaponTime  = BG_WeaponReloadTime( pm->ps->weapon );
+				PM_BeginReload();
 			}
 		} else {
 			pm->ps->weaponTime = 0;
@@ -1761,9 +1771,7 @@ static void PM_Weapon( void ) {
 		if ( pm->ps->stats[STAT_CUR_AMMO] <= 0 ) {
 			// Auto-reload if reserve available, otherwise dry-fire event.
 			if ( pm->ps->ammo[pm->ps->weapon] != 0 ) {
-				PM_AddEvent( EV_RELOAD );
-				pm->ps->weaponstate = WEAPON_RELOADING;
-				pm->ps->weaponTime  = BG_WeaponReloadTime( pm->ps->weapon );
+				PM_BeginReload();
 			} else {
 				PM_AddEvent( EV_NOAMMO );
 				pm->ps->weaponTime += 500;

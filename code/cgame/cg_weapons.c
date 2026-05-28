@@ -1414,6 +1414,28 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	VectorMA( hand.origin, cg_gun_y.value, cg.refdef.viewaxis[1], hand.origin );
 	VectorMA( hand.origin, (cg_gun_z.value+fovOffset), cg.refdef.viewaxis[2], hand.origin );
 
+	// Placeholder reload animation: arc the weapon down and back using a sin curve.
+	// Replace TORSO_GESTURE + this offset with a real weapon anim when assets exist.
+	if ( ps->weaponstate == WEAPON_RELOADING ) {
+		int   reloadDuration = BG_WeaponReloadTime( ps->weapon );
+		float t;
+		float arc;
+
+		if ( !cg.reloadStartTime ) {
+			cg.reloadStartTime = cg.time;
+		}
+		t = (float)( cg.time - cg.reloadStartTime ) / (float)reloadDuration;
+		if ( t < 0.0f ) t = 0.0f;
+		if ( t > 1.0f ) t = 1.0f;
+
+		// sin( π * t ) peaks at 0.5 — weapon pitches away and returns
+		arc = sin( 3.14159265f * t );
+		angles[PITCH] += 45.0f * arc;
+		angles[ROLL]  -= 25.0f * arc;
+	} else {
+		cg.reloadStartTime = 0;
+	}
+
 	AnglesToAxis( angles, hand.axis );
 
 	// map torso animations to weapon animations

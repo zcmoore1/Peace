@@ -1527,12 +1527,7 @@ static void PM_BeginWeaponChange( int weapon ) {
 
 	pm->ps->pm_flags &= ~PMF_QUICKSWAP_PENDING;
 	PM_AddEvent( EV_CHANGE_WEAPON );
-	// Aborting a reload resets the timer so the drop takes exactly 200ms.
-	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
-		pm->ps->weaponTime = 200;
-	} else {
-		pm->ps->weaponTime += 200;
-	}
+	pm->ps->weaponTime += 200;
 	pm->ps->weaponstate = WEAPON_DROPPING;
 	PM_StartTorsoAnim( TORSO_DROP );
 }

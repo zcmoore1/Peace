@@ -24,7 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "tr_types.h"
 
-#define	REF_API_VERSION		8
+#define	REF_API_VERSION		9
 
 //
 // these are the functions exported by the refresh module
@@ -99,6 +99,16 @@ typedef struct {
 	qboolean (*inPVS)( const vec3_t p1, const vec3_t p2 );
 
 	void (*TakeVideoFrame)( int h, int w, byte* captureBuffer, byte *encodeBuffer, qboolean motionJpeg );
+
+	// skeletal pose interface — renderer-agnostic animation blending
+	// BuildModelPose samples an IQM model at frame/oldframe (backlerp 0=current,1=old)
+	// and fills outPose with per-joint T+R+S transforms ready for blending.
+	// BlendModelPoses blends two poses; weightA and weightB should sum to 1.0.
+	// Set re.pose before AddRefEntityToScene to override frame-based animation.
+	qboolean (*BuildModelPose)( qhandle_t hModel, int frame, int oldframe, float backlerp, modelPose_t *outPose );
+	void     (*BlendModelPoses)( modelPose_t *out,
+	                             const modelPose_t *a, float weightA,
+	                             const modelPose_t *b, float weightB );
 } refexport_t;
 
 //

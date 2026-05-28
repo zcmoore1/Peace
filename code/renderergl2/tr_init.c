@@ -1712,5 +1712,8 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 
 	re.TakeVideoFrame = RE_TakeVideoFrame;
 
+	re.BuildModelPose  = RE_BuildModelPose;
+	re.BlendModelPoses = RE_BlendModelPoses;
+
 	return &re;
 }

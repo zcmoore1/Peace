@@ -2319,6 +2319,8 @@ qboolean R_LoadIQM (model_t *mod, void *buffer, int filesize, const char *name )
 void R_AddIQMSurfaces( trRefEntity_t *ent );
 void RB_IQMSurfaceAnim( surfaceType_t *surface );
 void RB_IQMSurfaceAnimVao( srfVaoIQModel_t *surface );
+qboolean RE_BuildModelPose( qhandle_t hModel, int frame, int oldframe, float backlerp, modelPose_t *outPose );
+void RE_BlendModelPoses( modelPose_t *out, const modelPose_t *a, float weightA, const modelPose_t *b, float weightB );
 int R_IQMLerpTag( orientation_t *tag, iqmData_t *data,
                   int startFrame, int endFrame,
                   float frac, const char *tagName );

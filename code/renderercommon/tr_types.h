@@ -26,6 +26,19 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define	MAX_DLIGHTS		32		// can't be increased, because bit flags are used on surfaces
 
+#define MAX_MODEL_JOINTS	128
+
+typedef struct {
+	vec3_t translate;
+	quat_t rotate;
+	vec3_t scale;
+} modelJointTransform_t;
+
+typedef struct {
+	modelJointTransform_t joints[MAX_MODEL_JOINTS];
+	int numJoints;
+} modelPose_t;
+
 #define	REFENTITYNUM_BITS	10		// can't be increased without changing drawsurf bit packing
 #define	REFENTITYNUM_MASK	((1<<REFENTITYNUM_BITS) - 1)
 // the last N-bit number (2^REFENTITYNUM_BITS - 1) is reserved for the special world refentity,
@@ -117,6 +130,9 @@ typedef struct {
 	// extra sprite information
 	float		radius;
 	float		rotation;
+
+	// pre-built skeletal pose; if non-NULL, overrides frame/oldframe for IQM models
+	const modelPose_t *pose;
 } refEntity_t;
 
 

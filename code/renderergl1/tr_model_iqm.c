@@ -1493,3 +1493,13 @@ int R_IQMLerpTag( orientation_t *tag, iqmData_t *data,
 
 	return qtrue;
 }
+
+qboolean RE_BuildModelPose( qhandle_t hModel, int frame, int oldframe, float backlerp, modelPose_t *outPose ) {
+	(void)hModel; (void)frame; (void)oldframe; (void)backlerp; (void)outPose;
+	return qfalse;
+}
+
+void RE_BlendModelPoses( modelPose_t *out, const modelPose_t *a, float weightA, const modelPose_t *b, float weightB ) {
+	(void)out; (void)a; (void)weightA; (void)b; (void)weightB;
+}
+}

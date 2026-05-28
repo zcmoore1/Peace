@@ -1340,20 +1340,39 @@ void R_AddIQMSurfaces( trRefEntity_t *ent ) {
 }
 
 
+// Convert relative joint transforms to skinning matrices.
+// relativeJoints is an array of num_poses iqmTransform_t (same layout as modelJointTransform_t).
+static void RelativeJointsToMatrices( iqmData_t *data, const iqmTransform_t *relativeJoints, float *poseMats ) {
+	const iqmTransform_t *relativeJoint = relativeJoints;
+	const int *jointParent = data->jointParents;
+	const float *invBindMat = data->invBindJoints;
+	float *poseMat = poseMats;
+	int i;
+
+	for ( i = 0; i < data->num_poses; i++, relativeJoint++, jointParent++, invBindMat += 12, poseMat += 12 ) {
+		float mat1[12], mat2[12];
+
+		JointToMatrix( relativeJoint->rotate, relativeJoint->scale, relativeJoint->translate, mat1 );
+
+		if ( *jointParent >= 0 ) {
+			Matrix34Multiply( &data->bindJoints[(*jointParent)*12], mat1, mat2 );
+			Matrix34Multiply( mat2, invBindMat, mat1 );
+			Matrix34Multiply( &poseMats[(*jointParent)*12], mat1, poseMat );
+		} else {
+			Matrix34Multiply( mat1, invBindMat, poseMat );
+		}
+	}
+}
+
 static void ComputePoseMats( iqmData_t *data, int frame, int oldframe,
 			      float backlerp, float *poseMats ) {
 	iqmTransform_t relativeJoints[IQM_MAX_JOINTS];
-	iqmTransform_t *relativeJoint;
+	iqmTransform_t *relativeJoint = relativeJoints;
 	const iqmTransform_t *pose;
 	const iqmTransform_t *oldpose;
-	const int *jointParent;
-	const float *invBindMat;
-	float *poseMat, lerp;
+	float lerp;
 	int i;
 
-	relativeJoint = relativeJoints;
-
-	// copy or lerp animation frame pose
 	if ( oldframe == frame ) {
 		pose = &data->poses[frame * data->num_poses];
 		for ( i = 0; i < data->num_poses; i++, pose++, relativeJoint++ ) {
@@ -1378,23 +1397,82 @@ static void ComputePoseMats( iqmData_t *data, int frame, int oldframe,
 		}
 	}
 
-	// multiply by inverse of bind pose and parent 'pose mat' (bind pose transform matrix)
-	relativeJoint = relativeJoints;
-	jointParent = data->jointParents;
-	invBindMat = data->invBindJoints;
-	poseMat = poseMats;
-	for ( i = 0; i < data->num_poses; i++, relativeJoint++, jointParent++, invBindMat += 12, poseMat += 12 ) {
-		float mat1[12], mat2[12];
+	RelativeJointsToMatrices( data, relativeJoints, poseMats );
+}
 
-		JointToMatrix( relativeJoint->rotate, relativeJoint->scale, relativeJoint->translate, mat1 );
+qboolean RE_BuildModelPose( qhandle_t hModel, int frame, int oldframe, float backlerp, modelPose_t *outPose ) {
+	model_t *model = R_GetModelByHandle( hModel );
+	iqmData_t *data;
+	const iqmTransform_t *pose, *oldpose;
+	modelJointTransform_t *outJoint;
+	float lerp;
+	int i;
 
-		if ( *jointParent >= 0 ) {
-			Matrix34Multiply( &data->bindJoints[(*jointParent)*12], mat1, mat2 );
-			Matrix34Multiply( mat2, invBindMat, mat1 );
-			Matrix34Multiply( &poseMats[(*jointParent)*12], mat1, poseMat );
-		} else {
-			Matrix34Multiply( mat1, invBindMat, poseMat );
+	if ( !model || model->type != MOD_IQM )
+		return qfalse;
+
+	data = model->modelData;
+	if ( !data->num_poses )
+		return qfalse;
+
+	outPose->numJoints = data->num_poses;
+
+	frame    = data->num_frames ? frame    % data->num_frames : 0;
+	oldframe = data->num_frames ? oldframe % data->num_frames : 0;
+
+	outJoint = outPose->joints;
+
+	if ( oldframe == frame ) {
+		pose = &data->poses[frame * data->num_poses];
+		for ( i = 0; i < data->num_poses; i++, pose++, outJoint++ ) {
+			VectorCopy( pose->translate, outJoint->translate );
+			QuatCopy( pose->rotate, outJoint->rotate );
+			VectorCopy( pose->scale, outJoint->scale );
 		}
+	} else {
+		lerp = 1.0f - backlerp;
+		pose    = &data->poses[frame    * data->num_poses];
+		oldpose = &data->poses[oldframe * data->num_poses];
+		for ( i = 0; i < data->num_poses; i++, pose++, oldpose++, outJoint++ ) {
+			outJoint->translate[0] = oldpose->translate[0] * backlerp + pose->translate[0] * lerp;
+			outJoint->translate[1] = oldpose->translate[1] * backlerp + pose->translate[1] * lerp;
+			outJoint->translate[2] = oldpose->translate[2] * backlerp + pose->translate[2] * lerp;
+
+			outJoint->scale[0] = oldpose->scale[0] * backlerp + pose->scale[0] * lerp;
+			outJoint->scale[1] = oldpose->scale[1] * backlerp + pose->scale[1] * lerp;
+			outJoint->scale[2] = oldpose->scale[2] * backlerp + pose->scale[2] * lerp;
+
+			QuatSlerp( oldpose->rotate, pose->rotate, lerp, outJoint->rotate );
+		}
+	}
+
+	return qtrue;
+}
+
+void RE_BlendModelPoses( modelPose_t *out,
+                          const modelPose_t *a, float weightA,
+                          const modelPose_t *b, float weightB ) {
+	float total = weightA + weightB;
+	float t;
+	int i, numJoints;
+
+	if ( total <= 0.0f )
+		return;
+
+	t = weightB / total;
+	numJoints = a->numJoints < b->numJoints ? a->numJoints : b->numJoints;
+	out->numJoints = numJoints;
+
+	for ( i = 0; i < numJoints; i++ ) {
+		out->joints[i].translate[0] = a->joints[i].translate[0] + (b->joints[i].translate[0] - a->joints[i].translate[0]) * t;
+		out->joints[i].translate[1] = a->joints[i].translate[1] + (b->joints[i].translate[1] - a->joints[i].translate[1]) * t;
+		out->joints[i].translate[2] = a->joints[i].translate[2] + (b->joints[i].translate[2] - a->joints[i].translate[2]) * t;
+
+		out->joints[i].scale[0] = a->joints[i].scale[0] + (b->joints[i].scale[0] - a->joints[i].scale[0]) * t;
+		out->joints[i].scale[1] = a->joints[i].scale[1] + (b->joints[i].scale[1] - a->joints[i].scale[1]) * t;
+		out->joints[i].scale[2] = a->joints[i].scale[2] + (b->joints[i].scale[2] - a->joints[i].scale[2]) * t;
+
+		QuatSlerp( a->joints[i].rotate, b->joints[i].rotate, t, out->joints[i].rotate );
 	}
 }
 
@@ -1475,8 +1553,11 @@ void RB_IQMSurfaceAnim( surfaceType_t *surface ) {
 	outColor = tess.color[tess.numVertexes];
 
 	if ( data->num_poses > 0 ) {
-		// compute interpolated joint matrices
-		ComputePoseMats( data, frame, oldframe, backlerp, poseMats );
+		if ( backEnd.currentEntity->e.pose ) {
+			RelativeJointsToMatrices( data, (const iqmTransform_t *)backEnd.currentEntity->e.pose->joints, poseMats );
+		} else {
+			ComputePoseMats( data, frame, oldframe, backlerp, poseMats );
+		}
 
 		// compute vertex blend influence matricies
 		for( i = 0; i < surf->num_influences; i++ ) {
@@ -1691,8 +1772,11 @@ void RB_IQMSurfaceAnimVao(srfVaoIQModel_t * surface)
 		float		backlerp = backEnd.currentEntity->e.backlerp;
 		int i;
 
-		// compute interpolated joint matrices
-		ComputePoseMats( surface->iqmData, frame, oldframe, backlerp, jointMats );
+		if ( backEnd.currentEntity->e.pose ) {
+			RelativeJointsToMatrices( surface->iqmData, (const iqmTransform_t *)backEnd.currentEntity->e.pose->joints, jointMats );
+		} else {
+			ComputePoseMats( surface->iqmData, frame, oldframe, backlerp, jointMats );
+		}
 
 		// convert row-major order 3x4 matrix to column-major order 4x4 matrix
 		for ( i = 0; i < data->num_poses; i++ ) {

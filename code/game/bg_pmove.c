@@ -1590,18 +1590,18 @@ static void PM_Weapon( void ) {
 	// again if lowering or raising
 	if ( pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ) {
 		if ( pm->ps->weapon != pm->cmd.weapon ) {
-			// During raise: check for quick-swap double-tap window
 			if ( pm->ps->weaponstate == WEAPON_RAISING &&
-			     pm->ps->weaponTime > QUICKSWAP_RAISE_THRESHOLD ) {
-				// First swap press within the window - absorb it and arm pending flag.
-				// The weapon will drop normally if the second press doesn't arrive in time.
+			     pm->cmd.weapon == pm->ps->stats[STAT_SECONDARY_WEAPON] ) {
+				// weapswap first press during raise (any point): arm quick-swap.
+				// weapnext/weapprev won't match the secondary slot, so they still
+				// abort the raise normally via PM_BeginWeaponChange.
 				pm->ps->pm_flags |= PMF_QUICKSWAP_PENDING;
 			} else {
 				PM_BeginWeaponChange( pm->cmd.weapon );
 			}
 		} else if ( (pm->ps->pm_flags & PMF_QUICKSWAP_PENDING) &&
 		            pm->ps->weaponstate == WEAPON_RAISING ) {
-			// Second press confirmed (player toggled back to the raising weapon) -
+			// weapswap second press (player toggled back to the raising weapon) -
 			// cancel the remainder of the raise and make the weapon immediately ready.
 			pm->ps->weaponstate = WEAPON_READY;
 			pm->ps->weaponTime = 0;

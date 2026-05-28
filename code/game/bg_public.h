@@ -162,8 +162,6 @@ typedef enum {
 
 #define	PMF_ALL_TIMES	(PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK)
 
-// ms from start of raise anim within which a second swap press triggers instant-ready
-#define QUICKSWAP_RAISE_THRESHOLD	100
 
 #define	MAXTOUCH	32
 typedef struct {

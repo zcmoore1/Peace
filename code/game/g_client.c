@@ -1165,18 +1165,8 @@ void ClientSpawn(gentity_t *ent) {
 	client->ps.clientNum = index;
 
 	client->ps.stats[STAT_WEAPONS] = ( 1 << WP_MACHINEGUN );
-	if ( g_gametype.integer == GT_TEAM ) {
-		client->ps.ammo[WP_MACHINEGUN] = 50;
-	} else {
-		client->ps.ammo[WP_MACHINEGUN] = 100;
-	}
-	// Load the starting magazine; deduct it from reserve.
-	{
-		int mag = BG_WeaponMagSize( WP_MACHINEGUN );
-		int load = client->ps.ammo[WP_MACHINEGUN] < mag ? client->ps.ammo[WP_MACHINEGUN] : mag;
-		client->ps.stats[STAT_CUR_AMMO] = load;
-		client->ps.ammo[WP_MACHINEGUN] -= load;
-	}
+	// ammo[weapon] is the loaded magazine; start with a full mag.
+	client->ps.ammo[WP_MACHINEGUN] = BG_WeaponMagSize( WP_MACHINEGUN );
 
 	client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_GAUNTLET );
 	client->ps.ammo[WP_GAUNTLET] = -1;

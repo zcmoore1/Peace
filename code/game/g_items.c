@@ -264,20 +264,13 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 	if (ent->item->giTag == WP_GRAPPLING_HOOK)
 		other->client->ps.ammo[ent->item->giTag] = -1; // unlimited ammo
 
-	// If this weapon is now the active primary and has an empty magazine,
-	// auto-load it from the reserve that was just added.
+	// Magazine weapons store loaded rounds in ammo[weapon]; picking one up
+	// gives a full magazine (reserve is infinite for now).
 	{
 		int wep = ent->item->giTag;
 		int mag = BG_WeaponMagSize( wep );
-		if ( mag > 0 && other->client->ps.weapon == wep &&
-		     other->client->ps.stats[STAT_CUR_AMMO] == 0 ) {
-			int reserve = other->client->ps.ammo[wep];
-			int load = ( reserve != -1 ) ?
-			           ( reserve < mag ? reserve : mag ) : mag;
-			other->client->ps.stats[STAT_CUR_AMMO] = load;
-			if ( reserve != -1 ) {
-				other->client->ps.ammo[wep] -= load;
-			}
+		if ( mag > 0 ) {
+			other->client->ps.ammo[wep] = mag;
 		}
 	}
 

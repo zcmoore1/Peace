@@ -159,7 +159,7 @@ typedef enum {
 #define PMF_FOLLOW			4096	// spectate following another player
 #define PMF_SCOREBOARD		8192	// spectate as a scoreboard
 #define PMF_INVULEXPAND		16384	// invulnerability sphere set to full size
-#define PMF_QUICKSWAP_PENDING	32768	// first Y pressed during raise window; second Y instant-readies
+#define PMF_QUICKSWAP_PENDING	32768	// a weapon switch interrupted a raise; the resulting weapon comes up instantly ready
 
 #define	PMF_ALL_TIMES	(PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK)
 
@@ -219,9 +219,6 @@ typedef enum {
 #endif
 	STAT_WEAPONS,					// 16 bit fields
 	STAT_ARMOR,
-	STAT_SECONDARY_WEAPON,			// weapon in the off-slot for the CoD-style 2-weapon swap
-	STAT_CUR_AMMO,					// magazine ammo for the active weapon
-	STAT_CUR_AMMO_SEC,				// magazine ammo for the secondary weapon
 	STAT_DEAD_YAW,					// look this direction when dead (FIXME: get rid of?)
 	STAT_CLIENTS_READY,				// bit mask of clients wishing to exit the intermission (FIXME: configstring?)
 	STAT_MAX_HEALTH					// health / armor limit, changeable by handicap

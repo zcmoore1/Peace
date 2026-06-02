@@ -1537,7 +1537,16 @@ static void PM_BeginWeaponChange( int weapon ) {
 		return;
 	}
 
-	pm->ps->pm_flags &= ~PMF_QUICKSWAP_PENDING;
+	// If we're interrupting a raise (the player switched again before the
+	// weapon finished coming up), the weapon we settle on will come up
+	// instantly ready. This is the generic "fast swap": any switch during a
+	// raise lets you be ready for anything, for any number of weapons.
+	if ( pm->ps->weaponstate == WEAPON_RAISING ) {
+		pm->ps->pm_flags |= PMF_QUICKSWAP_PENDING;
+	} else {
+		pm->ps->pm_flags &= ~PMF_QUICKSWAP_PENDING;
+	}
+
 	PM_AddEvent( EV_CHANGE_WEAPON );
 	pm->ps->weaponTime += 200;
 	pm->ps->weaponstate = WEAPON_DROPPING;
@@ -1552,13 +1561,6 @@ PM_FinishWeaponChange
 */
 static void PM_FinishWeaponChange( void ) {
 	int		weapon;
-	int		oldWeapon;
-	int		tmpClip;
-	int		magSize;
-	int		reserve;
-	int		load;
-
-	oldWeapon = pm->ps->weapon;
 
 	weapon = pm->cmd.weapon;
 	if ( weapon < WP_NONE || weapon >= WP_NUM_WEAPONS ) {
@@ -1569,35 +1571,20 @@ static void PM_FinishWeaponChange( void ) {
 		weapon = WP_NONE;
 	}
 
-	// stowed weapon becomes the secondary slot
-	if ( oldWeapon > WP_NONE ) {
-		pm->ps->stats[STAT_SECONDARY_WEAPON] = oldWeapon;
-	}
-
-	// Swap the magazine ammo between the two slots so each weapon remembers
-	// how many rounds it had loaded when it was last stowed.
-	tmpClip = pm->ps->stats[STAT_CUR_AMMO];
-	pm->ps->stats[STAT_CUR_AMMO]     = pm->ps->stats[STAT_CUR_AMMO_SEC];
-	pm->ps->stats[STAT_CUR_AMMO_SEC] = tmpClip;
-
-	// If the incoming weapon has never been loaded (empty mag), pull one
-	// full magazine from reserve automatically so it raises ready-to-fire.
-	magSize = BG_WeaponMagSize( weapon );
-	if ( magSize > 0 && pm->ps->stats[STAT_CUR_AMMO] == 0 ) {
-		reserve = pm->ps->ammo[weapon];
-		if ( reserve == -1 ) {
-			pm->ps->stats[STAT_CUR_AMMO] = magSize;
-		} else if ( reserve > 0 ) {
-			load = reserve < magSize ? reserve : magSize;
-			pm->ps->stats[STAT_CUR_AMMO] = load;
-			pm->ps->ammo[weapon] -= load;
-		}
-	}
-
+	// Each weapon's magazine lives in ps->ammo[weapon], so it persists across
+	// modular weapnext/weapprev swaps for free - no per-slot bookkeeping.
 	pm->ps->weapon = weapon;
 	pm->ps->weaponstate = WEAPON_RAISING;
-	pm->ps->weaponTime += 250;
 	PM_StartTorsoAnim( TORSO_RAISE );
+
+	// If this change interrupted a raise, come up instantly ready (fast swap).
+	// Otherwise play the normal raise. weaponTime uses plain += to preserve the
+	// NAC-family timing windows.
+	if ( pm->ps->pm_flags & PMF_QUICKSWAP_PENDING ) {
+		pm->ps->weaponTime += 0;
+	} else {
+		pm->ps->weaponTime += 250;
+	}
 }
 
 
@@ -1673,27 +1660,9 @@ static void PM_Weapon( void ) {
 	// again if lowering or raising
 	if ( pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ) {
 		if ( pm->ps->weapon != pm->cmd.weapon ) {
-			if ( pm->ps->weaponstate == WEAPON_RAISING &&
-			     pm->cmd.weapon == pm->ps->stats[STAT_SECONDARY_WEAPON] ) {
-				// weapswap first press during raise (any point): arm quick-swap.
-				// weapnext/weapprev won't match the secondary slot, so they still
-				// abort the raise normally via PM_BeginWeaponChange.
-				pm->ps->pm_flags |= PMF_QUICKSWAP_PENDING;
-			} else {
-				PM_BeginWeaponChange( pm->cmd.weapon );
-			}
-		} else if ( (pm->ps->pm_flags & PMF_QUICKSWAP_PENDING) &&
-		            pm->ps->weaponstate == WEAPON_RAISING ) {
-			// weapswap second press (player toggled back to the raising weapon) -
-			// cancel the remainder of the raise and make the weapon immediately ready.
-			pm->ps->weaponstate = WEAPON_READY;
-			pm->ps->weaponTime = 0;
-			pm->ps->pm_flags &= ~PMF_QUICKSWAP_PENDING;
-			if ( pm->ps->weapon == WP_GAUNTLET ) {
-				PM_StartTorsoAnim( TORSO_STAND2 );
-			} else {
-				PM_StartTorsoAnim( TORSO_STAND );
-			}
+			// Y is just weapnext (modular cycle, wraps back to the first weapon).
+			// PM_BeginWeaponChange arms the fast-swap if this interrupts a raise.
+			PM_BeginWeaponChange( pm->cmd.weapon );
 		}
 	}
 
@@ -1718,17 +1687,11 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
-	// reload complete: refill magazine from reserve
+	// reload complete: top the magazine back up. Reserve is infinite for now,
+	// so the magazine simply refills to its full size. This is the frame where
+	// ps->ammo[weapon] updates - the NAC window (weapnext timed to here).
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
-		int magSize = BG_WeaponMagSize( pm->ps->weapon );
-		int reserve = pm->ps->ammo[pm->ps->weapon];
-		int needed  = magSize - pm->ps->stats[STAT_CUR_AMMO];
-		int load    = ( reserve == -1 ) ? needed :
-		              ( reserve < needed ? reserve : needed );
-		pm->ps->stats[STAT_CUR_AMMO] += load;
-		if ( reserve != -1 ) {
-			pm->ps->ammo[pm->ps->weapon] -= load;
-		}
+		pm->ps->ammo[pm->ps->weapon] = BG_WeaponMagSize( pm->ps->weapon );
 		pm->ps->weaponstate = WEAPON_READY;
 		PM_StartTorsoAnim( TORSO_STAND );
 		return;
@@ -1740,8 +1703,7 @@ static void PM_Weapon( void ) {
 		if ( pm->cmd.buttons & BUTTON_RELOAD ) {
 			int magSize = BG_WeaponMagSize( pm->ps->weapon );
 			if ( magSize > 0 &&
-			     pm->ps->stats[STAT_CUR_AMMO] < magSize &&
-			     pm->ps->ammo[pm->ps->weapon] != 0 ) {
+			     pm->ps->ammo[pm->ps->weapon] < magSize ) {
 				PM_BeginReload();
 			}
 		} else {
@@ -1766,21 +1728,16 @@ static void PM_Weapon( void ) {
 
 	pm->ps->weaponstate = WEAPON_FIRING;
 
-	// Ammo check: magazine-based weapons use STAT_CUR_AMMO; others use ammo[] directly.
+	// Ammo check. Magazine weapons store loaded rounds in ammo[weapon] and
+	// auto-reload when empty (reserve is infinite for now). Non-magazine
+	// weapons (gauntlet, grapple) use ammo[] as a raw count / -1 sentinel.
 	if ( BG_WeaponMagSize( pm->ps->weapon ) > 0 ) {
-		if ( pm->ps->stats[STAT_CUR_AMMO] <= 0 ) {
-			// Auto-reload if reserve available, otherwise dry-fire event.
-			if ( pm->ps->ammo[pm->ps->weapon] != 0 ) {
-				PM_BeginReload();
-			} else {
-				PM_AddEvent( EV_NOAMMO );
-				pm->ps->weaponTime += 500;
-			}
+		if ( pm->ps->ammo[pm->ps->weapon] <= 0 ) {
+			PM_BeginReload();
 			return;
 		}
-		pm->ps->stats[STAT_CUR_AMMO]--;
+		pm->ps->ammo[pm->ps->weapon]--;
 	} else {
-		// No magazine (gauntlet, grapple hook): legacy ammo[] path.
 		if ( ! pm->ps->ammo[ pm->ps->weapon ] ) {
 			PM_AddEvent( EV_NOAMMO );
 			pm->ps->weaponTime += 500;
@@ -2016,7 +1973,7 @@ void PmoveSingle (pmove_t *pmove) {
 	// set the firing flag for continuous beam weapons
 	{
 		int hasAmmo = ( BG_WeaponMagSize( pm->ps->weapon ) > 0 )
-		              ? ( pm->ps->stats[STAT_CUR_AMMO] > 0 )
+		              ? ( pm->ps->ammo[ pm->ps->weapon ] > 0 )
 		              : ( pm->ps->ammo[ pm->ps->weapon ] != 0 );
 		if ( !(pm->ps->pm_flags & PMF_RESPAWNED) && pm->ps->pm_type != PM_INTERMISSION && pm->ps->pm_type != PM_NOCLIP
 			&& ( pm->cmd.buttons & BUTTON_ATTACK ) && hasAmmo

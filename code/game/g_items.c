@@ -256,6 +256,21 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 		}
 	}
 
+	// Hard limit: player carries at most 2 magazine weapons (CoD style).
+	// Picking up a third replaces the one currently in hand.
+	{
+		int i, weapCount = 0;
+		for ( i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++ ) {
+			if ( BG_WeaponMagSize( i ) > 0 &&
+			     ( other->client->ps.stats[STAT_WEAPONS] & ( 1 << i ) ) ) {
+				weapCount++;
+			}
+		}
+		if ( weapCount >= 2 ) {
+			other->client->ps.stats[STAT_WEAPONS] &= ~( 1 << other->client->ps.weapon );
+		}
+	}
+
 	// add the weapon
 	other->client->ps.stats[STAT_WEAPONS] |= ( 1 << ent->item->giTag );
 

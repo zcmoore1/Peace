@@ -815,6 +815,9 @@ void CG_RegisterWeapon( int weaponNum ) {
 		weaponInfo->flashSound[0] = trap_S_RegisterSound( "sound/weapons/rocket/rocklf1a.wav", qfalse );
 		break;
 	}
+
+	// Register IQM animation clips for this weapon (no-op until assets exist).
+	CG_WeapAnim_RegisterClips( weaponNum, weaponInfo->weaponModel );
 }
 
 /*
@@ -1438,17 +1441,21 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 
 	AnglesToAxis( angles, hand.axis );
 
-	// map torso animations to weapon animations
+	// Blend-tree path: evaluate the animation state machine and set re.pose.
+	// Falls back to the legacy torso-mapped frame path if no IQM clips are
+	// registered for this weapon (i.e. until real assets land).
 	if ( cg_gun_frame.integer ) {
-		// development tool
 		hand.frame = hand.oldframe = cg_gun_frame.integer;
 		hand.backlerp = 0;
+		hand.pose = NULL;
+	} else if ( CG_WeapAnim_BuildPose( ps, weapon->weaponModel, cg.frametime ) ) {
+		hand.pose = &cg.weaponPose;
 	} else {
-		// get clientinfo for animation map
 		ci = &cgs.clientinfo[ cent->currentState.clientNum ];
-		hand.frame = CG_MapTorsoToWeaponFrame( ci, cent->pe.torso.frame );
+		hand.frame    = CG_MapTorsoToWeaponFrame( ci, cent->pe.torso.frame );
 		hand.oldframe = CG_MapTorsoToWeaponFrame( ci, cent->pe.torso.oldFrame );
 		hand.backlerp = cent->pe.torso.backlerp;
+		hand.pose = NULL;
 	}
 
 	hand.hModel = weapon->handsModel;

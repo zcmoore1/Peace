@@ -606,6 +606,7 @@ typedef struct {
 
 	int			weaponSelectTime;
 	int			reloadStartTime;		// cg.time when WEAPON_RELOADING began, 0 when not reloading
+	modelPose_t	weaponPose;			// blended skeletal pose for the viewmodel, built each frame by cg_anim.c
 	int			weaponAnimation;
 	int			weaponAnimationTime;
 
@@ -1358,6 +1359,11 @@ void CG_NextWeapon_f( void );
 void CG_PrevWeapon_f( void );
 void CG_Weapon_f( void );
 
+// cg_anim.c
+void     CG_WeapAnim_Init( void );
+qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec );
+void     CG_WeapAnim_RegisterClips( int weapon, qhandle_t hModel );
+
 void CG_RegisterWeapon( int weaponNum );
 void CG_RegisterItemVisuals( int itemNum );
 
@@ -1604,6 +1610,8 @@ int			trap_R_LerpTag( orientation_t *tag, clipHandle_t mod, int startFrame, int 
 					   float frac, const char *tagName );
 void		trap_R_RemapShader( const char *oldShader, const char *newShader, const char *timeOffset );
 qboolean	trap_R_inPVS( const vec3_t p1, const vec3_t p2 );
+qboolean	trap_R_BuildModelPose( qhandle_t hModel, int frame, int oldframe, float backlerp, modelPose_t *outPose );
+void		trap_R_BlendModelPoses( modelPose_t *out, const modelPose_t *a, float weightA, const modelPose_t *b, float weightB );
 
 // The glconfig_t will not change during the life of a cgame.
 // If it needs to change, the entire cgame will be restarted, because

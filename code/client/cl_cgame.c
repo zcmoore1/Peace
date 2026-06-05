@@ -693,6 +693,13 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 	case CG_R_INPVS:
 		return re.inPVS( VMA(1), VMA(2) );
 
+	case CG_R_BUILDMODELPOSE:
+		return re.BuildModelPose( args[1], args[2], args[3], VMF(4), VMA(5) );
+
+	case CG_R_BLENDMODELPOSES:
+		re.BlendModelPoses( VMA(1), VMA(2), VMF(3), VMA(4), VMF(5) );
+		return 0;
+
 	default:
 	        assert(0);
 		Com_Error( ERR_DROP, "Bad cgame system trap: %ld", (long int) args[0] );

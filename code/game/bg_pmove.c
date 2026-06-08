@@ -1697,6 +1697,15 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
+	// Auto-reload: magazine empty - start reloading immediately regardless of
+	// whether the trigger is held. This runs before the fire/idle fork so the
+	// player never has to press R after firing the last round.
+	if ( BG_WeaponMagSize( pm->ps->weapon ) > 0 &&
+	     pm->ps->ammo[pm->ps->weapon] <= 0 ) {
+		PM_BeginReload();
+		return;
+	}
+
 	// check for fire
 	if ( ! (pm->cmd.buttons & BUTTON_ATTACK) ) {
 		// Manual reload: player pressed R while not firing

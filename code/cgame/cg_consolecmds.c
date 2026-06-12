@@ -79,8 +79,20 @@ Debugging command to print the current position
 */
 static void CG_Viewpos_f (void) {
 	CG_Printf ("(%i %i %i) : %i\n", (int)cg.refdef.vieworg[0],
-		(int)cg.refdef.vieworg[1], (int)cg.refdef.vieworg[2], 
+		(int)cg.refdef.vieworg[1], (int)cg.refdef.vieworg[2],
 		(int)cg.refdefViewAngles[YAW]);
+}
+
+
+/*
+=============
+CG_HelloWorld_f
+
+Sanity check command to confirm the cgame module built and loaded
+=============
+*/
+static void CG_HelloWorld_f (void) {
+	CG_Printf ("Hello World!!\n");
 }
 
 
@@ -458,6 +470,7 @@ static consoleCommand_t	commands[] = {
 	{ "nextskin", CG_TestModelNextSkin_f },
 	{ "prevskin", CG_TestModelPrevSkin_f },
 	{ "viewpos", CG_Viewpos_f },
+	{ "helloworld", CG_HelloWorld_f },
 	{ "+scores", CG_ScoresDown_f },
 	{ "-scores", CG_ScoresUp_f },
 	{ "+zoom", CG_ZoomDown_f },

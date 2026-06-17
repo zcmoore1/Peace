@@ -57,6 +57,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define INVUL_RADIUS		42
 
 //
+// final killcam timing, shared by the game (intermission delay) and cgame
+// (replay length / rewind depth).
+#define	KILLCAM_DURATION		5000	// total replay length shown to clients
+#define	KILLCAM_REWIND			5000	// how far before the kill the replay starts
+
 // config strings are a general means of communicating variable length strings
 // from the server to all connected clients.
 //

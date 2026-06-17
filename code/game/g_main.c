@@ -1153,6 +1153,17 @@ void LogExit( const char *string ) {
 
 	level.intermissionQueued = level.time;
 
+	// If the match ended on a fresh player-vs-player kill, replay it as a
+	// final killcam before the scoreboard. Clients rewind their own recorded
+	// snapshot history to the killer's view; see CG_Killcam_Start. The extra
+	// intermission delay (handled in CheckExitRules) gives the replay time to
+	// run before everyone is teleported to the intermission point.
+	if ( level.lastKillTime && ( level.time - level.lastKillTime ) <= KILLCAM_RECENT ) {
+		level.finalKillcam = qtrue;
+		trap_SendServerCommand( -1, va( "finalkillcam %i %i %i",
+			level.lastKillerNum, level.lastVictimNum, level.lastKillTime ) );
+	}
+
 	// this will keep the clients from playing any voice sounds
 	// that will get cut off when the queued intermission starts
 	trap_SetConfigstring( CS_INTERMISSION, "1" );
@@ -1345,18 +1356,20 @@ void CheckExitRules( void ) {
 	}
 
 	if ( level.intermissionQueued ) {
+		// A final killcam holds off the intermission long enough for the replay
+		// to finish; otherwise use the normal short "watch the last frag" delay.
+		int delay = level.finalKillcam ? ( KILLCAM_DURATION + INTERMISSION_DELAY_TIME )
+		                               : INTERMISSION_DELAY_TIME;
 #ifdef MISSIONPACK
-		int time = (g_singlePlayer.integer) ? SP_INTERMISSION_DELAY_TIME : INTERMISSION_DELAY_TIME;
-		if ( level.time - level.intermissionQueued >= time ) {
-			level.intermissionQueued = 0;
-			BeginIntermission();
-		}
-#else
-		if ( level.time - level.intermissionQueued >= INTERMISSION_DELAY_TIME ) {
-			level.intermissionQueued = 0;
-			BeginIntermission();
+		if (g_singlePlayer.integer && !level.finalKillcam) {
+			delay = SP_INTERMISSION_DELAY_TIME;
 		}
 #endif
+		if ( level.time - level.intermissionQueued >= delay ) {
+			level.intermissionQueued = 0;
+			level.finalKillcam = qfalse;
+			BeginIntermission();
+		}
 		return;
 	}
 

@@ -1065,6 +1065,12 @@ static void CG_ServerCommand( void ) {
 	}
 #endif
 
+	if ( !strcmp( cmd, "finalkillcam" ) ) {
+		// finalkillcam <killerNum> <victimNum> <killServerTime>
+		CG_Killcam_Start( atoi( CG_Argv(1) ), atoi( CG_Argv(2) ), atoi( CG_Argv(3) ) );
+		return;
+	}
+
 	if ( !strcmp( cmd, "scores" ) ) {
 		CG_ParseScores();
 		return;

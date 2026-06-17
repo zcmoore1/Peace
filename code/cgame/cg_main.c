@@ -1869,6 +1869,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
 	CG_InitConsoleCommands();
 	CG_WeapAnim_Init();
+	CG_Killcam_Init();
 
 	cg.weaponSelect = WP_MACHINEGUN;
 

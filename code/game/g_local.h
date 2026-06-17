@@ -42,6 +42,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	INTERMISSION_DELAY_TIME	1000
 #define	SP_INTERMISSION_DELAY_TIME	5000
 
+// KILLCAM_* timing lives in bg_public.h so cgame shares the same values.
+#define	KILLCAM_RECENT			8000	// only replay kills this fresh at match end
+
 // gentity->flags
 #define	FL_GODMODE				0x00000010
 #define	FL_NOTARGET				0x00000020
@@ -386,6 +389,14 @@ typedef struct {
 	char		*spawnVars[MAX_SPAWN_VARS][2];	// key / value pairs
 	int			numSpawnVarChars;
 	char		spawnVarChars[MAX_SPAWN_VARS_CHARS];
+
+	// final killcam state - the kill that ended the match, replayed before
+	// intermission. lastKill* are updated on every player-vs-player frag so
+	// that whichever kill triggers LogExit is the one we replay.
+	int			lastKillerNum;			// client number of the most recent killer
+	int			lastVictimNum;			// client number of the most recent victim
+	int			lastKillTime;			// level.time of the most recent kill
+	qboolean	finalKillcam;			// a killcam is playing before intermission
 
 	// intermission state
 	int			intermissionQueued;		// intermission was qualified, but

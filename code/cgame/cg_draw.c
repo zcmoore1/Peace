@@ -2535,6 +2535,12 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 		return;
 	}
 
+	// final killcam plays before the intermission scoreboard
+	if ( CG_Killcam_Active() ) {
+		CG_Killcam_Draw();
+		return;
+	}
+
 	if ( cg.snap->ps.pm_type == PM_INTERMISSION ) {
 		CG_DrawIntermission();
 		return;

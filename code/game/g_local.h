@@ -329,6 +329,14 @@ struct gclient_s {
 #define	MAX_SPAWN_VARS			64
 #define	MAX_SPAWN_VARS_CHARS	4096
 
+// search & destroy round phases (g_round.c)
+typedef enum {
+	RND_NONE,			// no round running (not GT_SD, in warmup, or a team is empty)
+	RND_PREROUND,		// players (re)spawned and frozen; brief setup delay
+	RND_ACTIVE,			// combat live; deaths are permanent until the round resets
+	RND_POSTROUND		// round decided; result shown before the next round starts
+} roundState_t;
+
 typedef struct {
 	struct gclient_s	*clients;		// [maxclients]
 
@@ -397,6 +405,13 @@ typedef struct {
 	int			lastVictimNum;			// client number of the most recent victim
 	int			lastKillTime;			// level.time of the most recent kill
 	qboolean	finalKillcam;			// a killcam is playing before intermission
+
+	// search & destroy round state (see g_round.c). teamScores[] holds rounds won.
+	int			roundState;				// roundState_t; RND_NONE when no match running
+	int			roundNumber;			// 1-based index of the current round
+	int			roundStateEndTime;		// level.time the pre/post-round phase ends
+	int			roundEndTime;			// level.time the active round times out (0 = none)
+	int			roundWinner;			// team_t that won the last round (-1 = undecided)
 
 	// intermission state
 	int			intermissionQueued;		// intermission was qualified, but
@@ -621,6 +636,13 @@ void QDECL G_Printf( const char *fmt, ... ) Q_PRINTF_FUNC(1, 2);
 void QDECL G_Error( const char *fmt, ... ) Q_NO_RETURN Q_PRINTF_FUNC(1, 2);
 
 //
+// g_round.c  (search & destroy round logic)
+//
+qboolean G_RoundBasedGametype( void );
+int G_CountAliveOnTeam( team_t team );
+void CheckRound( void );
+
+//
 // g_client.c
 //
 char *ClientConnect( int clientNum, qboolean firstTime, qboolean isBot );
@@ -724,6 +746,9 @@ extern	vmCvar_t	g_speed;
 extern	vmCvar_t	g_knockback;
 extern	vmCvar_t	g_quadfactor;
 extern	vmCvar_t	g_forcerespawn;
+extern	vmCvar_t	g_roundlimit;
+extern	vmCvar_t	g_roundtime;
+extern	vmCvar_t	g_roundwarmup;
 extern	vmCvar_t	g_inactivity;
 extern	vmCvar_t	g_debugMove;
 extern	vmCvar_t	g_debugAlloc;

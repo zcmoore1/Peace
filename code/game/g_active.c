@@ -996,6 +996,11 @@ void ClientThink_real( gentity_t *ent ) {
 
 	// check for respawning
 	if ( client->ps.stats[STAT_HEALTH] <= 0 ) {
+		// in round-based play the dead stay down until the round resets them;
+		// no voluntary or forced respawn mid-round
+		if ( G_RoundBasedGametype() && level.roundState != RND_NONE ) {
+			return;
+		}
 		// wait for the attack button to be pressed
 		if ( level.time > client->respawnTime ) {
 			// forcerespawn is to prevent users from waiting out powerups

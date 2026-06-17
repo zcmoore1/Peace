@@ -8,12 +8,17 @@ Custom maps for this Quake 3 mod. Maps here are authored as `.map` **source**
 mapping/
   src/                generated/authored .map source (compile these)
   levelshots/         menu thumbnails (<map>.tga)
+  scripts/            .arena files (make a map show in the menu list)
   tools/
     mapgen.py         programmatic .map generator (geometry lives here)
     make_levelshot.py procedural levelshot (thumbnail) generator
     compile.sh        q3map2 BSP -> VIS -> LIGHT pipeline + install
   README.md
 ```
+
+A map needs a `scripts/<map>.arena` file to appear in the in-game map list
+(and thus to show its levelshot). `compile.sh` installs it alongside the
+`.bsp` and levelshot. Without one, launch from the console with `\devmap <map>`.
 
 ## Maps
 

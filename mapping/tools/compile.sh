@@ -52,4 +52,12 @@ if [ -f "$SHOT" ]; then
     echo ">> installed: $GAME/levelshots/$MAP.tga"
 fi
 
+# install the arena definition (makes the map appear in the menu list) if present
+ARENA="$HERE/../scripts/$MAP.arena"
+if [ -f "$ARENA" ]; then
+    mkdir -p "$GAME/scripts"
+    cp "$ARENA" "$GAME/scripts/$MAP.arena"
+    echo ">> installed: $GAME/scripts/$MAP.arena"
+fi
+
 echo "   play with:  +set sv_pure 0 +devmap $MAP"

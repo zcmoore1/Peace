@@ -1,0 +1,6 @@
+{
+	map		"box2guns"
+	longname	"Box (2 Guns)"
+	type		"ffa tourney"
+	bots		"sarge grunt"
+}

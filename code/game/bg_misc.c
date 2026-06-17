@@ -222,12 +222,12 @@ gitem_t	bg_itemlist[] =
 /*QUAKED weapon_machinegun (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
-		"weapon_machinegun", 
+		"weapon_machinegun",
 		"sound/misc/w_pkup.wav",
-        { "models/weapons2/machinegun/machinegun.md3", 
+        { "models/weapons2/m16/m16.md3",
 		NULL, NULL, NULL},
-/* icon */		"icons/iconw_machinegun",
-/* pickup */	"Machinegun",
+/* icon */		"icons/iconw_m16",
+/* pickup */	"M16",
 		40,
 		IT_WEAPON,
 		WP_MACHINEGUN,

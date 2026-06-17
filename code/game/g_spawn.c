@@ -212,6 +212,7 @@ spawn_t	spawns[] = {
 	{"trigger_push", SP_trigger_push},
 	{"trigger_teleport", SP_trigger_teleport},
 	{"trigger_hurt", SP_trigger_hurt},
+	{"trigger_bombsite", SP_trigger_bombsite},		// search & destroy plant zone
 
 	// targets perform no action by themselves, but must be triggered
 	// by another entity

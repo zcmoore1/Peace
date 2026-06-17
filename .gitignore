@@ -62,3 +62,14 @@ deps/
 *.bak
 *.backup
 *~
+
+# Quake3 map build artifacts (compiled locally with q3map2, not committed)
+mapping/src/*.bsp
+mapping/src/*.prt
+mapping/src/*.srf
+mapping/src/*.lin
+mapping/src/*/
+
+# Python caches
+__pycache__/
+*.pyc

@@ -218,7 +218,44 @@ def build_outpost():
     return m
 
 
-MAPS = {"dm_outpost": build_outpost}
+# ---------------------------------------------------------------------------
+# Map: box2guns - the smallest useful test map. A sealed, lit square room
+# with two facing spawns and a pair of weapons, nothing else. Parameterised
+# so any weapon pairing / room size is a one-line change - handy for trying
+# out the mod's arsenal in isolation.
+# ---------------------------------------------------------------------------
+def build_box(name="box2guns", size=384, height=256,
+              weapons=("weapon_rocketlauncher", "weapon_railgun")):
+    m = Q3Map(message=name, _minlight="32")
+    R, H, T = size, height, 16
+
+    # sealed shell: floor, ceiling, 4 walls
+    m.box((-R - T, -R - T, -T), (R + T, R + T, 0), FLOOR)
+    m.box((-R - T, -R - T, H), (R + T, R + T, H + T), CEIL)
+    m.box((-R - T, -R - T, 0), (-R, R + T, H), WALL)
+    m.box((R, -R - T, 0), (R + T, R + T, H), WALL)
+    m.box((-R, -R - T, 0), (R, -R, H), WALL)
+    m.box((-R, R, 0), (R, R + T, H), WALL)
+
+    # two spawns near opposite walls, facing each other along +/-X
+    sx = R - 128
+    m.entity("info_player_deathmatch", (-sx, 0, 24), angle=0)
+    m.entity("info_player_deathmatch", (sx, 0, 24), angle=180)
+
+    # the two weapons, flanking the centre
+    w0, w1 = weapons
+    m.entity(w0, (-128, 0, 24))
+    m.entity(w1, (128, 0, 24))
+
+    # one ceiling light so the room isn't black
+    m.entity("light", (0, 0, H - 32), light=300)
+    return m
+
+
+MAPS = {
+    "dm_outpost": build_outpost,
+    "box2guns": build_box,
+}
 
 
 def main(argv):

@@ -5,16 +5,28 @@ rifle, an **M16**. Players still spawn with the same weapon slot
 (`WP_MACHINEGUN`) and the same hitscan/bullet behaviour — only the **model,
 pickup name, and HUD icon** change.
 
+## Current state: PLACEHOLDER
+
+There is no cleanly-licensed M16 mesh in this repo yet, so the spawn weapon is
+temporarily wired to a **stock Quake 3 model (the railgun)** that already ships
+in every `baseq3/pak0.pk3`. This means the spawn weapon renders immediately for
+anyone, with zero downloads and zero licensing risk, while still being renamed
+`M16` in the HUD. The railgun has a long, rifle-like silhouette; if you prefer
+a more real-world look right now, the **shotgun**
+(`models/weapons2/shotgun/shotgun.md3`) is the most modern-looking stock asset.
+
+When you have a real M16 art pack, swap two strings in `code/game/bg_misc.c`
+(both marked `PLACEHOLDER`) back to the M16 paths below.
+
 ## What was changed in code
 
-`code/game/bg_misc.c` — the `weapon_machinegun` item definition now points at
-the M16 art instead of the stock machine gun:
+`code/game/bg_misc.c` — the `weapon_machinegun` item definition:
 
-| Field        | Before                                       | After                          |
-|--------------|----------------------------------------------|--------------------------------|
-| world_model  | `models/weapons2/machinegun/machinegun.md3`  | `models/weapons2/m16/m16.md3`  |
-| icon         | `icons/iconw_machinegun`                     | `icons/iconw_m16`              |
-| pickup name  | `Machinegun`                                 | `M16`                          |
+| Field        | Original (stock)                             | Placeholder (now)                          | Target (real M16)              |
+|--------------|----------------------------------------------|--------------------------------------------|--------------------------------|
+| world_model  | `models/weapons2/machinegun/machinegun.md3`  | `models/weapons2/railgun/railgun.md3`      | `models/weapons2/m16/m16.md3`  |
+| icon         | `icons/iconw_machinegun`                     | `icons/iconw_railgun`                       | `icons/iconw_m16`              |
+| pickup name  | `Machinegun`                                 | `M16`                                       | `M16`                          |
 
 That single `world_model[0]` path drives everything. `CG_RegisterWeapon()` in
 `code/cgame/cg_weapons.c` strips the extension and derives the related models

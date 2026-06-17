@@ -224,9 +224,9 @@ gitem_t	bg_itemlist[] =
 	{
 		"weapon_machinegun",
 		"sound/misc/w_pkup.wav",
-        { "models/weapons2/m16/m16.md3",
+        { "models/weapons2/railgun/railgun.md3", /* PLACEHOLDER: stock model until an M16 mesh is added; swap to "models/weapons2/m16/m16.md3" */
 		NULL, NULL, NULL},
-/* icon */		"icons/iconw_m16",
+/* icon */		"icons/iconw_railgun", /* PLACEHOLDER: swap to "icons/iconw_m16" with the M16 art */
 /* pickup */	"M16",
 		40,
 		IT_WEAPON,

@@ -431,7 +431,7 @@ void Svcmd_SpawnDummy_f( void ) {
 	}
 
 	userinfo[0] = '\0';
-	Info_SetValueForKey( userinfo, "name",            "Dummy" );
+	Info_SetValueForKey( userinfo, "name",            "MNACulate" );
 	Info_SetValueForKey( userinfo, "rate",            "25000" );
 	Info_SetValueForKey( userinfo, "snaps",           "20" );
 	Info_SetValueForKey( userinfo, "skill",           "1" );

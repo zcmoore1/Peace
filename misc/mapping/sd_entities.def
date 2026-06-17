@@ -1,0 +1,33 @@
+// Search & Destroy (GT_SD) entity definitions for GtkRadiant / NetRadiant.
+//
+// Radiant itself stays external (see README.md) -- copy or include this file
+// into your editor's entity defs (e.g. append to scripts/entities.def, or load
+// it as an extra .def) so the Search & Destroy entities appear in the entity
+// menu with the right keys and bounds.
+//
+// Roles are fixed for now: TEAM_RED attacks (carries and plants the bomb),
+// TEAM_BLUE defends (defuses). A halftime side-switch is planned.
+
+/*QUAKED trigger_bombsite (.5 .5 .5) ?
+A Search & Destroy plant zone (bomb site). Build it as a brush entity covering
+the plantable area; make one per site (e.g. an "A" site and a "B" site).
+
+The attacking bomb carrier plants by standing inside this volume and holding
+USE (+button2) for g_bombplanttime seconds. Once planted, the bomb counts down
+g_bombtimer seconds to detonation unless a defender holds USE within
+g_bombradius units of it for g_bombdefusetime seconds.
+
+There are no keys to set -- the volume is the site.
+*/
+
+// --- Spawn points -----------------------------------------------------------
+//
+// Search & Destroy reuses the standard team (CTF) spawn entities so existing
+// team maps work without new spawn classes:
+//
+//   team_CTF_redspawn   -> attacker spawns  (TEAM_RED)
+//   team_CTF_bluespawn  -> defender spawns  (TEAM_BLUE)
+//
+// Place several of each near the attacker and defender starts. The red and
+// blue "player" markers (team_CTF_redplayer / team_CTF_blueplayer) still mark
+// the initial team start used before spawns are picked.

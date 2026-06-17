@@ -67,6 +67,10 @@ vmCvar_t	g_warmup;
 vmCvar_t	g_roundlimit;
 vmCvar_t	g_roundtime;
 vmCvar_t	g_roundwarmup;
+vmCvar_t	g_bombplanttime;
+vmCvar_t	g_bombdefusetime;
+vmCvar_t	g_bombtimer;
+vmCvar_t	g_bombradius;
 vmCvar_t	g_doWarmup;
 vmCvar_t	g_restarted;
 vmCvar_t	g_logfile;
@@ -125,6 +129,13 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_roundlimit, "g_roundlimit", "8", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
 	{ &g_roundtime, "g_roundtime", "120", CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
 	{ &g_roundwarmup, "g_roundwarmup", "5", CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
+
+	// bomb objective: plant/defuse hold times, time from plant to detonation
+	// (seconds) and the defuse reach radius (game units)
+	{ &g_bombplanttime, "g_bombplanttime", "4", CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
+	{ &g_bombdefusetime, "g_bombdefusetime", "7", CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
+	{ &g_bombtimer, "g_bombtimer", "40", CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
+	{ &g_bombradius, "g_bombradius", "128", CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
 
 	{ &g_synchronousClients, "g_synchronousClients", "0", CVAR_SYSTEMINFO, 0, qfalse  },
 

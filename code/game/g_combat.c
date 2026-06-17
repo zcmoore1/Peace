@@ -572,6 +572,11 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	}
 
 	TossClientItems( self );
+
+	// in search & destroy, hand the bomb off if its carrier was just killed
+	if ( G_RoundBasedGametype() ) {
+		G_BombCarrierDied( self );
+	}
 #ifdef MISSIONPACK
 	TossClientPersistantPowerups( self );
 	if( g_gametype.integer == GT_HARVESTER ) {

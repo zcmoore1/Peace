@@ -60,6 +60,102 @@ int G_CountAliveOnTeam( team_t team ) {
 
 /*
 ==================
+G_AttackingTeam / G_DefendingTeam
+
+Which side carries and plants the bomb, and which defends. Fixed for now
+(red attacks, blue defends); a halftime side-switch will swap these later.
+==================
+*/
+team_t G_AttackingTeam( void ) {
+	return TEAM_RED;
+}
+
+team_t G_DefendingTeam( void ) {
+	return TEAM_BLUE;
+}
+
+/*
+==================
+G_GiveBomb
+
+Make the given attacker the bomb carrier.
+==================
+*/
+static void G_GiveBomb( gentity_t *ent ) {
+	if ( !ent || !ent->client ) {
+		return;
+	}
+	level.bombCarrier = ent - g_entities;
+	level.bombState = BOMB_CARRIED;
+	trap_SendServerCommand( level.bombCarrier,
+		"cp \"You have the bomb!\nReach a site and hold USE to plant.\"" );
+}
+
+/*
+==================
+G_AssignBombCarrier
+
+Give the bomb to a random living member of the attacking team. Leaves the
+carrier unset if the attackers have nobody alive to take it.
+==================
+*/
+static void G_AssignBombCarrier( void ) {
+	int			i;
+	int			candidates[MAX_CLIENTS];
+	int			count = 0;
+	team_t		attackers = G_AttackingTeam();
+	gclient_t	*cl;
+
+	level.bombCarrier = -1;
+
+	for ( i = 0; i < level.maxclients; i++ ) {
+		cl = &level.clients[i];
+		if ( cl->pers.connected != CON_CONNECTED ) {
+			continue;
+		}
+		if ( cl->sess.sessionTeam != attackers ) {
+			continue;
+		}
+		if ( cl->ps.stats[STAT_HEALTH] <= 0 ) {
+			continue;
+		}
+		candidates[count++] = i;
+	}
+
+	if ( count > 0 ) {
+		int pick = (int)( random() * count ) % count;
+		G_GiveBomb( &g_entities[ candidates[pick] ] );
+	}
+}
+
+/*
+==================
+G_BombCarrierDied
+
+Called from player_die. If the dead player was carrying the bomb, hand it to
+another living attacker. If none remain the round is left to be decided by
+elimination or the round timer.
+==================
+*/
+void G_BombCarrierDied( gentity_t *self ) {
+	if ( level.bombState != BOMB_CARRIED ) {
+		return;		// not in the carried state (unplanted), nothing to pass
+	}
+	if ( ( self - g_entities ) != level.bombCarrier ) {
+		return;		// the dead player wasn't holding it
+	}
+
+	level.plantProgress = 0;
+	G_AssignBombCarrier();
+	if ( level.bombCarrier == -1 ) {
+		trap_SendServerCommand( -1, "cp \"The bomb carrier is down!\"" );
+	} else {
+		trap_SendServerCommand( -1, "print \"The bomb has been picked up.\n\"" );
+	}
+}
+
+/*
+==================
 G_RoundRespawnAll
 
 Bring every playing client back to a fresh team spawn point, alive and at full
@@ -109,6 +205,15 @@ static void G_StartRound( void ) {
 
 	G_RoundRespawnAll();
 
+	// reset the bomb and hand it to a fresh attacker for the new round
+	level.bombState = BOMB_NONE;
+	level.bombCarrier = -1;
+	level.bombDetonateTime = 0;
+	level.plantProgress = 0;
+	level.plantTouchTime = 0;
+	level.defuseProgress = 0;
+	G_AssignBombCarrier();
+
 	trap_SendServerCommand( -1, va( "cp \"Round %i\nGet ready...\"", level.roundNumber ) );
 }
 
@@ -136,6 +241,159 @@ static void G_RoundWin( team_t winner, const char *reason ) {
 
 /*
 ==================
+G_BombPlanted
+
+The carrier finished planting at a site: drop the bomb in place and start the
+detonation countdown. The carrier is freed to fight; the round is now settled
+by detonation versus defuse.
+==================
+*/
+static void G_BombPlanted( gentity_t *carrier, gentity_t *site ) {
+	int	timerMsec = ( g_bombtimer.integer > 0 ) ? g_bombtimer.integer * 1000 : 40000;
+
+	level.bombState = BOMB_PLANTED;
+	VectorCopy( carrier->r.currentOrigin, level.bombOrigin );
+	level.bombDetonateTime = level.time + timerMsec;
+	level.bombCarrier = -1;
+	level.plantProgress = 0;
+	level.defuseProgress = 0;
+
+	trap_SendServerCommand( -1, "cp \"The bomb has been planted!\"" );
+	// a planted-bomb world entity (model + beep + the eventual explosion
+	// effect) is part of the upcoming cgame stage.
+}
+
+/*
+==================
+G_RunBomb
+
+Advance the planted-bomb timer and any defuse in progress; called every active
+frame. Planting progress itself is accumulated in bombsite_touch. May award the
+round (defuse -> defenders, detonation -> attackers).
+==================
+*/
+static void G_RunBomb( void ) {
+	int			i;
+	gclient_t	*cl;
+	team_t		defenders = G_DefendingTeam();
+	qboolean	defusing = qfalse;
+	int			defuseMsec;
+
+	if ( level.bombState == BOMB_CARRIED ) {
+		// bombsite_touch stamps plantTouchTime while the carrier overlaps a
+		// site. ClientThink and G_RunFrame are separate VM calls with different
+		// level.time values, so treat a touch within the last fraction of a
+		// second as "still in the site" rather than requiring an exact match.
+		gentity_t	*carrier;
+		int			plantMsec;
+		qboolean	inSite;
+
+		if ( level.bombCarrier < 0 ) {
+			level.plantProgress = 0;
+			return;
+		}
+
+		carrier = &g_entities[ level.bombCarrier ];
+		inSite = ( level.plantTouchTime != 0 && ( level.time - level.plantTouchTime ) <= 250 );
+
+		if ( inSite && carrier->client &&
+			carrier->client->ps.stats[STAT_HEALTH] > 0 &&
+			( carrier->client->buttons & BUTTON_USE_HOLDABLE ) ) {
+			level.plantProgress += ( level.time - level.previousTime );
+			plantMsec = ( g_bombplanttime.integer > 0 ) ? g_bombplanttime.integer * 1000 : 4000;
+			if ( level.plantProgress >= plantMsec ) {
+				G_BombPlanted( carrier, NULL );
+			}
+		} else {
+			level.plantProgress = 0;
+		}
+		return;
+	}
+
+	if ( level.bombState != BOMB_PLANTED ) {
+		return;
+	}
+
+	// detonation: attackers win if the countdown expires before a defuse
+	if ( level.time >= level.bombDetonateTime ) {
+		level.bombState = BOMB_DETONATED;
+		G_RoundWin( G_AttackingTeam(), "Bomb detonated" );
+		return;
+	}
+
+	// defuse: any living defender within reach, holding USE, makes progress
+	for ( i = 0; i < level.maxclients; i++ ) {
+		gentity_t	*ent = &g_entities[i];
+		vec3_t		delta;
+
+		cl = &level.clients[i];
+		if ( cl->pers.connected != CON_CONNECTED ) {
+			continue;
+		}
+		if ( cl->sess.sessionTeam != defenders ) {
+			continue;
+		}
+		if ( cl->ps.stats[STAT_HEALTH] <= 0 ) {
+			continue;
+		}
+		if ( !( cl->buttons & BUTTON_USE_HOLDABLE ) ) {
+			continue;
+		}
+		VectorSubtract( ent->r.currentOrigin, level.bombOrigin, delta );
+		if ( VectorLength( delta ) <= (float)g_bombradius.integer ) {
+			defusing = qtrue;
+			break;
+		}
+	}
+
+	defuseMsec = ( g_bombdefusetime.integer > 0 ) ? g_bombdefusetime.integer * 1000 : 7000;
+	if ( defusing ) {
+		level.defuseProgress += ( level.time - level.previousTime );
+		if ( level.defuseProgress >= defuseMsec ) {
+			level.bombState = BOMB_DEFUSED;
+			G_RoundWin( defenders, "Bomb defused" );
+		}
+	} else {
+		level.defuseProgress = 0;
+	}
+}
+
+/*
+==================
+bombsite_touch
+
+Runs each frame an entity overlaps a bomb site. Records that the attacking
+bomb carrier is currently in a site; G_RunBomb turns that into plant progress.
+==================
+*/
+static void bombsite_touch( gentity_t *self, gentity_t *other, trace_t *trace ) {
+	if ( !other->client ) {
+		return;
+	}
+	if ( level.roundState != RND_ACTIVE || level.bombState != BOMB_CARRIED ) {
+		return;
+	}
+	if ( ( other - g_entities ) != level.bombCarrier ) {
+		return;		// only the carrier can plant
+	}
+
+	// just record that the carrier is standing in a site this instant;
+	// G_RunBomb accumulates the actual plant progress (see the note there).
+	level.plantTouchTime = level.time;
+}
+
+/*QUAKED trigger_bombsite (.5 .5 .5) ?
+Search & destroy plant zone. The attacking bomb carrier plants here by
+standing inside and holding USE. Place one or more per map (e.g. A and B).
+*/
+void SP_trigger_bombsite( gentity_t *ent ) {
+	InitTrigger( ent );
+	ent->touch = bombsite_touch;
+	trap_LinkEntity( ent );
+}
+
+/*
+==================
 CheckRound
 
 Drives the Search & Destroy round state machine; called once per frame from
@@ -144,7 +402,7 @@ CheckExitRules (so an awarded round is seen by the match-end check this frame).
 ==================
 */
 void CheckRound( void ) {
-	int	aliveRed, aliveBlue;
+	int	aliveAtt, aliveDef;
 
 	if ( !G_RoundBasedGametype() ) {
 		return;
@@ -178,25 +436,30 @@ void CheckRound( void ) {
 		break;
 
 	case RND_ACTIVE:
-		aliveRed  = G_CountAliveOnTeam( TEAM_RED );
-		aliveBlue = G_CountAliveOnTeam( TEAM_BLUE );
+		// advance plant / defuse / detonation first: it may decide the round
+		G_RunBomb();
+		if ( level.roundState != RND_ACTIVE ) {
+			break;		// a defuse or detonation already awarded the round
+		}
 
-		if ( aliveRed == 0 && aliveBlue == 0 ) {
-			// mutual wipe in the same frame
-			G_RoundWin( TEAM_SPECTATOR, "Round draw" );
-		} else if ( aliveBlue == 0 ) {
-			G_RoundWin( TEAM_RED, "Red wins the round" );
-		} else if ( aliveRed == 0 ) {
-			G_RoundWin( TEAM_BLUE, "Blue wins the round" );
-		} else if ( level.roundEndTime && level.time >= level.roundEndTime ) {
-			// time expired. with no bomb objective yet, decide on survivors;
-			// once planting exists the defenders win a timed-out round instead.
-			if ( aliveRed > aliveBlue ) {
-				G_RoundWin( TEAM_RED, "Time up - Red survives" );
-			} else if ( aliveBlue > aliveRed ) {
-				G_RoundWin( TEAM_BLUE, "Time up - Blue survives" );
-			} else {
-				G_RoundWin( TEAM_SPECTATOR, "Time up - round draw" );
+		aliveAtt = G_CountAliveOnTeam( G_AttackingTeam() );
+		aliveDef = G_CountAliveOnTeam( G_DefendingTeam() );
+
+		if ( level.bombState == BOMB_PLANTED ) {
+			// once planted, the bomb timer decides the round (see G_RunBomb).
+			// the lone exception: wiping the defenders leaves nobody to defuse,
+			// so the attackers have effectively won.
+			if ( aliveDef == 0 ) {
+				G_RoundWin( G_AttackingTeam(), "Defenders eliminated" );
+			}
+		} else {
+			// bomb still in hand: elimination or the round timer decides it
+			if ( aliveAtt == 0 ) {
+				G_RoundWin( G_DefendingTeam(), "Attackers eliminated" );
+			} else if ( aliveDef == 0 ) {
+				G_RoundWin( G_AttackingTeam(), "Defenders eliminated" );
+			} else if ( level.roundEndTime && level.time >= level.roundEndTime ) {
+				G_RoundWin( G_DefendingTeam(), "Time up - bomb not planted" );
 			}
 		}
 		break;

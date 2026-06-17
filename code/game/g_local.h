@@ -337,6 +337,15 @@ typedef enum {
 	RND_POSTROUND		// round decided; result shown before the next round starts
 } roundState_t;
 
+// search & destroy bomb objective (g_round.c)
+typedef enum {
+	BOMB_NONE,			// no bomb in play (e.g. between rounds)
+	BOMB_CARRIED,		// an attacker is holding the bomb
+	BOMB_PLANTED,		// bomb is down and counting toward detonation
+	BOMB_DEFUSED,		// defenders disarmed it (round decided)
+	BOMB_DETONATED		// it exploded (round decided)
+} bombState_t;
+
 typedef struct {
 	struct gclient_s	*clients;		// [maxclients]
 
@@ -412,6 +421,15 @@ typedef struct {
 	int			roundStateEndTime;		// level.time the pre/post-round phase ends
 	int			roundEndTime;			// level.time the active round times out (0 = none)
 	int			roundWinner;			// team_t that won the last round (-1 = undecided)
+
+	// search & destroy bomb objective state
+	int			bombState;				// bombState_t
+	int			bombCarrier;			// clientNum carrying the bomb, or -1
+	vec3_t		bombOrigin;				// world position the bomb was planted at
+	int			bombDetonateTime;		// level.time a planted bomb explodes
+	int			plantProgress;			// ms of planting accumulated this attempt
+	int			plantTouchTime;			// level.time the carrier last stood in a site
+	int			defuseProgress;			// ms of defusing accumulated this attempt
 
 	// intermission state
 	int			intermissionQueued;		// intermission was qualified, but
@@ -641,6 +659,11 @@ void QDECL G_Error( const char *fmt, ... ) Q_NO_RETURN Q_PRINTF_FUNC(1, 2);
 qboolean G_RoundBasedGametype( void );
 int G_CountAliveOnTeam( team_t team );
 void CheckRound( void );
+team_t G_AttackingTeam( void );
+team_t G_DefendingTeam( void );
+void G_BombCarrierDied( gentity_t *self );
+void SP_trigger_bombsite( gentity_t *ent );
+void InitTrigger( gentity_t *self );		// g_trigger.c
 
 //
 // g_client.c
@@ -749,6 +772,10 @@ extern	vmCvar_t	g_forcerespawn;
 extern	vmCvar_t	g_roundlimit;
 extern	vmCvar_t	g_roundtime;
 extern	vmCvar_t	g_roundwarmup;
+extern	vmCvar_t	g_bombplanttime;
+extern	vmCvar_t	g_bombdefusetime;
+extern	vmCvar_t	g_bombtimer;
+extern	vmCvar_t	g_bombradius;
 extern	vmCvar_t	g_inactivity;
 extern	vmCvar_t	g_debugMove;
 extern	vmCvar_t	g_debugAlloc;

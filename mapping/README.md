@@ -8,6 +8,7 @@ weapon behaviour in isolation.
 mapping/
   src/box2guns.map        map source (idTech3 brush format)
   levelshots/box2guns.tga menu thumbnail
+  scripts/box2guns.arena  menu entry (so the map + thumbnail show in the list)
   tools/compile.sh        q3map2 compile + install
 ```
 
@@ -23,8 +24,11 @@ Q3_BASEPATH=/path/to/quake3 mapping/tools/compile.sh box2guns
 ioquake3 +set sv_pure 0 +devmap box2guns
 ```
 
-`compile.sh` runs the q3map2 BSP/VIS/LIGHT stages and installs both
-`maps/box2guns.bsp` and `levelshots/box2guns.tga` into your `baseq3`.
+`compile.sh` runs the q3map2 BSP/VIS/LIGHT stages and installs the
+`.bsp`, the `levelshots/box2guns.tga` thumbnail, and `scripts/box2guns.arena`
+into your `baseq3`. The arena file makes the map appear in the in-game map
+list with its watermelon thumbnail; you can also launch it directly with
+`+devmap box2guns`.
 
 The full map-authoring pipeline (generators for geometry and levelshots,
 plus more maps) lives on the `claude/quake3-mod-maps-67wm8k` branch.

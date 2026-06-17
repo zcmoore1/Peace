@@ -414,6 +414,54 @@ gclient_t	*ClientForString( const char *s ) {
 
 /*
 ===================
+Svcmd_SpawnDummy_f
+
+Spawn a stationary training dummy. It acts as a full player client (takes
+damage, dies, respawns) but all input is zeroed so it never moves or shoots.
+===================
+*/
+void Svcmd_SpawnDummy_f( void ) {
+	int		clientNum;
+	char	userinfo[MAX_INFO_STRING];
+
+	clientNum = trap_BotAllocateClient();
+	if ( clientNum == -1 ) {
+		G_Printf( S_COLOR_RED "spawndummy: no free client slots (raise sv_maxclients).\n" );
+		return;
+	}
+
+	userinfo[0] = '\0';
+	Info_SetValueForKey( userinfo, "name",            "Dummy" );
+	Info_SetValueForKey( userinfo, "rate",            "25000" );
+	Info_SetValueForKey( userinfo, "snaps",           "20" );
+	Info_SetValueForKey( userinfo, "skill",           "1" );
+	Info_SetValueForKey( userinfo, "model",           "sarge/default" );
+	Info_SetValueForKey( userinfo, "team_model",      "sarge/default" );
+	Info_SetValueForKey( userinfo, "headmodel",       "sarge/default" );
+	Info_SetValueForKey( userinfo, "team_headmodel",  "sarge/default" );
+	Info_SetValueForKey( userinfo, "sex",             "male" );
+	Info_SetValueForKey( userinfo, "color1",          "4" );
+	Info_SetValueForKey( userinfo, "color2",          "5" );
+	Info_SetValueForKey( userinfo, "characterfile",   "bots/sarge.c" );
+	Info_SetValueForKey( userinfo, "teamoverlay",     "0" );
+
+	trap_SetUserinfo( clientNum, userinfo );
+
+	if ( ClientConnect( clientNum, qtrue, qtrue ) ) {
+		trap_BotFreeClient( clientNum );
+		G_Printf( S_COLOR_RED "spawndummy: client connect failed.\n" );
+		return;
+	}
+
+	ClientBegin( clientNum );
+
+	g_entities[clientNum].client->isDummy = qtrue;
+
+	G_Printf( "Training dummy spawned as client %i.\n", clientNum );
+}
+
+/*
+===================
 Svcmd_ForceTeam_f
 
 forceteam <player> <team>
@@ -455,6 +503,11 @@ qboolean	ConsoleCommand( void ) {
 
 	if ( Q_stricmp (cmd, "entitylist") == 0 ) {
 		Svcmd_EntityList_f();
+		return qtrue;
+	}
+
+	if ( Q_stricmp (cmd, "spawndummy") == 0 ) {
+		Svcmd_SpawnDummy_f();
 		return qtrue;
 	}
 

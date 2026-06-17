@@ -266,6 +266,8 @@ struct gclient_s {
 
 	qboolean	noclip;
 
+	qboolean	isDummy;			// training dummy: all input zeroed, just stands still
+
 	int			lastCmdTime;		// level.time of last usercmd_t, for EF_CONNECTION
 									// we can't just use pers.lastCommand.time, because
 									// of the g_sycronousclients case

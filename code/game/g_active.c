@@ -767,6 +767,13 @@ void ClientThink_real( gentity_t *ent ) {
 	// mark the time, so the connection sprite can be removed
 	ucmd = &ent->client->pers.cmd;
 
+	// training dummy: erase all AI/input so pmove sees a frozen player
+	if ( ent->client->isDummy ) {
+		int savedTime = level.time;
+		memset( ucmd, 0, sizeof( *ucmd ) );
+		ucmd->serverTime = savedTime;
+	}
+
 	// sanity check the command time to prevent speedup cheating
 	if ( ucmd->serverTime > level.time + 200 ) {
 		ucmd->serverTime = level.time + 200;

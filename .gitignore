@@ -71,3 +71,6 @@ mapping/src/*.prt
 mapping/src/*.srf
 mapping/src/*.lin
 mapping/src/*/
+# Python caches
+__pycache__/
+*.pyc

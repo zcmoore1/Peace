@@ -6,11 +6,12 @@ Custom maps for this Quake 3 mod. Maps here are authored as `.map` **source**
 
 ```
 mapping/
-  src/            generated/authored .map source (compile these)
+  src/                generated/authored .map source (compile these)
+  levelshots/         menu thumbnails (<map>.tga)
   tools/
-    mapgen.py     programmatic .map generator (geometry lives here)
-  build/
-    compile.sh    q3map2 BSP -> VIS -> LIGHT pipeline + install
+    mapgen.py         programmatic .map generator (geometry lives here)
+    make_levelshot.py procedural levelshot (thumbnail) generator
+    compile.sh        q3map2 BSP -> VIS -> LIGHT pipeline + install
   README.md
 ```
 
@@ -52,7 +53,7 @@ Compilation needs tools and assets that are **not** in this repo (and can't be
    Point `Q3_BASEPATH` at the directory that *contains* `baseq3/`.
 
 ```sh
-Q3_BASEPATH=/path/to/quake3 mapping/build/compile.sh dm_outpost
+Q3_BASEPATH=/path/to/quake3 mapping/tools/compile.sh dm_outpost
 ```
 
 This runs the three q3map2 stages (BSP, VIS, LIGHT) and copies the result to

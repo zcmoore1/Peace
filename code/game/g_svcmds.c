@@ -442,7 +442,7 @@ void Svcmd_SpawnDummy_f( void ) {
 	Info_SetValueForKey( userinfo, "sex",             "male" );
 	Info_SetValueForKey( userinfo, "color1",          "4" );
 	Info_SetValueForKey( userinfo, "color2",          "5" );
-	Info_SetValueForKey( userinfo, "characterfile",   "bots/sarge.c" );
+	Info_SetValueForKey( userinfo, "characterfile",   "bots/default_c.c" );
 	Info_SetValueForKey( userinfo, "teamoverlay",     "0" );
 
 	trap_SetUserinfo( clientNum, userinfo );

@@ -62,3 +62,12 @@ deps/
 *.bak
 *.backup
 *~
+
+# Quake3 map build artifacts (q3map2 output; compiled maps are added
+# separately once complete, not committed to this workshop branch).
+# .map source is kept; everything generated from it is ignored.
+mapping/src/*.bsp
+mapping/src/*.prt
+mapping/src/*.srf
+mapping/src/*.lin
+mapping/src/*/

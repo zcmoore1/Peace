@@ -112,6 +112,7 @@ typedef enum {
 	//-- team games go after this --
 
 	GT_TEAM,			// team deathmatch
+	GT_SD,				// search & destroy: round-based, no mid-round respawn
 	GT_CTF,				// capture the flag
 	GT_1FCTF,
 	GT_OBELISK,

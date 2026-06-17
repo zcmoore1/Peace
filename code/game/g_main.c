@@ -64,6 +64,9 @@ vmCvar_t	g_weaponTeamRespawn;
 vmCvar_t	g_motd;
 vmCvar_t	g_synchronousClients;
 vmCvar_t	g_warmup;
+vmCvar_t	g_roundlimit;
+vmCvar_t	g_roundtime;
+vmCvar_t	g_roundwarmup;
 vmCvar_t	g_doWarmup;
 vmCvar_t	g_restarted;
 vmCvar_t	g_logfile;
@@ -116,6 +119,12 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_fraglimit, "fraglimit", "20", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
 	{ &g_timelimit, "timelimit", "0", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
 	{ &g_capturelimit, "capturelimit", "8", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
+
+	// search & destroy (GT_SD): rounds to win the match, active round length
+	// (seconds) and pre-round freeze (seconds)
+	{ &g_roundlimit, "g_roundlimit", "8", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
+	{ &g_roundtime, "g_roundtime", "120", CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
+	{ &g_roundwarmup, "g_roundwarmup", "5", CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
 
 	{ &g_synchronousClients, "g_synchronousClients", "0", CVAR_SYSTEMINFO, 0, qfalse  },
 
@@ -1393,6 +1402,23 @@ void CheckExitRules( void ) {
 		}
 	}
 
+	// round-based play (search & destroy) ends on rounds won, not frags/captures
+	if ( G_RoundBasedGametype() ) {
+		if ( g_roundlimit.integer > 0 ) {
+			if ( level.teamScores[TEAM_RED] >= g_roundlimit.integer ) {
+				trap_SendServerCommand( -1, "print \"Red won the match.\n\"" );
+				LogExit( "Roundlimit hit." );
+				return;
+			}
+			if ( level.teamScores[TEAM_BLUE] >= g_roundlimit.integer ) {
+				trap_SendServerCommand( -1, "print \"Blue won the match.\n\"" );
+				LogExit( "Roundlimit hit." );
+				return;
+			}
+		}
+		return;
+	}
+
 	if ( g_fraglimit.integer < 0 ) {
 		G_Printf( "fraglimit %i is out of range, defaulting to 0\n", g_fraglimit.integer );
 		trap_Cvar_Set( "fraglimit", "0" );
@@ -1884,6 +1910,9 @@ void G_RunFrame( int levelTime ) {
 
 	// see if it is time to do a tournement restart
 	CheckTournament();
+
+	// run the search & destroy round state machine
+	CheckRound();
 
 	// see if it is time to end the level
 	CheckExitRules();

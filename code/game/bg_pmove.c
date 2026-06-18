@@ -1479,22 +1479,24 @@ static const int bg_weaponMagSize[MAX_WEAPONS] = {
 	60,		// WP_CHAINGUN
 };
 
-// Reload duration in milliseconds per weapon.
+// Reload duration in milliseconds per weapon. Trimmed ~25% from the first
+// pass for a snappier feel; the NAC tail (below) is unchanged so the trick
+// window is now a larger share of the (shorter) reload.
 static const int bg_weaponReloadTime[MAX_WEAPONS] = {
 	0,		// WP_NONE
 	0,		// WP_GAUNTLET
-	2000,	// WP_MACHINEGUN
-	1500,	// WP_SHOTGUN
-	1800,	// WP_GRENADE_LAUNCHER
-	1800,	// WP_ROCKET_LAUNCHER
-	1500,	// WP_LIGHTNING
-	1800,	// WP_RAILGUN
-	1500,	// WP_PLASMAGUN
-	2500,	// WP_BFG
+	1500,	// WP_MACHINEGUN
+	1100,	// WP_SHOTGUN
+	1400,	// WP_GRENADE_LAUNCHER
+	1400,	// WP_ROCKET_LAUNCHER
+	1100,	// WP_LIGHTNING
+	1400,	// WP_RAILGUN
+	1100,	// WP_PLASMAGUN
+	1900,	// WP_BFG
 	0,		// WP_GRAPPLING_HOOK
-	2000,	// WP_NAILGUN
-	2000,	// WP_PROX_LAUNCHER
-	2000,	// WP_CHAINGUN
+	1500,	// WP_NAILGUN
+	1500,	// WP_PROX_LAUNCHER
+	1500,	// WP_CHAINGUN
 };
 
 // Reload "tail": the cancelable portion at the END of the reload, in ms of

@@ -1497,6 +1497,29 @@ static const int bg_weaponReloadTime[MAX_WEAPONS] = {
 	2000,	// WP_CHAINGUN
 };
 
+// Reload "tail": the cancelable portion at the END of the reload, in ms of
+// remaining weaponTime. The magazine is inserted (notetrack) the moment
+// weaponTime drops to this value; everything after is just animation that can
+// be cut short by swapping/firing while KEEPING the ammo. That cancelable
+// window is the NAC: swap during the tail = full mag + skip the rest; swap
+// before it = the reload is lost. Tune per weapon to widen/tighten the trick.
+static const int bg_weaponReloadTail[MAX_WEAPONS] = {
+	0,		// WP_NONE
+	0,		// WP_GAUNTLET
+	700,	// WP_MACHINEGUN     (2000 reload -> insert at 1300, 700ms NAC tail)
+	500,	// WP_SHOTGUN
+	600,	// WP_GRENADE_LAUNCHER
+	600,	// WP_ROCKET_LAUNCHER
+	500,	// WP_LIGHTNING
+	600,	// WP_RAILGUN
+	500,	// WP_PLASMAGUN
+	800,	// WP_BFG
+	0,		// WP_GRAPPLING_HOOK
+	700,	// WP_NAILGUN
+	700,	// WP_PROX_LAUNCHER
+	700,	// WP_CHAINGUN
+};
+
 int BG_WeaponMagSize( int weapon ) {
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
 	return bg_weaponMagSize[weapon];
@@ -1505,6 +1528,11 @@ int BG_WeaponMagSize( int weapon ) {
 int BG_WeaponReloadTime( int weapon ) {
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
 	return bg_weaponReloadTime[weapon];
+}
+
+int BG_WeaponReloadTail( int weapon ) {
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
+	return bg_weaponReloadTail[weapon];
 }
 
 /*
@@ -1516,6 +1544,9 @@ static void PM_BeginReload( void ) {
 	PM_AddEvent( EV_RELOAD );
 	pm->ps->weaponstate = WEAPON_RELOADING;
 	pm->ps->weaponTime  = BG_WeaponReloadTime( pm->ps->weapon );
+	// Fresh reload: the mag hasn't been inserted yet, so clear the notetrack
+	// flag. It gets set partway through, opening the NAC tail.
+	pm->ps->pm_flags &= ~PMF_RELOAD_AMMO_GIVEN;
 	PM_StartTorsoAnim( TORSO_GESTURE );	// placeholder reload animation
 }
 
@@ -1545,6 +1576,16 @@ static void PM_BeginWeaponChange( int weapon ) {
 		pm->ps->pm_flags |= PMF_QUICKSWAP_PENDING;
 	} else {
 		pm->ps->pm_flags &= ~PMF_QUICKSWAP_PENDING;
+	}
+
+	// Cancelling a reload: the reload's leftover time is abandoned so the drop
+	// starts fresh (200ms), rather than dragging the rest of the reload along.
+	// THIS is what makes the NAC save the tail. Whether you keep the ammo was
+	// already decided by the notetrack in PM_Weapon (PMF_RELOAD_AMMO_GIVEN):
+	//   swap after the notetrack -> full mag + fast swap (the NAC payoff)
+	//   swap before the notetrack -> empty mag, the reload is wasted
+	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
+		pm->ps->weaponTime = 0;
 	}
 
 	PM_AddEvent( EV_CHANGE_WEAPON );
@@ -1655,6 +1696,18 @@ static void PM_Weapon( void ) {
 		pm->ps->weaponTime -= pml.msec;
 	}
 
+	// Reload notetrack: insert the magazine partway through the reload, the
+	// instant remaining weaponTime drops into the tail. From here on the mag
+	// is full and the rest of the reload is just animation that can be cut
+	// short (swap/fire) while keeping the ammo - the NAC. Checked every tick
+	// before the weapon-change fork so a same-tick swap still sees the ammo.
+	if ( pm->ps->weaponstate == WEAPON_RELOADING &&
+	     !( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) &&
+	     pm->ps->weaponTime <= BG_WeaponReloadTail( pm->ps->weapon ) ) {
+		pm->ps->ammo[pm->ps->weapon] = BG_WeaponMagSize( pm->ps->weapon );
+		pm->ps->pm_flags |= PMF_RELOAD_AMMO_GIVEN;
+	}
+
 	// check for weapon change
 	// can't change if weapon is firing, but can change
 	// again if lowering or raising
@@ -1687,11 +1740,14 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
-	// reload complete: top the magazine back up. Reserve is infinite for now,
-	// so the magazine simply refills to its full size. This is the frame where
-	// ps->ammo[weapon] updates - the NAC window (weapnext timed to here).
+	// reload fully played out (no cancel). The mag was already topped up at the
+	// notetrack above; if a weapon has no tail it gets filled here as a fallback.
+	// Either way the reload is done - return to ready and clear the notetrack flag.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
-		pm->ps->ammo[pm->ps->weapon] = BG_WeaponMagSize( pm->ps->weapon );
+		if ( !( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) ) {
+			pm->ps->ammo[pm->ps->weapon] = BG_WeaponMagSize( pm->ps->weapon );
+		}
+		pm->ps->pm_flags &= ~PMF_RELOAD_AMMO_GIVEN;
 		pm->ps->weaponstate = WEAPON_READY;
 		PM_StartTorsoAnim( TORSO_STAND );
 		return;

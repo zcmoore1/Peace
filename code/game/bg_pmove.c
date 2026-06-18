@@ -1558,6 +1558,8 @@ PM_BeginWeaponChange
 ===============
 */
 static void PM_BeginWeaponChange( int weapon ) {
+	qboolean midSwap;
+
 	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
 		return;
 	}
@@ -1566,26 +1568,40 @@ static void PM_BeginWeaponChange( int weapon ) {
 		return;
 	}
 
-	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
+	// Already lowering toward this exact weapon: nothing new to do.
+	if ( pm->ps->weaponstate == WEAPON_DROPPING && pm->ps->swapTarget == weapon ) {
 		return;
 	}
 
-	// If we're interrupting a raise (the player switched again before the
-	// weapon finished coming up), the weapon we settle on will come up
-	// instantly ready. This is the generic "fast swap": any switch during a
-	// raise lets you be ready for anything, for any number of weapons.
-	if ( pm->ps->weaponstate == WEAPON_RAISING ) {
+	// Are we interrupting a swap that's already in flight? A drop or a raise
+	// means a weapon is mid-transition. Re-selecting a DIFFERENT weapon here is
+	// the alt-swap / "YY": the weapon we settle on comes up instantly ready
+	// (the raise is skipped). A first swap from READY/FIRING/RELOADING is a
+	// normal, deliberate switch and plays the full raise.
+	midSwap = ( pm->ps->weaponstate == WEAPON_DROPPING ||
+	            pm->ps->weaponstate == WEAPON_RAISING );
+
+	if ( midSwap ) {
 		pm->ps->pm_flags |= PMF_QUICKSWAP_PENDING;
 	} else {
 		pm->ps->pm_flags &= ~PMF_QUICKSWAP_PENDING;
 	}
 
-	// Cancelling a reload: the reload's leftover time is abandoned so the drop
-	// starts fresh (200ms), rather than dragging the rest of the reload along.
-	// THIS is what makes the NAC save the tail. Whether you keep the ammo was
-	// already decided by the notetrack in PM_Weapon (PMF_RELOAD_AMMO_GIVEN):
-	//   swap after the notetrack -> full mag + fast swap (the NAC payoff)
-	//   swap before the notetrack -> empty mag, the reload is wasted
+	// Redirect the swap to the new weapon.
+	pm->ps->swapTarget = weapon;
+
+	// If we're already dropping, keep the current drop in progress and just
+	// redirect where it lands - don't stack another 200ms. This is what makes
+	// a fast double-tap (both presses during the drop) still resolve as one
+	// quick drop + instant raise instead of a full slow swap.
+	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
+		return;
+	}
+
+	// Cancelling a reload: abandon the reload's leftover time so the drop starts
+	// fresh. Whether you keep the ammo was already decided by the notetrack in
+	// PM_Weapon (PMF_RELOAD_AMMO_GIVEN): swap after it -> full mag (NAC payoff),
+	// swap before it -> the reload is wasted.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
 		pm->ps->weaponTime = 0;
 	}
@@ -1605,7 +1621,9 @@ PM_FinishWeaponChange
 static void PM_FinishWeaponChange( void ) {
 	int		weapon;
 
-	weapon = pm->cmd.weapon;
+	// We settle on whatever the drop was last redirected to (swapTarget),
+	// which already accounts for any mid-drop re-taps (the YY alt-swap).
+	weapon = pm->ps->swapTarget;
 	if ( weapon < WP_NONE || weapon >= WP_NUM_WEAPONS ) {
 		weapon = WP_NONE;
 	}
@@ -1617,12 +1635,13 @@ static void PM_FinishWeaponChange( void ) {
 	// Each weapon's magazine lives in ps->ammo[weapon], so it persists across
 	// modular weapnext/weapprev swaps for free - no per-slot bookkeeping.
 	pm->ps->weapon = weapon;
+	pm->ps->swapTarget = WP_NONE;	// swap resolved
 	pm->ps->weaponstate = WEAPON_RAISING;
 	PM_StartTorsoAnim( TORSO_RAISE );
 
-	// If this change interrupted a raise, come up instantly ready (fast swap).
-	// Otherwise play the normal raise. weaponTime uses plain += to preserve the
-	// NAC-family timing windows.
+	// If this change interrupted a swap already in flight (alt-swap / YY), come
+	// up instantly ready - the raise is skipped. Otherwise play the normal
+	// raise. weaponTime uses plain += to preserve the NAC-family timing windows.
 	if ( pm->ps->pm_flags & PMF_QUICKSWAP_PENDING ) {
 		pm->ps->weaponTime += 0;
 	} else {
@@ -1714,9 +1733,12 @@ static void PM_Weapon( void ) {
 	// can't change if weapon is firing, but can change
 	// again if lowering or raising
 	if ( pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ) {
-		if ( pm->ps->weapon != pm->cmd.weapon ) {
-			// Y is just weapnext (modular cycle, wraps back to the first weapon).
-			// PM_BeginWeaponChange arms the fast-swap if this interrupts a raise.
+		// Only (re)start a change when the player selects a weapon we aren't
+		// already holding AND aren't already switching to. During a normal swap
+		// the target is stable so this won't retrigger; tapping to a NEW weapon
+		// mid-swap is the alt-swap (YY) and PM_BeginWeaponChange arms the
+		// instant raise. Y is just weapnext (modular cycle, wraps to the first).
+		if ( pm->cmd.weapon != pm->ps->weapon && pm->cmd.weapon != pm->ps->swapTarget ) {
 			PM_BeginWeaponChange( pm->cmd.weapon );
 		}
 	}

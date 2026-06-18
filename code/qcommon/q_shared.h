@@ -1178,6 +1178,7 @@ typedef struct playerState_s {
 	int			clientNum;		// ranges from 0 to MAX_CLIENTS-1
 	int			weapon;			// copied to entityState_t->weapon
 	int			weaponstate;
+	int			swapTarget;		// weapon a swap-in-progress is heading to (WP_NONE when not switching); drives the alt-swap/YY fast switch
 
 	vec3_t		viewangles;		// for fixed views
 	int			viewheight;

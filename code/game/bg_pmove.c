@@ -1624,11 +1624,15 @@ static void PM_BeginWeaponChange( int weapon ) {
 		return;
 	}
 
-	// Cancelling a reload: abandon the reload's leftover time so the drop starts
-	// fresh. Whether you keep the ammo was already decided by the notetrack in
-	// PM_Weapon (PMF_RELOAD_AMMO_GIVEN): swap after it -> full mag (NAC payoff),
-	// swap before it -> the reload is wasted.
+	// Cancelling a reload: if the mag is already seated (tail / NAC window),
+	// arm a quickswap so the raise is skipped on the destination weapon - you
+	// aborted animation, not a considered switch. If we cancelled BEFORE the
+	// notetrack (ammo not given), it's a deliberate change; play the full raise.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
+		if ( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) {
+			pm->ps->pm_flags |= PMF_QUICKSWAP_PENDING;
+		}
+		pm->ps->pm_flags &= ~PMF_RELOAD_AMMO_GIVEN;
 		pm->ps->weaponTime = 0;
 	}
 

@@ -1537,6 +1537,29 @@ int BG_WeaponReloadTail( int weapon ) {
 	return bg_weaponReloadTail[weapon];
 }
 
+// Maximum reserve ammo the player can carry per weapon (mags not including the one loaded).
+static const int bg_weaponMaxReserve[MAX_WEAPONS] = {
+	0,		// WP_NONE
+	0,		// WP_GAUNTLET
+	90,		// WP_MACHINEGUN     (30 * 3)
+	24,		// WP_SHOTGUN        (8 * 3)
+	12,		// WP_GRENADE_LAUNCHER (6 * 2)
+	12,		// WP_ROCKET_LAUNCHER  (6 * 2)
+	200,	// WP_LIGHTNING      (100 * 2)
+	30,		// WP_RAILGUN        (10 * 3)
+	90,		// WP_PLASMAGUN      (30 * 3)
+	2,		// WP_BFG            (1 * 2)
+	0,		// WP_GRAPPLING_HOOK
+	60,		// WP_NAILGUN        (20 * 3)
+	15,		// WP_PROX_LAUNCHER  (5 * 3)
+	120,	// WP_CHAINGUN       (60 * 2)
+};
+
+int BG_WeaponMaxReserve( int weapon ) {
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
+	return bg_weaponMaxReserve[weapon];
+}
+
 /*
 ===============
 PM_BeginReload
@@ -1725,7 +1748,11 @@ static void PM_Weapon( void ) {
 	if ( pm->ps->weaponstate == WEAPON_RELOADING &&
 	     !( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) &&
 	     pm->ps->weaponTime <= BG_WeaponReloadTail( pm->ps->weapon ) ) {
-		pm->ps->ammo[pm->ps->weapon] = BG_WeaponMagSize( pm->ps->weapon );
+		int magSize = BG_WeaponMagSize( pm->ps->weapon );
+		int reserve = pm->ps->ammoReserve[pm->ps->weapon];
+		int give    = ( reserve >= magSize ) ? magSize : reserve;
+		pm->ps->ammoReserve[pm->ps->weapon] -= give;
+		pm->ps->ammo[pm->ps->weapon]         = give;
 		pm->ps->pm_flags |= PMF_RELOAD_AMMO_GIVEN;
 	}
 
@@ -1769,7 +1796,11 @@ static void PM_Weapon( void ) {
 	// Either way the reload is done - return to ready and clear the notetrack flag.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
 		if ( !( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) ) {
-			pm->ps->ammo[pm->ps->weapon] = BG_WeaponMagSize( pm->ps->weapon );
+			int magSize = BG_WeaponMagSize( pm->ps->weapon );
+			int reserve = pm->ps->ammoReserve[pm->ps->weapon];
+			int give    = ( reserve >= magSize ) ? magSize : reserve;
+			pm->ps->ammoReserve[pm->ps->weapon] -= give;
+			pm->ps->ammo[pm->ps->weapon]         = give;
 		}
 		pm->ps->pm_flags &= ~PMF_RELOAD_AMMO_GIVEN;
 		pm->ps->weaponstate = WEAPON_READY;
@@ -1777,11 +1808,10 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
-	// Auto-reload: magazine empty - start reloading immediately regardless of
-	// whether the trigger is held. This runs before the fire/idle fork so the
-	// player never has to press R after firing the last round.
+	// Auto-reload: magazine empty and reserve available.
 	if ( BG_WeaponMagSize( pm->ps->weapon ) > 0 &&
-	     pm->ps->ammo[pm->ps->weapon] <= 0 ) {
+	     pm->ps->ammo[pm->ps->weapon] <= 0 &&
+	     pm->ps->ammoReserve[pm->ps->weapon] > 0 ) {
 		PM_BeginReload();
 		return;
 	}
@@ -1792,7 +1822,8 @@ static void PM_Weapon( void ) {
 		if ( pm->cmd.buttons & BUTTON_RELOAD ) {
 			int magSize = BG_WeaponMagSize( pm->ps->weapon );
 			if ( magSize > 0 &&
-			     pm->ps->ammo[pm->ps->weapon] < magSize ) {
+			     pm->ps->ammo[pm->ps->weapon] < magSize &&
+			     pm->ps->ammoReserve[pm->ps->weapon] > 0 ) {
 				PM_BeginReload();
 			}
 		} else {
@@ -1817,12 +1848,14 @@ static void PM_Weapon( void ) {
 
 	pm->ps->weaponstate = WEAPON_FIRING;
 
-	// Ammo check. Magazine weapons store loaded rounds in ammo[weapon] and
-	// auto-reload when empty (reserve is infinite for now). Non-magazine
-	// weapons (gauntlet, grapple) use ammo[] as a raw count / -1 sentinel.
+	// Ammo check. Magazine weapons consume from the loaded mag and auto-reload
+	// when empty if reserve is available. Non-magazine weapons (gauntlet, grapple)
+	// use ammo[] as a raw count / -1 sentinel.
 	if ( BG_WeaponMagSize( pm->ps->weapon ) > 0 ) {
 		if ( pm->ps->ammo[pm->ps->weapon] <= 0 ) {
-			PM_BeginReload();
+			if ( pm->ps->ammoReserve[pm->ps->weapon] > 0 ) {
+				PM_BeginReload();
+			}
 			return;
 		}
 		pm->ps->ammo[pm->ps->weapon]--;

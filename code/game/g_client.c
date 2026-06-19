@@ -1165,8 +1165,8 @@ void ClientSpawn(gentity_t *ent) {
 	client->ps.clientNum = index;
 
 	client->ps.stats[STAT_WEAPONS] = ( 1 << WP_MACHINEGUN );
-	// ammo[weapon] is the loaded magazine; start with a full mag.
-	client->ps.ammo[WP_MACHINEGUN] = BG_WeaponMagSize( WP_MACHINEGUN );
+	client->ps.ammo[WP_MACHINEGUN]        = BG_WeaponMagSize( WP_MACHINEGUN );
+	client->ps.ammoReserve[WP_MACHINEGUN] = BG_WeaponMaxReserve( WP_MACHINEGUN );
 
 	client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_GAUNTLET );
 	client->ps.ammo[WP_GAUNTLET] = -1;

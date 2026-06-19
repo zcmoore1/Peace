@@ -210,6 +210,7 @@ void PM_UpdateViewAngles( playerState_t *ps, const usercmd_t *cmd );
 void Pmove (pmove_t *pmove);
 
 int  BG_WeaponMagSize( int weapon );
+int  BG_WeaponMaxReserve( int weapon );
 int  BG_WeaponReloadTime( int weapon );
 int  BG_WeaponReloadTail( int weapon );
 

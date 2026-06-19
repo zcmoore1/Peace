@@ -2304,6 +2304,54 @@ static void CG_DrawAmmoWarning( void ) {
 	CG_DrawBigString(320 - w / 2, 64, s, 1.0F);
 }
 
+/*
+=================
+CG_DrawAmmoCount
+
+Bottom-right "mag / reserve" readout for the current weapon. Uses the
+predicted player state so the count updates the instant a round is fired
+or a reload lands, without waiting for the next server snapshot.
+=================
+*/
+static void CG_DrawAmmoCount( void ) {
+	playerState_t	*ps;
+	int				weapon;
+	int				mag, reserve;
+	char			s[32];
+	int				w;
+	vec4_t			color;
+
+	ps = &cg.predictedPlayerState;
+	weapon = ps->weapon;
+
+	// Only magazine weapons have a meaningful mag/reserve readout.
+	if ( BG_WeaponMagSize( weapon ) <= 0 ) {
+		return;
+	}
+
+	mag     = ps->ammo[weapon];
+	reserve = ps->ammoReserve[weapon];
+	if ( mag < 0 ) {
+		mag = 0;
+	}
+	if ( reserve < 0 ) {
+		reserve = 0;
+	}
+
+	// Red when the mag is empty (dry), otherwise white.
+	if ( mag <= 0 ) {
+		MAKERGBA( color, 1.0f, 0.2f, 0.2f, 1.0f );
+	} else {
+		MAKERGBA( color, 1.0f, 1.0f, 1.0f, 1.0f );
+	}
+
+	Com_sprintf( s, sizeof( s ), "%i / %i", mag, reserve );
+	w = CG_DrawStrlen( s ) * BIGCHAR_WIDTH;
+
+	// right-aligned, just above the bottom edge
+	CG_DrawBigStringColor( 632 - w, 440, s, color );
+}
+
 
 #ifdef MISSIONPACK
 /*
@@ -2570,8 +2618,9 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 #else
 			CG_DrawStatusBar();
 #endif
-      
+
 			CG_DrawAmmoWarning();
+			CG_DrawAmmoCount();
 
 #ifdef MISSIONPACK
 			CG_DrawProxWarning();

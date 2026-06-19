@@ -1541,18 +1541,18 @@ int BG_WeaponReloadTail( int weapon ) {
 static const int bg_weaponMaxReserve[MAX_WEAPONS] = {
 	0,		// WP_NONE
 	0,		// WP_GAUNTLET
-	90,		// WP_MACHINEGUN     (30 * 3)
-	24,		// WP_SHOTGUN        (8 * 3)
-	12,		// WP_GRENADE_LAUNCHER (6 * 2)
-	12,		// WP_ROCKET_LAUNCHER  (6 * 2)
-	200,	// WP_LIGHTNING      (100 * 2)
-	30,		// WP_RAILGUN        (10 * 3)
-	90,		// WP_PLASMAGUN      (30 * 3)
-	2,		// WP_BFG            (1 * 2)
+	120,	// WP_MACHINEGUN     (30 * 4)
+	40,		// WP_SHOTGUN        (8 * 5)
+	18,		// WP_GRENADE_LAUNCHER (6 * 3)
+	18,		// WP_ROCKET_LAUNCHER  (6 * 3)
+	300,	// WP_LIGHTNING      (100 * 3)
+	40,		// WP_RAILGUN        (10 * 4)
+	120,	// WP_PLASMAGUN      (30 * 4)
+	3,		// WP_BFG            (1 * 3)
 	0,		// WP_GRAPPLING_HOOK
-	60,		// WP_NAILGUN        (20 * 3)
-	15,		// WP_PROX_LAUNCHER  (5 * 3)
-	120,	// WP_CHAINGUN       (60 * 2)
+	80,		// WP_NAILGUN        (20 * 4)
+	20,		// WP_PROX_LAUNCHER  (5 * 4)
+	180,	// WP_CHAINGUN       (60 * 3)
 };
 
 int BG_WeaponMaxReserve( int weapon ) {

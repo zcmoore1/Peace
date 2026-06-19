@@ -2352,6 +2352,67 @@ static void CG_DrawAmmoCount( void ) {
 	CG_DrawBigStringColor( 632 - w, 440, s, color );
 }
 
+/*
+=================
+CG_DrawWeaponDebug
+
+Live weapon-state readout for tuning the NAC. Toggle with cg_weaponDebug 1.
+Shows the predicted weapon state machine each frame so you can see exactly
+when the reload tail (NAC window) is open and whether a cancel kept the mag.
+=================
+*/
+static void CG_DrawWeaponDebug( void ) {
+	playerState_t	*ps;
+	const char		*stateName;
+	int				weapon;
+	char			line[64];
+	int				y;
+
+	if ( cg_weaponDebug.integer == 0 ) {
+		return;
+	}
+
+	ps = &cg.predictedPlayerState;
+	weapon = ps->weapon;
+
+	switch ( ps->weaponstate ) {
+		case WEAPON_READY:		stateName = "READY";	break;
+		case WEAPON_RAISING:	stateName = "RAISING";	break;
+		case WEAPON_DROPPING:	stateName = "DROPPING";	break;
+		case WEAPON_FIRING:		stateName = "FIRING";	break;
+		case WEAPON_RELOADING:	stateName = "RELOADING";break;
+		default:				stateName = "?";		break;
+	}
+
+	y = 200;
+
+	Com_sprintf( line, sizeof( line ), "state: %s", stateName );
+	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
+
+	Com_sprintf( line, sizeof( line ), "wTime: %i", ps->weaponTime );
+	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
+
+	Com_sprintf( line, sizeof( line ), "tail:  %i", BG_WeaponReloadTail( weapon ) );
+	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
+
+	Com_sprintf( line, sizeof( line ), "NACwin: %s",
+		( ps->weaponstate == WEAPON_RELOADING &&
+		  ps->weaponTime <= BG_WeaponReloadTail( weapon ) ) ? "OPEN" : "-" );
+	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
+
+	Com_sprintf( line, sizeof( line ), "ammoGiven: %s",
+		( ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) ? "YES" : "no" );
+	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
+
+	Com_sprintf( line, sizeof( line ), "mag/res: %i / %i",
+		ps->ammo[weapon], ps->ammoReserve[weapon] );
+	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
+
+	Com_sprintf( line, sizeof( line ), "swapTgt: %i  cmd: %i",
+		ps->swapTarget, weapon );
+	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
+}
+
 
 #ifdef MISSIONPACK
 /*
@@ -2621,6 +2682,7 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 
 			CG_DrawAmmoWarning();
 			CG_DrawAmmoCount();
+			CG_DrawWeaponDebug();
 
 #ifdef MISSIONPACK
 			CG_DrawProxWarning();

@@ -1624,22 +1624,15 @@ static void PM_BeginWeaponChange( int weapon ) {
 		return;
 	}
 
-	// Cancelling a reload.
+	// Cancelling a reload. The ammo was already decided by the notetrack
+	// (PMF_RELOAD_AMMO_GIVEN): swap after the mag seats = full mag kept (the NAC
+	// payoff), before = the reload is wasted. Either way this is a NORMAL weapon
+	// change - the next weapon plays its full drop + raise. The NAC is NOT
+	// instant on its own; the instant comes from chaining a YY (re-tap during
+	// that raise to cancel it), which the midSwap quickswap logic at the top of
+	// this function arms. NAC -> raise -> YY-cancel-the-raise is the trickshot.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
-		if ( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) {
-			// Mag already seated (we're in the tail) = the NAC. This is a true
-			// INSTANT swap: no drop, no raise. Arm quickswap and collapse
-			// weaponTime to 0 so PM_Weapon falls straight through to
-			// PM_FinishWeaponChange THIS tick and brings the next weapon up
-			// immediately, full mag kept. (Same trick as the YY drop-collapse.)
-			pm->ps->pm_flags   |= PMF_QUICKSWAP_PENDING;
-			pm->ps->pm_flags   &= ~PMF_RELOAD_AMMO_GIVEN;
-			pm->ps->weaponstate = WEAPON_DROPPING;
-			pm->ps->weaponTime  = 0;
-			return;
-		}
-		// Cancelled BEFORE the mag seated: the reload is wasted (no ammo). Fall
-		// through to a normal, deliberate swap - drop + raise, no instant.
+		pm->ps->pm_flags &= ~PMF_RELOAD_AMMO_GIVEN;
 		pm->ps->weaponTime = 0;
 	}
 

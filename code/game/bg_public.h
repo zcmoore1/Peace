@@ -396,6 +396,7 @@ typedef enum {
 	EV_CHANGE_WEAPON,
 	EV_FIRE_WEAPON,
 	EV_RELOAD,
+	EV_RELOAD_NOTETRACK,	// mag seated: NAC window is now open
 
 	EV_USE_ITEM0,
 	EV_USE_ITEM1,

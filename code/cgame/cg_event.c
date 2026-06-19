@@ -809,8 +809,14 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		break;
 	case EV_RELOAD:
 		DEBUGNAME("EV_RELOAD");
-		// placeholder: add a dedicated reload sound to cgs.media when available
 		trap_S_StartSound (NULL, es->number, CHAN_AUTO, cgs.media.selectSound );
+		break;
+	case EV_RELOAD_NOTETRACK:
+		DEBUGNAME("EV_RELOAD_NOTETRACK");
+		// Mag seated - NAC window is now open. Distinct sound so the player
+		// can hear exactly when to cancel. Replace with a real mag-click SFX
+		// once weapon audio assets exist.
+		trap_S_StartSound (NULL, es->number, CHAN_AUTO, cgs.media.noAmmoSound );
 		break;
 	case EV_FIRE_WEAPON:
 		DEBUGNAME("EV_FIRE_WEAPON");

@@ -1758,6 +1758,7 @@ static void PM_Weapon( void ) {
 		pm->ps->ammoReserve[pm->ps->weapon] -= give;
 		pm->ps->ammo[pm->ps->weapon]         = give;
 		pm->ps->pm_flags |= PMF_RELOAD_AMMO_GIVEN;
+		PM_AddEvent( EV_RELOAD_NOTETRACK );
 	}
 
 	// check for weapon change

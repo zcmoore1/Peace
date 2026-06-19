@@ -1753,10 +1753,11 @@ static void PM_Weapon( void ) {
 	     !( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) &&
 	     pm->ps->weaponTime <= BG_WeaponReloadTail( pm->ps->weapon ) ) {
 		int magSize = BG_WeaponMagSize( pm->ps->weapon );
+		int needed  = magSize - pm->ps->ammo[pm->ps->weapon];
 		int reserve = pm->ps->ammoReserve[pm->ps->weapon];
-		int give    = ( reserve >= magSize ) ? magSize : reserve;
+		int give    = ( reserve >= needed ) ? needed : reserve;
 		pm->ps->ammoReserve[pm->ps->weapon] -= give;
-		pm->ps->ammo[pm->ps->weapon]         = give;
+		pm->ps->ammo[pm->ps->weapon]         += give;
 		pm->ps->pm_flags |= PMF_RELOAD_AMMO_GIVEN;
 		PM_AddEvent( EV_RELOAD_NOTETRACK );
 	}
@@ -1803,10 +1804,11 @@ static void PM_Weapon( void ) {
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
 		if ( !( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) ) {
 			int magSize = BG_WeaponMagSize( pm->ps->weapon );
+			int needed  = magSize - pm->ps->ammo[pm->ps->weapon];
 			int reserve = pm->ps->ammoReserve[pm->ps->weapon];
-			int give    = ( reserve >= magSize ) ? magSize : reserve;
+			int give    = ( reserve >= needed ) ? needed : reserve;
 			pm->ps->ammoReserve[pm->ps->weapon] -= give;
-			pm->ps->ammo[pm->ps->weapon]         = give;
+			pm->ps->ammo[pm->ps->weapon]         += give;
 		}
 		pm->ps->pm_flags &= ~PMF_RELOAD_AMMO_GIVEN;
 		pm->ps->weaponstate = WEAPON_READY;

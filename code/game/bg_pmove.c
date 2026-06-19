@@ -1613,11 +1613,14 @@ static void PM_BeginWeaponChange( int weapon ) {
 	// Redirect the swap to the new weapon.
 	pm->ps->swapTarget = weapon;
 
-	// If we're already dropping, keep the current drop in progress and just
-	// redirect where it lands - don't stack another 200ms. This is what makes
-	// a fast double-tap (both presses during the drop) still resolve as one
-	// quick drop + instant raise instead of a full slow swap.
+	// Already dropping when a retap arrives = the YY cancel. Collapse the rest
+	// of the drop to zero so the swap resolves to READY on THIS pmove tick
+	// (PM_Weapon falls straight through to PM_FinishWeaponChange, which sees
+	// QUICKSWAP_PENDING and skips the raise too). Net result: a fast double-tap
+	// is a true instant, no-delay cancel - no leftover drop, no raise. A first
+	// swap from READY still plays the full slow drop+raise below.
 	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
+		pm->ps->weaponTime = 0;
 		return;
 	}
 

@@ -1624,15 +1624,22 @@ static void PM_BeginWeaponChange( int weapon ) {
 		return;
 	}
 
-	// Cancelling a reload: if the mag is already seated (tail / NAC window),
-	// arm a quickswap so the raise is skipped on the destination weapon - you
-	// aborted animation, not a considered switch. If we cancelled BEFORE the
-	// notetrack (ammo not given), it's a deliberate change; play the full raise.
+	// Cancelling a reload.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
 		if ( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) {
-			pm->ps->pm_flags |= PMF_QUICKSWAP_PENDING;
+			// Mag already seated (we're in the tail) = the NAC. This is a true
+			// INSTANT swap: no drop, no raise. Arm quickswap and collapse
+			// weaponTime to 0 so PM_Weapon falls straight through to
+			// PM_FinishWeaponChange THIS tick and brings the next weapon up
+			// immediately, full mag kept. (Same trick as the YY drop-collapse.)
+			pm->ps->pm_flags   |= PMF_QUICKSWAP_PENDING;
+			pm->ps->pm_flags   &= ~PMF_RELOAD_AMMO_GIVEN;
+			pm->ps->weaponstate = WEAPON_DROPPING;
+			pm->ps->weaponTime  = 0;
+			return;
 		}
-		pm->ps->pm_flags &= ~PMF_RELOAD_AMMO_GIVEN;
+		// Cancelled BEFORE the mag seated: the reload is wasted (no ammo). Fall
+		// through to a normal, deliberate swap - drop + raise, no instant.
 		pm->ps->weaponTime = 0;
 	}
 
@@ -1748,33 +1755,13 @@ static void PM_Weapon( void ) {
 		pm->ps->weaponTime -= pml.msec;
 	}
 
-	// check for weapon change
-	// can't change if weapon is firing, but can change
-	// again if lowering or raising.
-	// Checked BEFORE the reload notetrack below so a swap-cancel always wins
-	// the tick: it flips us out of WEAPON_RELOADING and suppresses the mag-seat
-	// click, so the click can never play AFTER the swap. Whether the ammo is
-	// kept depends on whether the notetrack already fired on a PRIOR tick
-	// (PMF_RELOAD_AMMO_GIVEN) - swap after the click = full mag, before = wasted.
-	if ( pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ) {
-		if ( pm->cmd.weapon != pm->ps->weapon && pm->cmd.weapon != pm->ps->swapTarget ) {
-			PM_BeginWeaponChange( pm->cmd.weapon );
-		} else if ( pm->ps->weaponstate == WEAPON_DROPPING &&
-		            pm->ps->swapTarget != WP_NONE &&
-		            pm->cmd.weapon == pm->ps->weapon ) {
-			// Weapnext wrapped back to current weapon during drop = YY redirect.
-			// cmd.weapon == ps->weapon so the normal check above misses it.
-			// Redirect the drop back to ps->weapon and arm instant-ready.
-			PM_BeginWeaponChange( pm->ps->weapon );
-		}
-	}
-
 	// Reload notetrack: insert the magazine partway through the reload, the
 	// instant remaining weaponTime drops into the tail. From here on the mag
 	// is full and the rest of the reload is just animation that can be cut
-	// short (swap) while keeping the ammo - the NAC. Only fires while we're
-	// still RELOADING; a swap above will have flipped us to DROPPING, so the
-	// click won't play on the cancel tick.
+	// short (swap) while KEEPING the ammo - the NAC.
+	// Checked BEFORE the weapon-change fork below so a swap on the exact seat
+	// tick still grants the ammo: pressing swap right as the mag goes in (the
+	// CoD timing) keeps the full mag, it does not race the swap and lose it.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING &&
 	     !( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) &&
 	     pm->ps->weaponTime <= BG_WeaponReloadTail( pm->ps->weapon ) ) {
@@ -1786,6 +1773,22 @@ static void PM_Weapon( void ) {
 		pm->ps->ammo[pm->ps->weapon]         += give;
 		pm->ps->pm_flags |= PMF_RELOAD_AMMO_GIVEN;
 		PM_AddEvent( EV_RELOAD_NOTETRACK );
+	}
+
+	// check for weapon change
+	// can't change if weapon is firing, but can change
+	// again if lowering or raising
+	if ( pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ) {
+		if ( pm->cmd.weapon != pm->ps->weapon && pm->cmd.weapon != pm->ps->swapTarget ) {
+			PM_BeginWeaponChange( pm->cmd.weapon );
+		} else if ( pm->ps->weaponstate == WEAPON_DROPPING &&
+		            pm->ps->swapTarget != WP_NONE &&
+		            pm->cmd.weapon == pm->ps->weapon ) {
+			// Weapnext wrapped back to current weapon during drop = YY redirect.
+			// cmd.weapon == ps->weapon so the normal check above misses it.
+			// Redirect the drop back to ps->weapon and arm instant-ready.
+			PM_BeginWeaponChange( pm->ps->weapon );
+		}
 	}
 
 	if ( pm->ps->weaponTime > 0 ) {

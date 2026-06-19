@@ -1626,32 +1626,11 @@ static void PM_BeginWeaponChange( int weapon ) {
 		return;
 	}
 
-	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
-		qboolean nacWindow = !!( pm->ps->pm_flags & PMF_RELOAD_NOTETRACK );
-		pm->ps->pm_flags &= ~PMF_RELOAD_NOTETRACK;
-		pm->ps->weaponTime = 0;
-
-		// The ammo was NEVER committed during the reload (the notetrack only
-		// opened the window). Cancelling here therefore gains no ammo either way -
-		// the mag is left exactly as it was. This is the "No Ammo" in NAC.
-		if ( nacWindow ) {
-			// Swap landed inside the open window: the mag-seat cue has played and
-			// the weapon is in its "down" position. The swap pre-empts the ammo
-			// commit and pulls the next weapon out instantly - WEAPON_DROPPING is
-			// skipped, we go straight to the raise. A YY (re-tap during that raise)
-			// then collapses to instant-ready. NAC -> raise -> YY is the trickshot.
-			pm->ps->weapon     = weapon;
-			pm->ps->swapTarget = WP_NONE;
-			PM_AddEvent( EV_CHANGE_WEAPON );
-			pm->ps->weaponTime += 250;
-			pm->ps->weaponstate = WEAPON_RAISING;
-			PM_StartTorsoAnim( TORSO_RAISE );
-			return;
-		}
-		// Swap before the window opened: a normal, slow swap (drop + raise),
-		// reload simply abandoned. Falls through to the drop below.
-	}
-
+	// A swap pressed *during* a reload never reaches here: PM_Weapon suppresses
+	// the weapon-change call while WEAPON_RELOADING and lets the reload run to its
+	// WEAPON_READY tick, where the ready state is redirected onto the selected
+	// weapon - that redirect IS the NAC. So at this point the weapon is
+	// READY/FIRING/RAISING/DROPPING: an ordinary swap, full drop + raise.
 	PM_AddEvent( EV_CHANGE_WEAPON );
 	pm->ps->weaponTime += 200;
 	pm->ps->weaponstate = WEAPON_DROPPING;
@@ -1764,12 +1743,11 @@ static void PM_Weapon( void ) {
 		pm->ps->weaponTime -= pml.msec;
 	}
 
-	// Reload notetrack: the mag-seat cue fires when weaponTime drops into the
-	// tail. This ONLY opens the NAC window (and plays the click) - it does NOT
-	// grant ammo. The ammo commits later, when the reload plays out to the end
-	// (below). Swapping while this window is open pre-empts that commit, so the
-	// reload is cancelled with no ammo gained. Checked before the weapon-change
-	// fork so a swap on the exact cue tick still counts as an in-window NAC.
+	// Reload "almost done" cue: fires once near the end of the reload. This is
+	// pure feedback - it does NOT gate the NAC anymore. The NAC is the WEAPON_READY
+	// redirect at the completion tick below; the cue just tells the player the
+	// ready tick (and the tightest fast-out) is coming up, so they know when to
+	// commit the swap.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING &&
 	     !( pm->ps->pm_flags & PMF_RELOAD_NOTETRACK ) &&
 	     pm->ps->weaponTime <= BG_WeaponReloadTail( pm->ps->weapon ) ) {
@@ -1778,9 +1756,12 @@ static void PM_Weapon( void ) {
 	}
 
 	// check for weapon change
-	// can't change if weapon is firing, but can change
-	// again if lowering or raising
-	if ( pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ) {
+	// can't change if weapon is firing, but can change again if lowering or
+	// raising. NOT while reloading: a swap during a reload is deliberately left
+	// pending (cmd.weapon persists) so the reload runs to its WEAPON_READY tick,
+	// where the ready state is redirected onto the selected weapon - the NAC.
+	if ( pm->ps->weaponstate != WEAPON_RELOADING &&
+	     ( pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ) ) {
 		if ( pm->cmd.weapon != pm->ps->weapon && pm->cmd.weapon != pm->ps->swapTarget ) {
 			PM_BeginWeaponChange( pm->cmd.weapon );
 		} else if ( pm->ps->weaponstate == WEAPON_DROPPING &&
@@ -1813,18 +1794,40 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
-	// Reload played out to the end without being cancelled: THIS is where the
-	// ammo finally commits. (A NAC bails out in PM_BeginWeaponChange before ever
-	// reaching here, which is exactly why it gains no ammo.) Top up the mag,
-	// close the window, return to ready.
+	// The reload has reached its WEAPON_READY tick. This single transition is the
+	// whole NAC: the weapon is about to become ready, and we either let it become
+	// ready (committing the mag) or redirect that ready state onto whatever weapon
+	// the player has selected.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
-		int magSize = BG_WeaponMagSize( pm->ps->weapon );
-		int needed  = magSize - pm->ps->ammo[pm->ps->weapon];
-		int reserve = pm->ps->ammoReserve[pm->ps->weapon];
-		int give    = ( reserve >= needed ) ? needed : reserve;
-		pm->ps->ammoReserve[pm->ps->weapon] -= give;
-		pm->ps->ammo[pm->ps->weapon]         += give;
 		pm->ps->pm_flags &= ~PMF_RELOAD_NOTETRACK;
+
+		// Swap was pending (the player pressed weapnext during the reload, so
+		// cmd.weapon points at a different owned weapon). The ready state lands on
+		// THAT weapon instead of this one: no drop (this weapon just finished its
+		// down-stroke), no raise (the next weapon receives ready directly), and -
+		// because we return before the ammo commit below - no ammo. The reload's
+		// payoff is sacrificed for an instant weapon-out. That redirect IS the NAC.
+		if ( pm->cmd.weapon != pm->ps->weapon &&
+		     pm->cmd.weapon > WP_NONE && pm->cmd.weapon < WP_NUM_WEAPONS &&
+		     ( pm->ps->stats[STAT_WEAPONS] & ( 1 << pm->cmd.weapon ) ) ) {
+			pm->ps->weapon      = pm->cmd.weapon;
+			pm->ps->swapTarget  = WP_NONE;
+			pm->ps->weaponstate = WEAPON_READY;
+			PM_AddEvent( EV_CHANGE_WEAPON );
+			PM_StartTorsoAnim( TORSO_STAND );
+			return;
+		}
+
+		// No swap pending: the reload completes normally. THIS is the only place
+		// the mag is topped up - commit the ammo and go ready.
+		{
+			int magSize = BG_WeaponMagSize( pm->ps->weapon );
+			int needed  = magSize - pm->ps->ammo[pm->ps->weapon];
+			int reserve = pm->ps->ammoReserve[pm->ps->weapon];
+			int give    = ( reserve >= needed ) ? needed : reserve;
+			pm->ps->ammoReserve[pm->ps->weapon] -= give;
+			pm->ps->ammo[pm->ps->weapon]         += give;
+		}
 		pm->ps->weaponstate = WEAPON_READY;
 		PM_StartTorsoAnim( TORSO_STAND );
 		return;

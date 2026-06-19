@@ -1748,27 +1748,14 @@ static void PM_Weapon( void ) {
 		pm->ps->weaponTime -= pml.msec;
 	}
 
-	// Reload notetrack: insert the magazine partway through the reload, the
-	// instant remaining weaponTime drops into the tail. From here on the mag
-	// is full and the rest of the reload is just animation that can be cut
-	// short (swap/fire) while keeping the ammo - the NAC. Checked every tick
-	// before the weapon-change fork so a same-tick swap still sees the ammo.
-	if ( pm->ps->weaponstate == WEAPON_RELOADING &&
-	     !( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) &&
-	     pm->ps->weaponTime <= BG_WeaponReloadTail( pm->ps->weapon ) ) {
-		int magSize = BG_WeaponMagSize( pm->ps->weapon );
-		int needed  = magSize - pm->ps->ammo[pm->ps->weapon];
-		int reserve = pm->ps->ammoReserve[pm->ps->weapon];
-		int give    = ( reserve >= needed ) ? needed : reserve;
-		pm->ps->ammoReserve[pm->ps->weapon] -= give;
-		pm->ps->ammo[pm->ps->weapon]         += give;
-		pm->ps->pm_flags |= PMF_RELOAD_AMMO_GIVEN;
-		PM_AddEvent( EV_RELOAD_NOTETRACK );
-	}
-
 	// check for weapon change
 	// can't change if weapon is firing, but can change
-	// again if lowering or raising
+	// again if lowering or raising.
+	// Checked BEFORE the reload notetrack below so a swap-cancel always wins
+	// the tick: it flips us out of WEAPON_RELOADING and suppresses the mag-seat
+	// click, so the click can never play AFTER the swap. Whether the ammo is
+	// kept depends on whether the notetrack already fired on a PRIOR tick
+	// (PMF_RELOAD_AMMO_GIVEN) - swap after the click = full mag, before = wasted.
 	if ( pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ) {
 		if ( pm->cmd.weapon != pm->ps->weapon && pm->cmd.weapon != pm->ps->swapTarget ) {
 			PM_BeginWeaponChange( pm->cmd.weapon );
@@ -1780,6 +1767,25 @@ static void PM_Weapon( void ) {
 			// Redirect the drop back to ps->weapon and arm instant-ready.
 			PM_BeginWeaponChange( pm->ps->weapon );
 		}
+	}
+
+	// Reload notetrack: insert the magazine partway through the reload, the
+	// instant remaining weaponTime drops into the tail. From here on the mag
+	// is full and the rest of the reload is just animation that can be cut
+	// short (swap) while keeping the ammo - the NAC. Only fires while we're
+	// still RELOADING; a swap above will have flipped us to DROPPING, so the
+	// click won't play on the cancel tick.
+	if ( pm->ps->weaponstate == WEAPON_RELOADING &&
+	     !( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) &&
+	     pm->ps->weaponTime <= BG_WeaponReloadTail( pm->ps->weapon ) ) {
+		int magSize = BG_WeaponMagSize( pm->ps->weapon );
+		int needed  = magSize - pm->ps->ammo[pm->ps->weapon];
+		int reserve = pm->ps->ammoReserve[pm->ps->weapon];
+		int give    = ( reserve >= needed ) ? needed : reserve;
+		pm->ps->ammoReserve[pm->ps->weapon] -= give;
+		pm->ps->ammo[pm->ps->weapon]         += give;
+		pm->ps->pm_flags |= PMF_RELOAD_AMMO_GIVEN;
+		PM_AddEvent( EV_RELOAD_NOTETRACK );
 	}
 
 	if ( pm->ps->weaponTime > 0 ) {

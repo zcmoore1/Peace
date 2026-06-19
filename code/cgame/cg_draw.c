@@ -2392,34 +2392,12 @@ static void CG_DrawWeaponDebug( void ) {
 	Com_sprintf( line, sizeof( line ), "wTime: %i", ps->weaponTime );
 	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
 
-	Com_sprintf( line, sizeof( line ), "tail:  %i", BG_WeaponReloadTail( weapon ) );
-	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
-
-	Com_sprintf( line, sizeof( line ), "NACwin: %s",
-		( ps->weaponstate == WEAPON_RELOADING &&
-		  ps->weaponTime <= BG_WeaponReloadTail( weapon ) ) ? "OPEN" : "-" );
-	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
-
-	Com_sprintf( line, sizeof( line ), "noteFired: %s",
-		( ps->pm_flags & PMF_RELOAD_NOTETRACK ) ? "YES" : "no" );
-	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
-
 	Com_sprintf( line, sizeof( line ), "mag/res: %i / %i",
 		ps->ammo[weapon], ps->ammoReserve[weapon] );
 	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
 
-	Com_sprintf( line, sizeof( line ), "swapTgt: %i  ps->wpn: %i",
-		ps->swapTarget, weapon );
-	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
-
-	// cg.weaponSelect is what the CLIENT is requesting - if this doesn't match
-	// ps->weapon, the server will process a weapon change on the next tick.
-	// NAC: the window is open (mag-seat cue fired, ammo NOT yet committed).
-	// Swapping here cancels the reload (no ammo) and instantly pulls the next gun.
-	Com_sprintf( line, sizeof( line ), "sel: %i  NAC: %s",
-		cg.weaponSelect,
-		( ps->weaponstate == WEAPON_RELOADING &&
-		  ( ps->pm_flags & PMF_RELOAD_NOTETRACK ) ) ? "OPEN" : "-" );
+	Com_sprintf( line, sizeof( line ), "swapTgt: %i  sel: %i",
+		ps->swapTarget, cg.weaponSelect );
 	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
 }
 

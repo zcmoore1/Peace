@@ -165,7 +165,7 @@ typedef enum {
 #define PMF_SCOREBOARD		8192	// spectate as a scoreboard
 #define PMF_INVULEXPAND		16384	// invulnerability sphere set to full size
 #define PMF_QUICKSWAP_PENDING	32768	// a weapon switch interrupted a raise; the resulting weapon comes up instantly ready
-#define PMF_RELOAD_NOTETRACK	128		// reload notetrack has fired; the NAC window is open. Ammo is NOT committed yet - swapping now cancels the reload (no ammo); riding it out commits the mag. bit 7 - must stay within pm_flags' 16 networked bits
+#define PMF_RELOAD_NOTETRACK	128		// reserved / available - bit 7
 
 #define	PMF_ALL_TIMES	(PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK)
 
@@ -212,7 +212,6 @@ void Pmove (pmove_t *pmove);
 int  BG_WeaponMagSize( int weapon );
 int  BG_WeaponMaxReserve( int weapon );
 int  BG_WeaponReloadTime( int weapon );
-int  BG_WeaponReloadTail( int weapon );
 
 //===================================================================================
 

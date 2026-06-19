@@ -1499,27 +1499,29 @@ static const int bg_weaponReloadTime[MAX_WEAPONS] = {
 	1500,	// WP_CHAINGUN
 };
 
-// Reload "tail": the cancelable portion at the END of the reload, in ms of
-// remaining weaponTime. The magazine is inserted (notetrack) the moment
-// weaponTime drops to this value; everything after is just animation that can
-// be cut short by swapping/firing while KEEPING the ammo. That cancelable
-// window is the NAC: swap during the tail = full mag + skip the rest; swap
-// before it = the reload is lost. Tune per weapon to widen/tighten the trick.
+// NAC window: a tight window at the END of the reload, in ms of remaining
+// weaponTime. The notetrack (mag-seat cue) fires the moment weaponTime drops to
+// this value, opening the window; the ammo itself only commits when the reload
+// plays out completely (weaponTime hits 0). Swapping WHILE the window is open
+// pre-empts that commit: the reload is cancelled, NO ammo is gained, and the
+// next weapon is pulled out instantly (drop skipped). Swapping before the window
+// is a normal slow swap. That tight, frame-tight cancel is the NAC - keep it
+// small so it stays a skill check; tune per weapon here.
 static const int bg_weaponReloadTail[MAX_WEAPONS] = {
 	0,		// WP_NONE
 	0,		// WP_GAUNTLET
-	700,	// WP_MACHINEGUN     (2000 reload -> insert at 1300, 700ms NAC tail)
-	500,	// WP_SHOTGUN
-	600,	// WP_GRENADE_LAUNCHER
-	600,	// WP_ROCKET_LAUNCHER
-	500,	// WP_LIGHTNING
-	600,	// WP_RAILGUN
-	500,	// WP_PLASMAGUN
-	800,	// WP_BFG
+	150,	// WP_MACHINEGUN
+	150,	// WP_SHOTGUN
+	150,	// WP_GRENADE_LAUNCHER
+	150,	// WP_ROCKET_LAUNCHER
+	150,	// WP_LIGHTNING
+	150,	// WP_RAILGUN
+	150,	// WP_PLASMAGUN
+	150,	// WP_BFG
 	0,		// WP_GRAPPLING_HOOK
-	700,	// WP_NAILGUN
-	700,	// WP_PROX_LAUNCHER
-	700,	// WP_CHAINGUN
+	150,	// WP_NAILGUN
+	150,	// WP_PROX_LAUNCHER
+	150,	// WP_CHAINGUN
 };
 
 int BG_WeaponMagSize( int weapon ) {
@@ -1569,9 +1571,9 @@ static void PM_BeginReload( void ) {
 	PM_AddEvent( EV_RELOAD );
 	pm->ps->weaponstate = WEAPON_RELOADING;
 	pm->ps->weaponTime  = BG_WeaponReloadTime( pm->ps->weapon );
-	// Fresh reload: the mag hasn't been inserted yet, so clear the notetrack
-	// flag. It gets set partway through, opening the NAC tail.
-	pm->ps->pm_flags &= ~PMF_RELOAD_AMMO_GIVEN;
+	// Fresh reload: the NAC window isn't open yet. The notetrack opens it
+	// partway through; the mag only fills if the reload runs to completion.
+	pm->ps->pm_flags &= ~PMF_RELOAD_NOTETRACK;
 	PM_StartTorsoAnim( TORSO_GESTURE );	// placeholder reload animation
 }
 
@@ -1625,17 +1627,19 @@ static void PM_BeginWeaponChange( int weapon ) {
 	}
 
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
-		qboolean nacTail = !!( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN );
-		pm->ps->pm_flags &= ~PMF_RELOAD_AMMO_GIVEN;
+		qboolean nacWindow = !!( pm->ps->pm_flags & PMF_RELOAD_NOTETRACK );
+		pm->ps->pm_flags &= ~PMF_RELOAD_NOTETRACK;
 		pm->ps->weaponTime = 0;
 
-		if ( nacTail ) {
-			// The reload tail has already played — the weapon is already in its
-			// "down" position. Pressing swap at this point skips WEAPON_DROPPING
-			// (nothing to drop) and raises the next weapon directly. This is the
-			// emergent NAC: weaponTime≈0 + swap = raise next gun, no explicit drop.
-			// A YY (re-tap during the raise) will then see WEAPON_RAISING, set
-			// QUICKSWAP_PENDING, and collapse to instant-ready. That's the trickshot.
+		// The ammo was NEVER committed during the reload (the notetrack only
+		// opened the window). Cancelling here therefore gains no ammo either way -
+		// the mag is left exactly as it was. This is the "No Ammo" in NAC.
+		if ( nacWindow ) {
+			// Swap landed inside the open window: the mag-seat cue has played and
+			// the weapon is in its "down" position. The swap pre-empts the ammo
+			// commit and pulls the next weapon out instantly - WEAPON_DROPPING is
+			// skipped, we go straight to the raise. A YY (re-tap during that raise)
+			// then collapses to instant-ready. NAC -> raise -> YY is the trickshot.
 			pm->ps->weapon     = weapon;
 			pm->ps->swapTarget = WP_NONE;
 			PM_AddEvent( EV_CHANGE_WEAPON );
@@ -1644,6 +1648,8 @@ static void PM_BeginWeaponChange( int weapon ) {
 			PM_StartTorsoAnim( TORSO_RAISE );
 			return;
 		}
+		// Swap before the window opened: a normal, slow swap (drop + raise),
+		// reload simply abandoned. Falls through to the drop below.
 	}
 
 	PM_AddEvent( EV_CHANGE_WEAPON );
@@ -1758,23 +1764,16 @@ static void PM_Weapon( void ) {
 		pm->ps->weaponTime -= pml.msec;
 	}
 
-	// Reload notetrack: insert the magazine partway through the reload, the
-	// instant remaining weaponTime drops into the tail. From here on the mag
-	// is full and the rest of the reload is just animation that can be cut
-	// short (swap) while KEEPING the ammo - the NAC.
-	// Checked BEFORE the weapon-change fork below so a swap on the exact seat
-	// tick still grants the ammo: pressing swap right as the mag goes in (the
-	// CoD timing) keeps the full mag, it does not race the swap and lose it.
+	// Reload notetrack: the mag-seat cue fires when weaponTime drops into the
+	// tail. This ONLY opens the NAC window (and plays the click) - it does NOT
+	// grant ammo. The ammo commits later, when the reload plays out to the end
+	// (below). Swapping while this window is open pre-empts that commit, so the
+	// reload is cancelled with no ammo gained. Checked before the weapon-change
+	// fork so a swap on the exact cue tick still counts as an in-window NAC.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING &&
-	     !( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) &&
+	     !( pm->ps->pm_flags & PMF_RELOAD_NOTETRACK ) &&
 	     pm->ps->weaponTime <= BG_WeaponReloadTail( pm->ps->weapon ) ) {
-		int magSize = BG_WeaponMagSize( pm->ps->weapon );
-		int needed  = magSize - pm->ps->ammo[pm->ps->weapon];
-		int reserve = pm->ps->ammoReserve[pm->ps->weapon];
-		int give    = ( reserve >= needed ) ? needed : reserve;
-		pm->ps->ammoReserve[pm->ps->weapon] -= give;
-		pm->ps->ammo[pm->ps->weapon]         += give;
-		pm->ps->pm_flags |= PMF_RELOAD_AMMO_GIVEN;
+		pm->ps->pm_flags |= PMF_RELOAD_NOTETRACK;
 		PM_AddEvent( EV_RELOAD_NOTETRACK );
 	}
 
@@ -1814,19 +1813,18 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
-	// reload fully played out (no cancel). The mag was already topped up at the
-	// notetrack above; if a weapon has no tail it gets filled here as a fallback.
-	// Either way the reload is done - return to ready and clear the notetrack flag.
+	// Reload played out to the end without being cancelled: THIS is where the
+	// ammo finally commits. (A NAC bails out in PM_BeginWeaponChange before ever
+	// reaching here, which is exactly why it gains no ammo.) Top up the mag,
+	// close the window, return to ready.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
-		if ( !( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) ) {
-			int magSize = BG_WeaponMagSize( pm->ps->weapon );
-			int needed  = magSize - pm->ps->ammo[pm->ps->weapon];
-			int reserve = pm->ps->ammoReserve[pm->ps->weapon];
-			int give    = ( reserve >= needed ) ? needed : reserve;
-			pm->ps->ammoReserve[pm->ps->weapon] -= give;
-			pm->ps->ammo[pm->ps->weapon]         += give;
-		}
-		pm->ps->pm_flags &= ~PMF_RELOAD_AMMO_GIVEN;
+		int magSize = BG_WeaponMagSize( pm->ps->weapon );
+		int needed  = magSize - pm->ps->ammo[pm->ps->weapon];
+		int reserve = pm->ps->ammoReserve[pm->ps->weapon];
+		int give    = ( reserve >= needed ) ? needed : reserve;
+		pm->ps->ammoReserve[pm->ps->weapon] -= give;
+		pm->ps->ammo[pm->ps->weapon]         += give;
+		pm->ps->pm_flags &= ~PMF_RELOAD_NOTETRACK;
 		pm->ps->weaponstate = WEAPON_READY;
 		PM_StartTorsoAnim( TORSO_STAND );
 		return;

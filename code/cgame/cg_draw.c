@@ -2400,8 +2400,8 @@ static void CG_DrawWeaponDebug( void ) {
 		  ps->weaponTime <= BG_WeaponReloadTail( weapon ) ) ? "OPEN" : "-" );
 	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
 
-	Com_sprintf( line, sizeof( line ), "ammoGiven: %s",
-		( ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) ? "YES" : "no" );
+	Com_sprintf( line, sizeof( line ), "noteFired: %s",
+		( ps->pm_flags & PMF_RELOAD_NOTETRACK ) ? "YES" : "no" );
 	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
 
 	Com_sprintf( line, sizeof( line ), "mag/res: %i / %i",
@@ -2414,13 +2414,12 @@ static void CG_DrawWeaponDebug( void ) {
 
 	// cg.weaponSelect is what the CLIENT is requesting - if this doesn't match
 	// ps->weapon, the server will process a weapon change on the next tick.
-	// NAC: the swap-cancel window is open (mag seated, tail playing). Swapping
-	// here keeps the full mag and skips the destination raise.
+	// NAC: the window is open (mag-seat cue fired, ammo NOT yet committed).
+	// Swapping here cancels the reload (no ammo) and instantly pulls the next gun.
 	Com_sprintf( line, sizeof( line ), "sel: %i  NAC: %s",
 		cg.weaponSelect,
 		( ps->weaponstate == WEAPON_RELOADING &&
-		  ( ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) &&
-		  ps->weaponTime <= BG_WeaponReloadTail( weapon ) ) ? "OPEN" : "-" );
+		  ( ps->pm_flags & PMF_RELOAD_NOTETRACK ) ) ? "OPEN" : "-" );
 	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
 }
 

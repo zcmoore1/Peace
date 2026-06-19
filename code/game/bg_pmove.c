@@ -1624,16 +1624,26 @@ static void PM_BeginWeaponChange( int weapon ) {
 		return;
 	}
 
-	// Cancelling a reload. The ammo was already decided by the notetrack
-	// (PMF_RELOAD_AMMO_GIVEN): swap after the mag seats = full mag kept (the NAC
-	// payoff), before = the reload is wasted. Either way this is a NORMAL weapon
-	// change - the next weapon plays its full drop + raise. The NAC is NOT
-	// instant on its own; the instant comes from chaining a YY (re-tap during
-	// that raise to cancel it), which the midSwap quickswap logic at the top of
-	// this function arms. NAC -> raise -> YY-cancel-the-raise is the trickshot.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
+		qboolean nacTail = !!( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN );
 		pm->ps->pm_flags &= ~PMF_RELOAD_AMMO_GIVEN;
 		pm->ps->weaponTime = 0;
+
+		if ( nacTail ) {
+			// The reload tail has already played — the weapon is already in its
+			// "down" position. Pressing swap at this point skips WEAPON_DROPPING
+			// (nothing to drop) and raises the next weapon directly. This is the
+			// emergent NAC: weaponTime≈0 + swap = raise next gun, no explicit drop.
+			// A YY (re-tap during the raise) will then see WEAPON_RAISING, set
+			// QUICKSWAP_PENDING, and collapse to instant-ready. That's the trickshot.
+			pm->ps->weapon     = weapon;
+			pm->ps->swapTarget = WP_NONE;
+			PM_AddEvent( EV_CHANGE_WEAPON );
+			pm->ps->weaponTime += 250;
+			pm->ps->weaponstate = WEAPON_RAISING;
+			PM_StartTorsoAnim( TORSO_RAISE );
+			return;
+		}
 	}
 
 	PM_AddEvent( EV_CHANGE_WEAPON );

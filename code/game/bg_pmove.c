@@ -1624,11 +1624,15 @@ static void PM_BeginWeaponChange( int weapon ) {
 		return;
 	}
 
-	// Cancelling a reload: abandon the reload's leftover time so the drop starts
-	// fresh. Whether you keep the ammo was already decided by the notetrack in
-	// PM_Weapon (PMF_RELOAD_AMMO_GIVEN): swap after it -> full mag (NAC payoff),
-	// swap before it -> the reload is wasted.
+	// Cancelling a reload: if the mag is already seated (tail / NAC window),
+	// arm a quickswap so the raise is skipped on the destination weapon - you
+	// aborted animation, not a considered switch. If we cancelled BEFORE the
+	// notetrack (ammo not given), it's a deliberate change; play the full raise.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
+		if ( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) {
+			pm->ps->pm_flags |= PMF_QUICKSWAP_PENDING;
+		}
+		pm->ps->pm_flags &= ~PMF_RELOAD_AMMO_GIVEN;
 		pm->ps->weaponTime = 0;
 	}
 
@@ -1760,6 +1764,21 @@ static void PM_Weapon( void ) {
 		pm->ps->ammo[pm->ps->weapon]         += give;
 		pm->ps->pm_flags |= PMF_RELOAD_AMMO_GIVEN;
 		PM_AddEvent( EV_RELOAD_NOTETRACK );
+	}
+
+	// Fire-cancel NAC: pressing attack during the tail (after the mag is seated)
+	// instantly cancels the remaining reload animation and lets you fire on the
+	// same weapon immediately. Matches CoD behaviour - any state change in the
+	// tail window (fire, swap, sprint, etc.) keeps the ammo and cuts the anim.
+	if ( pm->ps->weaponstate == WEAPON_RELOADING &&
+	     ( pm->ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) &&
+	     pm->ps->weaponTime <= BG_WeaponReloadTail( pm->ps->weapon ) &&
+	     ( pm->cmd.buttons & BUTTON_ATTACK ) ) {
+		pm->ps->weaponstate = WEAPON_READY;
+		pm->ps->weaponTime  = 0;
+		pm->ps->pm_flags &= ~PMF_RELOAD_AMMO_GIVEN;
+		// fall through: weaponTime is now 0, so we won't hit the early-return
+		// below and will reach the fire-check at the bottom of PM_Weapon.
 	}
 
 	// check for weapon change

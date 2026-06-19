@@ -2408,8 +2408,17 @@ static void CG_DrawWeaponDebug( void ) {
 		ps->ammo[weapon], ps->ammoReserve[weapon] );
 	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
 
-	Com_sprintf( line, sizeof( line ), "swapTgt: %i  cmd: %i",
+	Com_sprintf( line, sizeof( line ), "swapTgt: %i  ps->wpn: %i",
 		ps->swapTarget, weapon );
+	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
+
+	// cg.weaponSelect is what the CLIENT is requesting - if this doesn't match
+	// ps->weapon, the server will process a weapon change on the next tick.
+	Com_sprintf( line, sizeof( line ), "sel: %i  NACfire: %s",
+		cg.weaponSelect,
+		( ps->weaponstate == WEAPON_RELOADING &&
+		  ( ps->pm_flags & PMF_RELOAD_AMMO_GIVEN ) &&
+		  ps->weaponTime <= BG_WeaponReloadTail( weapon ) ) ? "READY" : "-" );
 	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
 }
 

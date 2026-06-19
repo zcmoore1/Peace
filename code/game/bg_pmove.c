@@ -1659,16 +1659,17 @@ static void PM_FinishWeaponChange( void ) {
 	// modular weapnext/weapprev swaps for free - no per-slot bookkeeping.
 	pm->ps->weapon = weapon;
 	pm->ps->swapTarget = WP_NONE;	// swap resolved
-	pm->ps->weaponstate = WEAPON_RAISING;
-	PM_StartTorsoAnim( TORSO_RAISE );
 
-	// If this change interrupted a swap already in flight (alt-swap / YY), come
-	// up instantly ready - the raise is skipped. Otherwise play the normal
-	// raise. weaponTime uses plain += to preserve the NAC-family timing windows.
+	// YY/alt-swap: skip the raise entirely, go straight to ready.
 	if ( pm->ps->pm_flags & PMF_QUICKSWAP_PENDING ) {
-		pm->ps->weaponTime += 0;
+		pm->ps->pm_flags    &= ~PMF_QUICKSWAP_PENDING;
+		pm->ps->weaponstate  = WEAPON_READY;
+		pm->ps->weaponTime   = 0;
+		PM_StartTorsoAnim( TORSO_STAND );
 	} else {
+		pm->ps->weaponstate = WEAPON_RAISING;
 		pm->ps->weaponTime += 250;
+		PM_StartTorsoAnim( TORSO_RAISE );
 	}
 }
 
@@ -1784,7 +1785,6 @@ static void PM_Weapon( void ) {
 
 	if ( pm->ps->weaponstate == WEAPON_RAISING ) {
 		pm->ps->weaponstate = WEAPON_READY;
-		pm->ps->pm_flags &= ~PMF_QUICKSWAP_PENDING;
 		if ( pm->ps->weapon == WP_GAUNTLET ) {
 			PM_StartTorsoAnim( TORSO_STAND2 );
 		} else {

@@ -1760,13 +1760,15 @@ static void PM_Weapon( void ) {
 	// can't change if weapon is firing, but can change
 	// again if lowering or raising
 	if ( pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ) {
-		// Only (re)start a change when the player selects a weapon we aren't
-		// already holding AND aren't already switching to. During a normal swap
-		// the target is stable so this won't retrigger; tapping to a NEW weapon
-		// mid-swap is the alt-swap (YY) and PM_BeginWeaponChange arms the
-		// instant raise. Y is just weapnext (modular cycle, wraps to the first).
 		if ( pm->cmd.weapon != pm->ps->weapon && pm->cmd.weapon != pm->ps->swapTarget ) {
 			PM_BeginWeaponChange( pm->cmd.weapon );
+		} else if ( pm->ps->weaponstate == WEAPON_DROPPING &&
+		            pm->ps->swapTarget != WP_NONE &&
+		            pm->cmd.weapon == pm->ps->weapon ) {
+			// Weapnext wrapped back to current weapon during drop = YY redirect.
+			// cmd.weapon == ps->weapon so the normal check above misses it.
+			// Redirect the drop back to ps->weapon and arm instant-ready.
+			PM_BeginWeaponChange( pm->ps->weapon );
 		}
 	}
 

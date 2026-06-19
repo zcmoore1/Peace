@@ -1164,9 +1164,15 @@ void ClientSpawn(gentity_t *ent) {
 
 	client->ps.clientNum = index;
 
+	// Slot 1 - primary
 	client->ps.stats[STAT_WEAPONS] = ( 1 << WP_MACHINEGUN );
 	client->ps.ammo[WP_MACHINEGUN]        = BG_WeaponMagSize( WP_MACHINEGUN );
 	client->ps.ammoReserve[WP_MACHINEGUN] = BG_WeaponMaxReserve( WP_MACHINEGUN );
+
+	// Slot 2 - secondary
+	client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_SHOTGUN );
+	client->ps.ammo[WP_SHOTGUN]        = BG_WeaponMagSize( WP_SHOTGUN );
+	client->ps.ammoReserve[WP_SHOTGUN] = BG_WeaponMaxReserve( WP_SHOTGUN );
 
 	client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_GAUNTLET );
 	client->ps.ammo[WP_GAUNTLET] = -1;

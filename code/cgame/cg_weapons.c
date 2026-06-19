@@ -1572,7 +1572,6 @@ CG_NextWeapon_f
 */
 void CG_NextWeapon_f( void ) {
 	int		i;
-	int		original;
 
 	if ( !cg.snap ) {
 		return;
@@ -1582,22 +1581,17 @@ void CG_NextWeapon_f( void ) {
 	}
 
 	cg.weaponSelectTime = cg.time;
-	original = cg.weaponSelect;
 
-	for ( i = 0 ; i < MAX_WEAPONS ; i++ ) {
-		cg.weaponSelect++;
-		if ( cg.weaponSelect == MAX_WEAPONS ) {
-			cg.weaponSelect = 0;
+	// 2-slot toggle: find the first selectable weapon that isn't the current one.
+	for ( i = 1; i < MAX_WEAPONS; i++ ) {
+		int candidate = ( cg.weaponSelect + i ) % MAX_WEAPONS;
+		if ( candidate == WP_NONE || candidate == WP_GAUNTLET || candidate == WP_GRAPPLING_HOOK ) {
+			continue;
 		}
-		if ( cg.weaponSelect == WP_GAUNTLET ) {
-			continue;		// never cycle to gauntlet
+		if ( CG_WeaponSelectable( candidate ) ) {
+			cg.weaponSelect = candidate;
+			return;
 		}
-		if ( CG_WeaponSelectable( cg.weaponSelect ) ) {
-			break;
-		}
-	}
-	if ( i == MAX_WEAPONS ) {
-		cg.weaponSelect = original;
 	}
 }
 
@@ -1607,34 +1601,8 @@ CG_PrevWeapon_f
 ===============
 */
 void CG_PrevWeapon_f( void ) {
-	int		i;
-	int		original;
-
-	if ( !cg.snap ) {
-		return;
-	}
-	if ( cg.snap->ps.pm_flags & PMF_FOLLOW ) {
-		return;
-	}
-
-	cg.weaponSelectTime = cg.time;
-	original = cg.weaponSelect;
-
-	for ( i = 0 ; i < MAX_WEAPONS ; i++ ) {
-		cg.weaponSelect--;
-		if ( cg.weaponSelect == -1 ) {
-			cg.weaponSelect = MAX_WEAPONS - 1;
-		}
-		if ( cg.weaponSelect == WP_GAUNTLET ) {
-			continue;		// never cycle to gauntlet
-		}
-		if ( CG_WeaponSelectable( cg.weaponSelect ) ) {
-			break;
-		}
-	}
-	if ( i == MAX_WEAPONS ) {
-		cg.weaponSelect = original;
-	}
+	// With 2 slots prev and next are the same toggle.
+	CG_NextWeapon_f();
 }
 
 /*

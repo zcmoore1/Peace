@@ -1515,8 +1515,9 @@ typedef enum {
 } notetrack_t;
 
 typedef struct {
-	notetrack_t type;
-	int         msRemaining;    // fires when weaponTime crosses this value during WEAPON_RELOADING
+	notetrack_t  type;
+	int          weaponstate;   // only active during this weapon state
+	int          msRemaining;   // fires when weaponTime crosses this threshold
 } weaponNotetrack_t;
 
 typedef struct {
@@ -1525,20 +1526,20 @@ typedef struct {
 } weaponNotetracks_t;
 
 static const weaponNotetracks_t bg_weaponNotetracks[MAX_WEAPONS] = {
-	{ 0 },                                           // WP_NONE
-	{ 0 },                                           // WP_GAUNTLET
-	{ 1, { { NT_RELOAD_SEAT, 700 } } },              // WP_MACHINEGUN
-	{ 1, { { NT_RELOAD_SEAT, 500 } } },              // WP_SHOTGUN
-	{ 1, { { NT_RELOAD_SEAT, 600 } } },              // WP_GRENADE_LAUNCHER
-	{ 1, { { NT_RELOAD_SEAT, 600 } } },              // WP_ROCKET_LAUNCHER
-	{ 1, { { NT_RELOAD_SEAT, 500 } } },              // WP_LIGHTNING
-	{ 1, { { NT_RELOAD_SEAT, 600 } } },              // WP_RAILGUN
-	{ 1, { { NT_RELOAD_SEAT, 500 } } },              // WP_PLASMAGUN
-	{ 1, { { NT_RELOAD_SEAT, 800 } } },              // WP_BFG
-	{ 0 },                                           // WP_GRAPPLING_HOOK
-	{ 1, { { NT_RELOAD_SEAT, 700 } } },              // WP_NAILGUN
-	{ 1, { { NT_RELOAD_SEAT, 700 } } },              // WP_PROX_LAUNCHER
-	{ 1, { { NT_RELOAD_SEAT, 700 } } },              // WP_CHAINGUN
+	{ 0 },                                                              // WP_NONE
+	{ 0 },                                                              // WP_GAUNTLET
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 700 } } },              // WP_MACHINEGUN
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 500 } } },              // WP_SHOTGUN
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 600 } } },              // WP_GRENADE_LAUNCHER
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 600 } } },              // WP_ROCKET_LAUNCHER
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 500 } } },              // WP_LIGHTNING
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 600 } } },              // WP_RAILGUN
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 500 } } },              // WP_PLASMAGUN
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 800 } } },              // WP_BFG
+	{ 0 },                                                              // WP_GRAPPLING_HOOK
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 700 } } },              // WP_NAILGUN
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 700 } } },              // WP_PROX_LAUNCHER
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 700 } } },              // WP_CHAINGUN
 };
 
 int BG_WeaponMagSize( int weapon ) {
@@ -1630,20 +1631,19 @@ Operates only during WEAPON_RELOADING; other states have no notetracks yet.
 */
 static void PM_ProcessNotetracks( int prevTime ) {
 	const weaponNotetracks_t *nts;
-	int                       i, curTime;
+	int                       i, curTime, curState;
 
-	if ( pm->ps->weaponstate != WEAPON_RELOADING ) {
-		return;
-	}
-
-	nts     = &bg_weaponNotetracks[pm->ps->weapon];
-	curTime = pm->ps->weaponTime;
+	nts      = &bg_weaponNotetracks[pm->ps->weapon];
+	curTime  = pm->ps->weaponTime;
+	curState = pm->ps->weaponstate;
 
 	for ( i = 0; i < nts->numTracks; i++ ) {
-		int threshold = nts->tracks[i].msRemaining;
-		// Crossed this threshold this tick (and only this tick).
-		if ( prevTime > threshold && curTime <= threshold ) {
-			PM_FireNotetrack( nts->tracks[i].type );
+		const weaponNotetrack_t *nt = &nts->tracks[i];
+		if ( curState != nt->weaponstate ) {
+			continue;
+		}
+		if ( prevTime > nt->msRemaining && curTime <= nt->msRemaining ) {
+			PM_FireNotetrack( nt->type );
 		}
 	}
 }
@@ -1736,7 +1736,7 @@ static void PM_FinishWeaponChange( void ) {
 		PM_StartTorsoAnim( TORSO_STAND );
 	} else {
 		pm->ps->weaponstate = WEAPON_RAISING;
-		pm->ps->weaponTime += 250;
+		pm->ps->weaponTime  = 250;
 		PM_StartTorsoAnim( TORSO_RAISE );
 	}
 }

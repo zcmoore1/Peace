@@ -1517,6 +1517,11 @@ static const int bg_weaponReloadTime[MAX_WEAPONS] = {
 // point: if the player has a swap pending on the exact tick this fires, the
 // ammo commit is pre-empted and the ready state is redirected to their
 // selected weapon. If not, the reload continues and ammo commits at the end.
+//
+// The threshold is given as ms of weaponTime REMAINING, so the click lands a
+// fixed beat before the reload finishes regardless of total reload length -
+// the mag clicks in, a short settle, then ready. Keep it small (late in the
+// reload) so the audio cue lines up with the seat, not the middle.
 
 typedef enum {
 	NT_RELOAD_SEAT      // mag seated or pump cycled
@@ -1533,21 +1538,26 @@ typedef struct {
 	weaponNotetrack_t   tracks[4];
 } weaponNotetracks_t;
 
+// Reload seat lands 300ms before the reload ends for every weapon - a single,
+// consistent "mag in" beat. One number to tune per weapon when real reload
+// animations arrive (the seat frame will differ per gun).
+#define NT_SEAT_BEFORE_END 300
+
 static const weaponNotetracks_t bg_weaponNotetracks[MAX_WEAPONS] = {
-	{ 0 },                                                              // WP_NONE
-	{ 0 },                                                              // WP_GAUNTLET
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 700 } } },              // WP_MACHINEGUN
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 500 } } },              // WP_SHOTGUN
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 600 } } },              // WP_GRENADE_LAUNCHER
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 600 } } },              // WP_ROCKET_LAUNCHER
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 500 } } },              // WP_LIGHTNING
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 600 } } },              // WP_RAILGUN
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 500 } } },              // WP_PLASMAGUN
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 800 } } },              // WP_BFG
-	{ 0 },                                                              // WP_GRAPPLING_HOOK
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 700 } } },              // WP_NAILGUN
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 700 } } },              // WP_PROX_LAUNCHER
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 700 } } },              // WP_CHAINGUN
+	{ 0 },                                                                            // WP_NONE
+	{ 0 },                                                                            // WP_GAUNTLET
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1500 - NT_SEAT_BEFORE_END } } },       // WP_MACHINEGUN
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1100 - NT_SEAT_BEFORE_END } } },       // WP_SHOTGUN
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1400 - NT_SEAT_BEFORE_END } } },       // WP_GRENADE_LAUNCHER
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1400 - NT_SEAT_BEFORE_END } } },       // WP_ROCKET_LAUNCHER
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1100 - NT_SEAT_BEFORE_END } } },       // WP_LIGHTNING
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1400 - NT_SEAT_BEFORE_END } } },       // WP_RAILGUN
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1100 - NT_SEAT_BEFORE_END } } },       // WP_PLASMAGUN
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1900 - NT_SEAT_BEFORE_END } } },       // WP_BFG
+	{ 0 },                                                                            // WP_GRAPPLING_HOOK
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1500 - NT_SEAT_BEFORE_END } } },       // WP_NAILGUN
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1500 - NT_SEAT_BEFORE_END } } },       // WP_PROX_LAUNCHER
+	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1500 - NT_SEAT_BEFORE_END } } },       // WP_CHAINGUN
 };
 
 int BG_WeaponMagSize( int weapon ) {

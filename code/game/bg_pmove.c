@@ -291,6 +291,14 @@ static float PM_CmdScale( usercmd_t *cmd ) {
 	float	total;
 	float	scale;
 
+	// Sprint: forward speed boost. ADS: movement penalty.
+	// Both are applied as a multiplier on top of ps->speed.
+	if ( pm->ps->pm_flags & PMF_SPRINTING ) {
+		pm->ps->speed = (int)( pm->ps->speed * 1.4f );
+	} else if ( pm->ps->pm_flags & PMF_ADS ) {
+		pm->ps->speed = (int)( pm->ps->speed * 0.5f );
+	}
+
 	max = abs( cmd->forwardmove );
 	if ( abs( cmd->rightmove ) > max ) {
 		max = abs( cmd->rightmove );
@@ -1762,6 +1770,69 @@ static void PM_TorsoAnimation( void ) {
 
 /*
 ==============
+PM_CheckSprint
+
+Sets or clears PMF_SPRINTING each tick. Sprint requires:
+  - BUTTON_SPRINT held
+  - moving forward (forwardmove > 0)
+  - on the ground and not ducking
+
+Entering sprint cancels an in-progress reload (the weapon snaps to the hip
+before the mag can seat). ADS is cleared immediately on sprint entry.
+==============
+*/
+static void PM_CheckSprint( void ) {
+	qboolean wantSprint;
+	qboolean wasSprinting;
+
+	wantSprint = ( ( pm->cmd.buttons & BUTTON_SPRINT ) &&
+	               pm->cmd.forwardmove > 0 &&
+	               pml.groundPlane &&
+	               !( pm->ps->pm_flags & PMF_DUCKED ) );
+
+	wasSprinting = !!( pm->ps->pm_flags & PMF_SPRINTING );
+
+	if ( wantSprint ) {
+		pm->ps->pm_flags |= PMF_SPRINTING;
+		pm->ps->pm_flags &= ~PMF_ADS;
+
+		// Sprint entry cancels reload: weapon is pulled back before mag seats.
+		if ( !wasSprinting && pm->ps->weaponstate == WEAPON_RELOADING ) {
+			pm->ps->weaponstate = WEAPON_DROPPING;
+			pm->ps->weaponTime  = 200;
+			pm->ps->swapTarget  = pm->ps->weapon;
+			PM_AddEvent( EV_CHANGE_WEAPON );
+			PM_StartTorsoAnim( TORSO_DROP );
+		}
+	} else {
+		pm->ps->pm_flags &= ~PMF_SPRINTING;
+	}
+}
+
+/*
+==============
+PM_CheckADS
+
+Sets or clears PMF_ADS. ADS is active while BUTTON_ADS is held and
+the player is not sprinting, reloading, or in a weapon transition.
+==============
+*/
+static void PM_CheckADS( void ) {
+	qboolean canADS;
+
+	canADS = ( ( pm->cmd.buttons & BUTTON_ADS ) &&
+	           !( pm->ps->pm_flags & PMF_SPRINTING ) &&
+	           pm->ps->weaponstate == WEAPON_READY );
+
+	if ( canADS ) {
+		pm->ps->pm_flags |= PMF_ADS;
+	} else {
+		pm->ps->pm_flags &= ~PMF_ADS;
+	}
+}
+
+/*
+==============
 PM_Weapon
 
 Generates weapon events and modifes the weapon counter
@@ -2153,7 +2224,8 @@ void PmoveSingle (pmove_t *pmove) {
 		              : ( pm->ps->ammo[ pm->ps->weapon ] != 0 );
 		if ( !(pm->ps->pm_flags & PMF_RESPAWNED) && pm->ps->pm_type != PM_INTERMISSION && pm->ps->pm_type != PM_NOCLIP
 			&& ( pm->cmd.buttons & BUTTON_ATTACK ) && hasAmmo
-			&& pm->ps->weaponstate != WEAPON_RELOADING ) {
+			&& pm->ps->weaponstate != WEAPON_RELOADING
+			&& !( pm->ps->pm_flags & PMF_SPRINTING ) ) {
 			pm->ps->eFlags |= EF_FIRING;
 		} else {
 			pm->ps->eFlags &= ~EF_FIRING;
@@ -2288,6 +2360,10 @@ void PmoveSingle (pmove_t *pmove) {
 	// set groundentity, watertype, and waterlevel
 	PM_GroundTrace();
 	PM_SetWaterLevel();
+
+	// sprint and ADS: evaluate before weapon so weapon logic sees current flags
+	PM_CheckSprint();
+	PM_CheckADS();
 
 	// weapons
 	PM_Weapon();

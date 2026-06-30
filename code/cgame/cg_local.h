@@ -525,6 +525,9 @@ typedef struct {
 	int			zoomTime;
 	float		zoomSensitivity;
 
+	// ADS (aim down sights): 0 = hipfire, 1 = fully aimed; eased each frame
+	float		adsFrac;
+
 	// information screen text during loading
 	char		infoScreenText[MAX_STRING_CHARS];
 

@@ -962,6 +962,10 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-attack", IN_Button0Up);
 	Cmd_AddCommand ("+reload", IN_Button12Down);	// BUTTON_RELOAD = bit 12
 	Cmd_AddCommand ("-reload", IN_Button12Up);
+	Cmd_AddCommand ("+sprint", IN_Button13Down);	// BUTTON_SPRINT = bit 13
+	Cmd_AddCommand ("-sprint", IN_Button13Up);
+	Cmd_AddCommand ("+ads", IN_Button14Down);		// BUTTON_ADS = bit 14
+	Cmd_AddCommand ("-ads", IN_Button14Up);
 	Cmd_AddCommand ("+button0", IN_Button0Down);
 	Cmd_AddCommand ("-button0", IN_Button0Up);
 	Cmd_AddCommand ("+button1", IN_Button1Down);

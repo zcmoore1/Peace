@@ -517,6 +517,24 @@ static int CG_CalcFov( void ) {
 		}
 	}
 
+	// ADS: ease adsFrac toward the player's aim state, then pull the FOV in.
+	// Separate from the railgun zoom above so the two don't fight. ~150ms ease.
+	{
+		float target = ( cg.predictedPlayerState.pm_flags & PMF_ADS ) ? 1.0f : 0.0f;
+		float step   = cg.frametime / 150.0f;
+		if ( cg.adsFrac < target ) {
+			cg.adsFrac += step;
+			if ( cg.adsFrac > target ) cg.adsFrac = target;
+		} else if ( cg.adsFrac > target ) {
+			cg.adsFrac -= step;
+			if ( cg.adsFrac < target ) cg.adsFrac = target;
+		}
+		if ( cg.adsFrac > 0 ) {
+			// Aim FOV is 72% of the hipfire FOV - a moderate sights pull-in.
+			fov_x = fov_x - cg.adsFrac * ( fov_x * 0.28f );
+		}
+	}
+
 	x = cg.refdef.width / tan( fov_x / 360 * M_PI );
 	fov_y = atan2( cg.refdef.height, x );
 	fov_y = fov_y * 360 / M_PI;

@@ -1911,11 +1911,46 @@ static void CG_DrawCrosshair(void)
 	}
 	hShader = cgs.media.crosshairShader[ ca % NUM_CROSSHAIRS ];
 
-	trap_R_DrawStretchPic( x + cg.refdef.x + 0.5 * (cg.refdef.width - w), 
-		y + cg.refdef.y + 0.5 * (cg.refdef.height - h), 
+	trap_R_DrawStretchPic( x + cg.refdef.x + 0.5 * (cg.refdef.width - w),
+		y + cg.refdef.y + 0.5 * (cg.refdef.height - h),
 		w, h, 0, 0, 1, 1, hShader );
 
 	trap_R_SetColor( NULL );
+
+	// Dynamic hipfire reticle: for bullet weapons, four bars that spread apart
+	// as the bullet cone widens (moving/airborne) and close in on ADS/standing
+	// still. Uses the SAME BG_WeaponSpread the game module aims the trace with,
+	// so the gap between the bars is an honest picture of where rounds will go.
+	if ( BG_WeaponBaseSpread( cg.predictedPlayerState.weapon ) > 0 ) {
+		float	spread = BG_WeaponSpread( &cg.predictedPlayerState );
+		float	gap    = 3.0f + spread * 0.04f;   // virtual-640 units from center
+		float	len    = 5.0f;                    // bar length
+		float	th     = 2.0f;                    // bar thickness
+		float	cx     = 320.0f + cg_crosshairX.integer;
+		float	cy     = 240.0f + cg_crosshairY.integer;
+		float	bx, by, bw, bh;
+
+		trap_R_SetColor( NULL );
+
+		// left bar
+		bx = cx - gap - len; by = cy - th * 0.5f; bw = len; bh = th;
+		CG_AdjustFrom640( &bx, &by, &bw, &bh );
+		trap_R_DrawStretchPic( bx, by, bw, bh, 0, 0, 1, 1, cgs.media.whiteShader );
+		// right bar
+		bx = cx + gap; by = cy - th * 0.5f; bw = len; bh = th;
+		CG_AdjustFrom640( &bx, &by, &bw, &bh );
+		trap_R_DrawStretchPic( bx, by, bw, bh, 0, 0, 1, 1, cgs.media.whiteShader );
+		// top bar
+		bx = cx - th * 0.5f; by = cy - gap - len; bw = th; bh = len;
+		CG_AdjustFrom640( &bx, &by, &bw, &bh );
+		trap_R_DrawStretchPic( bx, by, bw, bh, 0, 0, 1, 1, cgs.media.whiteShader );
+		// bottom bar
+		bx = cx - th * 0.5f; by = cy + gap; bw = th; bh = len;
+		CG_AdjustFrom640( &bx, &by, &bw, &bh );
+		trap_R_DrawStretchPic( bx, by, bw, bh, 0, 0, 1, 1, cgs.media.whiteShader );
+
+		trap_R_SetColor( NULL );
+	}
 }
 
 /*

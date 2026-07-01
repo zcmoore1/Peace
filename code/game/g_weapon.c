@@ -154,14 +154,13 @@ void SnapVectorTowards( vec3_t v, vec3_t to ) {
 }
 
 #ifdef MISSIONPACK
-#define CHAINGUN_SPREAD		600
 #define CHAINGUN_DAMAGE		7
 #endif
-#define MACHINEGUN_SPREAD	200
+// Base spreads live in bg_weaponSpread[] (shared with the crosshair); damage stays here.
 #define	MACHINEGUN_DAMAGE	7
 #define	MACHINEGUN_TEAM_DAMAGE	5		// wimpier MG in teamplay
 
-void Bullet_Fire (gentity_t *ent, float spread, int damage, int mod ) {
+void Bullet_Fire (gentity_t *ent, int damage, int mod ) {
 	trace_t		tr;
 	vec3_t		end;
 #ifdef MISSIONPACK
@@ -169,11 +168,16 @@ void Bullet_Fire (gentity_t *ent, float spread, int damage, int mod ) {
 #endif
 	float		r;
 	float		u;
+	float		spread;
 	gentity_t	*tent;
 	gentity_t	*traceEnt;
 	int			i, passent;
 
 	damage *= s_quadFactor;
+
+	// Effective spread comes from the shared formula so it matches the crosshair
+	// exactly (ADS tightens, movement/air widen). Same code in campaign and MP.
+	spread = BG_WeaponSpread( &ent->client->ps );
 
 	r = random() * M_PI * 2.0f;
 	u = sin(r) * crandom() * spread * 16;
@@ -842,9 +846,9 @@ void FireWeapon( gentity_t *ent ) {
 		break;
 	case WP_MACHINEGUN:
 		if ( g_gametype.integer != GT_TEAM ) {
-			Bullet_Fire( ent, MACHINEGUN_SPREAD, MACHINEGUN_DAMAGE, MOD_MACHINEGUN );
+			Bullet_Fire( ent, MACHINEGUN_DAMAGE, MOD_MACHINEGUN );
 		} else {
-			Bullet_Fire( ent, MACHINEGUN_SPREAD, MACHINEGUN_TEAM_DAMAGE, MOD_MACHINEGUN );
+			Bullet_Fire( ent, MACHINEGUN_TEAM_DAMAGE, MOD_MACHINEGUN );
 		}
 		break;
 	case WP_GRENADE_LAUNCHER:
@@ -873,7 +877,7 @@ void FireWeapon( gentity_t *ent ) {
 		weapon_proxlauncher_fire( ent );
 		break;
 	case WP_CHAINGUN:
-		Bullet_Fire( ent, CHAINGUN_SPREAD, CHAINGUN_DAMAGE, MOD_CHAINGUN );
+		Bullet_Fire( ent, CHAINGUN_DAMAGE, MOD_CHAINGUN );
 		break;
 #endif
 	default:

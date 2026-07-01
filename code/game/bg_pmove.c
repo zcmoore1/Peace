@@ -1593,6 +1593,83 @@ int BG_WeaponMaxReserve( int weapon ) {
 	return bg_weaponMaxReserve[weapon];
 }
 
+// Base bullet spread per weapon (hipfire, standing still), in the same units
+// the fire code already uses. 0 = no bullet spread (projectile weapons and the
+// shotgun, which uses its own fixed pattern). This is the single source of
+// truth shared by the game module (the actual bullet trace) and cgame (the
+// crosshair), so the reticle always reflects where rounds really go.
+static const int bg_weaponSpread[MAX_WEAPONS] = {
+	0,		// WP_NONE
+	0,		// WP_GAUNTLET
+	200,	// WP_MACHINEGUN
+	0,		// WP_SHOTGUN (own pattern)
+	0,		// WP_GRENADE_LAUNCHER
+	0,		// WP_ROCKET_LAUNCHER
+	0,		// WP_LIGHTNING
+	0,		// WP_RAILGUN
+	0,		// WP_PLASMAGUN
+	0,		// WP_BFG
+	0,		// WP_GRAPPLING_HOOK
+	0,		// WP_NAILGUN
+	0,		// WP_PROX_LAUNCHER
+	600,	// WP_CHAINGUN
+};
+
+int BG_WeaponBaseSpread( int weapon ) {
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
+	return bg_weaponSpread[weapon];
+}
+
+/*
+===============
+BG_SpreadScale
+
+State multiplier applied to a weapon's base spread. Pure function of
+playerState so the game module and cgame agree exactly:
+  - ADS + still   -> near pinpoint
+  - hipfire still -> baseline (1.0)
+  - moving        -> widens with horizontal speed
+  - airborne      -> large penalty (can't control the gun in the air)
+  - crouched still -> tighter
+===============
+*/
+float BG_SpreadScale( const playerState_t *ps ) {
+	float scale;
+	float speed;
+
+	speed = sqrt( ps->velocity[0] * ps->velocity[0] +
+	              ps->velocity[1] * ps->velocity[1] );
+
+	if ( ps->pm_flags & PMF_ADS ) {
+		scale = 0.15f;              // aimed: reticle nearly closed
+	} else {
+		scale = 1.0f;              // hipfire baseline
+	}
+
+	// movement penalty, proportional to horizontal speed (320 ~ run speed)
+	scale += ( speed / 320.0f ) * 0.6f;
+
+	if ( ps->groundEntityNum == ENTITYNUM_NONE ) {
+		scale += 1.5f;             // airborne: big bloom
+	} else if ( ( ps->pm_flags & PMF_DUCKED ) && speed < 20.0f ) {
+		scale *= 0.6f;             // crouched and still: steadier
+	}
+
+	return scale;
+}
+
+/*
+===============
+BG_WeaponSpread
+
+Effective bullet spread for the player's current weapon and state. Used by the
+game module to aim the trace and by cgame to size the crosshair.
+===============
+*/
+float BG_WeaponSpread( const playerState_t *ps ) {
+	return (float)BG_WeaponBaseSpread( ps->weapon ) * BG_SpreadScale( ps );
+}
+
 /*
 ===============
 PM_BeginReload

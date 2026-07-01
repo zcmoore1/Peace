@@ -213,6 +213,9 @@ void Pmove (pmove_t *pmove);
 int  BG_WeaponMagSize( int weapon );
 int  BG_WeaponMaxReserve( int weapon );
 int  BG_WeaponReloadTime( int weapon );
+int  BG_WeaponBaseSpread( int weapon );
+float BG_SpreadScale( const playerState_t *ps );
+float BG_WeaponSpread( const playerState_t *ps );
 
 //===================================================================================
 

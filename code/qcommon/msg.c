@@ -1102,7 +1102,7 @@ netField_t	playerStateFields[] =
 { PSF(eventParms[1]), 8 },
 { PSF(clientNum), 8 },
 { PSF(weapon), 5 },
-{ PSF(swapTarget), 5 },
+{ PSF(weaponDelay), -16 },
 { PSF(viewangles[2]), 0 },
 { PSF(grapplePoint[0]), 0 },
 { PSF(grapplePoint[1]), 0 },

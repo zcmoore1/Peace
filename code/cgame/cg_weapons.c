@@ -1419,7 +1419,11 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 
 	// Placeholder reload animation: arc the weapon down and back using a sin curve.
 	// Replace TORSO_GESTURE + this offset with a real weapon anim when assets exist.
-	if ( ps->weaponstate == WEAPON_RELOADING ) {
+	// RELOAD_END is the one mag-in frame; keep the arc running through it so the
+	// pulse is invisible. Switching away sets RAISING, which drops out of this
+	// branch and abandons the reload arc - the new gun raises from frame 0.
+	if ( ps->weaponstate == WEAPON_RELOADING ||
+	     ps->weaponstate == WEAPON_RELOAD_END ) {
 		int   reloadDuration = BG_WeaponReloadTime( ps->weapon );
 		float t;
 		float arc;

@@ -2416,6 +2416,7 @@ static void CG_DrawWeaponDebug( void ) {
 		case WEAPON_DROPPING:	stateName = "DROPPING";	break;
 		case WEAPON_FIRING:		stateName = "FIRING";	break;
 		case WEAPON_RELOADING:	stateName = "RELOADING";break;
+		case WEAPON_RELOAD_END:	stateName = "RELOAD_END";break;
 		default:				stateName = "?";		break;
 	}
 
@@ -2431,8 +2432,12 @@ static void CG_DrawWeaponDebug( void ) {
 		ps->ammo[weapon], ps->ammoReserve[weapon] );
 	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
 
-	Com_sprintf( line, sizeof( line ), "swapTgt: %i  sel: %i",
-		ps->swapTarget, cg.weaponSelect );
+	Com_sprintf( line, sizeof( line ), "delay: %i", ps->weaponDelay );
+	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
+
+	// ps->weapon is what is actually drawn; cg.weaponSelect is HUD only.
+	Com_sprintf( line, sizeof( line ), "wpn: %i  sel(hud): %i",
+		weapon, cg.weaponSelect );
 	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
 }
 

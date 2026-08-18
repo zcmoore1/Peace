@@ -147,7 +147,10 @@ typedef enum {
 	WEAPON_RAISING,
 	WEAPON_DROPPING,
 	WEAPON_FIRING,
-	WEAPON_RELOADING
+	WEAPON_RELOADING,
+	WEAPON_RELOAD_END	// the single pmove frame the mag seats on. Drop time is 0
+						// here, so a switch pending on this frame completes
+						// instantly and pre-empts the clip fill - that is the NAC.
 } weaponstate_t;
 
 // pmove->pm_flags
@@ -166,7 +169,8 @@ typedef enum {
 #define PMF_FOLLOW			4096	// spectate following another player
 #define PMF_SCOREBOARD		8192	// spectate as a scoreboard
 #define PMF_INVULEXPAND		16384	// invulnerability sphere set to full size
-#define PMF_QUICKSWAP_PENDING	32768	// a weapon switch interrupted a raise; the resulting weapon comes up instantly ready
+// bit 15 free (was PMF_QUICKSWAP_PENDING - the switch is stock Q3 again; the
+// instant swap now comes from PM_DropTime() being 0 on the mag-in frame)
 
 #define	PMF_ALL_TIMES	(PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK)
 
@@ -213,6 +217,7 @@ void Pmove (pmove_t *pmove);
 int  BG_WeaponMagSize( int weapon );
 int  BG_WeaponMaxReserve( int weapon );
 int  BG_WeaponReloadTime( int weapon );
+int  BG_WeaponReloadAddTime( int weapon );
 int  BG_WeaponBaseSpread( int weapon );
 float BG_SpreadScale( const playerState_t *ps );
 float BG_WeaponSpread( const playerState_t *ps );

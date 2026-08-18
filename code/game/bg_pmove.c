@@ -1507,58 +1507,36 @@ static const int bg_weaponReloadTime[MAX_WEAPONS] = {
 	1500,	// WP_CHAINGUN
 };
 
-// Weapon notetracks: animation events that fire when weaponTime crosses a
-// threshold during a given state. This is our timer-based stand-in for real
-// per-frame animation notretracks (which fire at a specific frame baked into
-// the model). When real IQM animations arrive, these thresholds become frame
-// times and the crossing check stays identical - nothing else needs to change.
+// Mag-in time per weapon: milliseconds into the reload at which the magazine
+// visually seats. PM_BeginReload loads this into ps->weaponDelay; the frame
+// weaponDelay crosses zero is the mag-in beat (WEAPON_RELOAD_END).
 //
-// NT_RELOAD_SEAT: the mag visually seats / the action cycles. This is the NAC
-// point: if the player has a swap pending on the exact tick this fires, the
-// ammo commit is pre-empted and the ready state is redirected to their
-// selected weapon. If not, the reload continues and ammo commits at the end.
+// This must be LESS than the weapon's total reload time - the remainder is the
+// settle after the mag is in. The clip is filled on the mag-in frame, not at
+// the end of the reload.
 //
-// The threshold is given as ms of weaponTime REMAINING, so the click lands a
-// fixed beat before the reload finishes regardless of total reload length -
-// the mag clicks in, a short settle, then ready. Keep it small (late in the
-// reload) so the audio cue lines up with the seat, not the middle.
-
-typedef enum {
-	NT_RELOAD_SEAT      // mag seated or pump cycled
-} notetrack_t;
-
-typedef struct {
-	notetrack_t  type;
-	int          weaponstate;   // only active during this weapon state
-	int          msRemaining;   // fires when weaponTime crosses this threshold
-} weaponNotetrack_t;
-
-typedef struct {
-	int                 numTracks;
-	weaponNotetrack_t   tracks[4];
-} weaponNotetracks_t;
-
-// Reload seat lands 300ms before the reload ends for every weapon - a single,
-// consistent "mag in" beat. One number to tune per weapon when real reload
-// animations arrive (the seat frame will differ per gun).
-#define NT_SEAT_BEFORE_END 300
-
-static const weaponNotetracks_t bg_weaponNotetracks[MAX_WEAPONS] = {
-	{ 0 },                                                                            // WP_NONE
-	{ 0 },                                                                            // WP_GAUNTLET
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1500 - NT_SEAT_BEFORE_END } } },       // WP_MACHINEGUN
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1100 - NT_SEAT_BEFORE_END } } },       // WP_SHOTGUN
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1400 - NT_SEAT_BEFORE_END } } },       // WP_GRENADE_LAUNCHER
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1400 - NT_SEAT_BEFORE_END } } },       // WP_ROCKET_LAUNCHER
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1100 - NT_SEAT_BEFORE_END } } },       // WP_LIGHTNING
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1400 - NT_SEAT_BEFORE_END } } },       // WP_RAILGUN
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1100 - NT_SEAT_BEFORE_END } } },       // WP_PLASMAGUN
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1900 - NT_SEAT_BEFORE_END } } },       // WP_BFG
-	{ 0 },                                                                            // WP_GRAPPLING_HOOK
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1500 - NT_SEAT_BEFORE_END } } },       // WP_NAILGUN
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1500 - NT_SEAT_BEFORE_END } } },       // WP_PROX_LAUNCHER
-	{ 1, { { NT_RELOAD_SEAT, WEAPON_RELOADING, 1500 - NT_SEAT_BEFORE_END } } },       // WP_CHAINGUN
+// When real reload animations arrive these become the seat frame's timestamp.
+static const int bg_weaponReloadAddTime[MAX_WEAPONS] = {
+	0,		// WP_NONE
+	0,		// WP_GAUNTLET
+	1200,	// WP_MACHINEGUN       (of 1500)
+	800,	// WP_SHOTGUN          (of 1100)
+	1100,	// WP_GRENADE_LAUNCHER (of 1400)
+	1100,	// WP_ROCKET_LAUNCHER  (of 1400)
+	800,	// WP_LIGHTNING        (of 1100)
+	1100,	// WP_RAILGUN          (of 1400)
+	800,	// WP_PLASMAGUN        (of 1100)
+	1600,	// WP_BFG              (of 1900)
+	0,		// WP_GRAPPLING_HOOK
+	1200,	// WP_NAILGUN          (of 1500)
+	1200,	// WP_PROX_LAUNCHER    (of 1500)
+	1200,	// WP_CHAINGUN         (of 1500)
 };
+
+// Floor for the weaponDelay countdown. It must be allowed to go negative so the
+// mag-in crossing test fires on exactly one frame, but it stops here so the
+// field settles and stops dirtying the network delta.
+#define WEAPONDELAY_FLOOR	-1000
 
 int BG_WeaponMagSize( int weapon ) {
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
@@ -1568,6 +1546,11 @@ int BG_WeaponMagSize( int weapon ) {
 int BG_WeaponReloadTime( int weapon ) {
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
 	return bg_weaponReloadTime[weapon];
+}
+
+int BG_WeaponReloadAddTime( int weapon ) {
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
+	return bg_weaponReloadAddTime[weapon];
 }
 
 // Maximum reserve ammo the player can carry per weapon (mags not including the one loaded).
@@ -1673,84 +1656,75 @@ float BG_WeaponSpread( const playerState_t *ps ) {
 /*
 ===============
 PM_BeginReload
+
+Reload always starts from scratch - there is no partial-reload state to resume.
+weaponTime is the whole animation; weaponDelay is the countdown to the mag-in
+beat, which lands partway through.
 ===============
 */
 static void PM_BeginReload( void ) {
 	PM_AddEvent( EV_RELOAD );
 	pm->ps->weaponstate = WEAPON_RELOADING;
 	pm->ps->weaponTime  = BG_WeaponReloadTime( pm->ps->weapon );
+	pm->ps->weaponDelay = BG_WeaponReloadAddTime( pm->ps->weapon );
 	PM_StartTorsoAnim( TORSO_GESTURE );
 }
 
 /*
 ===============
-PM_FireNotetrack
+PM_ReloadFillClip
 
-Responds to a single notetrack event. This is the ONLY place NAC logic lives.
-When NT_RELOAD_SEAT fires, if the player has a swap pending on this exact tick
-the ammo commit is pre-empted and the ready state is redirected to their weapon.
+Move rounds from the reserve into the magazine. Called from exactly one place:
+the mag-in frame, and only if a weapon switch did not take that frame first.
 ===============
 */
-static void PM_FireNotetrack( notetrack_t type ) {
-	switch ( type ) {
-	case NT_RELOAD_SEAT:
-		PM_AddEvent( EV_RELOAD_NOTETRACK );
-		// NAC: swap input is pending on the exact tick the mag seats.
-		// Redirect WEAPON_READY to the selected weapon. No drop (the reloading
-		// weapon just finished its down-stroke), no raise (WEAPON_READY lands
-		// directly on the new weapon), and we return before the ammo commit
-		// in the reload-completion block below, so the mag is untouched.
-		if ( pm->cmd.weapon != pm->ps->weapon &&
-		     pm->cmd.weapon >  WP_NONE &&
-		     pm->cmd.weapon <  WP_NUM_WEAPONS &&
-		     ( pm->ps->stats[STAT_WEAPONS] & ( 1 << pm->cmd.weapon ) ) ) {
-			pm->ps->weapon      = pm->cmd.weapon;
-			pm->ps->swapTarget  = WP_NONE;
-			pm->ps->weaponTime  = 0;
-			pm->ps->weaponstate = WEAPON_READY;
-			PM_AddEvent( EV_CHANGE_WEAPON );
-			PM_StartTorsoAnim( TORSO_STAND );
-		}
-		break;
+static void PM_ReloadFillClip( int weapon ) {
+	int magSize, needed, reserve, give;
+
+	magSize = BG_WeaponMagSize( weapon );
+	if ( magSize <= 0 ) {
+		return;			// gauntlet / hook: no magazine
 	}
+
+	needed = magSize - pm->ps->ammo[weapon];
+	if ( needed <= 0 ) {
+		return;
+	}
+
+	reserve = pm->ps->ammoReserve[weapon];
+	give    = ( reserve >= needed ) ? needed : reserve;
+
+	pm->ps->ammoReserve[weapon] -= give;
+	pm->ps->ammo[weapon]        += give;
 }
 
 /*
 ===============
-PM_ProcessNotetracks
+PM_DropTime
 
-Called each pmove tick with the weaponTime value from BEFORE this tick's
-decrement. Fires any notetrack whose threshold was crossed this tick.
-Operates only during WEAPON_RELOADING; other states have no notetracks yet.
+How long the holster takes. Zero on the mag-in frame: the weapon is already
+down there, so there is nothing to lower. That single fact is the whole NAC -
+a switch on that frame finishes its drop the same frame and therefore runs
+before the clip is filled.
 ===============
 */
-static void PM_ProcessNotetracks( int prevTime ) {
-	const weaponNotetracks_t *nts;
-	int                       i, curTime, curState;
-
-	nts      = &bg_weaponNotetracks[pm->ps->weapon];
-	curTime  = pm->ps->weaponTime;
-	curState = pm->ps->weaponstate;
-
-	for ( i = 0; i < nts->numTracks; i++ ) {
-		const weaponNotetrack_t *nt = &nts->tracks[i];
-		if ( curState != nt->weaponstate ) {
-			continue;
-		}
-		if ( prevTime > nt->msRemaining && curTime <= nt->msRemaining ) {
-			PM_FireNotetrack( nt->type );
-		}
+static int PM_DropTime( void ) {
+	if ( pm->ps->weaponstate == WEAPON_RELOAD_END ) {
+		return 0;
 	}
+	return 200;
 }
 
 /*
 ===============
 PM_BeginWeaponChange
+
+Stock Q3 switch. The only change is that the holster length comes from
+PM_DropTime() instead of a hardcoded 200, and it is ASSIGNED rather than added
+so leftover reload time never leaks into the drop.
 ===============
 */
 static void PM_BeginWeaponChange( int weapon ) {
-	qboolean midSwap;
-
 	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
 		return;
 	}
@@ -1759,41 +1733,14 @@ static void PM_BeginWeaponChange( int weapon ) {
 		return;
 	}
 
-	// Already lowering toward this exact weapon: nothing new to do.
-	if ( pm->ps->weaponstate == WEAPON_DROPPING && pm->ps->swapTarget == weapon ) {
-		return;
-	}
-
-	// Are we interrupting a swap that's already in flight? A drop or a raise
-	// means a weapon is mid-transition. Re-selecting a DIFFERENT weapon here is
-	// the alt-swap / "YY": the weapon we settle on comes up instantly ready
-	// (the raise is skipped). A first swap from READY/FIRING/RELOADING is a
-	// normal, deliberate switch and plays the full raise.
-	midSwap = ( pm->ps->weaponstate == WEAPON_DROPPING ||
-	            pm->ps->weaponstate == WEAPON_RAISING );
-
-	if ( midSwap ) {
-		pm->ps->pm_flags |= PMF_QUICKSWAP_PENDING;
-	} else {
-		pm->ps->pm_flags &= ~PMF_QUICKSWAP_PENDING;
-	}
-
-	// Redirect the swap to the new weapon.
-	pm->ps->swapTarget = weapon;
-
-	// Already dropping when a retap arrives = the YY cancel. Collapse the rest
-	// of the drop to zero so the swap resolves to READY on THIS pmove tick
-	// (PM_Weapon falls straight through to PM_FinishWeaponChange, which sees
-	// QUICKSWAP_PENDING and skips the raise too). Net result: a fast double-tap
-	// is a true instant, no-delay cancel - no leftover drop, no raise. A first
-	// swap from READY still plays the full slow drop+raise below.
 	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
-		pm->ps->weaponTime = 0;
-		return;
+		return;			// already holstering
 	}
 
 	PM_AddEvent( EV_CHANGE_WEAPON );
-	pm->ps->weaponTime  = 200;
+	// PM_DropTime() must be read BEFORE the state is overwritten - it is the
+	// outgoing state (WEAPON_RELOAD_END or not) that decides the holster length.
+	pm->ps->weaponTime  = PM_DropTime();
 	pm->ps->weaponstate = WEAPON_DROPPING;
 	PM_StartTorsoAnim( TORSO_DROP );
 }
@@ -1807,9 +1754,7 @@ PM_FinishWeaponChange
 static void PM_FinishWeaponChange( void ) {
 	int		weapon;
 
-	// We settle on whatever the drop was last redirected to (swapTarget),
-	// which already accounts for any mid-drop re-taps (the YY alt-swap).
-	weapon = pm->ps->swapTarget;
+	weapon = pm->cmd.weapon;
 	if ( weapon < WP_NONE || weapon >= WP_NUM_WEAPONS ) {
 		weapon = WP_NONE;
 	}
@@ -1819,21 +1764,12 @@ static void PM_FinishWeaponChange( void ) {
 	}
 
 	// Each weapon's magazine lives in ps->ammo[weapon], so it persists across
-	// modular weapnext/weapprev swaps for free - no per-slot bookkeeping.
-	pm->ps->weapon = weapon;
-	pm->ps->swapTarget = WP_NONE;	// swap resolved
-
-	// YY/alt-swap: skip the raise entirely, go straight to ready.
-	if ( pm->ps->pm_flags & PMF_QUICKSWAP_PENDING ) {
-		pm->ps->pm_flags    &= ~PMF_QUICKSWAP_PENDING;
-		pm->ps->weaponstate  = WEAPON_READY;
-		pm->ps->weaponTime   = 0;
-		PM_StartTorsoAnim( TORSO_STAND );
-	} else {
-		pm->ps->weaponstate = WEAPON_RAISING;
-		pm->ps->weaponTime  = 250;
-		PM_StartTorsoAnim( TORSO_RAISE );
-	}
+	// swaps for free - no per-slot bookkeeping.
+	pm->ps->weapon      = weapon;
+	pm->ps->weaponstate = WEAPON_RAISING;
+	pm->ps->weaponTime  = 250;
+	pm->ps->weaponDelay = 0;	// any interrupted reload is abandoned outright
+	PM_StartTorsoAnim( TORSO_RAISE );
 }
 
 
@@ -1883,13 +1819,14 @@ static void PM_CheckSprint( void ) {
 		pm->ps->pm_flags |= PMF_SPRINTING;
 		pm->ps->pm_flags &= ~PMF_ADS;
 
-		// Sprint entry cancels reload: weapon is pulled back before mag seats.
+		// Sprint entry cancels the reload outright - the gun goes to the hip
+		// before the mag can seat. Nothing is preserved: no rounds move, and
+		// the next reload starts from the beginning.
 		if ( !wasSprinting && pm->ps->weaponstate == WEAPON_RELOADING ) {
-			pm->ps->weaponstate = WEAPON_DROPPING;
-			pm->ps->weaponTime  = 200;
-			pm->ps->swapTarget  = pm->ps->weapon;
-			PM_AddEvent( EV_CHANGE_WEAPON );
-			PM_StartTorsoAnim( TORSO_DROP );
+			pm->ps->weaponstate = WEAPON_READY;
+			pm->ps->weaponTime  = 0;
+			pm->ps->weaponDelay = 0;
+			PM_StartTorsoAnim( TORSO_STAND );
 		}
 	} else {
 		pm->ps->pm_flags &= ~PMF_SPRINTING;
@@ -1962,36 +1899,54 @@ static void PM_Weapon( void ) {
 	}
 
 
-	// make weapon function
-	{
-		int prevWeaponTime = pm->ps->weaponTime;
-		if ( pm->ps->weaponTime > 0 ) {
-			pm->ps->weaponTime -= pml.msec;
+	// tick the weapon timers
+	if ( pm->ps->weaponTime > 0 ) {
+		pm->ps->weaponTime -= pml.msec;
+	}
+	if ( pm->ps->weaponDelay > WEAPONDELAY_FLOOR ) {
+		pm->ps->weaponDelay -= pml.msec;
+	}
+
+	// Mag-in pulse. weaponDelay crossed zero on THIS frame - never test for
+	// == 0, msec varies. Lasts exactly one pmove frame. No ammo moves here.
+	if ( pm->ps->weaponstate == WEAPON_RELOADING &&
+	     pm->ps->weaponDelay <= 0 &&
+	     pm->ps->weaponDelay + pml.msec > 0 ) {
+		pm->ps->weaponstate = WEAPON_RELOAD_END;
+		PM_AddEvent( EV_RELOAD_NOTETRACK );
+		if ( pm->debugLevel ) {
+			Com_Printf( "%i:magin wpn %i delay %i\n",
+				c_pmove, pm->ps->weapon, pm->ps->weaponDelay );
 		}
-		PM_ProcessNotetracks( prevWeaponTime );
 	}
 
 	// check for weapon change
 	if ( pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ) {
-		if ( pm->cmd.weapon != pm->ps->weapon && pm->cmd.weapon != pm->ps->swapTarget ) {
+		if ( pm->cmd.weapon != pm->ps->weapon ) {
 			PM_BeginWeaponChange( pm->cmd.weapon );
-		} else if ( pm->ps->weaponstate == WEAPON_DROPPING &&
-		            pm->ps->swapTarget != WP_NONE &&
-		            pm->cmd.weapon == pm->ps->weapon ) {
-			// Weapnext wrapped back to current weapon during drop = YY redirect.
-			// cmd.weapon == ps->weapon so the normal check above misses it.
-			// Redirect the drop back to ps->weapon and arm instant-ready.
-			PM_BeginWeaponChange( pm->ps->weapon );
+		}
+	}
+
+	// Finish a holster whose time is up. This sits BEFORE the weaponTime guard
+	// so a zero-length drop (the mag-in frame) resolves on the same frame it
+	// started - and returns, so the clip fill below never runs. That is the NAC.
+	if ( pm->ps->weaponstate == WEAPON_DROPPING && pm->ps->weaponTime <= 0 ) {
+		PM_FinishWeaponChange();
+		return;
+	}
+
+	// Still on the mag-in frame, so no switch claimed it: the rounds go in now.
+	if ( pm->ps->weaponstate == WEAPON_RELOAD_END ) {
+		PM_ReloadFillClip( pm->ps->weapon );
+		if ( pm->ps->weaponTime > 0 ) {
+			pm->ps->weaponstate = WEAPON_RELOADING;	// play out the settle
+		} else {
+			pm->ps->weaponstate = WEAPON_READY;
+			PM_StartTorsoAnim( TORSO_STAND );
 		}
 	}
 
 	if ( pm->ps->weaponTime > 0 ) {
-		return;
-	}
-
-	// change weapon if time
-	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
-		PM_FinishWeaponChange();
 		return;
 	}
 
@@ -2005,16 +1960,9 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
-	// Reload played out. NAC (if any) already fired in PM_ProcessNotetracks and
-	// changed state to WEAPON_READY, so if we're still WEAPON_RELOADING here the
-	// player didn't cancel: commit the mag and go ready.
+	// Reload settle finished. The clip was already filled on the mag-in frame,
+	// so there is nothing to move here - just go ready.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
-		int magSize = BG_WeaponMagSize( pm->ps->weapon );
-		int needed  = magSize - pm->ps->ammo[pm->ps->weapon];
-		int reserve = pm->ps->ammoReserve[pm->ps->weapon];
-		int give    = ( reserve >= needed ) ? needed : reserve;
-		pm->ps->ammoReserve[pm->ps->weapon] -= give;
-		pm->ps->ammo[pm->ps->weapon]         += give;
 		pm->ps->weaponstate = WEAPON_READY;
 		PM_StartTorsoAnim( TORSO_STAND );
 		return;

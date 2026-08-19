@@ -168,23 +168,30 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	animLayer_t *sprint = &cg_weapLayers[LAYER_SPRINT];
 	int i;
 
-	// Which layer wins when a swap collides with the sprint carry. The two CoD
-	// engine families answer this differently, so it is a policy, not a rule:
-	//   cg_weapSprintPriority 1 (Infinity Ward) - the sprint anim is preserved.
-	//     Swapping out of the carry never draws a drop, and swapping out of the
-	//     sprint-IN transition holds on that clip's final frame, i.e. the last
-	//     pose before the full sprint would have begun. That freeze is not coded
-	//     anywhere: a non-looping clip clamps to its last frame in
-	//     CG_WeapAnim_SampleLayer, and holding the layer just stops it being
-	//     re-aimed. A looping sprint carry keeps running for the same reason.
-	//   cg_weapSprintPriority 0 (Treyarch) - the swap anim takes priority and
-	//     the sprint blends out under it.
-	// Either way the weapon state machine is untouched: the holster still runs
-	// its normal timer, so only the picture differs.
-	qboolean swapping     = ( ps->weaponstate == WEAPON_RAISING ||
-	                          ps->weaponstate == WEAPON_DROPPING );
-	qboolean sprintHolds  = ( cg_weapSprintPriority.integer &&
-	                          swapping && sprint->weight > 0.0f );
+	// IW4 still swap. When a weapon swap collides with the sprint carry, the
+	// SPRINT animation wins and the swap is never drawn.
+	//
+	// This is deliberately NOT configurable and must not be made configurable.
+	// The other CoD family (Treyarch) lets the swap anim take priority instead;
+	// that is a different game and Peace is not it. This behaviour is load
+	// bearing for how the weapon system is meant to feel, so it is expressed as
+	// a rule in code rather than a cvar that could be archived to the wrong
+	// value and quietly change the feel of the game.
+	//
+	// Two consequences fall out of "hold the layer and stop re-aiming it", and
+	// neither is coded for directly:
+	//   - Swapping out of the sprint-IN transition holds that clip's final
+	//     frame - the last pose before the full sprint would have begun -
+	//     because CG_WeapAnim_SampleLayer clamps a NON-LOOPING clip to its end.
+	//   - Swapping out of the full sprint carry keeps the carry running, because
+	//     that clip is LOOPING and the same clamp does not apply.
+	// The clip's loop flag decides which of the two happens. There is no branch.
+	//
+	// The weapon state machine is untouched either way: the holster still runs
+	// its full BG_WeaponDropTime, so this changes the tell, never the timing.
+	qboolean swapping    = ( ps->weaponstate == WEAPON_RAISING ||
+	                         ps->weaponstate == WEAPON_DROPPING );
+	qboolean sprintHolds = ( swapping && sprint->weight > 0.0f );
 
 	// -- Base layer: swap between idle and fire --
 	if ( ps->weaponstate == WEAPON_FIRING ) {

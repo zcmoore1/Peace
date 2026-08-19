@@ -106,7 +106,6 @@ vmCvar_t	cg_draw3dIcons;
 vmCvar_t	cg_drawIcons;
 vmCvar_t	cg_drawAmmoWarning;
 vmCvar_t	cg_weaponDebug;
-vmCvar_t	cg_weapSprintPriority;
 vmCvar_t	cg_drawCrosshair;
 vmCvar_t	cg_drawCrosshairNames;
 vmCvar_t	cg_drawRewards;
@@ -227,10 +226,6 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_drawIcons, "cg_drawIcons", "1", CVAR_ARCHIVE  },
 	{ &cg_drawAmmoWarning, "cg_drawAmmoWarning", "1", CVAR_ARCHIVE  },
 	{ &cg_weaponDebug, "cg_weaponDebug", "0", CVAR_ARCHIVE  },
-	// Which layer wins when a weapon swap happens during the sprint carry.
-	// 1 = Infinity Ward: the sprint anim is preserved (a still swap).
-	// 0 = Treyarch: the swap anim takes priority and plays over the sprint.
-	{ &cg_weapSprintPriority, "cg_weapSprintPriority", "1", CVAR_ARCHIVE  },
 	{ &cg_drawAttacker, "cg_drawAttacker", "1", CVAR_ARCHIVE  },
 	{ &cg_drawCrosshair, "cg_drawCrosshair", "4", CVAR_ARCHIVE },
 	{ &cg_drawCrosshairNames, "cg_drawCrosshairNames", "1", CVAR_ARCHIVE },

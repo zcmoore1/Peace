@@ -1105,7 +1105,6 @@ extern	vmCvar_t		cg_draw3dIcons;
 extern	vmCvar_t		cg_drawIcons;
 extern	vmCvar_t		cg_drawAmmoWarning;
 extern	vmCvar_t		cg_weaponDebug;
-extern	vmCvar_t		cg_weapSprintPriority;
 extern	vmCvar_t		cg_drawCrosshair;
 extern	vmCvar_t		cg_drawCrosshairNames;
 extern	vmCvar_t		cg_drawRewards;

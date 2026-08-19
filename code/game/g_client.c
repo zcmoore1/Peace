@@ -1164,19 +1164,10 @@ void ClientSpawn(gentity_t *ent) {
 
 	client->ps.clientNum = index;
 
-	// Slot 1 - primary
-	client->ps.stats[STAT_WEAPONS] = ( 1 << WP_MACHINEGUN );
-	client->ps.ammo[WP_MACHINEGUN]        = BG_WeaponMagSize( WP_MACHINEGUN );
-	client->ps.ammoReserve[WP_MACHINEGUN] = BG_WeaponMaxReserve( WP_MACHINEGUN );
-
-	// Slot 2 - secondary
-	client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_SHOTGUN );
-	client->ps.ammo[WP_SHOTGUN]        = BG_WeaponMagSize( WP_SHOTGUN );
-	client->ps.ammoReserve[WP_SHOTGUN] = BG_WeaponMaxReserve( WP_SHOTGUN );
-
-	client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_GAUNTLET );
-	client->ps.ammo[WP_GAUNTLET] = -1;
-	client->ps.ammo[WP_GRAPPLING_HOOK] = -1;
+	// Whole loadout comes from the chosen class - two weapon slots, melee,
+	// underbarrel and equipment counts. One shared function so the server and
+	// any future loadout-change path can never disagree.
+	BG_ApplyLoadout( &client->ps, client->pers.selectedClass );
 
 	// health will count down towards max_health
 	ent->health = client->ps.stats[STAT_HEALTH] = client->ps.stats[STAT_MAX_HEALTH] + 25;
@@ -1215,15 +1206,10 @@ void ClientSpawn(gentity_t *ent) {
 			client->ps.pm_flags &= ~PMF_PENDING_MAG;
 			// fire the targets of the spawn point
 			G_UseTargets(spawnPoint, ent);
-			// select the highest weapon number available, after any spawn given items have fired
-			client->ps.weapon = 1;
-
-			for (i = WP_NUM_WEAPONS - 1 ; i > 0 ; i--) {
-				if (client->ps.stats[STAT_WEAPONS] & (1 << i)) {
-					client->ps.weapon = i;
-					break;
-				}
-			}
+			// Start on the primary slot. (Stock Q3 picked the highest owned weapon
+			// index here, which would now hand you the underbarrel.)
+			client->ps.weapon = client->ps.stats[STAT_SLOT_PRIMARY];
+			client->ps.stats[STAT_ACTIVE_SLOT] = SLOT_PRIMARY;
 			// positively link the client, even if the command times are weird
 			VectorCopy(ent->client->ps.origin, ent->r.currentOrigin);
 

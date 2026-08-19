@@ -272,7 +272,20 @@ typedef enum {
 	STAT_ARMOR,
 	STAT_DEAD_YAW,					// look this direction when dead (FIXME: get rid of?)
 	STAT_CLIENTS_READY,				// bit mask of clients wishing to exit the intermission (FIXME: configstring?)
-	STAT_MAX_HEALTH					// health / armor limit, changeable by handicap
+	STAT_MAX_HEALTH,				// health / armor limit, changeable by handicap
+
+	// --- loadout ---
+	// stats[] entries are networked as 16-bit shorts (msg.c), which is plenty
+	// for weapon indices and small counts, and costs no new playerState field.
+	STAT_SLOT_PRIMARY,				// weapon_t held in slot 1
+	STAT_SLOT_SECONDARY,			// weapon_t held in slot 2
+	STAT_ACTIVE_SLOT,				// weaponSlot_t the player is "on" (melee and
+									// equipment do not change it - they return here)
+	STAT_LETHAL_COUNT,				// lethal equipment remaining
+	STAT_TACTICAL_COUNT,			// tactical equipment remaining
+	STAT_UNDERBARREL,				// weapon_t of the attachment, or WP_NONE
+	STAT_USE_TARGET,				// entity being picked up, or -1
+	STAT_USE_PROGRESS				// ms of hold accumulated toward the pickup
 } statIndex_t;
 
 
@@ -382,8 +395,41 @@ typedef enum {
 	WP_CHAINGUN,
 #endif
 
+	// Loadout extras. These are weapon_t entries so they reuse the whole pmove
+	// state machine (switch timing, notes, firing) for free, but they are NOT
+	// inventory slots - melee is always available and equipment lives in its
+	// own slots. Basegame indices: KNIFE 11, FRAG 12, FLASH 13, M203 14.
+	WP_KNIFE,			// melee, always carried
+	WP_FRAG,			// lethal equipment
+	WP_FLASH,			// tactical equipment
+	WP_M203,			// underbarrel attachment
+
 	WP_NUM_WEAPONS
 } weapon_t;
+
+// Inventory slots. Two weapons, CoD style.
+typedef enum {
+	SLOT_PRIMARY,
+	SLOT_SECONDARY,
+	SLOT_COUNT
+} weaponSlot_t;
+
+// A class is a whole loadout: two weapons, an optional underbarrel attachment,
+// and the two equipment slots. Melee is not listed because it is always carried.
+typedef struct {
+	const char	*name;
+	int			slot[SLOT_COUNT];	// weapon_t in each weapon slot
+	int			underbarrel;		// weapon_t attached to the primary, or WP_NONE
+	int			lethal;				// weapon_t thrown by BUTTON_LETHAL
+	int			lethalCount;
+	int			tactical;			// weapon_t thrown by BUTTON_TACTICAL
+	int			tacticalCount;
+} bg_class_t;
+
+int					BG_ClassCount( void );
+const bg_class_t	*BG_Class( int index );
+void				BG_ApplyLoadout( playerState_t *ps, int classIndex );
+
 
 
 // reward sounds (stored in ps->persistant[PERS_PLAYEREVENTS])

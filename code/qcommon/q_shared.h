@@ -1237,6 +1237,12 @@ typedef struct playerState_s {
 #define BUTTON_RELOAD		4096			// manual reload (R key / bit 12)
 #define BUTTON_SPRINT		8192			// sprint (shift / bit 13)
 #define BUTTON_ADS			16384			// aim down sights (right-mouse / bit 14)
+#define BUTTON_MELEE		32768			// melee, always available (bit 15)
+#define BUTTON_LETHAL		65536			// throw lethal equipment (bit 16)
+#define BUTTON_TACTICAL		131072			// throw tactical equipment (bit 17)
+#define BUTTON_USE			262144			// hold to pick up / interact (bit 18)
+#define BUTTON_ALTFIRE		524288			// underbarrel / alt weapon toggle (bit 19)
+// usercmd_t.buttons is delta-encoded with 32 bits (msg.c) - bits 20..31 spare.
 
 #define	MOVE_RUN			120			// if forwardmove or rightmove are >= MOVE_RUN,
 										// then BUTTON_WALKING should be set

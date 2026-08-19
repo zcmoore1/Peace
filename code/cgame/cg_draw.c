@@ -2388,6 +2388,75 @@ static void CG_DrawAmmoCount( void ) {
 }
 
 /*
+===============
+CG_DrawLoadoutHud
+
+Modern-FPS bottom-right block: the two weapon slots (active one highlighted,
+showing mag / reserve) and the equipment counts. Reads ps only - it never
+decides anything, it just shows what the loadout already is.
+===============
+*/
+static void CG_DrawLoadoutHud( void ) {
+	playerState_t	*ps;
+	char			line[64];
+	int				x, y;
+	int				i, w, slotWpn;
+	vec4_t			dim    = { 1.0f, 1.0f, 1.0f, 0.45f };
+	vec4_t			bright = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+	if ( cg.snap->ps.pm_type == PM_INTERMISSION ) {
+		return;
+	}
+	if ( cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR ) {
+		return;
+	}
+
+	ps = &cg.predictedPlayerState;
+	x  = 420;
+	y  = 380;
+
+	for ( i = 0; i < SLOT_COUNT; i++ ) {
+		slotWpn = ( i == SLOT_PRIMARY )
+		        ? ps->stats[STAT_SLOT_PRIMARY]
+		        : ps->stats[STAT_SLOT_SECONDARY];
+
+		if ( slotWpn <= WP_NONE || slotWpn >= WP_NUM_WEAPONS ) {
+			continue;
+		}
+
+		// The active slot is the one the player is "on", even while a temporary
+		// selection (melee / equipment / underbarrel) is out.
+		trap_R_SetColor( ( ps->stats[STAT_ACTIVE_SLOT] == i ) ? bright : dim );
+
+		if ( BG_WeaponMagSize( slotWpn ) > 0 ) {
+			Com_sprintf( line, sizeof( line ), "%s  %i / %i",
+				( i == SLOT_PRIMARY ) ? "1" : "2",
+				ps->ammo[slotWpn], ps->ammoReserve[slotWpn] );
+		} else {
+			Com_sprintf( line, sizeof( line ), "%s  --",
+				( i == SLOT_PRIMARY ) ? "1" : "2" );
+		}
+		CG_DrawSmallString( x, y, line, 1.0f );
+		y += SMALLCHAR_HEIGHT + 2;
+	}
+
+	trap_R_SetColor( bright );
+
+	w = ps->stats[STAT_UNDERBARREL];
+	if ( w > WP_NONE && w < WP_NUM_WEAPONS ) {
+		Com_sprintf( line, sizeof( line ), "UB  %i", ps->ammo[w] );
+		CG_DrawSmallString( x, y, line, 1.0f );
+		y += SMALLCHAR_HEIGHT + 2;
+	}
+
+	Com_sprintf( line, sizeof( line ), "LETHAL %i   TAC %i",
+		ps->stats[STAT_LETHAL_COUNT], ps->stats[STAT_TACTICAL_COUNT] );
+	CG_DrawSmallString( x, y, line, 1.0f );
+
+	trap_R_SetColor( NULL );
+}
+
+/*
 =================
 CG_DrawWeaponDebug
 
@@ -2713,6 +2782,7 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 
 			CG_DrawAmmoWarning();
 			CG_DrawAmmoCount();
+			CG_DrawLoadoutHud();
 			CG_DrawWeaponDebug();
 
 #ifdef MISSIONPACK

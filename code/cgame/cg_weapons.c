@@ -1575,7 +1575,8 @@ CG_NextWeapon_f
 ===============
 */
 void CG_NextWeapon_f( void ) {
-	int		i;
+	playerState_t	*ps;
+	int				slot, want;
 
 	if ( !cg.snap ) {
 		return;
@@ -1584,19 +1585,27 @@ void CG_NextWeapon_f( void ) {
 		return;
 	}
 
-	cg.weaponSelectTime = cg.time;
+	ps = &cg.snap->ps;
 
-	// 2-slot toggle: find the first selectable weapon that isn't the current one.
-	for ( i = 1; i < MAX_WEAPONS; i++ ) {
-		int candidate = ( cg.weaponSelect + i ) % MAX_WEAPONS;
-		if ( candidate == WP_NONE || candidate == WP_GAUNTLET || candidate == WP_GRAPPLING_HOOK ) {
-			continue;
-		}
-		if ( CG_WeaponSelectable( candidate ) ) {
-			cg.weaponSelect = candidate;
-			return;
-		}
+	// Two slots: weapnext is a toggle between them. Melee, equipment and the
+	// underbarrel are NOT slots - they are temporary selections that return
+	// here, so the toggle is always primary <-> secondary.
+	slot = ( ps->stats[STAT_ACTIVE_SLOT] == SLOT_PRIMARY )
+	     ? SLOT_SECONDARY : SLOT_PRIMARY;
+
+	want = ( slot == SLOT_PRIMARY )
+	     ? ps->stats[STAT_SLOT_PRIMARY]
+	     : ps->stats[STAT_SLOT_SECONDARY];
+
+	if ( want <= WP_NONE || want >= WP_NUM_WEAPONS ) {
+		return;					// empty slot - nothing to swap to
 	}
+	if ( !( ps->stats[STAT_WEAPONS] & ( 1 << want ) ) ) {
+		return;
+	}
+
+	cg.weaponSelectTime = cg.time;
+	cg.weaponSelect     = want;
 }
 
 /*

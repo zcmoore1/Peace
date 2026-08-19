@@ -56,7 +56,7 @@ kbutton_t	in_up, in_down;
 kbutton_t	in_voiprecord;
 #endif
 
-kbutton_t	in_buttons[16];
+kbutton_t	in_buttons[32];
 
 
 qboolean	in_mlooking;
@@ -266,6 +266,14 @@ void IN_Button14Down(void) {IN_KeyDown(&in_buttons[14]);}
 void IN_Button14Up(void) {IN_KeyUp(&in_buttons[14]);}
 void IN_Button15Down(void) {IN_KeyDown(&in_buttons[15]);}
 void IN_Button15Up(void) {IN_KeyUp(&in_buttons[15]);}
+void IN_Button16Down(void) {IN_KeyDown(&in_buttons[16]);}
+void IN_Button16Up(void) {IN_KeyUp(&in_buttons[16]);}
+void IN_Button17Down(void) {IN_KeyDown(&in_buttons[17]);}
+void IN_Button17Up(void) {IN_KeyUp(&in_buttons[17]);}
+void IN_Button18Down(void) {IN_KeyDown(&in_buttons[18]);}
+void IN_Button18Up(void) {IN_KeyUp(&in_buttons[18]);}
+void IN_Button19Down(void) {IN_KeyDown(&in_buttons[19]);}
+void IN_Button19Up(void) {IN_KeyUp(&in_buttons[19]);}
 
 void IN_CenterView (void) {
 	cl.viewangles[PITCH] = -SHORT2ANGLE(cl.snap.ps.delta_angles[PITCH]);
@@ -530,7 +538,7 @@ void CL_CmdButtons( usercmd_t *cmd ) {
 	// send a button bit even if the key was pressed and released in
 	// less than a frame
 	//	
-	for (i = 0 ; i < 15 ; i++) {
+	for (i = 0 ; i < 32 ; i++) {
 		if ( in_buttons[i].active || in_buttons[i].wasPressed ) {
 			cmd->buttons |= 1 << i;
 		}
@@ -966,6 +974,16 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-sprint", IN_Button13Up);
 	Cmd_AddCommand ("+ads", IN_Button14Down);		// BUTTON_ADS = bit 14
 	Cmd_AddCommand ("-ads", IN_Button14Up);
+	Cmd_AddCommand ("+melee", IN_Button15Down);		// BUTTON_MELEE = bit 15
+	Cmd_AddCommand ("-melee", IN_Button15Up);
+	Cmd_AddCommand ("+lethal", IN_Button16Down);	// BUTTON_LETHAL = bit 16
+	Cmd_AddCommand ("-lethal", IN_Button16Up);
+	Cmd_AddCommand ("+tactical", IN_Button17Down);	// BUTTON_TACTICAL = bit 17
+	Cmd_AddCommand ("-tactical", IN_Button17Up);
+	Cmd_AddCommand ("+use", IN_Button18Down);		// BUTTON_USE = bit 18
+	Cmd_AddCommand ("-use", IN_Button18Up);
+	Cmd_AddCommand ("+altfire", IN_Button19Down);	// BUTTON_ALTFIRE = bit 19
+	Cmd_AddCommand ("-altfire", IN_Button19Up);
 	Cmd_AddCommand ("+button0", IN_Button0Down);
 	Cmd_AddCommand ("-button0", IN_Button0Up);
 	Cmd_AddCommand ("+button1", IN_Button1Down);

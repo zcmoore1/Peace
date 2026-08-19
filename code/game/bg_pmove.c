@@ -1482,9 +1482,12 @@ static const int bg_weaponMagSize[MAX_WEAPONS] = {
 	30,		// WP_PLASMAGUN
 	1,		// WP_BFG
 	0,		// WP_GRAPPLING_HOOK (infinite)
-	20,		// WP_NAILGUN
-	5,		// WP_PROX_LAUNCHER
-	60,		// WP_CHAINGUN
+	// NOTE: basegame has no missionpack weapons, so slots 11..14 are the
+	// loadout extras. STAT_WEAPONS is a 16-bit mask, so 15 weapons is the cap.
+	0,		// WP_KNIFE          (no magazine)
+	1,		// WP_FRAG           (one in hand)
+	1,		// WP_FLASH
+	1,		// WP_M203           (single grenade)
 };
 
 // ---------------------------------------------------------------------------
@@ -1559,11 +1562,10 @@ static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
 	/* WP_PLASMAGUN       */ { { SEG_NONE, { 800,  bgnotes_mag_fast },  SEG_NONE } },
 	/* WP_BFG             */ { { SEG_NONE, { 1500, bgnotes_mag_bfg },   SEG_NONE } },
 	/* WP_GRAPPLING_HOOK  */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
-	/* WP_NAILGUN         */ { { SEG_NONE, { 1000, bgnotes_mag },       SEG_NONE } },
-	/* WP_PROX_LAUNCHER   */ { { { 450, bgnotes_shell_start },
-	                             { 600, bgnotes_shell_loop },
-	                             { 300, bgnotes_shell_end } } },
-	/* WP_CHAINGUN        */ { { SEG_NONE, { 1200, bgnotes_mag_heavy }, SEG_NONE } },
+	/* WP_KNIFE           */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
+	/* WP_FRAG            */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
+	/* WP_FLASH           */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
+	/* WP_M203            */ { { SEG_NONE, { 1400, bgnotes_mag_heavy }, SEG_NONE } },
 };
 
 // Holster / deploy lengths. Always stamped on a weapon change - never 0, so a
@@ -1582,9 +1584,10 @@ static const int bg_weaponDropTime[MAX_WEAPONS] = {
 	200,	// WP_PLASMAGUN
 	300,	// WP_BFG
 	150,	// WP_GRAPPLING_HOOK
-	200,	// WP_NAILGUN
-	200,	// WP_PROX_LAUNCHER
-	250,	// WP_CHAINGUN
+	80,		// WP_KNIFE          (snappy melee)
+	100,	// WP_FRAG
+	100,	// WP_FLASH
+	120,	// WP_M203
 };
 
 static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
@@ -1599,9 +1602,10 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 	250,	// WP_PLASMAGUN
 	400,	// WP_BFG
 	200,	// WP_GRAPPLING_HOOK
-	250,	// WP_NAILGUN
-	250,	// WP_PROX_LAUNCHER
-	300,	// WP_CHAINGUN
+	120,	// WP_KNIFE
+	150,	// WP_FRAG
+	150,	// WP_FLASH
+	180,	// WP_M203
 };
 
 int BG_WeaponMagSize( int weapon ) {
@@ -1655,9 +1659,10 @@ static const int bg_weaponMaxReserve[MAX_WEAPONS] = {
 	120,	// WP_PLASMAGUN      (30 * 4)
 	3,		// WP_BFG            (1 * 3)
 	0,		// WP_GRAPPLING_HOOK
-	80,		// WP_NAILGUN        (20 * 4)
-	20,		// WP_PROX_LAUNCHER  (5 * 4)
-	180,	// WP_CHAINGUN       (60 * 3)
+	0,		// WP_KNIFE
+	0,		// WP_FRAG           (count lives in STAT_LETHAL_COUNT)
+	0,		// WP_FLASH          (count lives in STAT_TACTICAL_COUNT)
+	4,		// WP_M203
 };
 
 int BG_WeaponMaxReserve( int weapon ) {
@@ -1682,9 +1687,10 @@ static const int bg_weaponSpread[MAX_WEAPONS] = {
 	0,		// WP_PLASMAGUN
 	0,		// WP_BFG
 	0,		// WP_GRAPPLING_HOOK
-	0,		// WP_NAILGUN
-	0,		// WP_PROX_LAUNCHER
-	600,	// WP_CHAINGUN
+	0,		// WP_KNIFE
+	0,		// WP_FRAG
+	0,		// WP_FLASH
+	0,		// WP_M203
 };
 
 int BG_WeaponBaseSpread( int weapon ) {
@@ -1740,6 +1746,113 @@ game module to aim the trace and by cgame to size the crosshair.
 */
 float BG_WeaponSpread( const playerState_t *ps ) {
 	return (float)BG_WeaponBaseSpread( ps->weapon ) * BG_SpreadScale( ps );
+}
+
+// ---------------------------------------------------------------------------
+// Classes. Data only - add rows here and they appear in the class menu.
+// ---------------------------------------------------------------------------
+static const bg_class_t bg_classes[] = {
+	{	"Assault",
+		{ WP_MACHINEGUN, WP_SHOTGUN },
+		WP_M203,
+		WP_FRAG,  2,
+		WP_FLASH, 2
+	},
+	{	"Scout",
+		{ WP_RAILGUN, WP_MACHINEGUN },
+		WP_NONE,
+		WP_FRAG,  1,
+		WP_FLASH, 3
+	},
+	{	"Demolition",
+		{ WP_ROCKET_LAUNCHER, WP_SHOTGUN },
+		WP_NONE,
+		WP_FRAG,  3,
+		WP_FLASH, 1
+	},
+	{	"Support",
+		{ WP_PLASMAGUN, WP_LIGHTNING },
+		WP_NONE,
+		WP_FRAG,  2,
+		WP_FLASH, 2
+	},
+};
+
+int BG_ClassCount( void ) {
+	return (int)( sizeof( bg_classes ) / sizeof( bg_classes[0] ) );
+}
+
+const bg_class_t *BG_Class( int index ) {
+	if ( index < 0 || index >= BG_ClassCount() ) {
+		index = 0;
+	}
+	return &bg_classes[index];
+}
+
+/*
+===============
+BG_ApplyLoadout
+
+Write a class onto a playerState: both weapon slots (full mag + reserve), the
+underbarrel, the equipment counts, and the melee that everyone always carries.
+Shared so the server spawn path and any future respawn/loadout-change path can
+never disagree about what a class means.
+===============
+*/
+void BG_ApplyLoadout( playerState_t *ps, int classIndex ) {
+	const bg_class_t	*cl = BG_Class( classIndex );
+	int					i, w;
+
+	ps->stats[STAT_WEAPONS] = 0;
+	for ( i = 0; i < MAX_WEAPONS; i++ ) {
+		ps->ammo[i]        = 0;
+		ps->ammoReserve[i] = 0;
+	}
+
+	// Two weapon slots.
+	for ( i = 0; i < SLOT_COUNT; i++ ) {
+		w = cl->slot[i];
+		if ( w <= WP_NONE || w >= WP_NUM_WEAPONS ) {
+			w = WP_MACHINEGUN;
+		}
+		ps->stats[STAT_WEAPONS] |= ( 1 << w );
+		ps->ammo[w]        = BG_WeaponMagSize( w );
+		ps->ammoReserve[w] = BG_WeaponMaxReserve( w );
+	}
+	ps->stats[STAT_SLOT_PRIMARY]   = cl->slot[SLOT_PRIMARY];
+	ps->stats[STAT_SLOT_SECONDARY] = cl->slot[SLOT_SECONDARY];
+	ps->stats[STAT_ACTIVE_SLOT]    = SLOT_PRIMARY;
+
+	// Melee is never a slot - you always have it.
+	ps->stats[STAT_WEAPONS] |= ( 1 << WP_KNIFE );
+	ps->ammo[WP_KNIFE] = -1;
+
+	// Underbarrel rides on the primary.
+	ps->stats[STAT_UNDERBARREL] = cl->underbarrel;
+	if ( cl->underbarrel > WP_NONE && cl->underbarrel < WP_NUM_WEAPONS ) {
+		ps->stats[STAT_WEAPONS] |= ( 1 << cl->underbarrel );
+		ps->ammo[cl->underbarrel]        = BG_WeaponMagSize( cl->underbarrel );
+		ps->ammoReserve[cl->underbarrel] = BG_WeaponMaxReserve( cl->underbarrel );
+	}
+
+	// Equipment. The count is the inventory - the weapon entry only exists so
+	// the throw can reuse the normal weapon state machine.
+	ps->stats[STAT_LETHAL_COUNT]   = cl->lethalCount;
+	ps->stats[STAT_TACTICAL_COUNT] = cl->tacticalCount;
+	if ( cl->lethal > WP_NONE && cl->lethal < WP_NUM_WEAPONS ) {
+		ps->stats[STAT_WEAPONS] |= ( 1 << cl->lethal );
+		ps->ammo[cl->lethal] = cl->lethalCount;
+	}
+	if ( cl->tactical > WP_NONE && cl->tactical < WP_NUM_WEAPONS ) {
+		ps->stats[STAT_WEAPONS] |= ( 1 << cl->tactical );
+		ps->ammo[cl->tactical] = cl->tacticalCount;
+	}
+
+	ps->stats[STAT_USE_TARGET]   = -1;
+	ps->stats[STAT_USE_PROGRESS] = 0;
+
+	ps->weapon      = cl->slot[SLOT_PRIMARY];
+	ps->weaponstate = WEAPON_READY;
 }
 
 /*

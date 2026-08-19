@@ -1703,6 +1703,43 @@ void Cmd_Stats_f( gentity_t *ent ) {
 
 /*
 =================
+Cmd_Class_f
+
+"class"        - list the classes and show the current one
+"class <n>"    - pick a class. Takes effect on the next spawn, like CoD.
+=================
+*/
+void Cmd_Class_f( gentity_t *ent ) {
+	char	arg[MAX_TOKEN_CHARS];
+	int		i, n;
+
+	if ( trap_Argc() < 2 ) {
+		trap_SendServerCommand( ent - g_entities, "print \"Classes:\n\"" );
+		for ( i = 0; i < BG_ClassCount(); i++ ) {
+			trap_SendServerCommand( ent - g_entities,
+				va( "print \"  %i %s%s\n\"", i, BG_Class( i )->name,
+					( i == ent->client->pers.selectedClass ) ? "  <-- current" : "" ) );
+		}
+		trap_SendServerCommand( ent - g_entities,
+			"print \"Use: class <number>\n\"" );
+		return;
+	}
+
+	trap_Argv( 1, arg, sizeof( arg ) );
+	n = atoi( arg );
+	if ( n < 0 || n >= BG_ClassCount() ) {
+		trap_SendServerCommand( ent - g_entities,
+			va( "print \"No such class %i\n\"", n ) );
+		return;
+	}
+
+	ent->client->pers.selectedClass = n;
+	trap_SendServerCommand( ent - g_entities,
+		va( "print \"Class set to %s - respawn to apply.\n\"", BG_Class( n )->name ) );
+}
+
+/*
+=================
 ClientCommand
 =================
 */
@@ -1801,6 +1838,8 @@ void ClientCommand( int clientNum ) {
 		Cmd_FollowCycle_f (ent, -1);
 	else if (Q_stricmp (cmd, "team") == 0)
 		Cmd_Team_f (ent);
+	else if (Q_stricmp (cmd, "class") == 0)
+		Cmd_Class_f (ent);
 	else if (Q_stricmp (cmd, "where") == 0)
 		Cmd_Where_f (ent);
 	else if (Q_stricmp (cmd, "callvote") == 0)

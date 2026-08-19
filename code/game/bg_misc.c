@@ -203,6 +203,59 @@ gitem_t	bg_itemlist[] =
 /* sounds */ ""
 	},
 
+/*QUAKED weapon_knife (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
+Melee. Never spawns in a map - the entry exists because every weapon in
+STAT_WEAPONS must resolve to an item: CG_RegisterWeapon CG_Error()s otherwise,
+and the weapon-select HUD walks every owned bit.
+*/
+	{
+		"weapon_knife",
+		"sound/misc/w_pkup.wav",
+        { "models/weapons2/gauntlet/gauntlet.md3",
+		NULL, NULL, NULL},
+/* icon */		"icons/iconw_gauntlet",
+/* pickup */	"Knife",
+		0,
+		IT_WEAPON,
+		WP_KNIFE,
+/* precache */ "",
+/* sounds */ ""
+	},
+
+/*QUAKED weapon_frag (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
+Lethal equipment. Placeholder visuals until real assets land.
+*/
+	{
+		"weapon_frag",
+		"sound/misc/w_pkup.wav",
+        { "models/weapons2/grenadel/grenadel.md3",
+		NULL, NULL, NULL},
+/* icon */		"icons/iconw_grenade",
+/* pickup */	"Frag Grenade",
+		0,
+		IT_WEAPON,
+		WP_FRAG,
+/* precache */ "",
+/* sounds */ ""
+	},
+
+/*QUAKED weapon_flash (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
+Tactical equipment. Placeholder visuals until real assets land.
+*/
+	{
+		"weapon_flash",
+		"sound/misc/w_pkup.wav",
+        { "models/weapons2/grenadel/grenadel.md3",
+		NULL, NULL, NULL},
+/* icon */		"icons/iconw_grenade",
+/* pickup */	"Flashbang",
+		0,
+		IT_WEAPON,
+		WP_FLASH,
+/* precache */ "",
+/* sounds */ ""
+	},
+
 /*QUAKED weapon_shotgun (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{

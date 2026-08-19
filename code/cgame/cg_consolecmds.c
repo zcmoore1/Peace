@@ -462,6 +462,94 @@ typedef struct {
 	void	(*function)(void);
 } consoleCommand_t;
 
+
+/*
+=================
+CG_PeaceDump_f
+
+One command that prints everything worth knowing about the local player's
+weapon state in a single pasteable block. Beats scrolling the console when
+something misbehaves - and pairs with "condump" to get it into a file.
+
+  peacedump                  print to console
+  peacedump; condump out.txt print, then write the whole console to a file
+=================
+*/
+static const char *CG_PD_StateName( int st ) {
+	switch ( st ) {
+	case WEAPON_READY:			return "READY";
+	case WEAPON_RAISING:		return "RAISING";
+	case WEAPON_DROPPING:		return "DROPPING";
+	case WEAPON_FIRING:			return "FIRING";
+	case WEAPON_RELOADING:		return "RELOADING";
+	case WEAPON_SPRINT_IN:		return "SPRINT_IN";
+	case WEAPON_SPRINTING:		return "SPRINTING";
+	case WEAPON_SPRINT_OUT:		return "SPRINT_OUT";
+	default:					return "?";
+	}
+}
+
+static const char *CG_PD_SeqName( int seq ) {
+	switch ( seq ) {
+	case RSEQ_START:	return "START";
+	case RSEQ_LOOP:		return "LOOP";
+	case RSEQ_END:		return "END";
+	default:			return "?";
+	}
+}
+
+static void CG_PeaceDump_f( void ) {
+	playerState_t			*ps = &cg.predictedPlayerState;
+	const bg_weaponReload_t	*rl;
+	const bg_weaponNote_t	*n;
+	int						w, i;
+
+	w  = ps->weapon;
+	rl = BG_WeaponReload( w );
+
+	CG_Printf( "---------------- peacedump ----------------\n" );
+	CG_Printf( "weapon   %i   state %s   wTime %i\n",
+		w, CG_PD_StateName( ps->weaponstate ), ps->weaponTime );
+	CG_Printf( "anim     elapsed %i   seq %s   pendingMag %s\n",
+		ps->weaponAnimTime, CG_PD_SeqName( ps->weaponAnimSeq ),
+		( ps->pm_flags & PMF_PENDING_MAG ) ? "YES" : "no" );
+	CG_Printf( "flags    sprint %s  ads %s  ducked %s\n",
+		( ps->pm_flags & PMF_SPRINTING ) ? "Y" : "n",
+		( ps->pm_flags & PMF_ADS )       ? "Y" : "n",
+		( ps->pm_flags & PMF_DUCKED )    ? "Y" : "n" );
+
+	CG_Printf( "slots    primary %i   secondary %i   active %i\n",
+		ps->stats[STAT_SLOT_PRIMARY], ps->stats[STAT_SLOT_SECONDARY],
+		ps->stats[STAT_ACTIVE_SLOT] );
+	CG_Printf( "ammo     mag %i / reserve %i        owned mask 0x%04x\n",
+		ps->ammo[w], ps->ammoReserve[w], ps->stats[STAT_WEAPONS] );
+	CG_Printf( "equip    lethal %i   tactical %i\n",
+		ps->ammo[WP_FRAG], ps->ammo[WP_FLASH] );
+
+	CG_Printf( "timings  drop %i  raise %i  sprintIn %i  sprintOut %i\n",
+		BG_WeaponDropTime( w ), BG_WeaponRaiseTime( w ),
+		BG_WeaponSprintInTime( w ), BG_WeaponSprintOutTime( w ) );
+
+	for ( i = 0; i < RSEQ_COUNT; i++ ) {
+		CG_Printf( "reload   %-5s len %4i  notes:", CG_PD_SeqName( i ), rl->seg[i].length );
+		n = rl->seg[i].notes;
+		if ( !n || n->note == WNOTE_NONE ) {
+			CG_Printf( " (none)" );
+		} else {
+			for ( ; n->note != WNOTE_NONE; n++ ) {
+				CG_Printf( " [%i:%s%s]", n->time,
+					( n->note == WNOTE_MAG_OUT )    ? "MAG_OUT"     :
+					( n->note == WNOTE_MAG_IN )     ? "MAG_IN"      :
+					( n->note == WNOTE_BOLT_CLOSED )? "BOLT_CLOSED" : "?",
+					( n->note == WNOTE_MAG_IN || n->note == WNOTE_BOLT_CLOSED )
+						? ( n->param > 0 ? " +n" : " fill" ) : "" );
+			}
+		}
+		CG_Printf( "\n" );
+	}
+	CG_Printf( "-------------------------------------------\n" );
+}
+
 static consoleCommand_t	commands[] = {
 	{ "testgun", CG_TestGun_f },
 	{ "testmodel", CG_TestModel_f },
@@ -470,6 +558,7 @@ static consoleCommand_t	commands[] = {
 	{ "nextskin", CG_TestModelNextSkin_f },
 	{ "prevskin", CG_TestModelPrevSkin_f },
 	{ "viewpos", CG_Viewpos_f },
+	{ "peacedump", CG_PeaceDump_f },
 	{ "helloworld", CG_HelloWorld_f },
 	{ "+scores", CG_ScoresDown_f },
 	{ "-scores", CG_ScoresUp_f },

@@ -2431,7 +2431,9 @@ static void CG_DrawWeaponDebug( void ) {
 		ps->ammo[weapon], ps->ammoReserve[weapon] );
 	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
 
-	Com_sprintf( line, sizeof( line ), "elapsed: %i  pendMag: %s",
+	Com_sprintf( line, sizeof( line ), "seq: %s  elapsed: %i  pend: %s",
+		( ps->weaponAnimSeq == RSEQ_START ) ? "START" :
+		( ps->weaponAnimSeq == RSEQ_LOOP )  ? "LOOP"  : "END",
 		ps->weaponAnimTime,
 		( ps->pm_flags & PMF_PENDING_MAG ) ? "YES" : "no" );
 	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;

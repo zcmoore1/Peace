@@ -1178,7 +1178,8 @@ typedef struct playerState_s {
 	int			clientNum;		// ranges from 0 to MAX_CLIENTS-1
 	int			weapon;			// copied to entityState_t->weapon
 	int			weaponstate;
-	int			weaponAnimTime;	// ms ELAPSED into the current weapon anim (counts UP). -1 = no anim playing. Notes fire on crossings of this; never derived from weaponTime.
+	int			weaponAnimTime;	// ms ELAPSED into the current anim SEGMENT (counts UP). -1 = no anim playing. Notes fire on crossings of this; never derived from weaponTime.
+	int			weaponAnimSeq;	// which reload segment is playing (reloadSeq_t)
 
 	vec3_t		viewangles;		// for fixed views
 	int			viewheight;

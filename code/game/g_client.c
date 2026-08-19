@@ -1211,6 +1211,7 @@ void ClientSpawn(gentity_t *ent) {
 			// which reads as "anim live at elapsed 0" and would march the reload
 			// notes on a freshly spawned player.
 			client->ps.weaponAnimTime = -1;
+			client->ps.weaponAnimSeq  = RSEQ_START;
 			client->ps.pm_flags &= ~PMF_PENDING_MAG;
 			// fire the targets of the spawn point
 			G_UseTargets(spawnPoint, ent);

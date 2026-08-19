@@ -1488,62 +1488,82 @@ static const int bg_weaponMagSize[MAX_WEAPONS] = {
 };
 
 // ---------------------------------------------------------------------------
-// Weapon animation notes.
+// Weapon animation notes and segmented reloads.
 //
-// A reload is an animation with typed notes on its timeline. The notes are the
-// gameplay - not weaponTime. They fire when the anim's ELAPSED clock
-// (ps->weaponAnimTime, counting UP from 0) crosses their timestamp, which is
-// why the mag-in note can zero the busy lock without also dragging the settle
-// note forward. Deriving note times from weaponTime instead would make mag-in
-// jump elapsed to "done" and fire settle on the same think.
+// A reload is an animation with typed notes on its timeline, split into three
+// segments: an optional open-up (START), a body that repeats while there is
+// still room and stock (LOOP), and an optional close-up (END).
 //
-// Timestamps are ms into the anim. When real viewmodel anims land, a note's
-// time is just frame/fps*1000 - the runner does not change.
+// A magazine gun is NOT a special case: it is simply a weapon whose LOOP note
+// inserts the whole clip, so the "is there room left" test fails after one pass
+// and it falls through to END. A shotgun inserts one shell per pass, so the
+// same test keeps it looping. Nothing in the runner knows either weapon type.
+//
+// Note times are ms into their own SEGMENT. When real viewmodel anims land, a
+// note's time is just frame/fps*1000 - the runner does not change.
 // Each list is terminated by WNOTE_NONE.
 // ---------------------------------------------------------------------------
 static const bg_weaponNote_t bgnotes_none[] = {
-	{ 0, WNOTE_NONE }
-};
-static const bg_weaponNote_t bgnotes_mg[] = {
-	{  200, WNOTE_MAG_OUT },
-	{  800, WNOTE_MAG_IN },
-	{ 1000, WNOTE_RELOAD_SETTLE },
-	{ 0, WNOTE_NONE }
-};
-static const bg_weaponNote_t bgnotes_fast[] = {
-	{  150, WNOTE_MAG_OUT },
-	{  600, WNOTE_MAG_IN },
-	{  800, WNOTE_RELOAD_SETTLE },
-	{ 0, WNOTE_NONE }
-};
-static const bg_weaponNote_t bgnotes_heavy[] = {
-	{  250, WNOTE_MAG_OUT },
-	{  950, WNOTE_MAG_IN },
-	{ 1200, WNOTE_RELOAD_SETTLE },
-	{ 0, WNOTE_NONE }
-};
-static const bg_weaponNote_t bgnotes_bfg[] = {
-	{  300, WNOTE_MAG_OUT },
-	{ 1200, WNOTE_MAG_IN },
-	{ 1500, WNOTE_RELOAD_SETTLE },
-	{ 0, WNOTE_NONE }
+	{ 0, WNOTE_NONE, 0 }
 };
 
-static const bg_weaponNote_t * const bg_weaponNotes[MAX_WEAPONS] = {
-	bgnotes_none,	// WP_NONE
-	bgnotes_none,	// WP_GAUNTLET      (no magazine)
-	bgnotes_mg,		// WP_MACHINEGUN
-	bgnotes_fast,	// WP_SHOTGUN
-	bgnotes_heavy,	// WP_GRENADE_LAUNCHER
-	bgnotes_heavy,	// WP_ROCKET_LAUNCHER
-	bgnotes_fast,	// WP_LIGHTNING
-	bgnotes_heavy,	// WP_RAILGUN
-	bgnotes_fast,	// WP_PLASMAGUN
-	bgnotes_bfg,	// WP_BFG
-	bgnotes_none,	// WP_GRAPPLING_HOOK (no magazine)
-	bgnotes_mg,		// WP_NAILGUN
-	bgnotes_mg,		// WP_PROX_LAUNCHER
-	bgnotes_heavy,	// WP_CHAINGUN
+/* magazine guns - one pass, whole clip inserted at mag-in */
+static const bg_weaponNote_t bgnotes_mag[] = {
+	{  200, WNOTE_MAG_OUT, 0 },
+	{  800, WNOTE_MAG_IN,  0 },		/* 0 = fill the magazine */
+	{ 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_mag_fast[] = {
+	{  150, WNOTE_MAG_OUT, 0 },
+	{  600, WNOTE_MAG_IN,  0 },
+	{ 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_mag_heavy[] = {
+	{  250, WNOTE_MAG_OUT, 0 },
+	{  950, WNOTE_MAG_IN,  0 },
+	{ 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_mag_bfg[] = {
+	{  300, WNOTE_MAG_OUT, 0 },
+	{ 1200, WNOTE_MAG_IN,  0 },
+	{ 0, WNOTE_NONE, 0 }
+};
+
+/* shell-at-a-time guns - the loop repeats, one round per pass */
+static const bg_weaponNote_t bgnotes_shell_start[] = {
+	{  120, WNOTE_MAG_OUT, 0 },		/* action opens */
+	{ 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_shell_loop[] = {
+	{  250, WNOTE_MAG_IN, 1 },		/* one shell per pass */
+	{ 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_shell_end[] = {
+	{  180, WNOTE_BOLT_CLOSED, 0 },	/* action closes; no rounds, param unused */
+	{ 0, WNOTE_NONE, 0 }
+};
+
+#define SEG_NONE	{ 0, bgnotes_none }
+
+static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
+	/* WP_NONE            */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
+	/* WP_GAUNTLET        */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
+	/* WP_MACHINEGUN      */ { { SEG_NONE, { 1000, bgnotes_mag },       SEG_NONE } },
+	/* WP_SHOTGUN         */ { { { 500, bgnotes_shell_start },
+	                             { 550, bgnotes_shell_loop },
+	                             { 350, bgnotes_shell_end } } },
+	/* WP_GRENADE_LAUNCHER*/ { { SEG_NONE, { 1200, bgnotes_mag_heavy }, SEG_NONE } },
+	/* WP_ROCKET_LAUNCHER */ { { SEG_NONE, { 1200, bgnotes_mag_heavy }, SEG_NONE } },
+	/* WP_LIGHTNING       */ { { SEG_NONE, { 800,  bgnotes_mag_fast },  SEG_NONE } },
+	/* WP_RAILGUN         */ { { SEG_NONE, { 1200, bgnotes_mag_heavy }, SEG_NONE } },
+	/* WP_PLASMAGUN       */ { { SEG_NONE, { 800,  bgnotes_mag_fast },  SEG_NONE } },
+	/* WP_BFG             */ { { SEG_NONE, { 1500, bgnotes_mag_bfg },   SEG_NONE } },
+	/* WP_GRAPPLING_HOOK  */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
+	/* WP_NAILGUN         */ { { SEG_NONE, { 1000, bgnotes_mag },       SEG_NONE } },
+	/* WP_PROX_LAUNCHER   */ { { { 450, bgnotes_shell_start },
+	                             { 600, bgnotes_shell_loop },
+	                             { 300, bgnotes_shell_end } } },
+	/* WP_CHAINGUN        */ { { SEG_NONE, { 1200, bgnotes_mag_heavy }, SEG_NONE } },
 };
 
 // Holster / deploy lengths. Always stamped on a weapon change - never 0, so a
@@ -1589,20 +1609,23 @@ int BG_WeaponMagSize( int weapon ) {
 	return bg_weaponMagSize[weapon];
 }
 
-const bg_weaponNote_t *BG_WeaponNotes( int weapon ) {
-	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return bgnotes_none;
-	return bg_weaponNotes[weapon];
+const bg_weaponReload_t *BG_WeaponReload( int weapon ) {
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return &bg_weaponReloads[0];
+	return &bg_weaponReloads[weapon];
 }
 
-// The reload anim's length IS its settle note - one source of truth.
+int BG_WeaponReloadSegLength( int weapon, int seq ) {
+	if ( seq < 0 || seq >= RSEQ_COUNT ) return 0;
+	return BG_WeaponReload( weapon )->seg[seq].length;
+}
+
+// Nominal single-pass length. Only a rough number for HUD/feel code - the real
+// duration of a shell-at-a-time reload depends on how many rounds go in.
 int BG_WeaponReloadTime( int weapon ) {
-	const bg_weaponNote_t *n;
-	for ( n = BG_WeaponNotes( weapon ); n->note != WNOTE_NONE; n++ ) {
-		if ( n->note == WNOTE_RELOAD_SETTLE ) {
-			return n->time;
-		}
-	}
-	return 0;
+	const bg_weaponReload_t *rl = BG_WeaponReload( weapon );
+	return rl->seg[RSEQ_START].length
+	     + rl->seg[RSEQ_LOOP].length
+	     + rl->seg[RSEQ_END].length;
 }
 
 int BG_WeaponDropTime( int weapon ) {
@@ -1724,27 +1747,54 @@ float BG_WeaponSpread( const playerState_t *ps ) {
 PM_BeginReload
 
 Reload always starts from scratch - there is no partial reload to resume.
-Starts the anim clock at 0; the notes on the timeline do the rest.
+Starts at the first segment with the anim clock at 0; the notes and the segment
+runner do the rest.
 ===============
 */
 static void PM_BeginReload( void ) {
-	pm->ps->weaponstate   = WEAPON_RELOADING;
-	pm->ps->weaponAnimTime = 0;								// anim elapsed, counts UP
-	pm->ps->weaponTime    = BG_WeaponReloadTime( pm->ps->weapon );	// busy lock
-	pm->ps->pm_flags     &= ~PMF_PENDING_MAG;
+	pm->ps->weaponstate    = WEAPON_RELOADING;
+	pm->ps->weaponAnimSeq  = RSEQ_START;
+	pm->ps->weaponAnimTime = 0;
+	pm->ps->weaponTime     = BG_WeaponReloadSegLength( pm->ps->weapon, RSEQ_START );
+	pm->ps->pm_flags      &= ~PMF_PENDING_MAG;
 	PM_StartTorsoAnim( TORSO_GESTURE );
 	// The sound belongs to WNOTE_MAG_OUT, not to starting the reload.
 }
 
 /*
 ===============
-PM_ReloadFillClip
+PM_ReloadWantsMore
 
-Move rounds from the reserve into the magazine. Called from exactly one place -
-the queued fill in PM_Weapon - and never from a note handler.
+Is there anything left to load? This is the ONLY thing that decides whether the
+loop segment repeats. A magazine gun fails it after one pass because its note
+inserted the whole clip; a shell gun passes it until the tube is full.
 ===============
 */
-static void PM_ReloadFillClip( int weapon ) {
+static qboolean PM_ReloadWantsMore( void ) {
+	int magSize = BG_WeaponMagSize( pm->ps->weapon );
+
+	if ( magSize <= 0 ) {
+		return qfalse;
+	}
+	if ( pm->ps->ammo[pm->ps->weapon] >= magSize ) {
+		return qfalse;
+	}
+	if ( pm->ps->ammoReserve[pm->ps->weapon] <= 0 ) {
+		return qfalse;
+	}
+	return qtrue;
+}
+
+/*
+===============
+PM_ReloadFillClip
+
+Move rounds from the reserve into the magazine. rounds <= 0 means "fill it".
+Called from exactly one place - the queued fill in PM_Weapon - never from a
+note handler.
+===============
+*/
+static void PM_ReloadFillClip( int weapon, int rounds ) {
 	int magSize, needed, reserve, give;
 
 	magSize = BG_WeaponMagSize( weapon );
@@ -1756,6 +1806,9 @@ static void PM_ReloadFillClip( int weapon ) {
 	if ( needed <= 0 ) {
 		return;
 	}
+	if ( rounds > 0 && rounds < needed ) {
+		needed = rounds;
+	}
 
 	reserve = pm->ps->ammoReserve[weapon];
 	give    = ( reserve >= needed ) ? needed : reserve;
@@ -1766,20 +1819,43 @@ static void PM_ReloadFillClip( int weapon ) {
 
 /*
 ===============
+PM_PendingMagAmount
+
+How many rounds the queued fill should insert: the param on the mag-in note of
+the segment currently playing. Safe to look up at fill time because the fill
+happens before the segment can advance.
+===============
+*/
+static int PM_PendingMagAmount( void ) {
+	const bg_weaponNote_t *n;
+
+	n = BG_WeaponReload( pm->ps->weapon )->seg[ pm->ps->weaponAnimSeq ].notes;
+	for ( ; n->note != WNOTE_NONE; n++ ) {
+		if ( n->note == WNOTE_MAG_IN || n->note == WNOTE_BOLT_CLOSED ) {
+			return n->param;
+		}
+	}
+	return 0;
+}
+
+/*
+===============
 PM_RunWeaponNotes
 
-Fire every note the anim clock crossed this think. Crossing test only - a note
-whose timestamp is exactly the old elapsed has already fired.
+Fire every note the anim clock crossed this think, for the segment currently
+playing. Crossing test only.
 
-No note fills the clip. WNOTE_MAG_IN only queues the fill and clears the busy
-lock; whether the fill actually happens is decided later in PM_Weapon by
-whether a holster got there first.
+No note fills the clip. MAG_IN only queues the fill and clears the busy lock;
+whether the fill actually happens is decided later in PM_Weapon by whether a
+holster got there first.
 ===============
 */
 static void PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 	const bg_weaponNote_t *n;
 
-	for ( n = BG_WeaponNotes( pm->ps->weapon ); n->note != WNOTE_NONE; n++ ) {
+	n = BG_WeaponReload( pm->ps->weapon )->seg[ pm->ps->weaponAnimSeq ].notes;
+
+	for ( ; n->note != WNOTE_NONE; n++ ) {
 		if ( !( oldElapsed < n->time && newElapsed >= n->time ) ) {
 			continue;
 		}
@@ -1789,30 +1865,77 @@ static void PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 			PM_AddEvent( EV_RELOAD );
 			break;
 
-		case WNOTE_BOLT_CLOSED:		// same meaning as MAG_IN
+		case WNOTE_BOLT_CLOSED:
+			// Closing the action on a shell gun carries no rounds, so it only
+			// releases the lock - which is exactly what makes it NAC-able too.
 		case WNOTE_MAG_IN:
-			pm->ps->pm_flags  |= PMF_PENDING_MAG;
-			pm->ps->weaponTime = 0;			// busy lock released on the mag-in think
+			if ( n->param != 0 || n->note == WNOTE_MAG_IN ) {
+				pm->ps->pm_flags |= PMF_PENDING_MAG;
+			}
+			pm->ps->weaponTime = 0;			// busy lock released on this think
 			PM_AddEvent( EV_RELOAD_NOTETRACK );
 			if ( pm->debugLevel ) {
-				Com_Printf( "%i:MAG_IN wpn %i elapsed %i\n",
-					c_pmove, pm->ps->weapon, newElapsed );
-			}
-			break;
-
-		case WNOTE_RELOAD_SETTLE:
-			// Only ends the reload if the reload is still what we are doing -
-			// a holster started this think owns the weapon now.
-			if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
-				pm->ps->weaponstate    = WEAPON_READY;
-				pm->ps->weaponAnimTime = -1;	// anim over
-				PM_StartTorsoAnim( TORSO_STAND );
+				Com_Printf( "%i:MAG_IN wpn %i seq %i elapsed %i add %i\n",
+					c_pmove, pm->ps->weapon, pm->ps->weaponAnimSeq,
+					newElapsed, n->param );
 			}
 			break;
 
 		default:
 			break;
 		}
+	}
+}
+
+/*
+===============
+PM_AdvanceReloadSegments
+
+Walk the reload forward whenever the clock runs past the segment it is in.
+The loop repeats purely on "is there anything left to load" - there is no
+weapon-type test anywhere, which is why a magazine gun runs the loop once and
+a shell gun runs it until the tube is full.
+===============
+*/
+static void PM_AdvanceReloadSegments( void ) {
+	const bg_weaponReload_t *rl = BG_WeaponReload( pm->ps->weapon );
+	int guard;
+
+	for ( guard = 0; guard < RSEQ_COUNT + 4; guard++ ) {
+		const bg_weaponAnimSeg_t *seg = &rl->seg[ pm->ps->weaponAnimSeq ];
+
+		if ( seg->length > 0 ) {
+			if ( pm->ps->weaponAnimTime < seg->length ) {
+				return;						// still playing
+			}
+			pm->ps->weaponAnimTime -= seg->length;	// carry the overshoot
+		}
+
+		switch ( pm->ps->weaponAnimSeq ) {
+		case RSEQ_START:
+			pm->ps->weaponAnimSeq = RSEQ_LOOP;
+			break;
+
+		case RSEQ_LOOP:
+			if ( !PM_ReloadWantsMore() ) {
+				pm->ps->weaponAnimSeq = RSEQ_END;
+			}
+			// else: stay on RSEQ_LOOP - the clock already wrapped, so the
+			// segment simply plays again and its mag-in note fires again.
+			break;
+
+		case RSEQ_END:
+		default:
+			pm->ps->weaponstate    = WEAPON_READY;
+			pm->ps->weaponAnimTime = -1;
+			pm->ps->weaponAnimSeq  = RSEQ_START;
+			PM_StartTorsoAnim( TORSO_STAND );
+			return;
+		}
+
+		// Re-arm the busy lock for the segment we just entered. Each loop pass
+		// gets its own lock, so each pass is independently cancelable.
+		pm->ps->weaponTime = rl->seg[ pm->ps->weaponAnimSeq ].length;
 	}
 }
 
@@ -2017,11 +2140,7 @@ static void PM_Weapon( void ) {
 	// note runner below deliberately does NOT gate on weaponstate: step 1 may
 	// have already flipped us to DROPPING and the mag-in note still has to land.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING && pm->ps->weaponAnimTime >= 0 ) {
-		int animLen = BG_WeaponReloadTime( pm->ps->weapon );
-		pm->ps->weaponAnimTime += pml.msec;
-		if ( animLen > 0 && pm->ps->weaponAnimTime > animLen ) {
-			pm->ps->weaponAnimTime = animLen;
-		}
+		pm->ps->weaponAnimTime += pml.msec;		// no clamp - overshoot carries
 	}
 	if ( pm->ps->weaponTime > 0 ) {
 		pm->ps->weaponTime -= pml.msec;
@@ -2054,8 +2173,15 @@ static void PM_Weapon( void ) {
 	//    Still RELOADING afterwards: the settle note has not arrived yet, and
 	//    the state alone is what keeps the gun from firing during the tail.
 	if ( pm->ps->pm_flags & PMF_PENDING_MAG ) {
-		PM_ReloadFillClip( pm->ps->weapon );
+		PM_ReloadFillClip( pm->ps->weapon, PM_PendingMagAmount() );
 		pm->ps->pm_flags &= ~PMF_PENDING_MAG;
+	}
+
+	// 4b. Walk the reload forward if the clock ran past this segment. Must sit
+	//     after the fill: whether the loop repeats depends on whether those
+	//     rounds just went in.
+	if ( pm->ps->weaponstate == WEAPON_RELOADING && pm->ps->weaponAnimTime >= 0 ) {
+		PM_AdvanceReloadSegments();
 	}
 
 	// 5. Busy.

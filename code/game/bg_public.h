@@ -157,14 +157,34 @@ typedef enum {
 	WNOTE_NONE,			// list terminator
 	WNOTE_MAG_OUT,		// sound only
 	WNOTE_MAG_IN,		// gameplay: queue the clip fill and clear the busy lock
-	WNOTE_RELOAD_SETTLE,// anim done - back to READY, may fire
-	WNOTE_BOLT_CLOSED	// later: pump/bolt guns, same meaning as MAG_IN
+	WNOTE_BOLT_CLOSED	// pump/bolt guns: identical meaning to MAG_IN
 } weaponNote_t;
 
 typedef struct {
-	int				time;	// ms into the anim
+	int				time;	// ms into the SEGMENT
 	weaponNote_t	note;
+	int				param;	// MAG_IN/BOLT_CLOSED: rounds to insert. <= 0 = fill the magazine
 } bg_weaponNote_t;
+
+// A reload is three segments: an optional open-up, a body that repeats while
+// there is still room and stock, and an optional close-up. A magazine gun is
+// simply a weapon whose loop fills the whole clip in one pass and therefore
+// never repeats - there is no per-weapon-type branch anywhere.
+typedef enum {
+	RSEQ_START,
+	RSEQ_LOOP,
+	RSEQ_END,
+	RSEQ_COUNT
+} reloadSeq_t;
+
+typedef struct {
+	int						length;	// segment duration in ms. 0 = segment absent
+	const bg_weaponNote_t	*notes;
+} bg_weaponAnimSeg_t;
+
+typedef struct {
+	bg_weaponAnimSeg_t	seg[RSEQ_COUNT];
+} bg_weaponReload_t;
 
 // pmove->pm_flags
 #define	PMF_DUCKED			1
@@ -228,10 +248,11 @@ void Pmove (pmove_t *pmove);
 
 int  BG_WeaponMagSize( int weapon );
 int  BG_WeaponMaxReserve( int weapon );
-int  BG_WeaponReloadTime( int weapon );		// = the WNOTE_RELOAD_SETTLE timestamp
+int  BG_WeaponReloadTime( int weapon );		// nominal single-pass length (start+loop+end)
+const bg_weaponReload_t *BG_WeaponReload( int weapon );
+int  BG_WeaponReloadSegLength( int weapon, int seq );
 int  BG_WeaponDropTime( int weapon );		// holster length, never 0
 int  BG_WeaponRaiseTime( int weapon );		// deploy length, never 0
-const bg_weaponNote_t *BG_WeaponNotes( int weapon );
 int  BG_WeaponBaseSpread( int weapon );
 float BG_SpreadScale( const playerState_t *ps );
 float BG_WeaponSpread( const playerState_t *ps );

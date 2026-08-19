@@ -105,11 +105,64 @@ static void CG_WeapAnim_WeaponChanged( int weapon ) {
 }
 
 // ---------------------------------------------------------------------------
+// CG_WeapAnim_ClipLength
+// Duration of a clip in ms. 0 when the weapon has no animation data yet.
+// ---------------------------------------------------------------------------
+static float CG_WeapAnim_ClipLength( const weapAnimDef_t *def, int clip ) {
+	const weapAnimClip_t *c;
+
+	if ( clip < 0 || clip >= WANIM_COUNT ) {
+		return 0.0f;
+	}
+	c = &def->clips[clip];
+	if ( c->numFrames <= 0 || c->framerate <= 0.0f ) {
+		return 0.0f;
+	}
+	return (float)c->numFrames * ( 1000.0f / c->framerate );
+}
+
+// ---------------------------------------------------------------------------
+// CG_WeapAnim_TransitionBusy
+//
+// A transition clip OWNS its layer until it has played out. This is the general
+// rule that produces the "still swap": the weapon state machine is free to move
+// on underneath - start a holster, defer a sprint - but the picture does not
+// restart mid-transition. So a swap requested during a raise runs its full
+// timer while the raise keeps playing, and the next thing you see is the new
+// weapon's raise. No drop is ever drawn, and nothing here knows what a still
+// swap is; it is just a clip refusing to be cut short.
+//
+// Returns qfalse when the weapon has no animation data, so the fallback path
+// behaves exactly as before.
+// ---------------------------------------------------------------------------
+static qboolean CG_WeapAnim_TransitionBusy( const weapAnimDef_t *def, const animLayer_t *l ) {
+	float len = CG_WeapAnim_ClipLength( def, l->clip );
+
+	if ( len <= 0.0f ) {
+		return qfalse;			// no data - never blocks
+	}
+	return ( l->weight > 0.0f && l->time < len );
+}
+
+// ---------------------------------------------------------------------------
+// CG_WeapAnim_PlayLayer
+// Point a layer at a clip. Restarts the clip only when it actually changes,
+// so a repeated request does not stutter the animation.
+// ---------------------------------------------------------------------------
+static void CG_WeapAnim_PlayLayer( animLayer_t *l, int clip ) {
+	if ( l->clip != clip ) {
+		l->clip = clip;
+		l->time = 0.0f;
+	}
+	l->targetWeight = 1.0f;
+}
+
+// ---------------------------------------------------------------------------
 // CG_WeapAnim_UpdateLayers
 // Called every frame with current weapon state. Updates layer weights and
 // clip times based on weaponstate, sprint flag, etc.
 // ---------------------------------------------------------------------------
-static void CG_WeapAnim_UpdateLayers( playerState_t *ps, int msec ) {
+static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *ps, int msec ) {
 	animLayer_t *base   = &cg_weapLayers[LAYER_BASE];
 	animLayer_t *move   = &cg_weapLayers[LAYER_MOVE];
 	animLayer_t *sprint = &cg_weapLayers[LAYER_SPRINT];
@@ -125,14 +178,17 @@ static void CG_WeapAnim_UpdateLayers( playerState_t *ps, int msec ) {
 	}
 
 	// -- Move layer: raise / drop transitions --
-	if ( ps->weaponstate == WEAPON_RAISING ) {
-		move->clip         = WANIM_RAISE;
-		move->targetWeight = 1.0f;
-	} else if ( ps->weaponstate == WEAPON_DROPPING ) {
-		move->clip         = WANIM_DROP;
-		move->targetWeight = 1.0f;
-	} else {
-		move->targetWeight = 0.0f;
+	// Only re-aimed while the current transition has finished. THIS is the
+	// still swap: press swap during a raise and the state machine holsters on
+	// its normal timer, but the raise owns the layer and no drop is drawn.
+	if ( !CG_WeapAnim_TransitionBusy( def, move ) ) {
+		if ( ps->weaponstate == WEAPON_RAISING ) {
+			CG_WeapAnim_PlayLayer( move, WANIM_RAISE );
+		} else if ( ps->weaponstate == WEAPON_DROPPING ) {
+			CG_WeapAnim_PlayLayer( move, WANIM_DROP );
+		} else {
+			move->targetWeight = 0.0f;
+		}
 	}
 
 	// -- Sprint layer --
@@ -140,17 +196,19 @@ static void CG_WeapAnim_UpdateLayers( playerState_t *ps, int msec ) {
 	// stow is instant the sprint blend also completes instantly for free.
 	// For now wire to a simple ps->pm_flags sprint check (placeholder until
 	// PMF_SPRINTING exists).
-	if ( ps->weaponstate == WEAPON_SPRINT_IN ) {
-		sprint->clip         = WANIM_SPRINT_IN;
-		sprint->targetWeight = 1.0f;
-	} else if ( ps->weaponstate == WEAPON_SPRINTING ) {
-		sprint->clip         = WANIM_SPRINT_LOOP;
-		sprint->targetWeight = 1.0f;
-	} else if ( ps->weaponstate == WEAPON_SPRINT_OUT ) {
-		sprint->clip         = WANIM_SPRINT_OUT;
-		sprint->targetWeight = 1.0f;
-	} else {
-		sprint->targetWeight = 0.0f;
+	// Same ownership rule. Note pmove already refuses to enter the sprint carry
+	// during a raise, so a held sprint is deferred there too - the picture and
+	// the state machine agree without either one being told about the other.
+	if ( !CG_WeapAnim_TransitionBusy( def, sprint ) ) {
+		if ( ps->weaponstate == WEAPON_SPRINT_IN ) {
+			CG_WeapAnim_PlayLayer( sprint, WANIM_SPRINT_IN );
+		} else if ( ps->weaponstate == WEAPON_SPRINTING ) {
+			CG_WeapAnim_PlayLayer( sprint, WANIM_SPRINT_LOOP );
+		} else if ( ps->weaponstate == WEAPON_SPRINT_OUT ) {
+			CG_WeapAnim_PlayLayer( sprint, WANIM_SPRINT_OUT );
+		} else {
+			sprint->targetWeight = 0.0f;
+		}
 	}
 
 	// -- Advance clip times and lerp weights --
@@ -235,7 +293,7 @@ qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec ) 
 
 	def = &bg_weapAnimDefs[ps->weapon];
 
-	CG_WeapAnim_UpdateLayers( ps, msec );
+	CG_WeapAnim_UpdateLayers( def, ps, msec );
 
 	// Evaluate layers low→high, blending each onto the accumulated pose.
 	for ( i = 0; i < ANIM_LAYER_COUNT; i++ ) {

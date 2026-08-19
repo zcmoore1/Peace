@@ -205,11 +205,13 @@ void QDECL Com_Printf( const char *fmt, ... ) {
 			time( &aclock );
 			newtime = localtime( &aclock );
 
-			logfile = FS_FOpenFileWrite_HomeData( "qconsole.log" );
-			
+			// APPEND, not truncate. Truncating means relaunching to try again
+			// destroys the log of the crash you were trying to diagnose.
+			logfile = FS_FOpenFileAppend_HomeData( "qconsole.log" );
+
 			if(logfile)
 			{
-				Com_Printf( "logfile opened on %s\n", asctime( newtime ) );
+				Com_Printf( "\n===== session started %s", asctime( newtime ) );
 			
 				if ( com_logfile->integer > 1 )
 				{
@@ -2757,7 +2759,11 @@ void Com_Init( char *commandLine ) {
 #endif
 	com_blood = Cvar_Get ("com_blood", "1", CVAR_ARCHIVE);
 
-	com_logfile = Cvar_Get ("logfile", "0", CVAR_TEMP );
+	// Default 2, not 0. 2 forces an unbuffered write per line so the log
+	// survives a hard crash - 1 buffers and loses exactly the lines that
+	// explain it. Defaulted here rather than left to autoexec so anything that
+	// dies BEFORE the configs run is still captured.
+	com_logfile = Cvar_Get ("logfile", "2", CVAR_TEMP );
 
 	com_timescale = Cvar_Get ("timescale", "1", CVAR_CHEAT | CVAR_SYSTEMINFO );
 	com_fixedtime = Cvar_Get ("fixedtime", "0", CVAR_CHEAT);

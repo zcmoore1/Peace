@@ -2411,7 +2411,13 @@ static void PM_Weapon( void ) {
 		return;
 	}
 	if ( pm->ps->weaponstate == WEAPON_SPRINT_OUT && pm->ps->weaponTime <= 0 ) {
-		pm->ps->weaponstate = WEAPON_READY;
+		pm->ps->weaponstate    = WEAPON_READY;
+		// Releasing sprint before the lower-in finished leaves the abandoned
+		// reload's clock parked at a stale positive value. It is inert (the
+		// clock only advances while RELOADING, so no note can cross), but park
+		// it at idle so the only live anim clock is one we are actually playing.
+		pm->ps->weaponAnimTime = -1;
+		pm->ps->pm_flags      &= ~PMF_PENDING_MAG;
 		PM_StartTorsoAnim( TORSO_STAND );
 	}
 

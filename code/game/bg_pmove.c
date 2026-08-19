@@ -2474,6 +2474,13 @@ static void PM_Weapon( void ) {
 	case WP_GAUNTLET:
 		addTime = 400;
 		break;
+	case WP_KNIFE:
+		addTime = 500;			// swing cooldown
+		break;
+	case WP_FRAG:
+	case WP_FLASH:
+		addTime = 1000;			// stops equipment being spammed
+		break;
 	case WP_LIGHTNING:
 		addTime = 50;
 		break;

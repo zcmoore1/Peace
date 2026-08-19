@@ -1207,6 +1207,11 @@ void ClientSpawn(gentity_t *ent) {
 			// force the base weapon up
 			client->ps.weapon = WP_MACHINEGUN;
 			client->ps.weaponstate = WEAPON_READY;
+			// No weapon anim is playing. -1 is "idle"; a memset would leave 0,
+			// which reads as "anim live at elapsed 0" and would march the reload
+			// notes on a freshly spawned player.
+			client->ps.weaponAnimTime = -1;
+			client->ps.pm_flags &= ~PMF_PENDING_MAG;
 			// fire the targets of the spawn point
 			G_UseTargets(spawnPoint, ent);
 			// select the highest weapon number available, after any spawn given items have fired

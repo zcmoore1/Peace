@@ -1178,7 +1178,7 @@ typedef struct playerState_s {
 	int			clientNum;		// ranges from 0 to MAX_CLIENTS-1
 	int			weapon;			// copied to entityState_t->weapon
 	int			weaponstate;
-	int			weaponDelay;	// counts down during a reload; crossing zero is the mag-in beat (goes negative, floored)
+	int			weaponAnimTime;	// ms ELAPSED into the current weapon anim (counts UP). -1 = no anim playing. Notes fire on crossings of this; never derived from weaponTime.
 
 	vec3_t		viewangles;		// for fixed views
 	int			viewheight;

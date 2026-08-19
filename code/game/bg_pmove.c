@@ -1487,70 +1487,136 @@ static const int bg_weaponMagSize[MAX_WEAPONS] = {
 	60,		// WP_CHAINGUN
 };
 
-// Reload duration in milliseconds per weapon. Trimmed ~25% from the first
-// pass for a snappier feel; the NAC tail (below) is unchanged so the trick
-// window is now a larger share of the (shorter) reload.
-static const int bg_weaponReloadTime[MAX_WEAPONS] = {
-	0,		// WP_NONE
-	0,		// WP_GAUNTLET
-	1500,	// WP_MACHINEGUN
-	1100,	// WP_SHOTGUN
-	1400,	// WP_GRENADE_LAUNCHER
-	1400,	// WP_ROCKET_LAUNCHER
-	1100,	// WP_LIGHTNING
-	1400,	// WP_RAILGUN
-	1100,	// WP_PLASMAGUN
-	1900,	// WP_BFG
-	0,		// WP_GRAPPLING_HOOK
-	1500,	// WP_NAILGUN
-	1500,	// WP_PROX_LAUNCHER
-	1500,	// WP_CHAINGUN
+// ---------------------------------------------------------------------------
+// Weapon animation notes.
+//
+// A reload is an animation with typed notes on its timeline. The notes are the
+// gameplay - not weaponTime. They fire when the anim's ELAPSED clock
+// (ps->weaponAnimTime, counting UP from 0) crosses their timestamp, which is
+// why the mag-in note can zero the busy lock without also dragging the settle
+// note forward. Deriving note times from weaponTime instead would make mag-in
+// jump elapsed to "done" and fire settle on the same think.
+//
+// Timestamps are ms into the anim. When real viewmodel anims land, a note's
+// time is just frame/fps*1000 - the runner does not change.
+// Each list is terminated by WNOTE_NONE.
+// ---------------------------------------------------------------------------
+static const bg_weaponNote_t bgnotes_none[] = {
+	{ 0, WNOTE_NONE }
+};
+static const bg_weaponNote_t bgnotes_mg[] = {
+	{  200, WNOTE_MAG_OUT },
+	{  800, WNOTE_MAG_IN },
+	{ 1000, WNOTE_RELOAD_SETTLE },
+	{ 0, WNOTE_NONE }
+};
+static const bg_weaponNote_t bgnotes_fast[] = {
+	{  150, WNOTE_MAG_OUT },
+	{  600, WNOTE_MAG_IN },
+	{  800, WNOTE_RELOAD_SETTLE },
+	{ 0, WNOTE_NONE }
+};
+static const bg_weaponNote_t bgnotes_heavy[] = {
+	{  250, WNOTE_MAG_OUT },
+	{  950, WNOTE_MAG_IN },
+	{ 1200, WNOTE_RELOAD_SETTLE },
+	{ 0, WNOTE_NONE }
+};
+static const bg_weaponNote_t bgnotes_bfg[] = {
+	{  300, WNOTE_MAG_OUT },
+	{ 1200, WNOTE_MAG_IN },
+	{ 1500, WNOTE_RELOAD_SETTLE },
+	{ 0, WNOTE_NONE }
 };
 
-// Mag-in time per weapon: milliseconds into the reload at which the magazine
-// visually seats. PM_BeginReload loads this into ps->weaponDelay; the frame
-// weaponDelay crosses zero is the mag-in beat (WEAPON_RELOAD_END).
-//
-// This must be LESS than the weapon's total reload time - the remainder is the
-// settle after the mag is in. The clip is filled on the mag-in frame, not at
-// the end of the reload.
-//
-// When real reload animations arrive these become the seat frame's timestamp.
-static const int bg_weaponReloadAddTime[MAX_WEAPONS] = {
-	0,		// WP_NONE
-	0,		// WP_GAUNTLET
-	1200,	// WP_MACHINEGUN       (of 1500)
-	800,	// WP_SHOTGUN          (of 1100)
-	1100,	// WP_GRENADE_LAUNCHER (of 1400)
-	1100,	// WP_ROCKET_LAUNCHER  (of 1400)
-	800,	// WP_LIGHTNING        (of 1100)
-	1100,	// WP_RAILGUN          (of 1400)
-	800,	// WP_PLASMAGUN        (of 1100)
-	1600,	// WP_BFG              (of 1900)
-	0,		// WP_GRAPPLING_HOOK
-	1200,	// WP_NAILGUN          (of 1500)
-	1200,	// WP_PROX_LAUNCHER    (of 1500)
-	1200,	// WP_CHAINGUN         (of 1500)
+static const bg_weaponNote_t * const bg_weaponNotes[MAX_WEAPONS] = {
+	bgnotes_none,	// WP_NONE
+	bgnotes_none,	// WP_GAUNTLET      (no magazine)
+	bgnotes_mg,		// WP_MACHINEGUN
+	bgnotes_fast,	// WP_SHOTGUN
+	bgnotes_heavy,	// WP_GRENADE_LAUNCHER
+	bgnotes_heavy,	// WP_ROCKET_LAUNCHER
+	bgnotes_fast,	// WP_LIGHTNING
+	bgnotes_heavy,	// WP_RAILGUN
+	bgnotes_fast,	// WP_PLASMAGUN
+	bgnotes_bfg,	// WP_BFG
+	bgnotes_none,	// WP_GRAPPLING_HOOK (no magazine)
+	bgnotes_mg,		// WP_NAILGUN
+	bgnotes_mg,		// WP_PROX_LAUNCHER
+	bgnotes_heavy,	// WP_CHAINGUN
 };
 
-// Floor for the weaponDelay countdown. It must be allowed to go negative so the
-// mag-in crossing test fires on exactly one frame, but it stops here so the
-// field settles and stops dirtying the network delta.
-#define WEAPONDELAY_FLOOR	-1000
+// Holster / deploy lengths. Always stamped on a weapon change - never 0, so a
+// switch always costs real time unless something else clears the lock first.
+#define WEAPON_MIN_SWAP_TIME	50
+
+static const int bg_weaponDropTime[MAX_WEAPONS] = {
+	200,	// WP_NONE
+	200,	// WP_GAUNTLET
+	200,	// WP_MACHINEGUN
+	200,	// WP_SHOTGUN
+	250,	// WP_GRENADE_LAUNCHER
+	250,	// WP_ROCKET_LAUNCHER
+	200,	// WP_LIGHTNING
+	250,	// WP_RAILGUN
+	200,	// WP_PLASMAGUN
+	300,	// WP_BFG
+	150,	// WP_GRAPPLING_HOOK
+	200,	// WP_NAILGUN
+	200,	// WP_PROX_LAUNCHER
+	250,	// WP_CHAINGUN
+};
+
+static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
+	250,	// WP_NONE
+	250,	// WP_GAUNTLET
+	250,	// WP_MACHINEGUN
+	250,	// WP_SHOTGUN
+	300,	// WP_GRENADE_LAUNCHER
+	300,	// WP_ROCKET_LAUNCHER
+	250,	// WP_LIGHTNING
+	300,	// WP_RAILGUN
+	250,	// WP_PLASMAGUN
+	400,	// WP_BFG
+	200,	// WP_GRAPPLING_HOOK
+	250,	// WP_NAILGUN
+	250,	// WP_PROX_LAUNCHER
+	300,	// WP_CHAINGUN
+};
 
 int BG_WeaponMagSize( int weapon ) {
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
 	return bg_weaponMagSize[weapon];
 }
 
-int BG_WeaponReloadTime( int weapon ) {
-	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
-	return bg_weaponReloadTime[weapon];
+const bg_weaponNote_t *BG_WeaponNotes( int weapon ) {
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return bgnotes_none;
+	return bg_weaponNotes[weapon];
 }
 
-int BG_WeaponReloadAddTime( int weapon ) {
-	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
-	return bg_weaponReloadAddTime[weapon];
+// The reload anim's length IS its settle note - one source of truth.
+int BG_WeaponReloadTime( int weapon ) {
+	const bg_weaponNote_t *n;
+	for ( n = BG_WeaponNotes( weapon ); n->note != WNOTE_NONE; n++ ) {
+		if ( n->note == WNOTE_RELOAD_SETTLE ) {
+			return n->time;
+		}
+	}
+	return 0;
+}
+
+int BG_WeaponDropTime( int weapon ) {
+	int t;
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return WEAPON_MIN_SWAP_TIME;
+	t = bg_weaponDropTime[weapon];
+	return ( t < WEAPON_MIN_SWAP_TIME ) ? WEAPON_MIN_SWAP_TIME : t;
+}
+
+int BG_WeaponRaiseTime( int weapon ) {
+	int t;
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return WEAPON_MIN_SWAP_TIME;
+	t = bg_weaponRaiseTime[weapon];
+	return ( t < WEAPON_MIN_SWAP_TIME ) ? WEAPON_MIN_SWAP_TIME : t;
 }
 
 // Maximum reserve ammo the player can carry per weapon (mags not including the one loaded).
@@ -1657,25 +1723,25 @@ float BG_WeaponSpread( const playerState_t *ps ) {
 ===============
 PM_BeginReload
 
-Reload always starts from scratch - there is no partial-reload state to resume.
-weaponTime is the whole animation; weaponDelay is the countdown to the mag-in
-beat, which lands partway through.
+Reload always starts from scratch - there is no partial reload to resume.
+Starts the anim clock at 0; the notes on the timeline do the rest.
 ===============
 */
 static void PM_BeginReload( void ) {
-	PM_AddEvent( EV_RELOAD );
-	pm->ps->weaponstate = WEAPON_RELOADING;
-	pm->ps->weaponTime  = BG_WeaponReloadTime( pm->ps->weapon );
-	pm->ps->weaponDelay = BG_WeaponReloadAddTime( pm->ps->weapon );
+	pm->ps->weaponstate   = WEAPON_RELOADING;
+	pm->ps->weaponAnimTime = 0;								// anim elapsed, counts UP
+	pm->ps->weaponTime    = BG_WeaponReloadTime( pm->ps->weapon );	// busy lock
+	pm->ps->pm_flags     &= ~PMF_PENDING_MAG;
 	PM_StartTorsoAnim( TORSO_GESTURE );
+	// The sound belongs to WNOTE_MAG_OUT, not to starting the reload.
 }
 
 /*
 ===============
 PM_ReloadFillClip
 
-Move rounds from the reserve into the magazine. Called from exactly one place:
-the mag-in frame, and only if a weapon switch did not take that frame first.
+Move rounds from the reserve into the magazine. Called from exactly one place -
+the queued fill in PM_Weapon - and never from a note handler.
 ===============
 */
 static void PM_ReloadFillClip( int weapon ) {
@@ -1700,28 +1766,64 @@ static void PM_ReloadFillClip( int weapon ) {
 
 /*
 ===============
-PM_DropTime
+PM_RunWeaponNotes
 
-How long the holster takes. Zero on the mag-in frame: the weapon is already
-down there, so there is nothing to lower. That single fact is the whole NAC -
-a switch on that frame finishes its drop the same frame and therefore runs
-before the clip is filled.
+Fire every note the anim clock crossed this think. Crossing test only - a note
+whose timestamp is exactly the old elapsed has already fired.
+
+No note fills the clip. WNOTE_MAG_IN only queues the fill and clears the busy
+lock; whether the fill actually happens is decided later in PM_Weapon by
+whether a holster got there first.
 ===============
 */
-static int PM_DropTime( void ) {
-	if ( pm->ps->weaponstate == WEAPON_RELOAD_END ) {
-		return 0;
+static void PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
+	const bg_weaponNote_t *n;
+
+	for ( n = BG_WeaponNotes( pm->ps->weapon ); n->note != WNOTE_NONE; n++ ) {
+		if ( !( oldElapsed < n->time && newElapsed >= n->time ) ) {
+			continue;
+		}
+
+		switch ( n->note ) {
+		case WNOTE_MAG_OUT:
+			PM_AddEvent( EV_RELOAD );
+			break;
+
+		case WNOTE_BOLT_CLOSED:		// same meaning as MAG_IN
+		case WNOTE_MAG_IN:
+			pm->ps->pm_flags  |= PMF_PENDING_MAG;
+			pm->ps->weaponTime = 0;			// busy lock released on the mag-in think
+			PM_AddEvent( EV_RELOAD_NOTETRACK );
+			if ( pm->debugLevel ) {
+				Com_Printf( "%i:MAG_IN wpn %i elapsed %i\n",
+					c_pmove, pm->ps->weapon, newElapsed );
+			}
+			break;
+
+		case WNOTE_RELOAD_SETTLE:
+			// Only ends the reload if the reload is still what we are doing -
+			// a holster started this think owns the weapon now.
+			if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
+				pm->ps->weaponstate    = WEAPON_READY;
+				pm->ps->weaponAnimTime = -1;	// anim over
+				PM_StartTorsoAnim( TORSO_STAND );
+			}
+			break;
+
+		default:
+			break;
+		}
 	}
-	return 200;
 }
 
 /*
 ===============
 PM_BeginWeaponChange
 
-Stock Q3 switch. The only change is that the holster length comes from
-PM_DropTime() instead of a hardcoded 200, and it is ASSIGNED rather than added
-so leftover reload time never leaks into the drop.
+Stock holster. Always stamps a real per-weapon drop time - it never inspects
+what we were doing, never shortens itself, never skips. If something else
+clears the lock in the same think (the mag-in note), the drop simply finishes
+early on its own.
 ===============
 */
 static void PM_BeginWeaponChange( int weapon ) {
@@ -1738,10 +1840,8 @@ static void PM_BeginWeaponChange( int weapon ) {
 	}
 
 	PM_AddEvent( EV_CHANGE_WEAPON );
-	// PM_DropTime() must be read BEFORE the state is overwritten - it is the
-	// outgoing state (WEAPON_RELOAD_END or not) that decides the holster length.
-	pm->ps->weaponTime  = PM_DropTime();
 	pm->ps->weaponstate = WEAPON_DROPPING;
+	pm->ps->weaponTime  = BG_WeaponDropTime( pm->ps->weapon );
 	PM_StartTorsoAnim( TORSO_DROP );
 }
 
@@ -1767,8 +1867,13 @@ static void PM_FinishWeaponChange( void ) {
 	// swaps for free - no per-slot bookkeeping.
 	pm->ps->weapon      = weapon;
 	pm->ps->weaponstate = WEAPON_RAISING;
-	pm->ps->weaponTime  = 250;
-	pm->ps->weaponDelay = 0;	// any interrupted reload is abandoned outright
+	pm->ps->weaponTime  = BG_WeaponRaiseTime( weapon );
+	pm->ps->weaponAnimTime = -1;			// whatever anim we were in is abandoned
+
+	// A fill queued by the reload we just walked away from must not land in the
+	// gun we are now holding.
+	pm->ps->pm_flags &= ~PMF_PENDING_MAG;
+
 	PM_StartTorsoAnim( TORSO_RAISE );
 }
 
@@ -1823,9 +1928,10 @@ static void PM_CheckSprint( void ) {
 		// before the mag can seat. Nothing is preserved: no rounds move, and
 		// the next reload starts from the beginning.
 		if ( !wasSprinting && pm->ps->weaponstate == WEAPON_RELOADING ) {
-			pm->ps->weaponstate = WEAPON_READY;
-			pm->ps->weaponTime  = 0;
-			pm->ps->weaponDelay = 0;
+			pm->ps->weaponstate    = WEAPON_READY;
+			pm->ps->weaponTime     = 0;
+			pm->ps->weaponAnimTime = -1;			// reload anim abandoned
+			pm->ps->pm_flags      &= ~PMF_PENDING_MAG;
 			PM_StartTorsoAnim( TORSO_STAND );
 		}
 	} else {
@@ -1864,6 +1970,7 @@ Generates weapon events and modifes the weapon counter
 */
 static void PM_Weapon( void ) {
 	int		addTime;
+	int		oldElapsed;
 
 	// don't allow attack until all buttons are up
 	if ( pm->ps->pm_flags & PMF_RESPAWNED ) {
@@ -1899,57 +2006,64 @@ static void PM_Weapon( void ) {
 	}
 
 
-	// tick the weapon timers
+	// --- two clocks ---------------------------------------------------------
+	// Anim elapsed counts UP and is what notes fire off. Busy weaponTime counts
+	// DOWN and is only a fire / holster lock. They are deliberately independent:
+	// mag-in zeroes the lock without touching elapsed, so the settle note still
+	// arrives at its own time.
+	oldElapsed = pm->ps->weaponAnimTime;
+
+	// Only a reload anim is modelled for now, so only it advances the clock. The
+	// note runner below deliberately does NOT gate on weaponstate: step 1 may
+	// have already flipped us to DROPPING and the mag-in note still has to land.
+	if ( pm->ps->weaponstate == WEAPON_RELOADING && pm->ps->weaponAnimTime >= 0 ) {
+		int animLen = BG_WeaponReloadTime( pm->ps->weapon );
+		pm->ps->weaponAnimTime += pml.msec;
+		if ( animLen > 0 && pm->ps->weaponAnimTime > animLen ) {
+			pm->ps->weaponAnimTime = animLen;
+		}
+	}
 	if ( pm->ps->weaponTime > 0 ) {
 		pm->ps->weaponTime -= pml.msec;
 	}
-	if ( pm->ps->weaponDelay > WEAPONDELAY_FLOOR ) {
-		pm->ps->weaponDelay -= pml.msec;
-	}
 
-	// Mag-in pulse. weaponDelay crossed zero on THIS frame - never test for
-	// == 0, msec varies. Lasts exactly one pmove frame. No ammo moves here.
-	if ( pm->ps->weaponstate == WEAPON_RELOADING &&
-	     pm->ps->weaponDelay <= 0 &&
-	     pm->ps->weaponDelay + pml.msec > 0 ) {
-		pm->ps->weaponstate = WEAPON_RELOAD_END;
-		PM_AddEvent( EV_RELOAD_NOTETRACK );
-		if ( pm->debugLevel ) {
-			Com_Printf( "%i:magin wpn %i delay %i\n",
-				c_pmove, pm->ps->weapon, pm->ps->weaponDelay );
-		}
-	}
-
-	// check for weapon change
+	// 1. Weapon change ALWAYS stamps a real holster first.
 	if ( pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ) {
 		if ( pm->cmd.weapon != pm->ps->weapon ) {
 			PM_BeginWeaponChange( pm->cmd.weapon );
 		}
 	}
 
-	// Finish a holster whose time is up. This sits BEFORE the weaponTime guard
-	// so a zero-length drop (the mag-in frame) resolves on the same frame it
-	// started - and returns, so the clip fill below never runs. That is the NAC.
+	// 2. Then the anim's notes run. Gated on the anim clock being live, not on
+	//    weaponstate - step 1 may have just flipped us to DROPPING, and the
+	//    reload's mag-in note still has to land on this think for the race to
+	//    exist at all. MAG_IN zeroes the lock the holster just stamped.
+	if ( pm->ps->weaponAnimTime >= 0 ) {
+		PM_RunWeaponNotes( oldElapsed, pm->ps->weaponAnimTime );
+	}
+
+	// 3. A holster whose lock is already spent finishes NOW, this think, and
+	//    returns - so the queued fill in step 4 is never reached. Nothing here
+	//    knows what a NAC is; it is just a drop that had its lock taken away.
 	if ( pm->ps->weaponstate == WEAPON_DROPPING && pm->ps->weaponTime <= 0 ) {
 		PM_FinishWeaponChange();
 		return;
 	}
 
-	// Still on the mag-in frame, so no switch claimed it: the rounds go in now.
-	if ( pm->ps->weaponstate == WEAPON_RELOAD_END ) {
+	// 4. Nobody holstered out from under us, so the queued rounds go in.
+	//    Still RELOADING afterwards: the settle note has not arrived yet, and
+	//    the state alone is what keeps the gun from firing during the tail.
+	if ( pm->ps->pm_flags & PMF_PENDING_MAG ) {
 		PM_ReloadFillClip( pm->ps->weapon );
-		if ( pm->ps->weaponTime > 0 ) {
-			pm->ps->weaponstate = WEAPON_RELOADING;	// play out the settle
-		} else {
-			pm->ps->weaponstate = WEAPON_READY;
-			PM_StartTorsoAnim( TORSO_STAND );
-		}
+		pm->ps->pm_flags &= ~PMF_PENDING_MAG;
 	}
 
+	// 5. Busy.
 	if ( pm->ps->weaponTime > 0 ) {
 		return;
 	}
 
+	// 6. Stock transitions.
 	if ( pm->ps->weaponstate == WEAPON_RAISING ) {
 		pm->ps->weaponstate = WEAPON_READY;
 		if ( pm->ps->weapon == WP_GAUNTLET ) {
@@ -1960,11 +2074,10 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
-	// Reload settle finished. The clip was already filled on the mag-in frame,
-	// so there is nothing to move here - just go ready.
+	// 7. The settle note ends a reload, not the busy clock. While the tail is
+	//    still playing the lock reads 0 but the state is RELOADING, so we stop
+	//    here and the fire code below stays unreachable.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
-		pm->ps->weaponstate = WEAPON_READY;
-		PM_StartTorsoAnim( TORSO_STAND );
 		return;
 	}
 
@@ -1973,6 +2086,14 @@ static void PM_Weapon( void ) {
 	     pm->ps->ammo[pm->ps->weapon] <= 0 &&
 	     pm->ps->ammoReserve[pm->ps->weapon] > 0 ) {
 		PM_BeginReload();
+		return;
+	}
+
+	// Fire is a no-op while reloading. During the tail the busy lock reads 0, so
+	// the state - not the clock - is what keeps the gun quiet until the settle
+	// note lands. (Step 7 above already returns; this states the invariant here
+	// too, where the fire code can see it.)
+	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
 		return;
 	}
 

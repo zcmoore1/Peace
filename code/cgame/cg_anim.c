@@ -118,10 +118,7 @@ static void CG_WeapAnim_UpdateLayers( playerState_t *ps, int msec ) {
 	// -- Base layer: swap between idle and fire --
 	if ( ps->weaponstate == WEAPON_FIRING ) {
 		base->clip = WANIM_FIRE;
-	} else if ( ps->weaponstate == WEAPON_RELOADING ||
-	            ps->weaponstate == WEAPON_RELOAD_END ) {
-		// RELOAD_END is the single mag-in frame - still the reload clip, so the
-		// animation does not blip when the state pulses through it.
+	} else if ( ps->weaponstate == WEAPON_RELOADING ) {
 		base->clip = WANIM_RELOAD;
 	} else {
 		base->clip = WANIM_IDLE;

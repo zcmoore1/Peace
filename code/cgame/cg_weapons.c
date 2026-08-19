@@ -1419,19 +1419,19 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 
 	// Placeholder reload animation: arc the weapon down and back using a sin curve.
 	// Replace TORSO_GESTURE + this offset with a real weapon anim when assets exist.
-	// RELOAD_END is the one mag-in frame; keep the arc running through it so the
-	// pulse is invisible. Switching away sets RAISING, which drops out of this
-	// branch and abandons the reload arc - the new gun raises from frame 0.
-	if ( ps->weaponstate == WEAPON_RELOADING ||
-	     ps->weaponstate == WEAPON_RELOAD_END ) {
+	// Picture only - this never touches ammo. Driven by the PREDICTED anim clock
+	// (ps->weaponAnimTime), not a client-side stopwatch, so the viewmodel sits at
+	// exactly the frame the notes are being fired from. Switching away sets
+	// RAISING, which drops out of this branch: the reload clip is abandoned and
+	// the new gun raises from frame 0 - no drop is played for it.
+	if ( ps->weaponstate == WEAPON_RELOADING && ps->weaponAnimTime >= 0 ) {
 		int   reloadDuration = BG_WeaponReloadTime( ps->weapon );
 		float t;
 		float arc;
 
-		if ( !cg.reloadStartTime ) {
-			cg.reloadStartTime = cg.time;
-		}
-		t = (float)( cg.time - cg.reloadStartTime ) / (float)reloadDuration;
+		t = ( reloadDuration > 0 )
+		    ? (float)ps->weaponAnimTime / (float)reloadDuration
+		    : 0.0f;
 		if ( t < 0.0f ) t = 0.0f;
 		if ( t > 1.0f ) t = 1.0f;
 
@@ -1439,8 +1439,6 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		arc = sin( 3.14159265f * t );
 		angles[PITCH] += 45.0f * arc;
 		angles[ROLL]  -= 25.0f * arc;
-	} else {
-		cg.reloadStartTime = 0;
 	}
 
 	AnglesToAxis( angles, hand.axis );

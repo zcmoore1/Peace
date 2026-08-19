@@ -147,11 +147,24 @@ typedef enum {
 	WEAPON_RAISING,
 	WEAPON_DROPPING,
 	WEAPON_FIRING,
-	WEAPON_RELOADING,
-	WEAPON_RELOAD_END	// the single pmove frame the mag seats on. Drop time is 0
-						// here, so a switch pending on this frame completes
-						// instantly and pre-empts the clip fill - that is the NAC.
+	WEAPON_RELOADING
 } weaponstate_t;
+
+// Typed notes on a weapon animation. Predicted in bg_pmove - never driven from
+// cgame, and never from weaponTime. They fire when the anim's ELAPSED clock
+// (ps->weaponAnimTime) crosses their timestamp.
+typedef enum {
+	WNOTE_NONE,			// list terminator
+	WNOTE_MAG_OUT,		// sound only
+	WNOTE_MAG_IN,		// gameplay: queue the clip fill and clear the busy lock
+	WNOTE_RELOAD_SETTLE,// anim done - back to READY, may fire
+	WNOTE_BOLT_CLOSED	// later: pump/bolt guns, same meaning as MAG_IN
+} weaponNote_t;
+
+typedef struct {
+	int				time;	// ms into the anim
+	weaponNote_t	note;
+} bg_weaponNote_t;
 
 // pmove->pm_flags
 #define	PMF_DUCKED			1
@@ -169,8 +182,7 @@ typedef enum {
 #define PMF_FOLLOW			4096	// spectate following another player
 #define PMF_SCOREBOARD		8192	// spectate as a scoreboard
 #define PMF_INVULEXPAND		16384	// invulnerability sphere set to full size
-// bit 15 free (was PMF_QUICKSWAP_PENDING - the switch is stock Q3 again; the
-// instant swap now comes from PM_DropTime() being 0 on the mag-in frame)
+#define PMF_PENDING_MAG		32768	// WNOTE_MAG_IN fired and the clip fill is queued for later this think. If a holster finishes first the fill never happens - that is the NAC. bit 15
 
 #define	PMF_ALL_TIMES	(PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK)
 
@@ -216,8 +228,10 @@ void Pmove (pmove_t *pmove);
 
 int  BG_WeaponMagSize( int weapon );
 int  BG_WeaponMaxReserve( int weapon );
-int  BG_WeaponReloadTime( int weapon );
-int  BG_WeaponReloadAddTime( int weapon );
+int  BG_WeaponReloadTime( int weapon );		// = the WNOTE_RELOAD_SETTLE timestamp
+int  BG_WeaponDropTime( int weapon );		// holster length, never 0
+int  BG_WeaponRaiseTime( int weapon );		// deploy length, never 0
+const bg_weaponNote_t *BG_WeaponNotes( int weapon );
 int  BG_WeaponBaseSpread( int weapon );
 float BG_SpreadScale( const playerState_t *ps );
 float BG_WeaponSpread( const playerState_t *ps );

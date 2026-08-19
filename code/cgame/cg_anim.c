@@ -168,6 +168,24 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	animLayer_t *sprint = &cg_weapLayers[LAYER_SPRINT];
 	int i;
 
+	// Which layer wins when a swap collides with the sprint carry. The two CoD
+	// engine families answer this differently, so it is a policy, not a rule:
+	//   cg_weapSprintPriority 1 (Infinity Ward) - the sprint anim is preserved.
+	//     Swapping out of the carry never draws a drop, and swapping out of the
+	//     sprint-IN transition holds on that clip's final frame, i.e. the last
+	//     pose before the full sprint would have begun. That freeze is not coded
+	//     anywhere: a non-looping clip clamps to its last frame in
+	//     CG_WeapAnim_SampleLayer, and holding the layer just stops it being
+	//     re-aimed. A looping sprint carry keeps running for the same reason.
+	//   cg_weapSprintPriority 0 (Treyarch) - the swap anim takes priority and
+	//     the sprint blends out under it.
+	// Either way the weapon state machine is untouched: the holster still runs
+	// its normal timer, so only the picture differs.
+	qboolean swapping     = ( ps->weaponstate == WEAPON_RAISING ||
+	                          ps->weaponstate == WEAPON_DROPPING );
+	qboolean sprintHolds  = ( cg_weapSprintPriority.integer &&
+	                          swapping && sprint->weight > 0.0f );
+
 	// -- Base layer: swap between idle and fire --
 	if ( ps->weaponstate == WEAPON_FIRING ) {
 		base->clip = WANIM_FIRE;
@@ -181,7 +199,9 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	// Only re-aimed while the current transition has finished. THIS is the
 	// still swap: press swap during a raise and the state machine holsters on
 	// its normal timer, but the raise owns the layer and no drop is drawn.
-	if ( !CG_WeapAnim_TransitionBusy( def, move ) ) {
+	if ( sprintHolds ) {
+		move->targetWeight = 0.0f;			// swap anim suppressed
+	} else if ( !CG_WeapAnim_TransitionBusy( def, move ) ) {
 		if ( ps->weaponstate == WEAPON_RAISING ) {
 			CG_WeapAnim_PlayLayer( move, WANIM_RAISE );
 		} else if ( ps->weaponstate == WEAPON_DROPPING ) {
@@ -199,7 +219,9 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	// Same ownership rule. Note pmove already refuses to enter the sprint carry
 	// during a raise, so a held sprint is deferred there too - the picture and
 	// the state machine agree without either one being told about the other.
-	if ( !CG_WeapAnim_TransitionBusy( def, sprint ) ) {
+	if ( sprintHolds ) {
+		sprint->targetWeight = 1.0f;		// hold whatever it was already playing
+	} else if ( !CG_WeapAnim_TransitionBusy( def, sprint ) ) {
 		if ( ps->weaponstate == WEAPON_SPRINT_IN ) {
 			CG_WeapAnim_PlayLayer( sprint, WANIM_SPRINT_IN );
 		} else if ( ps->weaponstate == WEAPON_SPRINTING ) {

@@ -281,9 +281,8 @@ typedef enum {
 	STAT_SLOT_SECONDARY,			// weapon_t held in slot 2
 	STAT_ACTIVE_SLOT,				// weaponSlot_t the player is "on" (melee and
 									// equipment do not change it - they return here)
-	STAT_LETHAL_COUNT,				// lethal equipment remaining
-	STAT_TACTICAL_COUNT,			// tactical equipment remaining
-	STAT_UNDERBARREL,				// weapon_t of the attachment, or WP_NONE
+									// equipment counts live in ammo[WP_FRAG] /
+									// ammo[WP_FLASH] - no stat needed
 	STAT_USE_TARGET,				// entity being picked up, or -1
 	STAT_USE_PROGRESS				// ms of hold accumulated toward the pickup
 } statIndex_t;
@@ -402,7 +401,6 @@ typedef enum {
 	WP_KNIFE,			// melee, always carried
 	WP_FRAG,			// lethal equipment
 	WP_FLASH,			// tactical equipment
-	WP_M203,			// underbarrel attachment
 
 	WP_NUM_WEAPONS
 } weapon_t;
@@ -419,7 +417,6 @@ typedef enum {
 typedef struct {
 	const char	*name;
 	int			slot[SLOT_COUNT];	// weapon_t in each weapon slot
-	int			underbarrel;		// weapon_t attached to the primary, or WP_NONE
 	int			lethal;				// weapon_t thrown by BUTTON_LETHAL
 	int			lethalCount;
 	int			tactical;			// weapon_t thrown by BUTTON_TACTICAL

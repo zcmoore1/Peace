@@ -799,6 +799,59 @@ void CalcMuzzlePointOrigin ( gentity_t *ent, vec3_t origin, vec3_t localForward,
 
 
 /*
+======================================================================
+MELEE / EQUIPMENT
+======================================================================
+*/
+#define	KNIFE_RANGE		64
+#define	KNIFE_DAMAGE	100		// CoD-style: a connected melee kills
+
+void Weapon_Knife( gentity_t *ent ) {
+	trace_t		tr;
+	vec3_t		end;
+	gentity_t	*tent, *traceEnt;
+
+	VectorMA( muzzle, KNIFE_RANGE, forward, end );
+	trap_Trace( &tr, muzzle, NULL, NULL, end, ent->s.number, MASK_SHOT );
+	if ( tr.surfaceFlags & SURF_NOIMPACT ) {
+		return;
+	}
+
+	traceEnt = &g_entities[ tr.entityNum ];
+	if ( !traceEnt->takedamage ) {
+		return;
+	}
+
+	if ( traceEnt->client ) {
+		tent = G_TempEntity( tr.endpos, EV_MISSILE_HIT );
+		tent->s.otherEntityNum = traceEnt->s.number;
+		tent->s.eventParm      = DirToByte( tr.plane.normal );
+		tent->s.weapon         = ent->s.weapon;
+	}
+
+	G_Damage( traceEnt, ent, ent, forward, tr.endpos,
+		KNIFE_DAMAGE * s_quadFactor, 0, MOD_GAUNTLET );
+}
+
+// Both equipment types are thrown the same way; only the payload differs.
+void Weapon_ThrowEquipment( gentity_t *ent, qboolean lethal ) {
+	gentity_t	*m;
+
+	m = fire_grenade( ent, muzzle, forward );
+	if ( !m ) {
+		return;
+	}
+	if ( lethal ) {
+		m->damage       *= s_quadFactor;
+		m->splashDamage *= s_quadFactor;
+	} else {
+		// Tactical: no damage yet - the flash effect lands with the HUD work.
+		m->damage       = 0;
+		m->splashDamage = 0;
+	}
+}
+
+/*
 ===============
 FireWeapon
 ===============
@@ -837,6 +890,15 @@ void FireWeapon( gentity_t *ent ) {
 	switch( ent->s.weapon ) {
 	case WP_GAUNTLET:
 		Weapon_Gauntlet( ent );
+		break;
+	case WP_KNIFE:
+		Weapon_Knife( ent );
+		break;
+	case WP_FRAG:
+		Weapon_ThrowEquipment( ent, qtrue );
+		break;
+	case WP_FLASH:
+		Weapon_ThrowEquipment( ent, qfalse );
 		break;
 	case WP_LIGHTNING:
 		Weapon_LightningFire( ent );

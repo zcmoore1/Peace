@@ -2400,7 +2400,7 @@ static void CG_DrawLoadoutHud( void ) {
 	playerState_t	*ps;
 	char			line[64];
 	int				x, y;
-	int				i, w, slotWpn;
+	int				i, slotWpn;
 	vec4_t			dim    = { 1.0f, 1.0f, 1.0f, 0.45f };
 	vec4_t			bright = { 1.0f, 1.0f, 1.0f, 1.0f };
 
@@ -2442,15 +2442,9 @@ static void CG_DrawLoadoutHud( void ) {
 
 	trap_R_SetColor( bright );
 
-	w = ps->stats[STAT_UNDERBARREL];
-	if ( w > WP_NONE && w < WP_NUM_WEAPONS ) {
-		Com_sprintf( line, sizeof( line ), "UB  %i", ps->ammo[w] );
-		CG_DrawSmallString( x, y, line, 1.0f );
-		y += SMALLCHAR_HEIGHT + 2;
-	}
-
+	// Equipment counts are just the ammo on those weapon entries.
 	Com_sprintf( line, sizeof( line ), "LETHAL %i   TAC %i",
-		ps->stats[STAT_LETHAL_COUNT], ps->stats[STAT_TACTICAL_COUNT] );
+		ps->ammo[WP_FRAG], ps->ammo[WP_FLASH] );
 	CG_DrawSmallString( x, y, line, 1.0f );
 
 	trap_R_SetColor( NULL );

@@ -1487,7 +1487,6 @@ static const int bg_weaponMagSize[MAX_WEAPONS] = {
 	0,		// WP_KNIFE          (no magazine)
 	1,		// WP_FRAG           (one in hand)
 	1,		// WP_FLASH
-	1,		// WP_M203           (single grenade)
 };
 
 // ---------------------------------------------------------------------------
@@ -1565,7 +1564,6 @@ static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
 	/* WP_KNIFE           */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 	/* WP_FRAG            */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 	/* WP_FLASH           */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
-	/* WP_M203            */ { { SEG_NONE, { 1400, bgnotes_mag_heavy }, SEG_NONE } },
 };
 
 // Holster / deploy lengths. Always stamped on a weapon change - never 0, so a
@@ -1587,7 +1585,6 @@ static const int bg_weaponDropTime[MAX_WEAPONS] = {
 	80,		// WP_KNIFE          (snappy melee)
 	100,	// WP_FRAG
 	100,	// WP_FLASH
-	120,	// WP_M203
 };
 
 static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
@@ -1605,7 +1602,6 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 	120,	// WP_KNIFE
 	150,	// WP_FRAG
 	150,	// WP_FLASH
-	180,	// WP_M203
 };
 
 int BG_WeaponMagSize( int weapon ) {
@@ -1662,7 +1658,6 @@ static const int bg_weaponMaxReserve[MAX_WEAPONS] = {
 	0,		// WP_KNIFE
 	0,		// WP_FRAG           (count lives in STAT_LETHAL_COUNT)
 	0,		// WP_FLASH          (count lives in STAT_TACTICAL_COUNT)
-	4,		// WP_M203
 };
 
 int BG_WeaponMaxReserve( int weapon ) {
@@ -1690,7 +1685,6 @@ static const int bg_weaponSpread[MAX_WEAPONS] = {
 	0,		// WP_KNIFE
 	0,		// WP_FRAG
 	0,		// WP_FLASH
-	0,		// WP_M203
 };
 
 int BG_WeaponBaseSpread( int weapon ) {
@@ -1754,25 +1748,21 @@ float BG_WeaponSpread( const playerState_t *ps ) {
 static const bg_class_t bg_classes[] = {
 	{	"Assault",
 		{ WP_MACHINEGUN, WP_SHOTGUN },
-		WP_M203,
 		WP_FRAG,  2,
 		WP_FLASH, 2
 	},
 	{	"Scout",
 		{ WP_RAILGUN, WP_MACHINEGUN },
-		WP_NONE,
 		WP_FRAG,  1,
 		WP_FLASH, 3
 	},
 	{	"Demolition",
 		{ WP_ROCKET_LAUNCHER, WP_SHOTGUN },
-		WP_NONE,
 		WP_FRAG,  3,
 		WP_FLASH, 1
 	},
 	{	"Support",
 		{ WP_PLASMAGUN, WP_LIGHTNING },
-		WP_NONE,
 		WP_FRAG,  2,
 		WP_FLASH, 2
 	},
@@ -1827,18 +1817,8 @@ void BG_ApplyLoadout( playerState_t *ps, int classIndex ) {
 	ps->stats[STAT_WEAPONS] |= ( 1 << WP_KNIFE );
 	ps->ammo[WP_KNIFE] = -1;
 
-	// Underbarrel rides on the primary.
-	ps->stats[STAT_UNDERBARREL] = cl->underbarrel;
-	if ( cl->underbarrel > WP_NONE && cl->underbarrel < WP_NUM_WEAPONS ) {
-		ps->stats[STAT_WEAPONS] |= ( 1 << cl->underbarrel );
-		ps->ammo[cl->underbarrel]        = BG_WeaponMagSize( cl->underbarrel );
-		ps->ammoReserve[cl->underbarrel] = BG_WeaponMaxReserve( cl->underbarrel );
-	}
-
-	// Equipment. The count is the inventory - the weapon entry only exists so
-	// the throw can reuse the normal weapon state machine.
-	ps->stats[STAT_LETHAL_COUNT]   = cl->lethalCount;
-	ps->stats[STAT_TACTICAL_COUNT] = cl->tacticalCount;
+	// Equipment. The remaining count IS ammo[] for that entry - the weapon
+	// entry only exists so a throw can reuse the normal weapon state machine.
 	if ( cl->lethal > WP_NONE && cl->lethal < WP_NUM_WEAPONS ) {
 		ps->stats[STAT_WEAPONS] |= ( 1 << cl->lethal );
 		ps->ammo[cl->lethal] = cl->lethalCount;
@@ -2078,6 +2058,68 @@ static void PM_AdvanceReloadSegments( void ) {
 
 /*
 ===============
+PM_IsSpecialWeapon
+
+Melee and equipment are weapon_t entries so they reuse the pmove state machine,
+but they are not inventory slots - the player always returns to their gun.
+===============
+*/
+static qboolean PM_IsSpecialWeapon( int w ) {
+	return ( w == WP_KNIFE || w == WP_FRAG || w == WP_FLASH );
+}
+
+/*
+===============
+PM_DesiredWeapon
+
+What the player wants in their hands this think. Normally that is whatever the
+client selected (cmd.weapon, which weapnext toggles between the two slots), but
+holding melee or an equipment button requests that instead.
+
+A tap is enough: once a special weapon is out we keep requesting it until it has
+finished its swing/throw, then fall back to cmd.weapon - which is still pointing
+at the slot weapon, so the gun comes back on its own.
+
+This only chooses a NUMBER. The switch itself still goes through
+PM_BeginWeaponChange unchanged, so the holster always stamps a real drop time
+and the NAC is untouched.
+===============
+*/
+static int PM_DesiredWeapon( void ) {
+	int special = WP_NONE;
+
+	if ( pm->cmd.buttons & BUTTON_MELEE ) {
+		special = WP_KNIFE;
+	} else if ( ( pm->cmd.buttons & BUTTON_LETHAL ) && pm->ps->ammo[WP_FRAG] > 0 ) {
+		special = WP_FRAG;
+	} else if ( ( pm->cmd.buttons & BUTTON_TACTICAL ) && pm->ps->ammo[WP_FLASH] > 0 ) {
+		special = WP_FLASH;
+	}
+
+	if ( special != WP_NONE ) {
+		if ( pm->ps->stats[STAT_WEAPONS] & ( 1 << special ) ) {
+			return special;
+		}
+		return pm->cmd.weapon;
+	}
+
+	// Button released. Stay on the special until it is idle so a tap still
+	// completes, then hand control back to the client's selection.
+	if ( PM_IsSpecialWeapon( pm->ps->weapon ) ) {
+		if ( pm->ps->weaponstate != WEAPON_READY || pm->ps->weaponTime > 0 ) {
+			return pm->ps->weapon;
+		}
+		// Out of equipment? Never leave an empty hand out.
+		if ( pm->ps->weapon != WP_KNIFE && pm->ps->ammo[pm->ps->weapon] <= 0 ) {
+			return pm->cmd.weapon;
+		}
+	}
+
+	return pm->cmd.weapon;
+}
+
+/*
+===============
 PM_BeginWeaponChange
 
 Stock holster. Always stamps a real per-weapon drop time - it never inspects
@@ -2114,7 +2156,7 @@ PM_FinishWeaponChange
 static void PM_FinishWeaponChange( void ) {
 	int		weapon;
 
-	weapon = pm->cmd.weapon;
+	weapon = PM_DesiredWeapon();
 	if ( weapon < WP_NONE || weapon >= WP_NUM_WEAPONS ) {
 		weapon = WP_NONE;
 	}
@@ -2126,6 +2168,15 @@ static void PM_FinishWeaponChange( void ) {
 	// Each weapon's magazine lives in ps->ammo[weapon], so it persists across
 	// swaps for free - no per-slot bookkeeping.
 	pm->ps->weapon      = weapon;
+
+	// Remember which slot we are "on". Melee and equipment deliberately leave
+	// this alone, so releasing the button returns to the right gun.
+	if ( weapon == pm->ps->stats[STAT_SLOT_PRIMARY] ) {
+		pm->ps->stats[STAT_ACTIVE_SLOT] = SLOT_PRIMARY;
+	} else if ( weapon == pm->ps->stats[STAT_SLOT_SECONDARY] ) {
+		pm->ps->stats[STAT_ACTIVE_SLOT] = SLOT_SECONDARY;
+	}
+
 	pm->ps->weaponstate = WEAPON_RAISING;
 	pm->ps->weaponTime  = BG_WeaponRaiseTime( weapon );
 	pm->ps->weaponAnimTime = -1;			// whatever anim we were in is abandoned
@@ -2285,8 +2336,9 @@ static void PM_Weapon( void ) {
 
 	// 1. Weapon change ALWAYS stamps a real holster first.
 	if ( pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ) {
-		if ( pm->cmd.weapon != pm->ps->weapon ) {
-			PM_BeginWeaponChange( pm->cmd.weapon );
+		int want = PM_DesiredWeapon();
+		if ( want != pm->ps->weapon ) {
+			PM_BeginWeaponChange( want );
 		}
 	}
 

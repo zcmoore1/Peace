@@ -1819,6 +1819,26 @@ static void PM_ReloadFillClip( int weapon, int rounds ) {
 
 /*
 ===============
+PM_SegNotes
+
+Never hand back a NULL note list. bg_weaponReloads is sized MAX_WEAPONS but
+only the real weapons are initialised, so the tail slots zero out with a NULL
+notes pointer - and ps->weapon arrives over the network, so it cannot be
+assumed sane.
+===============
+*/
+static const bg_weaponNote_t *PM_SegNotes( int weapon, int seq ) {
+	const bg_weaponNote_t *n;
+
+	if ( seq < 0 || seq >= RSEQ_COUNT ) {
+		return bgnotes_none;
+	}
+	n = BG_WeaponReload( weapon )->seg[seq].notes;
+	return n ? n : bgnotes_none;
+}
+
+/*
+===============
 PM_PendingMagAmount
 
 How many rounds the queued fill should insert: the param on the mag-in note of
@@ -1829,7 +1849,7 @@ happens before the segment can advance.
 static int PM_PendingMagAmount( void ) {
 	const bg_weaponNote_t *n;
 
-	n = BG_WeaponReload( pm->ps->weapon )->seg[ pm->ps->weaponAnimSeq ].notes;
+	n = PM_SegNotes( pm->ps->weapon, pm->ps->weaponAnimSeq );
 	for ( ; n->note != WNOTE_NONE; n++ ) {
 		if ( n->note == WNOTE_MAG_IN || n->note == WNOTE_BOLT_CLOSED ) {
 			return n->param;
@@ -1853,7 +1873,7 @@ holster got there first.
 static void PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 	const bg_weaponNote_t *n;
 
-	n = BG_WeaponReload( pm->ps->weapon )->seg[ pm->ps->weaponAnimSeq ].notes;
+	n = PM_SegNotes( pm->ps->weapon, pm->ps->weaponAnimSeq );
 
 	for ( ; n->note != WNOTE_NONE; n++ ) {
 		if ( !( oldElapsed < n->time && newElapsed >= n->time ) ) {
@@ -1900,6 +1920,10 @@ a shell gun runs it until the tube is full.
 static void PM_AdvanceReloadSegments( void ) {
 	const bg_weaponReload_t *rl = BG_WeaponReload( pm->ps->weapon );
 	int guard;
+
+	if ( pm->ps->weaponAnimSeq < 0 || pm->ps->weaponAnimSeq >= RSEQ_COUNT ) {
+		pm->ps->weaponAnimSeq = RSEQ_START;
+	}
 
 	for ( guard = 0; guard < RSEQ_COUNT + 4; guard++ ) {
 		const bg_weaponAnimSeg_t *seg = &rl->seg[ pm->ps->weaponAnimSeq ];

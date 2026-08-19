@@ -2479,6 +2479,9 @@ static void CG_DrawWeaponDebug( void ) {
 		case WEAPON_DROPPING:	stateName = "DROPPING";	break;
 		case WEAPON_FIRING:		stateName = "FIRING";	break;
 		case WEAPON_RELOADING:	stateName = "RELOADING";break;
+		case WEAPON_SPRINT_IN:	stateName = "SPRINT_IN";break;
+		case WEAPON_SPRINTING:	stateName = "SPRINTING";break;
+		case WEAPON_SPRINT_OUT:	stateName = "SPRINT_OUT";break;
 		default:				stateName = "?";		break;
 	}
 

@@ -140,9 +140,14 @@ static void CG_WeapAnim_UpdateLayers( playerState_t *ps, int msec ) {
 	// stow is instant the sprint blend also completes instantly for free.
 	// For now wire to a simple ps->pm_flags sprint check (placeholder until
 	// PMF_SPRINTING exists).
-	// TODO: replace PMF_FOLLOW placeholder with actual PMF_SPRINTING flag.
-	if ( ps->pm_flags & PMF_FOLLOW ) {   // placeholder: will be PMF_SPRINTING
+	if ( ps->weaponstate == WEAPON_SPRINT_IN ) {
+		sprint->clip         = WANIM_SPRINT_IN;
+		sprint->targetWeight = 1.0f;
+	} else if ( ps->weaponstate == WEAPON_SPRINTING ) {
 		sprint->clip         = WANIM_SPRINT_LOOP;
+		sprint->targetWeight = 1.0f;
+	} else if ( ps->weaponstate == WEAPON_SPRINT_OUT ) {
+		sprint->clip         = WANIM_SPRINT_OUT;
 		sprint->targetWeight = 1.0f;
 	} else {
 		sprint->targetWeight = 0.0f;

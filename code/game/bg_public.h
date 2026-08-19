@@ -147,7 +147,12 @@ typedef enum {
 	WEAPON_RAISING,
 	WEAPON_DROPPING,
 	WEAPON_FIRING,
-	WEAPON_RELOADING
+	WEAPON_RELOADING,
+	WEAPON_SPRINT_IN,	// lowering into the sprint carry - a timed action with
+						// its own lock, so anything that clears the lock (the
+						// mag-in note) collapses the transition
+	WEAPON_SPRINTING,	// gun is down; cannot fire
+	WEAPON_SPRINT_OUT	// bringing the gun back up
 } weaponstate_t;
 
 // Typed notes on a weapon animation. Predicted in bg_pmove - never driven from
@@ -253,6 +258,8 @@ const bg_weaponReload_t *BG_WeaponReload( int weapon );
 int  BG_WeaponReloadSegLength( int weapon, int seq );
 int  BG_WeaponDropTime( int weapon );		// holster length, never 0
 int  BG_WeaponRaiseTime( int weapon );		// deploy length, never 0
+int  BG_WeaponSprintInTime( int weapon );	// lower-into-sprint length
+int  BG_WeaponSprintOutTime( int weapon );	// raise-out-of-sprint length
 int  BG_WeaponBaseSpread( int weapon );
 float BG_SpreadScale( const playerState_t *ps );
 float BG_WeaponSpread( const playerState_t *ps );

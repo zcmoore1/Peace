@@ -1628,6 +1628,30 @@ int BG_WeaponReloadTime( int weapon ) {
 	     + rl->seg[RSEQ_END].length;
 }
 
+// Sprint transitions. Same shape as drop/raise: a real per-weapon time that is
+// always stamped, never zero. The instant version is not authored anywhere - it
+// only happens when something else clears the lock in the same think.
+static const int bg_weaponSprintInTime[MAX_WEAPONS] = {
+	150, 150, 200, 200, 250, 250, 200, 250, 200, 300, 120, 150, 150, 150, 150, 150
+};
+static const int bg_weaponSprintOutTime[MAX_WEAPONS] = {
+	180, 180, 250, 250, 300, 300, 250, 300, 250, 350, 150, 180, 180, 180, 180, 180
+};
+
+int BG_WeaponSprintInTime( int weapon ) {
+	int t;
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return WEAPON_MIN_SWAP_TIME;
+	t = bg_weaponSprintInTime[weapon];
+	return ( t < WEAPON_MIN_SWAP_TIME ) ? WEAPON_MIN_SWAP_TIME : t;
+}
+
+int BG_WeaponSprintOutTime( int weapon ) {
+	int t;
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return WEAPON_MIN_SWAP_TIME;
+	t = bg_weaponSprintOutTime[weapon];
+	return ( t < WEAPON_MIN_SWAP_TIME ) ? WEAPON_MIN_SWAP_TIME : t;
+}
+
 int BG_WeaponDropTime( int weapon ) {
 	int t;
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return WEAPON_MIN_SWAP_TIME;
@@ -2231,23 +2255,19 @@ static void PM_CheckSprint( void ) {
 
 	wasSprinting = !!( pm->ps->pm_flags & PMF_SPRINTING );
 
+	(void)wasSprinting;
+
 	if ( wantSprint ) {
 		pm->ps->pm_flags |= PMF_SPRINTING;
 		pm->ps->pm_flags &= ~PMF_ADS;
-
-		// Sprint entry cancels the reload outright - the gun goes to the hip
-		// before the mag can seat. Nothing is preserved: no rounds move, and
-		// the next reload starts from the beginning.
-		if ( !wasSprinting && pm->ps->weaponstate == WEAPON_RELOADING ) {
-			pm->ps->weaponstate    = WEAPON_READY;
-			pm->ps->weaponTime     = 0;
-			pm->ps->weaponAnimTime = -1;			// reload anim abandoned
-			pm->ps->pm_flags      &= ~PMF_PENDING_MAG;
-			PM_StartTorsoAnim( TORSO_STAND );
-		}
 	} else {
 		pm->ps->pm_flags &= ~PMF_SPRINTING;
 	}
+
+	// Deliberately does NOT touch the weapon here. Lowering the gun into the
+	// sprint carry is a timed weapon action and belongs in PM_Weapon, where it
+	// is ordered against the animation notes - cancelling the reload from here
+	// would kill the mag-in note before it could ever fire.
 }
 
 /*
@@ -2342,6 +2362,26 @@ static void PM_Weapon( void ) {
 		}
 	}
 
+	// 1b. Sprint posture. Lowering into and rising out of the sprint carry are
+	//     timed weapon actions that ALWAYS stamp a real per-weapon time, exactly
+	//     like a holster. Stamped here - before the notes - so the mag-in note
+	//     can take the lock away in the same think. Nothing here knows that is
+	//     possible; it just stamps honestly and lets step 3b notice.
+	//     Held off while a switch is resolving, so the drop/raise finishes first.
+	if ( pm->ps->weaponstate != WEAPON_DROPPING && pm->ps->weaponstate != WEAPON_RAISING ) {
+		if ( pm->ps->pm_flags & PMF_SPRINTING ) {
+			if ( pm->ps->weaponstate != WEAPON_SPRINT_IN &&
+			     pm->ps->weaponstate != WEAPON_SPRINTING ) {
+				pm->ps->weaponstate = WEAPON_SPRINT_IN;
+				pm->ps->weaponTime  = BG_WeaponSprintInTime( pm->ps->weapon );
+			}
+		} else if ( pm->ps->weaponstate == WEAPON_SPRINT_IN ||
+		            pm->ps->weaponstate == WEAPON_SPRINTING ) {
+			pm->ps->weaponstate = WEAPON_SPRINT_OUT;
+			pm->ps->weaponTime  = BG_WeaponSprintOutTime( pm->ps->weapon );
+		}
+	}
+
 	// 2. Then the anim's notes run. Gated on the anim clock being live, not on
 	//    weaponstate - step 1 may have just flipped us to DROPPING, and the
 	//    reload's mag-in note still has to land on this think for the race to
@@ -2356,6 +2396,23 @@ static void PM_Weapon( void ) {
 	if ( pm->ps->weaponstate == WEAPON_DROPPING && pm->ps->weaponTime <= 0 ) {
 		PM_FinishWeaponChange();
 		return;
+	}
+
+	// 3b. A sprint transition whose lock is already spent completes NOW and
+	//     returns - so the queued fill below is never reached. Identical shape
+	//     to the holster above: if the mag-in note cleared the lock this think,
+	//     the lower-into-sprint collapses to nothing and the rounds are lost.
+	//     Sprint out deliberately does NOT return: it hands back to a ready gun.
+	if ( pm->ps->weaponstate == WEAPON_SPRINT_IN && pm->ps->weaponTime <= 0 ) {
+		pm->ps->weaponstate    = WEAPON_SPRINTING;
+		pm->ps->weaponAnimTime = -1;			// any interrupted reload is gone
+		pm->ps->pm_flags      &= ~PMF_PENDING_MAG;
+		PM_StartTorsoAnim( TORSO_STAND );
+		return;
+	}
+	if ( pm->ps->weaponstate == WEAPON_SPRINT_OUT && pm->ps->weaponTime <= 0 ) {
+		pm->ps->weaponstate = WEAPON_READY;
+		PM_StartTorsoAnim( TORSO_STAND );
 	}
 
 	// 4. Nobody holstered out from under us, so the queued rounds go in.
@@ -2392,8 +2449,9 @@ static void PM_Weapon( void ) {
 	// 7. The settle note ends a reload, not the busy clock. While the tail is
 	//    still playing the lock reads 0 but the state is RELOADING, so we stop
 	//    here and the fire code below stays unreachable.
-	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
-		return;
+	if ( pm->ps->weaponstate == WEAPON_RELOADING ||
+	     pm->ps->weaponstate == WEAPON_SPRINTING ) {
+		return;			// gun is not up: the state blocks firing, not the clock
 	}
 
 	// Auto-reload: magazine empty and reserve available.

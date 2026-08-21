@@ -751,6 +751,87 @@ If "g_synchronousClients 1" is set, this will be called exactly
 once for each server frame, which makes for smooth demo recording.
 ==============
 */
+/*
+==============
+G_CheckWeaponPickup
+
+Hold the use key while looking at a floor weapon to take it. Replaces whatever
+is in the slot you are currently on - the slots are the inventory, so there is
+never a third gun to reconcile.
+
+Progress lives in STAT_USE_PROGRESS (networked, so the HUD can draw a bar) and
+STAT_USE_TARGET names the entity. Letting go resets both; there is no partial
+credit.
+==============
+*/
+#define	PICKUP_RANGE		72
+#define	PICKUP_HOLD_MS		600
+
+static void G_CheckWeaponPickup( gentity_t *ent, usercmd_t *ucmd ) {
+	playerState_t	*ps = &ent->client->ps;
+	vec3_t			forward, start, end;
+	trace_t			tr;
+	gentity_t		*target = NULL;
+	int				slot;
+
+	if ( !( ucmd->buttons & BUTTON_USE ) || ps->stats[STAT_HEALTH] <= 0 ) {
+		ps->stats[STAT_USE_TARGET]   = -1;
+		ps->stats[STAT_USE_PROGRESS] = 0;
+		return;
+	}
+
+	AngleVectors( ps->viewangles, forward, NULL, NULL );
+	VectorCopy( ps->origin, start );
+	start[2] += ps->viewheight;
+	VectorMA( start, PICKUP_RANGE, forward, end );
+
+	trap_Trace( &tr, start, NULL, NULL, end, ent->s.number, MASK_SHOT );
+	if ( tr.entityNum < ENTITYNUM_MAX_NORMAL ) {
+		gentity_t *hit = &g_entities[ tr.entityNum ];
+		if ( hit->item && hit->item->giType == IT_WEAPON &&
+		     hit->r.contents & CONTENTS_TRIGGER ) {
+			target = hit;
+		}
+	}
+
+	if ( !target ) {
+		ps->stats[STAT_USE_TARGET]   = -1;
+		ps->stats[STAT_USE_PROGRESS] = 0;
+		return;
+	}
+
+	// Looking at something new restarts the hold.
+	if ( ps->stats[STAT_USE_TARGET] != target->s.number ) {
+		ps->stats[STAT_USE_TARGET]   = target->s.number;
+		ps->stats[STAT_USE_PROGRESS] = 0;
+	}
+
+	ps->stats[STAT_USE_PROGRESS] += ucmd->serverTime - ent->client->pers.cmd.serverTime;
+	if ( ps->stats[STAT_USE_PROGRESS] < PICKUP_HOLD_MS ) {
+		return;
+	}
+
+	// Held long enough - take it.
+	slot = ( ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY )
+	     ? SLOT_SECONDARY : SLOT_PRIMARY;
+	BG_SetSlotWeapon( ps, slot, target->item->giTag );
+	ps->weapon = target->item->giTag;
+
+	ps->stats[STAT_USE_TARGET]   = -1;
+	ps->stats[STAT_USE_PROGRESS] = 0;
+
+	G_AddEvent( ent, EV_ITEM_PICKUP, target->s.modelindex );
+	if ( target->flags & FL_DROPPED_ITEM ) {
+		G_FreeEntity( target );
+	} else {
+		target->r.svFlags |= SVF_NOCLIENT;
+		target->s.eFlags  |= EF_NODRAW;
+		target->r.contents = 0;
+		target->nextthink  = level.time + g_weaponRespawn.integer * 1000;
+		target->think      = RespawnItem;
+	}
+}
+
 void ClientThink_real( gentity_t *ent ) {
 	gclient_t	*client;
 	pmove_t		pm;
@@ -981,6 +1062,9 @@ void ClientThink_real( gentity_t *ent ) {
 	if ( !ent->client->noclip ) {
 		G_TouchTriggers( ent );
 	}
+
+	// hold-to-pickup for floor weapons (walking over them does nothing)
+	G_CheckWeaponPickup( ent, ucmd );
 
 	// NOTE: now copy the exact origin over otherwise clients can be snapped into solid
 	VectorCopy( ent->client->ps.origin, ent->r.currentOrigin );

@@ -433,6 +433,8 @@ typedef struct {
 int					BG_ClassCount( void );
 const bg_class_t	*BG_Class( int index );
 void				BG_ApplyLoadout( playerState_t *ps, int classIndex );
+void				BG_RebuildWeaponMask( playerState_t *ps );
+void				BG_SetSlotWeapon( playerState_t *ps, int slot, int weapon );
 
 
 

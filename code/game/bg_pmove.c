@@ -1813,6 +1813,66 @@ Shared so the server spawn path and any future respawn/loadout-change path can
 never disagree about what a class means.
 ===============
 */
+/*
+===============
+BG_RebuildWeaponMask
+
+STAT_WEAPONS is DERIVED, never accumulated. A weapon is in your inventory if and
+only if it occupies one of the two slots - plus melee, which you always have,
+and whatever equipment you are carrying.
+
+Everything that changes the inventory must go through here. The old failure was
+Pickup_Weapon poking STAT_WEAPONS directly: the mask and the slots disagreed,
+the slot named a weapon whose bit had been cleared, and every swap silently
+failed the ownership check.
+===============
+*/
+void BG_RebuildWeaponMask( playerState_t *ps ) {
+	int mask = 0;
+	int i, w;
+
+	for ( i = 0; i < SLOT_COUNT; i++ ) {
+		w = ps->stats[STAT_SLOT_PRIMARY + i];
+		if ( w > WP_NONE && w < WP_NUM_WEAPONS ) {
+			mask |= ( 1 << w );
+		}
+	}
+
+	mask |= ( 1 << WP_KNIFE );					// melee is never a slot
+
+	if ( ps->ammo[WP_FRAG]  > 0 ) mask |= ( 1 << WP_FRAG );
+	if ( ps->ammo[WP_FLASH] > 0 ) mask |= ( 1 << WP_FLASH );
+
+	ps->stats[STAT_WEAPONS] = mask;
+}
+
+/*
+===============
+BG_SetSlotWeapon
+
+Put a weapon in a slot and rebuild the mask. This is the ONLY way a gun enters
+or leaves the inventory, which is what keeps the two-slot model honest no matter
+which weapons are involved.
+===============
+*/
+void BG_SetSlotWeapon( playerState_t *ps, int slot, int weapon ) {
+	if ( slot < 0 || slot >= SLOT_COUNT ) {
+		return;
+	}
+	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
+		return;
+	}
+
+	ps->stats[STAT_SLOT_PRIMARY + slot] = weapon;
+	BG_RebuildWeaponMask( ps );
+
+	// A gun that just arrived comes loaded.
+	if ( BG_WeaponMagSize( weapon ) > 0 && ps->ammo[weapon] <= 0 ) {
+		ps->ammo[weapon]        = BG_WeaponMagSize( weapon );
+		ps->ammoReserve[weapon] = BG_WeaponMaxReserve( weapon );
+	}
+}
+
 void BG_ApplyLoadout( playerState_t *ps, int classIndex ) {
 	const bg_class_t	*cl = BG_Class( classIndex );
 	int					i, w;
@@ -1829,28 +1889,25 @@ void BG_ApplyLoadout( playerState_t *ps, int classIndex ) {
 		if ( w <= WP_NONE || w >= WP_NUM_WEAPONS ) {
 			w = WP_MACHINEGUN;
 		}
-		ps->stats[STAT_WEAPONS] |= ( 1 << w );
+		ps->stats[STAT_SLOT_PRIMARY + i] = w;
 		ps->ammo[w]        = BG_WeaponMagSize( w );
 		ps->ammoReserve[w] = BG_WeaponMaxReserve( w );
 	}
-	ps->stats[STAT_SLOT_PRIMARY]   = cl->slot[SLOT_PRIMARY];
-	ps->stats[STAT_SLOT_SECONDARY] = cl->slot[SLOT_SECONDARY];
-	ps->stats[STAT_ACTIVE_SLOT]    = SLOT_PRIMARY;
+	ps->stats[STAT_ACTIVE_SLOT] = SLOT_PRIMARY;
 
 	// Melee is never a slot - you always have it.
-	ps->stats[STAT_WEAPONS] |= ( 1 << WP_KNIFE );
 	ps->ammo[WP_KNIFE] = -1;
 
 	// Equipment. The remaining count IS ammo[] for that entry - the weapon
 	// entry only exists so a throw can reuse the normal weapon state machine.
 	if ( cl->lethal > WP_NONE && cl->lethal < WP_NUM_WEAPONS ) {
-		ps->stats[STAT_WEAPONS] |= ( 1 << cl->lethal );
 		ps->ammo[cl->lethal] = cl->lethalCount;
 	}
 	if ( cl->tactical > WP_NONE && cl->tactical < WP_NUM_WEAPONS ) {
-		ps->stats[STAT_WEAPONS] |= ( 1 << cl->tactical );
 		ps->ammo[cl->tactical] = cl->tacticalCount;
 	}
+
+	BG_RebuildWeaponMask( ps );
 
 	ps->stats[STAT_USE_TARGET]   = -1;
 	ps->stats[STAT_USE_PROGRESS] = 0;

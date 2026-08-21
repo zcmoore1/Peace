@@ -233,67 +233,38 @@ int Pickup_Ammo (gentity_t *ent, gentity_t *other)
 
 
 int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
-	int		quantity;
+	playerState_t	*ps = &other->client->ps;
+	int				wep = ent->item->giTag;
+	int				slot;
 
-	if ( ent->count < 0 ) {
-		quantity = 0; // None for you, sir!
-	} else {
-		if ( ent->count ) {
-			quantity = ent->count;
-		} else {
-			quantity = ent->item->quantity;
-		}
+	// Two slots, and the slots ARE the inventory. A picked-up gun replaces
+	// whatever is in the slot you are currently on; it never just appends.
+	//
+	// This used to poke STAT_WEAPONS directly and clear the held weapon's bit
+	// when you already had two. The slots were never updated, so a slot ended up
+	// naming a weapon whose bit was gone, and every weapnext silently failed the
+	// ownership check in CG_NextWeapon_f. Walking over one floor gun killed
+	// weapon switching for the rest of the life.
+	slot = ( ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY )
+	     ? SLOT_SECONDARY : SLOT_PRIMARY;
 
-		// dropped items and teamplay weapons always have full ammo
-		if ( ! (ent->flags & FL_DROPPED_ITEM) && g_gametype.integer != GT_TEAM ) {
-			// respawning rules
-			// drop the quantity if the already have over the minimum
-			if ( other->client->ps.ammo[ ent->item->giTag ] < quantity ) {
-				quantity = quantity - other->client->ps.ammo[ ent->item->giTag ];
-			} else {
-				quantity = 1;		// only add a single shot
-			}
-		}
+	// Already carrying it in the other slot? Nothing to do but top it up.
+	if ( ps->stats[STAT_SLOT_PRIMARY]   != wep &&
+	     ps->stats[STAT_SLOT_SECONDARY] != wep ) {
+		BG_SetSlotWeapon( ps, slot, wep );
+		ps->weapon = wep;			// you are holding what you just picked up
 	}
 
-	// Hard limit: player carries at most 2 magazine weapons (CoD style).
-	// Picking up a third replaces the one currently in hand.
-	{
-		int i, weapCount = 0;
-		for ( i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++ ) {
-			if ( BG_WeaponMagSize( i ) > 0 &&
-			     ( other->client->ps.stats[STAT_WEAPONS] & ( 1 << i ) ) ) {
-				weapCount++;
-			}
-		}
-		if ( weapCount >= 2 ) {
-			other->client->ps.stats[STAT_WEAPONS] &= ~( 1 << other->client->ps.weapon );
-		}
+	if ( BG_WeaponMagSize( wep ) > 0 ) {
+		ps->ammo[wep]        = BG_WeaponMagSize( wep );
+		ps->ammoReserve[wep] = BG_WeaponMaxReserve( wep );
+	} else if ( wep == WP_GRAPPLING_HOOK ) {
+		ps->ammo[wep] = -1;
 	}
 
-	// add the weapon
-	other->client->ps.stats[STAT_WEAPONS] |= ( 1 << ent->item->giTag );
-
-	Add_Ammo( other, ent->item->giTag, quantity );
-
-	if (ent->item->giTag == WP_GRAPPLING_HOOK)
-		other->client->ps.ammo[ent->item->giTag] = -1; // unlimited ammo
-
-	// Magazine weapons store loaded rounds in ammo[weapon]; picking one up
-	// gives a full magazine (reserve is infinite for now).
-	{
-		int wep = ent->item->giTag;
-		int mag = BG_WeaponMagSize( wep );
-		if ( mag > 0 ) {
-			other->client->ps.ammo[wep] = mag;
-		}
-	}
-
-	// team deathmatch has slow weapon respawns
 	if ( g_gametype.integer == GT_TEAM ) {
 		return g_weaponTeamRespawn.integer;
 	}
-
 	return g_weaponRespawn.integer;
 }
 
@@ -465,6 +436,13 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 	G_LogPrintf( "Item: %i %s\n", other->s.number, ent->item->classname );
 
 	predict = other->client->pers.predictItemPickup;
+
+	// Weapons are NOT vacuumed up by walking over them - you hold the use key
+	// to take one (G_CheckWeaponPickup). Ammo, health and armour still work on
+	// touch. Without this, crossing a Q3 map rewrites your loadout constantly.
+	if ( ent->item->giType == IT_WEAPON ) {
+		return;
+	}
 
 	// call the item-specific pickup function
 	switch( ent->item->giType ) {

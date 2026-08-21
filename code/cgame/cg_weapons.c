@@ -1437,8 +1437,22 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		if ( t < 0.0f ) t = 0.0f;
 		if ( t > 1.0f ) t = 1.0f;
 
-		// sin( π * t ) peaks at 0.5 — weapon pitches away and returns
-		arc = sin( 3.14159265f * t );
+		// Shape depends on which segment is playing, so a shell-at-a-time gun
+		// reads as ONE continuous reload instead of the gun bobbing back up
+		// between every shell:
+		//   START  ease down into the reload posture
+		//   LOOP   hold it down (each shell is a note, not a fresh animation)
+		//   END    ease back up
+		// A magazine gun has only a LOOP, so it still gets a single arc.
+		if ( ps->weaponAnimSeq == RSEQ_START ) {
+			arc = sin( 1.57079633f * t );			// 0 -> 1
+		} else if ( ps->weaponAnimSeq == RSEQ_END ) {
+			arc = sin( 1.57079633f * ( 1.0f - t ) );	// 1 -> 0
+		} else if ( BG_WeaponReloadSegLength( ps->weapon, RSEQ_START ) > 0 ) {
+			arc = 1.0f;								// segmented: hold the posture
+		} else {
+			arc = sin( 3.14159265f * t );			// magazine: single down-and-up
+		}
 		angles[PITCH] += 45.0f * arc;
 		angles[ROLL]  -= 25.0f * arc;
 	}
@@ -1656,15 +1670,64 @@ The current weapon has just run out of ammo
 ===================
 */
 void CG_OutOfAmmoChange( void ) {
-	int		i;
+	playerState_t	*ps = &cg.snap->ps;
+	int				other;
 
 	cg.weaponSelectTime = cg.time;
 
-	for ( i = MAX_WEAPONS-1 ; i > 0 ; i-- ) {
-		if ( CG_WeaponSelectable( i ) ) {
-			cg.weaponSelect = i;
-			break;
-		}
+	// Stock Q3 scanned from the HIGHEST weapon index down and took the first
+	// selectable one. With melee and equipment now living in the weapon enum
+	// above the guns, that handed you a flashbang whenever a gun ran dry - and
+	// because cg.weaponSelect feeds cmd.weapon, pmove then churned weapon
+	// changes forever and weaponstate never settled on READY.
+	// Two slots means there is exactly one place to go: the other one.
+	other = ( ps->stats[STAT_ACTIVE_SLOT] == SLOT_PRIMARY )
+	      ? ps->stats[STAT_SLOT_SECONDARY]
+	      : ps->stats[STAT_SLOT_PRIMARY];
+
+	if ( other > WP_NONE && other < WP_NUM_WEAPONS &&
+	     ( ps->stats[STAT_WEAPONS] & ( 1 << other ) ) ) {
+		cg.weaponSelect = other;
+	}
+}
+
+/*
+===============
+CG_ValidateWeaponSelect
+
+cg.weaponSelect is the ONLY thing that drives cmd.weapon, so it is the single
+choke point where a bad selection can wedge the weapon state machine. It may
+only ever name one of the two slots: melee and equipment are requested with
+their own buttons and are never selected here.
+
+Clamping at this one point is what decouples the inventory from any particular
+pair of weapons - swap a slot for something off the floor and the toggle
+follows automatically, with no other code needing to know.
+===============
+*/
+void CG_ValidateWeaponSelect( void ) {
+	playerState_t	*ps;
+	int				pri, sec;
+
+	if ( !cg.snap ) {
+		return;
+	}
+	ps  = &cg.snap->ps;
+	pri = ps->stats[STAT_SLOT_PRIMARY];
+	sec = ps->stats[STAT_SLOT_SECONDARY];
+
+	if ( cg.weaponSelect == pri || cg.weaponSelect == sec ) {
+		return;						// already a slot
+	}
+
+	// Anything else - a stale pick, a special weapon, an empty slot - snaps
+	// back to whichever slot we are currently on.
+	if ( ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY && sec > WP_NONE ) {
+		cg.weaponSelect = sec;
+	} else if ( pri > WP_NONE ) {
+		cg.weaponSelect = pri;
+	} else if ( sec > WP_NONE ) {
+		cg.weaponSelect = sec;
 	}
 }
 

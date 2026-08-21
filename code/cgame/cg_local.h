@@ -1392,7 +1392,8 @@ void CG_AddViewWeapon (playerState_t *ps);
 void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent, int team );
 void CG_DrawWeaponSelect( void );
 
-void CG_OutOfAmmoChange( void );	// should this be in pmove?
+void CG_OutOfAmmoChange( void );
+void CG_ValidateWeaponSelect( void );	// should this be in pmove?
 
 //
 // cg_marks.c

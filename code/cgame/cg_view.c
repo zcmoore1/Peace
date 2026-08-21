@@ -820,6 +820,9 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	CG_Killcam_Record();
 
 	// let the client system know what our weapon and zoom settings are
+	// Clamp before it becomes cmd.weapon - nothing may ask pmove for a weapon
+	// that is not in a slot.
+	CG_ValidateWeaponSelect();
 	trap_SetUserCmdValue( cg.weaponSelect, cg.zoomSensitivity );
 
 	// this counter will be bumped for every valid scene we generate

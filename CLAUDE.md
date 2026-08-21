@@ -54,6 +54,10 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   sprint carry the sprint animation wins. The Treyarch behaviour is explicitly
   unwanted — do not reintroduce it as a cvar or a branch.
 - **cgame is picture only.** It never touches ammo or weapon state.
+- **Never ADS through a reload.** `PM_CheckADS` blocks `WEAPON_RELOADING` on
+  purpose. The ZOOMload trick is a client/server desync — the reload animation
+  starts client-side and the server never agrees one is happening — not a rule
+  being relaxed. Do not reproduce it by loosening the gate.
 
 ## Capacity limits (both currently full)
 

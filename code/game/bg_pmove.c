@@ -2281,16 +2281,19 @@ the player is not sprinting, reloading, or in a weapon transition.
 static void PM_CheckADS( void ) {
 	qboolean canADS;
 
-	// Deliberately NOT gated on WEAPON_READY. That was too strict: any state
-	// the weapon got stuck in silently disabled aiming altogether, with no way
-	// to tell why. Only the two things that physically prevent it are checked -
-	// the gun is stowed for a sprint, or it is mid-swap.
+	// Listed as "what physically stops you aiming" rather than "only when
+	// READY". The whitelist version was too strict: any state the weapon got
+	// stuck in silently disabled aiming with no way to see why.
 	//
-	// Note this leaves ADS legal during a reload on purpose. That is the door a
-	// ZOOMload-style trick needs; whether one actually exists here depends on
-	// the reload being cancellable, not on this gate.
+	// Reloading IS blocked, and that is correct - you should never be able to
+	// aim through a reload. The ZOOMload trick is not this rule being relaxed;
+	// it is a client/server desync where the reload animation starts on the
+	// client and the server never agrees one is happening, so there is no
+	// reload here to aim through. It is a network artefact, not a permission,
+	// and must not be reproduced by loosening this gate.
 	canADS = ( ( pm->cmd.buttons & BUTTON_ADS ) &&
 	           !( pm->ps->pm_flags & PMF_SPRINTING ) &&
+	           pm->ps->weaponstate != WEAPON_RELOADING &&
 	           pm->ps->weaponstate != WEAPON_SPRINT_IN &&
 	           pm->ps->weaponstate != WEAPON_SPRINTING &&
 	           pm->ps->weaponstate != WEAPON_SPRINT_OUT &&

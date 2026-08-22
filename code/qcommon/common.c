@@ -2763,6 +2763,9 @@ void Com_Init( char *commandLine ) {
 	// survives a hard crash - 1 buffers and loses exactly the lines that
 	// explain it. Defaulted here rather than left to autoexec so anything that
 	// dies BEFORE the configs run is still captured.
+	// Startup cinematics (id logo + intro). Off for Peace - see Com_Init.
+	Cvar_Get( "com_playIntro", "0", CVAR_ARCHIVE );
+
 	com_logfile = Cvar_Get ("logfile", "2", CVAR_TEMP );
 
 	com_timescale = Cvar_Get ("timescale", "1", CVAR_CHEAT | CVAR_SYSTEMINFO );
@@ -2835,7 +2838,11 @@ void Com_Init( char *commandLine ) {
 	// add + commands from command line
 	if ( !Com_AddStartupCommands() ) {
 		// if the user didn't give any commands, run default action
-		if ( !com_dedicated->integer ) {
+		if ( !com_dedicated->integer && Cvar_VariableIntegerValue( "com_playIntro" ) ) {
+			// Off by default in Peace. The id logo played unconditionally - no
+			// cvar gated it, only the intro had com_introplayed - so there was
+			// no way to silence it from a config. It is also the wrong logo for
+			// a total conversion. Set com_playIntro 1 to get both back.
 #ifdef CINEMATICS_LOGO
 			Cbuf_AddText ("cinematic " CINEMATICS_LOGO "\n");
 #endif

@@ -31,11 +31,13 @@ Each layer has:
 #define WANIM_FIRE          1
 #define WANIM_RAISE         2
 #define WANIM_DROP          3
-#define WANIM_RELOAD        4
-#define WANIM_SPRINT_IN     5
-#define WANIM_SPRINT_LOOP   6
-#define WANIM_SPRINT_OUT    7
-#define WANIM_COUNT         8
+#define WANIM_RELOAD_START  4       // matches RSEQ_START
+#define WANIM_RELOAD_LOOP   5       // matches RSEQ_LOOP  (one shell per pass)
+#define WANIM_RELOAD_END    6       // matches RSEQ_END
+#define WANIM_SPRINT_IN     7
+#define WANIM_SPRINT_LOOP   8
+#define WANIM_SPRINT_OUT    9
+#define WANIM_COUNT         10
 
 #define ANIM_LAYER_COUNT    4
 #define LAYER_BASE          0
@@ -100,25 +102,33 @@ static void CG_WeapAnim_DefineClips( void ) {
 	weapAnimDef_t *d;
 
 	// --- WP_SHOTGUN (SPAS-12) --------------------------------------------
-	// Import the model in Blender, read each action's frame count off the
-	// Action Editor, lay the clips end to end in a single IQM export, and fill
-	// the calls in below. firstFrame is the running total of everything before.
+	// Real frame counts from the MW2 .smd pack (last "time N" + 1), at 60fps.
+	// firstFrame assumes the clips are exported end to end in THIS order - if
+	// you export in a different order, only the firstFrame column changes.
 	//
-	//   idle          -> WANIM_IDLE    LOOPING
-	//   Shoot         -> WANIM_FIRE
-	//   draw          -> WANIM_RAISE
-	//   insert        -> WANIM_RELOAD  the per-shell loop
+	//   idle          11f   frames   0..10
+	//   Shoot         38f   frames  11..48
+	//   draw          26f   frames  49..74
+	//   start_reload  17f   frames  75..91
+	//   insert        25f   frames  92..116
+	//   after_reload  32f   frames 117..148      total 149
 	//
-	// The SMD pack has no holster or sprint clips; those get authored on the
-	// same skeleton once this pipeline is proven end to end. When they exist,
-	// WANIM_SPRINT_IN must be NON-looping and WANIM_SPRINT_LOOP looping - that
-	// one flag is what makes the IW4 still swap hold on the final frame.
+	// Uncomment once the .iqm exists. Enabling these before the model has a
+	// skeleton would ask the renderer to pose an MD3, so they stay off until
+	// there is something to pose.
+	//
+	// The pack has no holster or sprint clips - author those on the same
+	// skeleton once this pipeline is proven. WANIM_SPRINT_IN must be
+	// NON-looping and WANIM_SPRINT_LOOP looping: that one flag is what makes
+	// the IW4 still swap hold on its final frame.
 	d = &bg_weapAnimDefs[WP_SHOTGUN];
 	(void)d;
-	// CG_SetClip( d, WANIM_IDLE,    0, 60, 30.0f, qtrue  );
-	// CG_SetClip( d, WANIM_FIRE,   60, 15, 30.0f, qfalse );
-	// CG_SetClip( d, WANIM_RAISE,  75, 20, 30.0f, qfalse );
-	// CG_SetClip( d, WANIM_RELOAD, 95, 25, 30.0f, qfalse );
+	// CG_SetClip( d, WANIM_IDLE,           0, 11, 60.0f, qtrue  );
+	// CG_SetClip( d, WANIM_FIRE,          11, 38, 60.0f, qfalse );
+	// CG_SetClip( d, WANIM_RAISE,         49, 26, 60.0f, qfalse );
+	// CG_SetClip( d, WANIM_RELOAD_START,  75, 17, 60.0f, qfalse );
+	// CG_SetClip( d, WANIM_RELOAD_LOOP,   92, 25, 60.0f, qfalse );
+	// CG_SetClip( d, WANIM_RELOAD_END,   117, 32, 60.0f, qfalse );
 }
 
 // ---------------------------------------------------------------------------
@@ -250,7 +260,16 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	if ( ps->weaponstate == WEAPON_FIRING ) {
 		base->clip = WANIM_FIRE;
 	} else if ( ps->weaponstate == WEAPON_RELOADING ) {
-		base->clip = WANIM_RELOAD;
+		// The reload is segmented in pmove, so the picture follows the same
+		// segment rather than playing one clip over the whole thing. A magazine
+		// gun only ever uses LOOP, so it needs no special handling here.
+		if ( ps->weaponAnimSeq == RSEQ_START ) {
+			base->clip = WANIM_RELOAD_START;
+		} else if ( ps->weaponAnimSeq == RSEQ_END ) {
+			base->clip = WANIM_RELOAD_END;
+		} else {
+			base->clip = WANIM_RELOAD_LOOP;
+		}
 	} else {
 		base->clip = WANIM_IDLE;
 	}

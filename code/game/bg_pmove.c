@@ -1531,6 +1531,26 @@ static const bg_weaponNote_t bgnotes_mag_bfg[] = {
 	{ 0, WNOTE_NONE, 0 }
 };
 
+/* SPAS-12 - timings taken from the MW2 viewmodel animations.
+   Frame counts off the .smd files at 60fps:
+     start_reload 17f -> 283ms   insert 25f -> 417ms   after_reload 32f -> 533ms
+   The pack has no .qc, so the rate is inferred: 30fps would make a full
+   8-shell reload 6.7s and the refire 1.27s, which is plainly wrong; 60fps
+   lands on MW2's actual cadence. If it plays sluggish, halve these. */
+static const bg_weaponNote_t bgnotes_spas_start[] = {
+	{  120, WNOTE_MAG_OUT, 0 },
+	{ 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_spas_loop[] = {
+	{  250, WNOTE_MAG_IN, 1 },		/* one shell. 250ms matches the reloadAddTime
+									   seen in shipped CoD4 weapon files. */
+	{ 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_spas_end[] = {
+	{  260, WNOTE_BOLT_CLOSED, 0 },	/* action closes; carries no rounds */
+	{ 0, WNOTE_NONE, 0 }
+};
+
 /* shell-at-a-time guns - the loop repeats, one round per pass */
 static const bg_weaponNote_t bgnotes_shell_start[] = {
 	{  120, WNOTE_MAG_OUT, 0 },		/* action opens */
@@ -1551,9 +1571,9 @@ static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
 	/* WP_NONE            */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 	/* WP_GAUNTLET        */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 	/* WP_MACHINEGUN      */ { { SEG_NONE, { 1000, bgnotes_mag },       SEG_NONE } },
-	/* WP_SHOTGUN         */ { { { 500, bgnotes_shell_start },
-	                             { 550, bgnotes_shell_loop },
-	                             { 350, bgnotes_shell_end } } },
+	/* WP_SHOTGUN         */ { { { 283, bgnotes_spas_start },
+	                             { 417, bgnotes_spas_loop },
+	                             { 533, bgnotes_spas_end } } },
 	/* WP_GRENADE_LAUNCHER*/ { { SEG_NONE, { 1200, bgnotes_mag_heavy }, SEG_NONE } },
 	/* WP_ROCKET_LAUNCHER */ { { SEG_NONE, { 1200, bgnotes_mag_heavy }, SEG_NONE } },
 	/* WP_LIGHTNING       */ { { SEG_NONE, { 800,  bgnotes_mag_fast },  SEG_NONE } },
@@ -1591,7 +1611,7 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 	250,	// WP_NONE
 	250,	// WP_GAUNTLET
 	250,	// WP_MACHINEGUN
-	250,	// WP_SHOTGUN
+	433,	// WP_SHOTGUN  (MW2 draw, 26f @60fps)
 	300,	// WP_GRENADE_LAUNCHER
 	300,	// WP_ROCKET_LAUNCHER
 	250,	// WP_LIGHTNING
@@ -2621,7 +2641,7 @@ static void PM_Weapon( void ) {
 		addTime = 50;
 		break;
 	case WP_SHOTGUN:
-		addTime = 1000;
+		addTime = 633;			// MW2 Shoot anim, 38f @60fps
 		break;
 	case WP_MACHINEGUN:
 		addTime = 100;

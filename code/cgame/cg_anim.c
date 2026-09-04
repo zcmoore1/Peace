@@ -72,13 +72,66 @@ static animLayer_t   cg_weapLayers[ANIM_LAYER_COUNT];
 static int           cg_weapAnimWeapon = WP_NONE;   // weapon these layers belong to
 
 // ---------------------------------------------------------------------------
+// Clip definitions.
+//
+// A clip is four numbers: where it starts in the IQM's frame list, how many
+// frames it runs, its playback rate, and whether it loops.
+//
+// Everything starts zeroed and numFrames 0 means "no data" - that clip is
+// skipped and the legacy torso path is used instead. So a weapon can be filled
+// in one animation at a time rather than being all-or-nothing.
+//
+// Duration in ms is numFrames / framerate * 1000. That is the SAME number that
+// belongs in the reload note table in bg_pmove.c, so the picture and the
+// gameplay agree by construction instead of being tuned to match.
+// ---------------------------------------------------------------------------
+static void CG_SetClip( weapAnimDef_t *d, int idx,
+                        int firstFrame, int numFrames, float fps, qboolean loop ) {
+	if ( idx < 0 || idx >= WANIM_COUNT ) {
+		return;
+	}
+	d->clips[idx].firstFrame = firstFrame;
+	d->clips[idx].numFrames  = numFrames;
+	d->clips[idx].framerate  = fps;
+	d->clips[idx].loop       = loop;
+}
+
+static void CG_WeapAnim_DefineClips( void ) {
+	weapAnimDef_t *d;
+
+	// --- WP_SHOTGUN (SPAS-12) --------------------------------------------
+	// Import the model in Blender, read each action's frame count off the
+	// Action Editor, lay the clips end to end in a single IQM export, and fill
+	// the calls in below. firstFrame is the running total of everything before.
+	//
+	//   idle          -> WANIM_IDLE    LOOPING
+	//   Shoot         -> WANIM_FIRE
+	//   draw          -> WANIM_RAISE
+	//   insert        -> WANIM_RELOAD  the per-shell loop
+	//
+	// The SMD pack has no holster or sprint clips; those get authored on the
+	// same skeleton once this pipeline is proven end to end. When they exist,
+	// WANIM_SPRINT_IN must be NON-looping and WANIM_SPRINT_LOOP looping - that
+	// one flag is what makes the IW4 still swap hold on the final frame.
+	d = &bg_weapAnimDefs[WP_SHOTGUN];
+	(void)d;
+	// CG_SetClip( d, WANIM_IDLE,    0, 60, 30.0f, qtrue  );
+	// CG_SetClip( d, WANIM_FIRE,   60, 15, 30.0f, qfalse );
+	// CG_SetClip( d, WANIM_RAISE,  75, 20, 30.0f, qfalse );
+	// CG_SetClip( d, WANIM_RELOAD, 95, 25, 30.0f, qfalse );
+}
+
+// ---------------------------------------------------------------------------
 // CG_WeapAnim_Init
-// Called once on cgame init. Placeholder: no clips defined until IQM assets land.
+// Called once on cgame init.
 // ---------------------------------------------------------------------------
 void CG_WeapAnim_Init( void ) {
 	Com_Memset( bg_weapAnimDefs, 0, sizeof(bg_weapAnimDefs) );
 	Com_Memset( cg_weapLayers,   0, sizeof(cg_weapLayers) );
 	cg_weapAnimWeapon = WP_NONE;
+
+	CG_WeapAnim_DefineClips();
+
 	bg_weapAnimDefsLoaded = qtrue;
 }
 

@@ -98,39 +98,6 @@ static void CG_SetClip( weapAnimDef_t *d, int idx,
 	d->clips[idx].loop       = loop;
 }
 
-static void CG_WeapAnim_DefineClips( void ) {
-	weapAnimDef_t *d;
-
-	// --- WP_SHOTGUN (SPAS-12) --------------------------------------------
-	// Real frame counts from the MW2 .smd pack (last "time N" + 1), at 60fps.
-	// firstFrame assumes the clips are exported end to end in THIS order - if
-	// you export in a different order, only the firstFrame column changes.
-	//
-	//   idle          11f   frames   0..10
-	//   Shoot         38f   frames  11..48
-	//   draw          26f   frames  49..74
-	//   start_reload  17f   frames  75..91
-	//   insert        25f   frames  92..116
-	//   after_reload  32f   frames 117..148      total 149
-	//
-	// Uncomment once the .iqm exists. Enabling these before the model has a
-	// skeleton would ask the renderer to pose an MD3, so they stay off until
-	// there is something to pose.
-	//
-	// The pack has no holster or sprint clips - author those on the same
-	// skeleton once this pipeline is proven. WANIM_SPRINT_IN must be
-	// NON-looping and WANIM_SPRINT_LOOP looping: that one flag is what makes
-	// the IW4 still swap hold on its final frame.
-	d = &bg_weapAnimDefs[WP_SHOTGUN];
-	(void)d;
-	// CG_SetClip( d, WANIM_IDLE,           0, 11, 60.0f, qtrue  );
-	// CG_SetClip( d, WANIM_FIRE,          11, 38, 60.0f, qfalse );
-	// CG_SetClip( d, WANIM_RAISE,         49, 26, 60.0f, qfalse );
-	// CG_SetClip( d, WANIM_RELOAD_START,  75, 17, 60.0f, qfalse );
-	// CG_SetClip( d, WANIM_RELOAD_LOOP,   92, 25, 60.0f, qfalse );
-	// CG_SetClip( d, WANIM_RELOAD_END,   117, 32, 60.0f, qfalse );
-}
-
 // ---------------------------------------------------------------------------
 // CG_WeapAnim_Init
 // Called once on cgame init.
@@ -139,9 +106,6 @@ void CG_WeapAnim_Init( void ) {
 	Com_Memset( bg_weapAnimDefs, 0, sizeof(bg_weapAnimDefs) );
 	Com_Memset( cg_weapLayers,   0, sizeof(cg_weapLayers) );
 	cg_weapAnimWeapon = WP_NONE;
-
-	CG_WeapAnim_DefineClips();
-
 	bg_weapAnimDefsLoaded = qtrue;
 }
 
@@ -432,13 +396,49 @@ qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec ) 
 // ---------------------------------------------------------------------------
 void CG_WeapAnim_RegisterClips( int weapon, qhandle_t hModel ) {
 	weapAnimDef_t *def = &bg_weapAnimDefs[weapon];
+
 	(void)hModel;
+
+	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
+		return;
+	}
+
+	// Cleared first, so a weapon with no clips defined below falls back to the
+	// legacy torso path rather than inheriting whatever was here before.
 	Com_Memset( def, 0, sizeof(*def) );
-	// Frame ranges will be populated here once IQM weapon models are in place.
-	// Example (Kar98k - values TBD from actual export):
-	//   def->clips[WANIM_IDLE].firstFrame  = 0;
-	//   def->clips[WANIM_IDLE].numFrames   = 60;
-	//   def->clips[WANIM_IDLE].framerate   = 30.0f;
-	//   def->clips[WANIM_IDLE].loop        = qtrue;
-	//   ... etc.
+
+	switch ( weapon ) {
+
+	case WP_SHOTGUN:
+		// SPAS-12. Frame counts read off the MW2 .smd pack (last "time N" + 1):
+		//   idle 11   Shoot 38   draw 26
+		//   start_reload 17   insert 25   after_reload 32      total 149
+		//
+		// 60fps is inferred - the pack has no .qc to state it. At 30fps a full
+		// 8-shell reload would be 6.7s and the refire 1.27s, which is plainly
+		// wrong; 60 lands on MW2's cadence. These MUST stay in step with the
+		// segment lengths in bg_weaponReloads (283/417/533ms).
+		//
+		// firstFrame assumes the clips are exported end to end in THIS order.
+		// Export in a different order and only this column changes.
+		//
+		// Uncomment once the .iqm exists - enabling them against an MD3 would
+		// ask the renderer to pose a model that has no skeleton.
+		//
+		// CG_SetClip( def, WANIM_IDLE,           0, 11, 60.0f, qtrue  );
+		// CG_SetClip( def, WANIM_FIRE,          11, 38, 60.0f, qfalse );
+		// CG_SetClip( def, WANIM_RAISE,         49, 26, 60.0f, qfalse );
+		// CG_SetClip( def, WANIM_RELOAD_START,  75, 17, 60.0f, qfalse );
+		// CG_SetClip( def, WANIM_RELOAD_LOOP,   92, 25, 60.0f, qfalse );
+		// CG_SetClip( def, WANIM_RELOAD_END,   117, 32, 60.0f, qfalse );
+		//
+		// Not in the pack - author on the same skeleton later:
+		//   WANIM_DROP, WANIM_SPRINT_IN/LOOP/OUT.
+		// SPRINT_IN must be NON-looping and SPRINT_LOOP looping: that one flag
+		// is what makes the IW4 still swap hold on its final frame.
+		break;
+
+	default:
+		break;
+	}
 }

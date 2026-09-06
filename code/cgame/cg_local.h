@@ -384,6 +384,8 @@ typedef struct weaponInfo_s {
 
 	qhandle_t		handsModel;			// the hands don't actually draw, they just position the weapon
 	qhandle_t		weaponModel;
+	qhandle_t		viewModel;			// optional IQM with the arms and the gun in one skeleton; when
+										// set it IS the first-person view, drawn instead of hands+gun
 	qhandle_t		barrelModel;
 	qhandle_t		flashModel;
 

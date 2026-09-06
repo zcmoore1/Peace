@@ -671,6 +671,15 @@ void CG_RegisterWeapon( int weaponNum ) {
 		weaponInfo->handsModel = trap_R_RegisterModel( "models/weapons2/shotgun/shotgun_hand.md3" );
 	}
 
+	// Optional CoD-style viewmodel: arms and gun exported together as one
+	// skinned IQM. Purely a naming convention - drop <weapon>_view.iqm next to
+	// the world model and it is picked up, no item table edit. Absent, the
+	// registration silently fails, viewModel stays 0, and the stock
+	// hands-md3-parents-the-gun path is used exactly as before.
+	COM_StripExtension( item->world_model[0], path, sizeof(path) );
+	Q_strcat( path, sizeof(path), "_view.iqm" );
+	weaponInfo->viewModel = trap_R_RegisterModel( path );
+
 	switch ( weaponNum ) {
 	case WP_GAUNTLET:
 		MAKERGB( weaponInfo->flashDlightColor, 0.6f, 0.6f, 1.0f );
@@ -817,7 +826,8 @@ void CG_RegisterWeapon( int weaponNum ) {
 	}
 
 	// Register IQM animation clips for this weapon (no-op until assets exist).
-	CG_WeapAnim_RegisterClips( weaponNum, weaponInfo->weaponModel );
+	CG_WeapAnim_RegisterClips( weaponNum,
+		weaponInfo->viewModel ? weaponInfo->viewModel : weaponInfo->weaponModel );
 }
 
 /*
@@ -1466,8 +1476,17 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		hand.frame = hand.oldframe = cg_gun_frame.integer;
 		hand.backlerp = 0;
 		hand.pose = NULL;
-	} else if ( CG_WeapAnim_BuildPose( ps, weapon->weaponModel, cg.frametime ) ) {
+	} else if ( CG_WeapAnim_BuildPose( ps,
+			weapon->viewModel ? weapon->viewModel : weapon->weaponModel,
+			cg.frametime ) ) {
 		hand.pose = &cg.weaponPose;
+	} else if ( weapon->viewModel ) {
+		// Model is in, clips are not yet. Hold frame 0 rather than feeding it
+		// the legacy torso frame numbers, which index a completely different
+		// animation table and would land anywhere.
+		hand.frame = hand.oldframe = 0;
+		hand.backlerp = 0;
+		hand.pose = NULL;
 	} else {
 		ci = &cgs.clientinfo[ cent->currentState.clientNum ];
 		hand.frame    = CG_MapTorsoToWeaponFrame( ci, cent->pe.torso.frame );
@@ -1476,8 +1495,22 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		hand.pose = NULL;
 	}
 
-	hand.hModel = weapon->handsModel;
 	hand.renderfx = RF_DEPTHHACK | RF_FIRST_PERSON | RF_MINLIGHT;
+
+	if ( weapon->viewModel ) {
+		// Arms and gun are one skeleton, so there is no parent to hang a child
+		// off: the model IS the view and it draws directly. The pose set above
+		// is what animates it.
+		//
+		// No muzzle flash or spinning barrel on this path yet - those are md3
+		// children placed with tag_flash / tag_barrel, and an IQM viewmodel
+		// wants its own tags. Wire them once the model is confirmed on screen.
+		hand.hModel = weapon->viewModel;
+		trap_R_AddRefEntityToScene( &hand );
+		return;
+	}
+
+	hand.hModel = weapon->handsModel;
 
 	// add everything onto the hand
 	CG_AddPlayerWeapon( &hand, ps, &cg.predictedPlayerEntity, ps->persistant[PERS_TEAM] );

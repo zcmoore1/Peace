@@ -1567,6 +1567,52 @@ static const bg_weaponNote_t bgnotes_shell_end[] = {
 
 #define SEG_NONE	{ 0, bgnotes_none }
 
+/* The fire cycle. A gun whose action has to be worked between shots is not
+   "firing" for the whole refire - the shot leaves at the start and the rest is
+   the action cycling. Notes mark the two moments that matter:
+
+     WNOTE_CYCLE        the blast is over and the pump begins  -> WEAPON_PUMPING
+     WNOTE_BOLT_CLOSED  a round is chambered                   -> lock released
+
+   The chamber note carries no rounds (param 0), so it does exactly one thing:
+   clear the busy lock. That is the same note, in the same place in PM_Weapon,
+   that opens the cancel window on a reload - which is why the pump can be
+   swap-cancelled without a line of code that knows what a pump is.
+
+   The remaining time after the chamber note is settle. The gun cannot fire
+   during it because step 7 returns on WEAPON_PUMPING - the STATE holds the
+   gun, never the clock, exactly as it does through a reload tail. */
+static const bg_weaponNote_t bgnotes_spas_fire[] = {
+	{  150, WNOTE_CYCLE, 0 },		/* ~f9 of 38: recoil done, pump starts */
+	{  500, WNOTE_BOLT_CLOSED, 0 },	/* ~f30 of 38: shell chambered */
+	{ 0, WNOTE_NONE, 0 }
+};
+
+/* Length is the refire, so this and the addTime in PM_Weapon are one number.
+   A zero-length entry means the weapon has no modelled fire animation and
+   behaves exactly as it did before: FIRING until the lock runs out. */
+static const bg_weaponAnimSeg_t bg_weaponFire[MAX_WEAPONS] = {
+	/* WP_NONE            */ { 0, bgnotes_none },
+	/* WP_GAUNTLET        */ { 0, bgnotes_none },
+	/* WP_MACHINEGUN      */ { 0, bgnotes_none },
+	/* WP_SHOTGUN         */ { 633, bgnotes_spas_fire },
+	/* WP_GRENADE_LAUNCHER*/ { 0, bgnotes_none },
+	/* WP_ROCKET_LAUNCHER */ { 0, bgnotes_none },
+	/* WP_LIGHTNING       */ { 0, bgnotes_none },
+	/* WP_RAILGUN         */ { 0, bgnotes_none },
+	/* WP_PLASMAGUN       */ { 0, bgnotes_none },
+	/* WP_BFG             */ { 0, bgnotes_none },
+	/* WP_GRAPPLING_HOOK  */ { 0, bgnotes_none },
+	/* WP_KNIFE           */ { 0, bgnotes_none },
+	/* WP_FRAG            */ { 0, bgnotes_none },
+	/* WP_FLASH           */ { 0, bgnotes_none }
+};
+
+int BG_WeaponFireLength( int weapon ) {
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
+	return bg_weaponFire[weapon].length;
+}
+
 static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
 	/* WP_NONE            */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 	/* WP_GAUNTLET        */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
@@ -2024,6 +2070,17 @@ assumed sane.
 static const bg_weaponNote_t *PM_SegNotes( int weapon, int seq ) {
 	const bg_weaponNote_t *n;
 
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) {
+		return bgnotes_none;
+	}
+
+	// Selected by which SEGMENT is playing, deliberately not by weaponstate.
+	// By the time the notes run, step 1 may already have flipped the state to
+	// DROPPING - and the note that makes that holster free still has to land.
+	if ( seq == ASEQ_FIRE ) {
+		n = bg_weaponFire[weapon].notes;
+		return n ? n : bgnotes_none;
+	}
 	if ( seq < 0 || seq >= RSEQ_COUNT ) {
 		return bgnotes_none;
 	}
@@ -2079,6 +2136,15 @@ static void PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 			PM_AddEvent( EV_RELOAD );
 			break;
 
+		case WNOTE_CYCLE:
+			// The shot is over; what is left is the action working. Only moved
+			// out of FIRING so a shot that has already been cancelled is not
+			// dragged back - the same reason nothing else here tests state.
+			if ( pm->ps->weaponstate == WEAPON_FIRING ) {
+				pm->ps->weaponstate = WEAPON_PUMPING;
+			}
+			break;
+
 		case WNOTE_BOLT_CLOSED:
 			// Closing the action on a shell gun carries no rounds, so it only
 			// releases the lock - which is exactly what makes it NAC-able too.
@@ -2087,7 +2153,7 @@ static void PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 				pm->ps->pm_flags |= PMF_PENDING_MAG;
 			}
 			pm->ps->weaponTime = 0;			// busy lock released on this think
-			PM_AddEvent( EV_RELOAD_NOTETRACK );
+			PM_AddEvent( EV_WEAPON_NOTETRACK );
 			if ( pm->debugLevel ) {
 				Com_Printf( "%i:MAG_IN wpn %i seq %i elapsed %i add %i\n",
 					c_pmove, pm->ps->weapon, pm->ps->weaponAnimSeq,
@@ -2452,7 +2518,10 @@ static void PM_Weapon( void ) {
 	// Only a reload anim is modelled for now, so only it advances the clock. The
 	// note runner below deliberately does NOT gate on weaponstate: step 1 may
 	// have already flipped us to DROPPING and the mag-in note still has to land.
-	if ( pm->ps->weaponstate == WEAPON_RELOADING && pm->ps->weaponAnimTime >= 0 ) {
+	if ( ( pm->ps->weaponstate == WEAPON_RELOADING ||
+	       pm->ps->weaponstate == WEAPON_FIRING ||
+	       pm->ps->weaponstate == WEAPON_PUMPING ) &&
+	     pm->ps->weaponAnimTime >= 0 ) {
 		pm->ps->weaponAnimTime += pml.msec;		// no clamp - overshoot carries
 	}
 	if ( pm->ps->weaponTime > 0 ) {
@@ -2541,6 +2610,15 @@ static void PM_Weapon( void ) {
 		PM_AdvanceReloadSegments();
 	}
 
+	// 4c. The fire cycle ends on the ANIM clock, not the busy lock - the lock
+	//     was already given away by the chamber note, and the settle after it
+	//     still has to play. Same shape as advancing a reload segment.
+	if ( pm->ps->weaponstate == WEAPON_PUMPING && pm->ps->weaponAnimTime >= 0 &&
+	     pm->ps->weaponAnimTime >= BG_WeaponFireLength( pm->ps->weapon ) ) {
+		pm->ps->weaponstate    = WEAPON_READY;
+		pm->ps->weaponAnimTime = -1;
+	}
+
 	// 5. Busy.
 	if ( pm->ps->weaponTime > 0 ) {
 		return;
@@ -2561,6 +2639,7 @@ static void PM_Weapon( void ) {
 	//    still playing the lock reads 0 but the state is RELOADING, so we stop
 	//    here and the fire code below stays unreachable.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ||
+	     pm->ps->weaponstate == WEAPON_PUMPING ||
 	     pm->ps->weaponstate == WEAPON_SPRINTING ) {
 		return;			// gun is not up: the state blocks firing, not the clock
 	}
@@ -2612,6 +2691,12 @@ static void PM_Weapon( void ) {
 	}
 
 	pm->ps->weaponstate = WEAPON_FIRING;
+
+	// Start the fire animation's clock so its notes have something to fire off.
+	// -1 for a weapon with no modelled fire anim, which is the same "no anim
+	// playing" value a finished reload leaves behind, so nothing runs for it.
+	pm->ps->weaponAnimSeq  = ASEQ_FIRE;
+	pm->ps->weaponAnimTime = BG_WeaponFireLength( pm->ps->weapon ) > 0 ? 0 : -1;
 
 	// Ammo check. Magazine weapons consume from the loaded mag and auto-reload
 	// when empty if reserve is available. Non-magazine weapons (gauntlet, grapple)

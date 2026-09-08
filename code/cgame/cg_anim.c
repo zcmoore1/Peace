@@ -212,7 +212,11 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	qboolean sprintHolds = ( swapping && sprint->weight > 0.0f );
 
 	// -- Base layer: swap between idle and fire --
-	if ( ps->weaponstate == WEAPON_FIRING ) {
+	// Firing and pumping share one clip. On a pump gun the shot and the action
+	// working are a single authored animation; the split into two states is a
+	// gameplay distinction, not a second piece of art, so the picture just
+	// keeps running across the boundary.
+	if ( ps->weaponstate == WEAPON_FIRING || ps->weaponstate == WEAPON_PUMPING ) {
 		baseClip = WANIM_FIRE;
 	} else if ( ps->weaponstate == WEAPON_RELOADING ) {
 		// The reload is segmented in pmove, so the picture follows the same
@@ -287,14 +291,23 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 		}
 	}
 
-	// Reload pictures follow the same segment clock as gameplay notes. A loop
-	// wrap or canceled reload cannot leave the viewmodel on an old stopwatch.
+	// Base pictures follow the PREDICTED anim clock that the gameplay notes fire
+	// off, so the frame on screen is the frame the notes are being read from. A
+	// loop wrap or a cancelled reload cannot leave the viewmodel on a stale
+	// client-side stopwatch, because there is no client-side stopwatch.
 	if ( ps->weaponstate == WEAPON_RELOADING ) {
 		int duration = BG_WeaponReloadSegLength( ps->weapon, ps->weaponAnimSeq );
 		base->time = duration > 0 ? (float)ps->weaponAnimTime / duration *
 		             CG_WeapAnim_ClipLength( def, base->clip ) : 0.0f;
+	} else if ( ( ps->weaponstate == WEAPON_FIRING ||
+	              ps->weaponstate == WEAPON_PUMPING ) &&
+	            ps->weaponAnimSeq == ASEQ_FIRE && ps->weaponAnimTime >= 0 ) {
+		int duration = BG_WeaponFireLength( ps->weapon );
+		base->time = duration > 0 ? (float)ps->weaponAnimTime / duration *
+		             CG_WeapAnim_ClipLength( def, base->clip ) : 0.0f;
 	} else if ( ps->weaponstate == WEAPON_FIRING ) {
-		// Every predicted shot restarts its picture, including held-fire repeats.
+		// Weapon with no modelled fire animation: no predicted clock exists for
+		// it, so fall back to real time since the shot.
 		base->time = cg.time - cg.predictedPlayerEntity.muzzleFlashTime;
 	}
 	// Fit the supplied draw/drop clips to the existing gameplay transitions.

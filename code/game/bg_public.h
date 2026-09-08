@@ -147,6 +147,11 @@ typedef enum {
 	WEAPON_RAISING,
 	WEAPON_DROPPING,
 	WEAPON_FIRING,
+	WEAPON_PUMPING,		// the shot is away and the action is cycling. Its own
+						// state because it obeys different rules to firing: it
+						// cannot fire, it CAN be holstered out of, and the
+						// chamber note clears its lock the same way a mag-in
+						// clears a reload's - which is the whole pump cancel
 	WEAPON_RELOADING,
 	WEAPON_SPRINT_IN,	// lowering into the sprint carry - a timed action with
 						// its own lock, so anything that clears the lock (the
@@ -160,6 +165,7 @@ typedef enum {
 // (ps->weaponAnimTime) crosses their timestamp.
 typedef enum {
 	WNOTE_NONE,			// list terminator
+	WNOTE_CYCLE,		// shot is away, the action starts cycling
 	WNOTE_MAG_OUT,		// sound only
 	WNOTE_MAG_IN,		// gameplay: queue the clip fill and clear the busy lock
 	WNOTE_BOLT_CLOSED	// pump/bolt guns: identical meaning to MAG_IN
@@ -179,7 +185,12 @@ typedef enum {
 	RSEQ_START,
 	RSEQ_LOOP,
 	RSEQ_END,
-	RSEQ_COUNT
+	RSEQ_COUNT,
+	// The fire cycle is an animation with notes on it exactly like a reload
+	// segment, so it rides in the same field rather than growing a second one.
+	// ps->weaponAnimSeq goes over the wire in 2 bits and this is the last value
+	// that fits; a fifth would have to widen it in msg.c.
+	ASEQ_FIRE = RSEQ_COUNT
 } reloadSeq_t;
 
 typedef struct {
@@ -257,6 +268,7 @@ int  BG_WeaponMaxReserve( int weapon );
 int  BG_WeaponReloadTime( int weapon );		// nominal single-pass length (start+loop+end)
 const bg_weaponReload_t *BG_WeaponReload( int weapon );
 int  BG_WeaponReloadSegLength( int weapon, int seq );
+int  BG_WeaponFireLength( int weapon );		// 0 = no modelled fire animation
 int  BG_WeaponDropTime( int weapon );		// holster length, never 0
 int  BG_WeaponRaiseTime( int weapon );		// deploy length, never 0
 int  BG_WeaponSprintInTime( int weapon );	// lower-into-sprint length
@@ -492,7 +504,7 @@ typedef enum {
 	EV_CHANGE_WEAPON,
 	EV_FIRE_WEAPON,
 	EV_RELOAD,
-	EV_RELOAD_NOTETRACK,	// mag seated: NAC window is now open
+	EV_WEAPON_NOTETRACK,	// mag seated or round chambered: cancel window open
 
 	EV_USE_ITEM0,
 	EV_USE_ITEM1,

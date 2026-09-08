@@ -287,12 +287,12 @@ static void TestPumpIsItsOwnState( int step ) {
 	testMove.cmd.buttons = 0;
 
 	/* The shot itself. */
-	RunFor( FireNote( WNOTE_CYCLE ) - 1, step );
+	RunFor( FireNote( WNOTE_BOLT_OPEN ) - 1, step );
 	CHECK( testPs.weaponstate == WEAPON_FIRING );
 
 	/* Then the action works, and that is NOT firing. */
-	RunFor( BG_WeaponFireLength( WP_SHOTGUN ) - FireNote( WNOTE_CYCLE ), step );
-	CHECK( testPs.weaponstate == WEAPON_PUMPING );
+	RunFor( BG_WeaponFireLength( WP_SHOTGUN ) - FireNote( WNOTE_BOLT_OPEN ), step );
+	CHECK( testPs.weaponstate == WEAPON_BOLTING );
 
 	/* Only when the whole cycle has played does the gun come back up. */
 	Step( step );
@@ -321,7 +321,7 @@ static void TestPumpCancelIsFree( void ) {
 	ReadyToFire();
 	testMove.cmd.buttons = 0;
 	RunFor( FireNote( WNOTE_BOLT_CLOSED ) - 1, 1 );
-	CHECK( testPs.weaponstate == WEAPON_PUMPING );
+	CHECK( testPs.weaponstate == WEAPON_BOLTING );
 	CHECK( testPs.weapon == WP_SHOTGUN );
 
 	testMove.cmd.weapon = WP_MACHINEGUN;
@@ -355,6 +355,91 @@ static void TestSprintCancelsThePump( void ) {
 	CHECK( testPs.weaponstate == WEAPON_SPRINTING );
 }
 
+static void SwapAwayAndBack( void ) {
+	int t;
+	testMove.cmd.weapon = WP_MACHINEGUN;
+	for ( t = 0; t < 1200 && testPs.weapon != WP_MACHINEGUN; t++ ) Step( 1 );
+	for ( t = 0; t < 800; t++ ) Step( 1 );
+	testMove.cmd.weapon = WP_SHOTGUN;
+	for ( t = 0; t < 2000 &&
+	      !( testPs.weapon == WP_SHOTGUN && testPs.weaponstate == WEAPON_READY ); t++ ) {
+		Step( 1 );
+	}
+	CHECK( testPs.weapon == WP_SHOTGUN );
+}
+
+static void TestEarlyCancelCostsTheWholeCycle( void ) {
+	/* Swap out BEFORE the action shuts. The round never chambered, so coming
+	   back has to work the whole thing again - "the bolt timer resets to full".
+	   This is what stops the cancel window being a free swap at any time. */
+	ReadyToFire();
+	testMove.cmd.buttons = 0;
+	RunFor( FireNote( WNOTE_BOLT_CLOSED ) - 2, 1 );
+	CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN) );
+	SwapAwayAndBack();
+	CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN) );
+
+	shots = 0;
+	testMove.cmd.buttons = BUTTON_ATTACK;
+	Step( 1 );
+	CHECK( shots == 0 );
+	CHECK( testPs.weaponstate == WEAPON_BOLTING );
+	CHECK( testPs.weaponAnimTime == 0 );		/* from the top, never resumed */
+
+	/* and it is the FULL cycle, not the remainder */
+	RunFor( BG_WeaponFireLength( WP_SHOTGUN ) - 1, 1 );
+	CHECK( shots == 0 );
+	Step( 1 );
+	CHECK( shots == 1 );
+}
+
+static void TestLateCancelKeepsTheRound( void ) {
+	/* Swap out ON the think the action shuts. The note chambers the round and
+	   clears the lock in the same think, so the holster is free AND the gun
+	   comes back ready. Both halves out of the one note. */
+	ReadyToFire();
+	testMove.cmd.buttons = 0;
+	RunFor( FireNote( WNOTE_BOLT_CLOSED ) - 1, 1 );
+	testMove.cmd.weapon = WP_MACHINEGUN;
+	Step( 1 );
+	CHECK( !( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN) ) );
+	CHECK( testPs.weapon == WP_MACHINEGUN );	/* free: holster completed */
+	CHECK( testPs.weaponstate == WEAPON_RAISING );
+
+	testMove.cmd.weapon = WP_SHOTGUN;
+	SwapAwayAndBack();
+	shots = 0;
+	testMove.cmd.buttons = BUTTON_ATTACK;
+	Step( 1 );
+	CHECK( shots == 1 );
+}
+
+static void TestReloadChambersTheGun( void ) {
+	/* The reload's END segment carries the same close note, so finishing a
+	   reload shuts the action. Cancel a bolt, reload, and the bolt debt is
+	   gone - no code says so, the note just lands. */
+	ReadyToFire();
+	testMove.cmd.buttons = 0;
+	RunFor( FireNote( WNOTE_BOLT_CLOSED ) - 2, 1 );
+	CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN) );
+	SwapAwayAndBack();
+
+	PM_BeginReload();
+	RunFor( Seg( WP_SHOTGUN, RSEQ_START ) + Seg( WP_SHOTGUN, RSEQ_LOOP )
+	        + Seg( WP_SHOTGUN, RSEQ_END ) + 2, 1 );
+	CHECK( !( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN) ) );
+}
+
+static void TestChamberDebtIsPerWeapon( void ) {
+	/* Two guns, one of them mid-cycle. The other must be unaffected - the bit
+	   is per weapon precisely because you carry two. */
+	ReadyToFire();
+	testMove.cmd.buttons = 0;
+	RunFor( FireNote( WNOTE_BOLT_CLOSED ) - 2, 1 );
+	CHECK(  ( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN)    ) );
+	CHECK( !( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_MACHINEGUN) ) );
+}
+
 static void TestUnpumpedWeaponUnchanged( int step ) {
 	/* A weapon with no modelled fire animation must behave exactly as before:
 	   FIRING for the whole refire, no anim clock, no pump state. */
@@ -372,7 +457,7 @@ static void TestUnpumpedWeaponUnchanged( int step ) {
 	CHECK( testPs.weaponAnimTime == -1 );
 	for ( elapsed = 0; elapsed < 90; elapsed += step ) {
 		Step( step );
-		CHECK( testPs.weaponstate != WEAPON_PUMPING );
+		CHECK( testPs.weaponstate != WEAPON_BOLTING );
 	}
 }
 
@@ -390,6 +475,10 @@ int main( void ) {
 		TestUnpumpedWeaponUnchanged( steps[i] );
 	}
 	TestPumpCannotBeShortCircuited();
+	TestEarlyCancelCostsTheWholeCycle();
+	TestLateCancelKeepsTheRound();
+	TestReloadChambersTheGun();
+	TestChamberDebtIsPerWeapon();
 	TestPumpCancelIsFree();
 	TestPumpSwapBeforeChamberCosts();
 	TestSprintCancelsThePump();

@@ -53,13 +53,22 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 - **IW4 still swap is a rule, not a setting.** When a swap collides with the
   sprint carry the sprint animation wins. The Treyarch behaviour is explicitly
   unwanted — do not reintroduce it as a cvar or a branch.
-- **The pump is a state, not a phase of firing.** `WEAPON_FIRING` is the shot;
-  `WEAPON_PUMPING` is the action being worked. It cannot fire and CAN be
-  holstered out of. It ends on the anim clock, never on the lock — the chamber
-  note gave the lock away and the settle still has to play.
-- **The pump cancel is the reload cancel.** `WNOTE_BOLT_CLOSED` on the fire
-  animation carries no rounds, so it only clears the lock — the same note, in
-  the same place, that opens the reload's window. Never write a second cancel.
+- **Bolting is a state, not a phase of firing.** `WEAPON_FIRING` is the shot;
+  `WEAPON_BOLTING` is the action being worked. "Bolting" covers bolt, pump,
+  cock and lever — they differ only in cycle length and note placement, never
+  in code. It cannot fire and CAN be holstered out of. It ends on the anim
+  clock, never on the lock.
+- **The bolt cancel is the reload cancel.** `WNOTE_BOLT_CLOSED` on the fire
+  animation carries no rounds, so it clears the lock and the unchambered bit —
+  the same note, in the same place, that opens the reload's window. Never write
+  a second cancel.
+- **An open action is a debt, and it is never resumed.** Firing sets the
+  weapon's bit in `STAT_UNCHAMBERED`; only the close note clears it. A gun that
+  reaches `WEAPON_READY` with its bit set re-enters `WEAPON_BOLTING` from
+  elapsed 0 — the whole cycle, exactly like a reload, which never resumes
+  either. This is what makes the cancel window a window: miss it and the swap
+  costs you the full bolt when you come back. Never add a partial-bolt state,
+  and never clear the bit anywhere but the note (spawn is the one exception).
 - **Clip frame ranges are data.** They live in the `.cfg` beside the model and
   are read by `CG_WeapAnim_RegisterClips`. Re-exporting a model must never mean
   editing C, and no weapon may be named in that loader.
@@ -79,6 +88,9 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   (`RSEQ_START/LOOP/END` + `ASEQ_FIRE`). A fifth animation segment has to widen
   the field.
 - `weaponstate` — 4 bits, 9 of 16 values used. Room for seven more states.
+- `stats[]` — **14 of 16 used.** Two free. Every entry round-trips as a SIGNED
+  short (`MSG_WriteShort`), so any new bitmask stat has the same bit-15 trap as
+  `STAT_WEAPONS`. `STAT_UNCHAMBERED` uses bits 0–13, one per weapon.
 
 ## Weapon animation assets
 

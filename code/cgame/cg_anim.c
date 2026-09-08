@@ -216,7 +216,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	// working are a single authored animation; the split into two states is a
 	// gameplay distinction, not a second piece of art, so the picture just
 	// keeps running across the boundary.
-	if ( ps->weaponstate == WEAPON_FIRING || ps->weaponstate == WEAPON_PUMPING ) {
+	if ( ps->weaponstate == WEAPON_FIRING || ps->weaponstate == WEAPON_BOLTING ) {
 		baseClip = WANIM_FIRE;
 	} else if ( ps->weaponstate == WEAPON_RELOADING ) {
 		// The reload is segmented in pmove, so the picture follows the same
@@ -300,7 +300,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 		base->time = duration > 0 ? (float)ps->weaponAnimTime / duration *
 		             CG_WeapAnim_ClipLength( def, base->clip ) : 0.0f;
 	} else if ( ( ps->weaponstate == WEAPON_FIRING ||
-	              ps->weaponstate == WEAPON_PUMPING ) &&
+	              ps->weaponstate == WEAPON_BOLTING ) &&
 	            ps->weaponAnimSeq == ASEQ_FIRE && ps->weaponAnimTime >= 0 ) {
 		int duration = BG_WeaponFireLength( ps->weapon );
 		base->time = duration > 0 ? (float)ps->weaponAnimTime / duration *

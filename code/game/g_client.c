@@ -1204,6 +1204,9 @@ void ClientSpawn(gentity_t *ent) {
 			client->ps.weaponAnimTime = -1;
 			client->ps.weaponAnimSeq  = RSEQ_START;
 			client->ps.pm_flags &= ~PMF_PENDING_MAG;
+			// You respawn with every action shut. Dying halfway through a bolt
+			// is not a debt the next life inherits.
+			client->ps.stats[STAT_UNCHAMBERED] = 0;
 			// fire the targets of the spawn point
 			G_UseTargets(spawnPoint, ent);
 			// Start on the primary slot. (Stock Q3 picked the highest owned weapon

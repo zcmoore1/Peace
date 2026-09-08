@@ -147,11 +147,13 @@ typedef enum {
 	WEAPON_RAISING,
 	WEAPON_DROPPING,
 	WEAPON_FIRING,
-	WEAPON_PUMPING,		// the shot is away and the action is cycling. Its own
+	WEAPON_BOLTING,		// the shot is away and the action is being worked. One
+						// name for bolt, pump, cock and lever - they differ only
+						// in how long it takes and where the notes sit. Its own
 						// state because it obeys different rules to firing: it
 						// cannot fire, it CAN be holstered out of, and the
 						// chamber note clears its lock the same way a mag-in
-						// clears a reload's - which is the whole pump cancel
+						// clears a reload's
 	WEAPON_RELOADING,
 	WEAPON_SPRINT_IN,	// lowering into the sprint carry - a timed action with
 						// its own lock, so anything that clears the lock (the
@@ -165,7 +167,7 @@ typedef enum {
 // (ps->weaponAnimTime) crosses their timestamp.
 typedef enum {
 	WNOTE_NONE,			// list terminator
-	WNOTE_CYCLE,		// shot is away, the action starts cycling
+	WNOTE_BOLT_OPEN,	// shot is away, the action starts opening
 	WNOTE_MAG_OUT,		// sound only
 	WNOTE_MAG_IN,		// gameplay: queue the clip fill and clear the busy lock
 	WNOTE_BOLT_CLOSED	// pump/bolt guns: identical meaning to MAG_IN
@@ -304,7 +306,13 @@ typedef enum {
 									// equipment counts live in ammo[WP_FRAG] /
 									// ammo[WP_FLASH] - no stat needed
 	STAT_USE_TARGET,				// entity being picked up, or -1
-	STAT_USE_PROGRESS				// ms of hold accumulated toward the pickup
+	STAT_USE_PROGRESS,				// ms of hold accumulated toward the pickup
+	STAT_UNCHAMBERED				// bit per weapon: this gun has fired and its
+									// action has NOT been worked since. Per weapon
+									// because you carry two and only one of them
+									// is mid-cycle. Same 0-13 range and the same
+									// bit-15 rule as STAT_WEAPONS - stats[] go
+									// over the wire as SIGNED shorts.
 } statIndex_t;
 
 

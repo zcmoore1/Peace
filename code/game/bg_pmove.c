@@ -1571,7 +1571,7 @@ static const bg_weaponNote_t bgnotes_shell_end[] = {
    "firing" for the whole refire - the shot leaves at the start and the rest is
    the action cycling. Notes mark the two moments that matter:
 
-     WNOTE_CYCLE        the blast is over and the pump begins  -> WEAPON_PUMPING
+     WNOTE_BOLT_OPEN        the blast is over and the pump begins  -> WEAPON_BOLTING
      WNOTE_BOLT_CLOSED  a round is chambered                   -> lock released
 
    The chamber note carries no rounds (param 0), so it does exactly one thing:
@@ -1580,10 +1580,10 @@ static const bg_weaponNote_t bgnotes_shell_end[] = {
    swap-cancelled without a line of code that knows what a pump is.
 
    The remaining time after the chamber note is settle. The gun cannot fire
-   during it because step 7 returns on WEAPON_PUMPING - the STATE holds the
+   during it because step 7 returns on WEAPON_BOLTING - the STATE holds the
    gun, never the clock, exactly as it does through a reload tail. */
 static const bg_weaponNote_t bgnotes_spas_fire[] = {
-	{  150, WNOTE_CYCLE, 0 },		/* ~f9 of 38: recoil done, pump starts */
+	{  150, WNOTE_BOLT_OPEN, 0 },		/* ~f9 of 38: recoil done, pump starts */
 	{  500, WNOTE_BOLT_CLOSED, 0 },	/* ~f30 of 38: shell chambered */
 	{ 0, WNOTE_NONE, 0 }
 };
@@ -2136,16 +2136,21 @@ static void PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 			PM_AddEvent( EV_RELOAD );
 			break;
 
-		case WNOTE_CYCLE:
+		case WNOTE_BOLT_OPEN:
 			// The shot is over; what is left is the action working. Only moved
 			// out of FIRING so a shot that has already been cancelled is not
 			// dragged back - the same reason nothing else here tests state.
 			if ( pm->ps->weaponstate == WEAPON_FIRING ) {
-				pm->ps->weaponstate = WEAPON_PUMPING;
+				pm->ps->weaponstate = WEAPON_BOLTING;
 			}
 			break;
 
 		case WNOTE_BOLT_CLOSED:
+			// The action is shut and a round is under the hammer. Clearing the
+			// bit here is the whole of the "cancel late and you keep the round"
+			// half of the rule - and because the reload's END segment carries
+			// this same note, finishing a reload chambers the gun for free.
+			pm->ps->stats[STAT_UNCHAMBERED] &= ~( 1 << pm->ps->weapon );
 			// Closing the action on a shell gun carries no rounds, so it only
 			// releases the lock - which is exactly what makes it NAC-able too.
 		case WNOTE_MAG_IN:
@@ -2520,7 +2525,7 @@ static void PM_Weapon( void ) {
 	// have already flipped us to DROPPING and the mag-in note still has to land.
 	if ( ( pm->ps->weaponstate == WEAPON_RELOADING ||
 	       pm->ps->weaponstate == WEAPON_FIRING ||
-	       pm->ps->weaponstate == WEAPON_PUMPING ) &&
+	       pm->ps->weaponstate == WEAPON_BOLTING ) &&
 	     pm->ps->weaponAnimTime >= 0 ) {
 		pm->ps->weaponAnimTime += pml.msec;		// no clamp - overshoot carries
 	}
@@ -2613,10 +2618,28 @@ static void PM_Weapon( void ) {
 	// 4c. The fire cycle ends on the ANIM clock, not the busy lock - the lock
 	//     was already given away by the chamber note, and the settle after it
 	//     still has to play. Same shape as advancing a reload segment.
-	if ( pm->ps->weaponstate == WEAPON_PUMPING && pm->ps->weaponAnimTime >= 0 &&
+	if ( pm->ps->weaponstate == WEAPON_BOLTING && pm->ps->weaponAnimTime >= 0 &&
 	     pm->ps->weaponAnimTime >= BG_WeaponFireLength( pm->ps->weapon ) ) {
 		pm->ps->weaponstate    = WEAPON_READY;
 		pm->ps->weaponAnimTime = -1;
+	}
+
+	// 4d. The mirror of 4c. A gun sitting READY with its action still open has
+	//     to work it before it can fire, and works ALL of it - the clock starts
+	//     at 0, exactly like a reload, which never resumes either.
+	//
+	//     Nothing here knows why the bit is set. A swap, a sprint, a death, a
+	//     dropped weapon picked back up - they all leave the same bit, so they
+	//     all get the same answer without being enumerated. The one way to not
+	//     end up here is to have let the close note land, which is what makes
+	//     the cancel window a window instead of a free swap.
+	if ( pm->ps->weaponstate == WEAPON_READY &&
+	     ( pm->ps->stats[STAT_UNCHAMBERED] & ( 1 << pm->ps->weapon ) ) &&
+	     BG_WeaponFireLength( pm->ps->weapon ) > 0 ) {
+		pm->ps->weaponstate    = WEAPON_BOLTING;
+		pm->ps->weaponAnimSeq  = ASEQ_FIRE;
+		pm->ps->weaponAnimTime = 0;
+		pm->ps->weaponTime     = BG_WeaponFireLength( pm->ps->weapon );
 	}
 
 	// 5. Busy.
@@ -2639,7 +2662,7 @@ static void PM_Weapon( void ) {
 	//    still playing the lock reads 0 but the state is RELOADING, so we stop
 	//    here and the fire code below stays unreachable.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ||
-	     pm->ps->weaponstate == WEAPON_PUMPING ||
+	     pm->ps->weaponstate == WEAPON_BOLTING ||
 	     pm->ps->weaponstate == WEAPON_SPRINTING ) {
 		return;			// gun is not up: the state blocks firing, not the clock
 	}
@@ -2692,11 +2715,18 @@ static void PM_Weapon( void ) {
 
 	pm->ps->weaponstate = WEAPON_FIRING;
 
-	// Start the fire animation's clock so its notes have something to fire off.
-	// -1 for a weapon with no modelled fire anim, which is the same "no anim
-	// playing" value a finished reload leaves behind, so nothing runs for it.
-	pm->ps->weaponAnimSeq  = ASEQ_FIRE;
-	pm->ps->weaponAnimTime = BG_WeaponFireLength( pm->ps->weapon ) > 0 ? 0 : -1;
+	// Start the fire animation's clock so its notes have something to fire off,
+	// and mark the action open. The round has left; nothing is chambered until
+	// the close note says so. A weapon with no modelled fire animation has no
+	// action to work, so it gets neither the clock nor the bit and behaves
+	// exactly as it always did.
+	if ( BG_WeaponFireLength( pm->ps->weapon ) > 0 ) {
+		pm->ps->weaponAnimSeq   = ASEQ_FIRE;
+		pm->ps->weaponAnimTime  = 0;
+		pm->ps->stats[STAT_UNCHAMBERED] |= ( 1 << pm->ps->weapon );
+	} else {
+		pm->ps->weaponAnimTime = -1;
+	}
 
 	// Ammo check. Magazine weapons consume from the loaded mag and auto-reload
 	// when empty if reserve is available. Non-magazine weapons (gauntlet, grapple)

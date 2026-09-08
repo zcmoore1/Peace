@@ -816,8 +816,12 @@ void CG_RegisterWeapon( int weaponNum ) {
 		break;
 	}
 
-	// Register IQM animation clips for this weapon (no-op until assets exist).
-	CG_WeapAnim_RegisterClips( weaponNum, weaponInfo->weaponModel );
+	// The imported SPAS contains its own hands. Keep the world model separate
+	// so another player's weapon never includes first-person arms.
+	if ( weaponNum == WP_SHOTGUN ) {
+		weaponInfo->viewModel = trap_R_RegisterModel( "models/weapons2/spas12/view.iqm" );
+	}
+	CG_WeapAnim_RegisterClips( weaponNum, weaponInfo->viewModel );
 }
 
 /*
@@ -1416,6 +1420,29 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	VectorMA( hand.origin, cg_gun_x.value, cg.refdef.viewaxis[0], hand.origin );
 	VectorMA( hand.origin, cg_gun_y.value, cg.refdef.viewaxis[1], hand.origin );
 	VectorMA( hand.origin, (cg_gun_z.value+fovOffset), cg.refdef.viewaxis[2], hand.origin );
+
+	if ( weapon->viewModel ) {
+		refEntity_t flash;
+		hand.hModel = weapon->viewModel;
+		hand.renderfx = RF_DEPTHHACK | RF_FIRST_PERSON | RF_MINLIGHT;
+		AnglesToAxis( angles, hand.axis );
+		CG_WeapAnim_Apply( ps, &hand, cg.frametime );
+		if ( cg_gun_frame.integer ) {
+			hand.frame = hand.oldframe = cg_gun_frame.integer;
+			hand.backlerp = 0;
+			hand.pose = NULL;
+		}
+		CG_AddWeaponWithPowerups( &hand, cent->currentState.powerups );
+		if ( weapon->flashModel && cg.time - cent->muzzleFlashTime <= MUZZLE_FLASH_TIME ) {
+			memset( &flash, 0, sizeof(flash) );
+			flash.hModel = weapon->flashModel;
+			flash.renderfx = hand.renderfx;
+			AxisClear( flash.axis );
+			CG_PositionRotatedEntityOnTag( &flash, &hand, hand.hModel, "tag_flash" );
+			trap_R_AddRefEntityToScene( &flash );
+		}
+		return;
+	}
 
 	// Placeholder reload animation: arc the weapon down and back using a sin curve.
 	// Replace TORSO_GESTURE + this offset with a real weapon anim when assets exist.

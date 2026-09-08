@@ -1109,7 +1109,7 @@ void R_AddIQMSurfaces( trRefEntity_t *ent ) {
 		R_SetupEntityLighting( &tr.refdef, ent );
 	}
 
-	//
+	//`
 	// see if we are in a fog volume
 	//
 	fogNum = R_ComputeIQMFogNum( data, ent );
@@ -1502,4 +1502,4 @@ qboolean RE_BuildModelPose( qhandle_t hModel, int frame, int oldframe, float bac
 void RE_BlendModelPoses( modelPose_t *out, const modelPose_t *a, float weightA, const modelPose_t *b, float weightB ) {
 	(void)out; (void)a; (void)weightA; (void)b; (void)weightB;
 }
-}
+

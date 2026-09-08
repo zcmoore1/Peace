@@ -1,0 +1,384 @@
+"""Import the supplied SMDs into an editable Blender rig and an IQM viewmodel.
+
+Run with Blender --background --python dev/tools/import_spas.py.
+Inputs are preserved in assets/source/spas12; outputs live in assets/baseq3
+and out/build/spas-preview. IQM v2 layout follows code/renderercommon/iqm.h.
+No external importer/exporter add-on is required.
+"""
+import collections
+import json
+import math
+from pathlib import Path
+import re
+import struct
+
+import bpy
+from mathutils import Euler, Matrix, Vector
+
+ROOT = Path(__file__).resolve().parents[2]
+SOURCE = ROOT / "assets/source/spas12"
+OUTPUT = ROOT / "assets/baseq3/models/weapons2/spas12"
+PREVIEW = ROOT / "out/build/spas-preview"
+# The supplied model points down -Y. Quake viewmodels point down +X.
+# The source is a left-handed viewmodel. Reflect the view for right-handed use.
+AXIS = Matrix.Diagonal((1., -1., 1., 1.)) @ Matrix.Rotation(math.pi / 2, 4, "Z")
+CLIPS = [
+    ("idle", "idle.smd", True),
+    ("raise", "draw.smd", False),
+    ("fire", "Shoot.smd", False),
+    ("reload_start", "start_reload.smd", False),
+    ("reload_loop", "insert.smd", False),
+    ("reload_end", "after_reload.smd", False),
+]
+
+
+def smd(path):
+    lines = iter(path.read_text().splitlines())
+    if next(lines).strip() != "version 1":
+        raise ValueError(f"Unsupported SMD version: {path}")
+    nodes, frames, triangles = [], {}, collections.defaultdict(list)
+    for line in lines:
+        section = line.strip()
+        if section == "nodes":
+            for line in lines:
+                if line.strip() == "end":
+                    break
+                match = re.fullmatch(r'\s*(\d+)\s+"(.*)"\s+(-?\d+)\s*', line)
+                index, name, parent = int(match[1]), match[2], int(match[3])
+                if index != len(nodes) or parent >= index:
+                    raise ValueError("Expected contiguous, parent-first bone IDs")
+                nodes.append((name, parent))
+        elif section == "skeleton":
+            for line in lines:
+                if line.strip() == "end":
+                    break
+                if line.startswith("time "):
+                    current = frames[int(line.split()[1])] = {}
+                else:
+                    values = line.split()
+                    current[int(values[0])] = tuple(map(float, values[1:]))
+        elif section == "triangles":
+            for line in lines:
+                if line.strip() == "end":
+                    break
+                tri = []
+                for _ in range(3):
+                    fields = next(lines).split()
+                    values = tuple(map(float, fields[1:9]))
+                    weights = [(int(fields[0]), 1.0)]
+                    if len(fields) > 9 and int(fields[9]):
+                        weights = [(int(fields[10 + 2*i]), float(fields[11 + 2*i]))
+                                   for i in range(int(fields[9]))]
+                    if len(weights) > 4 or abs(sum(w for _, w in weights) - 1) > .001:
+                        raise ValueError("Invalid or unsupported skin weights")
+                    weights = sorted(((i, w) for i, w in weights if w > 0),
+                                     key=lambda pair: -pair[1])
+                    total = sum(w for _, w in weights)
+                    weights = [(i, w/total) for i, w in weights]
+                    tri.append((values, tuple(weights)))
+                triangles[line.strip()].append(tri)
+    previous, complete = {}, []
+    for time in range(max(frames) + 1):
+        previous = dict(previous)
+        previous.update(frames.get(time, {}))
+        if len(previous) != len(nodes):
+            raise ValueError(f"Incomplete first pose: {path}")
+        complete.append([previous[i] for i in range(len(nodes))])
+    return nodes, complete, triangles
+
+
+def local_matrices(nodes, frame):
+    result = []
+    for (_, parent), values in zip(nodes, frame):
+        m = Euler(values[3:6], "XYZ").to_matrix().to_4x4()
+        m.translation = Vector(values[:3])
+        result.append(AXIS @ m @ AXIS.inverted())
+    return result
+
+
+def world_matrices(nodes, local):
+    result = []
+    for (_, parent), m in zip(nodes, local):
+        result.append(result[parent] @ m if parent >= 0 else m.copy())
+    return result
+
+
+def channels(m):
+    p, q, scale = m.decompose()
+    # A consistent quaternion hemisphere avoids unnecessary quantization range.
+    if q.w < 0:
+        q.negate()
+    return tuple(p) + (q.x, q.y, q.z, q.w) + tuple(scale)
+
+
+def mesh_chunks(materials):
+    vertices, triangles, meshes = [], [], []
+    for material, tris in materials.items():
+        first_vertex, first_tri, lookup = len(vertices), len(triangles), {}
+
+        def finish():
+            if len(triangles) > first_tri:
+                meshes.append((material, first_vertex, len(vertices)-first_vertex,
+                               first_tri, len(triangles)-first_tri))
+
+        for tri in tris:
+            if len(lookup) + 3 >= 990 or len(triangles)-first_tri >= 1900:
+                finish()
+                first_vertex, first_tri, lookup = len(vertices), len(triangles), {}
+            indices = []
+            for vertex in tri:
+                if vertex not in lookup:
+                    lookup[vertex] = len(vertices)
+                    vertices.append(vertex)
+                indices.append(lookup[vertex])
+            # Reflection changes winding; retain outward-facing triangles.
+            triangles.append((indices[0], indices[2], indices[1]))
+        finish()
+    return vertices, triangles, meshes
+
+
+def write_iqm(nodes, bind, clips, vertices, triangles, meshes):
+    text = bytearray(b"\0")
+
+    def name(value):
+        offset = len(text)
+        text.extend(value.encode() + b"\0")
+        return offset
+
+    joint_names = [name(n) for n, _ in nodes]
+    mesh_records = [(name(f"spas_{i}"), name("models/weapons2/spas12/" +
+                    ("hands" if "hands" in mat else "gun")), fv, nv, ft, nt)
+                    for i, (mat, fv, nv, ft, nt) in enumerate(meshes)]
+    all_frames, anim_records, cfg = [], [], []
+    for clip_name, local_frames, loop in clips:
+        first, count = len(all_frames), len(local_frames)
+        anim_records.append((name(clip_name), first, count, 30., int(loop)))
+        cfg.append(f"{clip_name} {first} {count} 30 {int(loop)}")
+        all_frames.extend([[channels(m) for m in frame] for frame in local_frames])
+    offsets, scales, masks = [], [], []
+    for bone in range(len(nodes)):
+        lo = [min(f[bone][c] for f in all_frames) for c in range(10)]
+        hi = [max(f[bone][c] for f in all_frames) for c in range(10)]
+        scale = [(b-a)/65535 if b-a > 1e-7 else 0 for a, b in zip(lo, hi)]
+        offsets.append(lo)
+        scales.append(scale)
+        masks.append(sum(1 << c for c in range(10) if scale[c]))
+    frame_data = bytearray()
+    for frame in all_frames:
+        for bone, values in enumerate(frame):
+            for c in range(10):
+                if scales[bone][c]:
+                    v = round((values[c] - offsets[bone][c]) / scales[bone][c])
+                    frame_data.extend(struct.pack("<H", max(0, min(v, 65535))))
+    positions = [AXIS @ Vector(v[0][:3]) for v in vertices]
+    normals = [(AXIS.to_3x3() @ Vector(v[0][3:6])).normalized() for v in vertices]
+    uvs = [(v[0][6], 1-v[0][7]) for v in vertices]
+    tangent = [Vector() for _ in vertices]
+    bitangent = [Vector() for _ in vertices]
+    for ids in triangles:
+        a, b, c = ids
+        e1, e2 = positions[b]-positions[a], positions[c]-positions[a]
+        d1, d2 = Vector(uvs[b])-Vector(uvs[a]), Vector(uvs[c])-Vector(uvs[a])
+        det = d1.x*d2.y-d1.y*d2.x
+        t = (e1*d2.y-e2*d1.y)/det if abs(det) > 1e-9 else normals[a].orthogonal()
+        bt = (e2*d1.x-e1*d2.x)/det if abs(det) > 1e-9 else normals[a].cross(t)
+        for i in ids:
+            tangent[i] += t
+            bitangent[i] += bt
+    tangents = []
+    for n, t, b in zip(normals, tangent, bitangent):
+        t = (t-n*n.dot(t)).normalized()
+        if t.length < .5:
+            t = n.orthogonal().normalized()
+        tangents.append(tuple(t) + (-1. if n.cross(t).dot(b) < 0 else 1.,))
+    indices, weights = [], []
+    for _, influence in vertices:
+        ids = [i for i, _ in influence] + [0]*(4-len(influence))
+        ws = [round(w*255) for _, w in influence] + [0]*(4-len(influence))
+        ws[0] += 255-sum(ws)
+        indices.append(ids)
+        weights.append(ws)
+
+    def pack_rows(fmt, rows):
+        return b"".join(struct.pack(fmt, *row) for row in rows)
+
+    data = bytearray(124)
+
+    def append(blob):
+        data.extend(b"\0" * (-len(data) % 4))
+        start = len(data)
+        data.extend(blob)
+        return start
+
+    ofs_text = append(text)
+    ofs_meshes = append(pack_rows("<6I", mesh_records))
+    array_records = []
+    for kind, fmt, size, blob in [
+        (0, 7, 3, pack_rows("<3f", positions)),
+        (1, 7, 2, pack_rows("<2f", uvs)),
+        (2, 7, 3, pack_rows("<3f", normals)),
+        (3, 7, 4, pack_rows("<4f", tangents)),
+        (4, 1, 4, pack_rows("<4B", indices)),
+        (5, 1, 4, pack_rows("<4B", weights)),
+    ]:
+        array_records.append((kind, 0, fmt, size, append(blob)))
+    ofs_arrays = append(pack_rows("<5I", array_records))
+    ofs_triangles = append(pack_rows("<3I", triangles))
+    ofs_joints = append(pack_rows("<Ii10f", [(joint_names[i], parent, *channels(bind[i]))
+                       for i, (_, parent) in enumerate(nodes)]))
+    ofs_poses = append(pack_rows("<iI20f", [(parent, masks[i], *offsets[i], *scales[i])
+                      for i, (_, parent) in enumerate(nodes)]))
+    ofs_anims = append(pack_rows("<3IfI", anim_records))
+    ofs_frames = append(frame_data)
+    # Conservative bounds include all animation frames, including layer blends.
+    inverse_bind = [m.inverted() for m in world_matrices(nodes, bind)]
+    low, high = Vector((1e6,)*3), Vector((-1e6,)*3)
+    for _, frames, _ in clips:
+        for local in frames:
+            skin = [m @ inv for m, inv in zip(world_matrices(nodes, local), inverse_bind)]
+            for position, (_, influence) in zip(positions, vertices):
+                v = sum((skin[i] @ position * w for i, w in influence), Vector())
+                for c in range(3):
+                    low[c], high[c] = min(low[c], v[c]), max(high[c], v[c])
+    bounds = tuple(low-Vector((1,)*3)) + tuple(high+Vector((1,)*3)) + (128., 128.)
+    ofs_bounds = append(pack_rows("<8f", [bounds]*len(all_frames)))
+    header = (2, len(data), 0, len(text), ofs_text, len(meshes), ofs_meshes,
+              6, len(vertices), ofs_arrays, len(triangles), ofs_triangles, 0,
+              len(nodes), ofs_joints, len(nodes), ofs_poses, len(clips), ofs_anims,
+              len(all_frames), sum(mask.bit_count() for mask in masks), ofs_frames,
+              ofs_bounds, 0, 0, 0, 0)
+    data[:124] = struct.pack("<16s27I", b"INTERQUAKEMODEL\0", *header)
+    (OUTPUT / "view.iqm").write_bytes(data)
+    (OUTPUT / "view.cfg").write_text("// name firstFrame numFrames fps loop\n" + "\n".join(cfg) + "\n")
+    for name, rgb in [("gun", (70, 76, 82)), ("hands", (150, 116, 87))]:
+        # Explicit neutral materials, not replacements for the missing atlases.
+        tga = struct.pack("<BBBHHBHHHHBB", 0, 0, 2, 0, 0, 0, 0, 0, 2, 2, 24, 0)
+        (OUTPUT / f"{name}.tga").write_bytes(tga + bytes(reversed(rgb))*4)
+    return {"joints": len(nodes), "vertices": len(vertices), "triangles": len(triangles),
+            "surfaces": len(meshes), "frames": len(all_frames), "bounds": list(bounds),
+            "clips": cfg, "bytes": len(data)}
+
+
+def create_blend(nodes, bind, clips, vertices, triangles, meshes):
+    bpy.ops.object.select_all(action="SELECT")
+    bpy.ops.object.delete(use_global=False)
+    armature = bpy.data.armatures.new("SPAS source skeleton")
+    rig = bpy.data.objects.new("SPAS-12", armature)
+    bpy.context.collection.objects.link(rig)
+    bpy.context.view_layer.objects.active = rig
+    rig.select_set(True)
+    bpy.ops.object.mode_set(mode="EDIT")
+    world = world_matrices(nodes, bind)
+    for i, (name, parent) in enumerate(nodes):
+        bone = armature.edit_bones.new(name)
+        bone.head = world[i].translation
+        bone.tail = bone.head + world[i].to_3x3() @ Vector((0, .4, 0))
+        bone.matrix = world[i]
+        if parent >= 0:
+            bone.parent = armature.edit_bones[nodes[parent][0]]
+    bpy.ops.object.mode_set(mode="OBJECT")
+    mesh = bpy.data.meshes.new("SPAS geometry")
+    mesh.from_pydata([AXIS @ Vector(v[0][:3]) for v in vertices], [], triangles)
+    mesh.update()
+    obj = bpy.data.objects.new("SPAS mesh and hands", mesh)
+    bpy.context.collection.objects.link(obj)
+    obj.parent = rig
+    modifier = obj.modifiers.new("Source skin", "ARMATURE")
+    modifier.object = rig
+    for name, _ in nodes:
+        obj.vertex_groups.new(name=name)
+    for i, (_, influence) in enumerate(vertices):
+        for bone, weight in influence:
+            obj.vertex_groups[bone].add([i], weight, "REPLACE")
+    uv = mesh.uv_layers.new(name="Source UV")
+    for loop in mesh.loops:
+        uv.data[loop.index].uv = vertices[loop.vertex_index][0][6:8]
+    for name, color in [("Missing gun atlas", (.13, .15, .17, 1)),
+                        ("Missing hand atlas", (.38, .27, .19, 1))]:
+        material = bpy.data.materials.new(name)
+        material.diffuse_color = color
+        mesh.materials.append(material)
+    for mat, _, _, first, count in meshes:
+        for poly in list(mesh.polygons)[first:first+count]:
+            poly.material_index = int("hands" in mat)
+            poly.use_smooth = True
+    mesh.normals_split_custom_set_from_vertices([
+        (AXIS.to_3x3() @ Vector(v[0][3:6])).normalized() for v in vertices])
+    rig.animation_data_create()
+    actions = {}
+    for clip_name, frames, loop in clips:
+        action = bpy.data.actions.new(clip_name)
+        action.use_fake_user = True
+        action["source_fps_assumed"] = 30
+        action["loop"] = loop
+        rig.animation_data.action = action
+        for frame_num, local in enumerate(frames, 1):
+            for i, (name, _) in enumerate(nodes):
+                bone = rig.pose.bones[name]
+                bone.rotation_mode = "QUATERNION"
+                bone.matrix_basis = bind[i].inverted() @ local[i]
+                for prop in ("location", "rotation_quaternion", "scale"):
+                    bone.keyframe_insert(data_path=prop, frame=frame_num, group=name)
+        actions[clip_name] = action
+    rig.animation_data.action = actions["idle"]
+    scene = bpy.context.scene
+    scene.render.fps = 30
+    scene.frame_start, scene.frame_end = 1, len(clips[0][1])
+    scene.frame_set(1)
+    camera_data = bpy.data.cameras.new("First person camera")
+    camera = bpy.data.objects.new("First person camera", camera_data)
+    bpy.context.collection.objects.link(camera)
+    camera.rotation_euler = Vector((1, 0, 0)).to_track_quat("-Z", "Y").to_euler()
+    camera_data.angle = math.radians(90)
+    camera_data.clip_start = .1
+    scene.camera = camera
+    scene.render.engine = "BLENDER_WORKBENCH"
+    scene.display.shading.light = "STUDIO"
+    scene.display.shading.color_type = "MATERIAL"
+    scene.display.shading.show_shadows = False
+    scene.display.shading.show_cavity = True
+    scene.display.shading.background_type = "WORLD"
+    scene.world.color = (.025, .03, .04)
+    scene.render.resolution_x, scene.render.resolution_y = 1280, 720
+    scene.render.resolution_percentage = 100
+    scene.render.image_settings.file_format = "PNG"
+    bpy.ops.wm.save_as_mainfile(filepath=str(PREVIEW / "spas12.blend"))
+    scene.render.filepath = str(PREVIEW / "idle.png")
+    bpy.ops.render.render(write_still=True)
+
+
+def main():
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+    PREVIEW.mkdir(parents=True, exist_ok=True)
+    nodes, rest_frames, materials = smd(SOURCE / "Ref.smd")
+    if len(nodes) > 128:
+        raise ValueError("Rig exceeds the engine's bone limit")
+    bind = local_matrices(nodes, rest_frames[0])
+    clips = []
+    for name, filename, loop in CLIPS:
+        clip_nodes, frames, _ = smd(SOURCE / filename)
+        if clip_nodes != nodes:
+            raise ValueError(f"Skeleton mismatch: {filename}")
+        clips.append((name, [local_matrices(nodes, f) for f in frames], loop))
+    # Until a separate holster is authored, use the supplied draw in reverse.
+    clips.append(("drop", list(reversed(clips[1][1])), False))
+    # Quake's muzzle attachment is a named joint. It follows the gun's root.
+    muzzle = Matrix.Translation(Vector((27.5, -2.7, -2.2)))
+    muzzle_local = bind[0].inverted() @ muzzle
+    nodes.append(("tag_flash", 0))
+    bind.append(muzzle_local)
+    for _, frames, _ in clips:
+        for frame in frames:
+            # The generated reversed draw shares matrices with draw frames.
+            if len(frame) < len(nodes):
+                frame.append(muzzle_local.copy())
+    vertices, triangles, meshes = mesh_chunks(materials)
+    report = write_iqm(nodes, bind, clips, vertices, triangles, meshes)
+    report["missing_textures"] = [name for name in materials if not (SOURCE / name).exists()]
+    (PREVIEW / "import-report.json").write_text(json.dumps(report, indent=2))
+    print(json.dumps(report, indent=2), flush=True)
+    create_blend(nodes, bind, clips, vertices, triangles, meshes)
+
+
+if __name__ == "__main__":
+    main()

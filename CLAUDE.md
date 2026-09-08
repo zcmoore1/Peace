@@ -53,17 +53,58 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 - **IW4 still swap is a rule, not a setting.** When a swap collides with the
   sprint carry the sprint animation wins. The Treyarch behaviour is explicitly
   unwanted — do not reintroduce it as a cvar or a branch.
+- **The pump is a state, not a phase of firing.** `WEAPON_FIRING` is the shot;
+  `WEAPON_PUMPING` is the action being worked. It cannot fire and CAN be
+  holstered out of. It ends on the anim clock, never on the lock — the chamber
+  note gave the lock away and the settle still has to play.
+- **The pump cancel is the reload cancel.** `WNOTE_BOLT_CLOSED` on the fire
+  animation carries no rounds, so it only clears the lock — the same note, in
+  the same place, that opens the reload's window. Never write a second cancel.
+- **Clip frame ranges are data.** They live in the `.cfg` beside the model and
+  are read by `CG_WeapAnim_RegisterClips`. Re-exporting a model must never mean
+  editing C, and no weapon may be named in that loader.
 - **cgame is picture only.** It never touches ammo or weapon state.
 - **Never ADS through a reload.** `PM_CheckADS` blocks `WEAPON_RELOADING` on
   purpose. The ZOOMload trick is a client/server desync — the reload animation
   starts client-side and the server never agrees one is happening — not a rule
   being relaxed. Do not reproduce it by loosening the gate.
 
-## Capacity limits (both currently full)
+## Capacity limits
 
-- `pm_flags` — all 16 networked bits used. A 17th needs the wire format widened.
+- `pm_flags` — **full.** All 16 networked bits used. A 17th needs the wire
+  format widened.
 - `STAT_WEAPONS` — bits 0–13 used. Bit 15 must stay unused: `stats[]` round-trip
   as **signed** int16, so a bit-15 weapon reads back negative.
+- `weaponAnimSeq` — **full.** 2 bits in `msg.c`; all four values are taken
+  (`RSEQ_START/LOOP/END` + `ASEQ_FIRE`). A fifth animation segment has to widen
+  the field.
+- `weaponstate` — 4 bits, 9 of 16 values used. Room for seven more states.
+
+## Weapon animation assets
+
+- Source SMDs in `assets/source/<model>/`; built IQM + clip table in
+  `assets/baseq3/models/weapons2/<model>/`. CMake copies `assets/baseq3` into
+  the build's `baseq3` on every build.
+- `dev/tools/import_spas.py` runs under `blender --background --python` and
+  builds the IQM. **`SOURCE_FPS` is 60**, inferred, not stated by the pack: 38
+  fire frames are MW2's ~1.7 shots/sec and 26 draw frames its snappy draw only
+  at 60. It will not overwrite a hand-edited `view.cfg`.
+- Clip lengths and the gameplay timers in `bg_pmove.c` are the SAME numbers.
+  When they disagree the clip is time-warped to fit and reads as jittery.
+- Material strings are baked into the IQM (`models/weapons2/spas12/...`), so
+  moving an asset folder breaks its textures until re-export.
+- Known SPAS gaps: no sprint clips exist (the gun plays idle while sprinting),
+  the drop is the draw reversed, and `gun.tga`/`hands.tga` are 2×2 flat
+  placeholders — the mesh UV-maps to `mw2_spas12.bmp`/`v_hands.bmp`, neither of
+  which is in the source pack.
+
+## Tests
+
+`dev/tests/run-shotgun-reload.cmd` builds and runs `shotgun_reload_test.c`,
+which `#include`s `bg_pmove.c` and drives `PM_Weapon` directly — reload
+segments, ammo conservation, swap/sprint ordering and the fire cycle. Every
+timing in it is read from the shipped tables; never write a literal there, or
+retiming a weapon breaks the test without telling you anything.
 
 ## Adding a weapon — touches TWO lists
 

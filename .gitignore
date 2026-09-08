@@ -73,3 +73,6 @@ mapping/src/*/
 # Python caches
 __pycache__/
 *.pyc
+
+# Visual Studio IDE cache - Browse.VC.db alone is over GitHub's 100MB limit
+.vs/

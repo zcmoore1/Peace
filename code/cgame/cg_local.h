@@ -1368,7 +1368,8 @@ void CG_Weapon_f( void );
 // cg_anim.c
 void     CG_WeapAnim_Init( void );
 qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec );
-void     CG_WeapAnim_RegisterClips( int weapon, qhandle_t hModel );
+qboolean CG_WeapAnim_Apply( playerState_t *ps, refEntity_t *entity, int msec );
+void     CG_WeapAnim_RegisterClips( int weapon, qhandle_t hModel, const char *cfgPath );
 
 // cg_killcam.c
 void     CG_Killcam_Init( void );

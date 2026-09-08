@@ -25,7 +25,7 @@ Each layer has:
 #include "cg_local.h"
 
 // ---------------------------------------------------------------------------
-// Clip indices -- keep in sync with weapAnimClips_t in cg_anim.h
+// Clip indices used by the viewmodel config.
 // ---------------------------------------------------------------------------
 #define WANIM_IDLE          0
 #define WANIM_FIRE          1
@@ -87,17 +87,6 @@ static int           cg_weapAnimWeapon = WP_NONE;   // weapon these layers belon
 // belongs in the reload note table in bg_pmove.c, so the picture and the
 // gameplay agree by construction instead of being tuned to match.
 // ---------------------------------------------------------------------------
-static void CG_SetClip( weapAnimDef_t *d, int idx,
-                        int firstFrame, int numFrames, float fps, qboolean loop ) {
-	if ( idx < 0 || idx >= WANIM_COUNT ) {
-		return;
-	}
-	d->clips[idx].firstFrame = firstFrame;
-	d->clips[idx].numFrames  = numFrames;
-	d->clips[idx].framerate  = fps;
-	d->clips[idx].loop       = loop;
-}
-
 // ---------------------------------------------------------------------------
 // CG_WeapAnim_Init
 // Called once on cgame init.
@@ -127,6 +116,7 @@ static void CG_WeapAnim_WeaponChanged( int weapon ) {
 	cg_weapLayers[LAYER_MOVE].weight       = 0.0f;
 	cg_weapLayers[LAYER_MOVE].targetWeight = 1.0f;
 	cg_weapLayers[LAYER_MOVE].blendSpeed   = 8.0f;
+	cg_weapLayers[LAYER_SPRINT].blendSpeed = 0.02f;
 
 	cg_weapAnimWeapon = weapon;
 }
@@ -194,6 +184,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	animLayer_t *move   = &cg_weapLayers[LAYER_MOVE];
 	animLayer_t *sprint = &cg_weapLayers[LAYER_SPRINT];
 	int i;
+	int baseClip = WANIM_IDLE;
 
 	// IW4 still swap. When a weapon swap collides with the sprint carry, the
 	// SPRINT animation wins and the swap is never drawn.
@@ -222,21 +213,20 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 
 	// -- Base layer: swap between idle and fire --
 	if ( ps->weaponstate == WEAPON_FIRING ) {
-		base->clip = WANIM_FIRE;
+		baseClip = WANIM_FIRE;
 	} else if ( ps->weaponstate == WEAPON_RELOADING ) {
 		// The reload is segmented in pmove, so the picture follows the same
 		// segment rather than playing one clip over the whole thing. A magazine
 		// gun only ever uses LOOP, so it needs no special handling here.
 		if ( ps->weaponAnimSeq == RSEQ_START ) {
-			base->clip = WANIM_RELOAD_START;
+			baseClip = WANIM_RELOAD_START;
 		} else if ( ps->weaponAnimSeq == RSEQ_END ) {
-			base->clip = WANIM_RELOAD_END;
+			baseClip = WANIM_RELOAD_END;
 		} else {
-			base->clip = WANIM_RELOAD_LOOP;
+			baseClip = WANIM_RELOAD_LOOP;
 		}
-	} else {
-		base->clip = WANIM_IDLE;
 	}
+	CG_WeapAnim_PlayLayer( base, baseClip );
 
 	// -- Move layer: raise / drop transitions --
 	// Only re-aimed while the current transition has finished. THIS is the
@@ -296,6 +286,29 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 			l->time += (float)msec;
 		}
 	}
+
+	// Reload pictures follow the same segment clock as gameplay notes. A loop
+	// wrap or canceled reload cannot leave the viewmodel on an old stopwatch.
+	if ( ps->weaponstate == WEAPON_RELOADING ) {
+		int duration = BG_WeaponReloadSegLength( ps->weapon, ps->weaponAnimSeq );
+		base->time = duration > 0 ? (float)ps->weaponAnimTime / duration *
+		             CG_WeapAnim_ClipLength( def, base->clip ) : 0.0f;
+	} else if ( ps->weaponstate == WEAPON_FIRING ) {
+		// Every predicted shot restarts its picture, including held-fire repeats.
+		base->time = cg.time - cg.predictedPlayerEntity.muzzleFlashTime;
+	}
+	// Fit the supplied draw/drop clips to the existing gameplay transitions.
+	// When another transition interrupts one, the layer ownership rule above
+	// still decides whether the previous clip holds the picture.
+	if ( (ps->weaponstate == WEAPON_RAISING && move->clip == WANIM_RAISE) ||
+	     (ps->weaponstate == WEAPON_DROPPING && move->clip == WANIM_DROP) ) {
+		int duration = ps->weaponstate == WEAPON_RAISING ?
+		               BG_WeaponRaiseTime( ps->weapon ) : BG_WeaponDropTime( ps->weapon );
+		float fraction = 1.0f - (float)ps->weaponTime / duration;
+		if ( fraction < 0 ) fraction = 0;
+		if ( fraction > 1 ) fraction = 1;
+		move->time = fraction * CG_WeapAnim_ClipLength( def, move->clip );
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -303,8 +316,8 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 // Sample a single layer into outPose. Returns qfalse if no IQM data available
 // (falls back to frame-number path in CG_AddViewWeapon).
 // ---------------------------------------------------------------------------
-static qboolean CG_WeapAnim_SampleLayer( qhandle_t hModel, const weapAnimDef_t *def,
-                                          const animLayer_t *layer, modelPose_t *outPose ) {
+static qboolean CG_WeapAnim_SampleFrame( const weapAnimDef_t *def,
+                                       const animLayer_t *layer, refEntity_t *entity ) {
 	const weapAnimClip_t *clip;
 	float totalMs, frameDuration, clipTime;
 	int   frame, oldframe;
@@ -330,11 +343,25 @@ static qboolean CG_WeapAnim_SampleLayer( qhandle_t hModel, const weapAnimDef_t *
 		if ( clipTime < 0.0f    ) clipTime = 0.0f;
 	}
 
-	frame    = clip->firstFrame + (int)( clipTime / frameDuration );
+	oldframe = (int)( clipTime / frameDuration );
+	frame = oldframe + 1;
+	if ( frame >= clip->numFrames ) {
+		frame = clip->loop ? 0 : clip->numFrames - 1;
+	}
 	backlerp = 1.0f - ( (clipTime / frameDuration) - (int)(clipTime / frameDuration) );
-	oldframe = frame > clip->firstFrame ? frame - 1 : clip->firstFrame;
+	entity->frame = clip->firstFrame + frame;
+	entity->oldframe = clip->firstFrame + oldframe;
+	entity->backlerp = backlerp;
+	return qtrue;
+}
 
-	return trap_R_BuildModelPose( hModel, frame, oldframe, backlerp, outPose );
+static qboolean CG_WeapAnim_SampleLayer( qhandle_t hModel, const weapAnimDef_t *def,
+                                      const animLayer_t *layer, modelPose_t *outPose ) {
+	refEntity_t sample;
+	if ( !CG_WeapAnim_SampleFrame( def, layer, &sample ) ) {
+		return qfalse;
+	}
+	return trap_R_BuildModelPose( hModel, sample.frame, sample.oldframe, sample.backlerp, outPose );
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +376,8 @@ qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec ) 
 	int i;
 	qboolean anyLayer = qfalse;
 
+	if ( ps->weapon <= WP_NONE || ps->weapon >= WP_NUM_WEAPONS )
+		return qfalse;
 	if ( !bg_weapAnimDefsLoaded )
 		CG_WeapAnim_Init();
 
@@ -387,58 +416,106 @@ qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec ) 
 	return anyLayer;
 }
 
+// Apply the pose to the actual IQM entity. Both renderers support IQM frame
+// sampling; GL1 currently has no external-pose implementation, so keep the
+// highest active layer's frames as its fallback without changing that renderer.
+qboolean CG_WeapAnim_Apply( playerState_t *ps, refEntity_t *entity, int msec ) {
+	qboolean sampled = qfalse;
+	int i;
+	if ( ps->weapon <= WP_NONE || ps->weapon >= WP_NUM_WEAPONS ) return qfalse;
+	entity->pose = CG_WeapAnim_BuildPose( ps, entity->hModel, msec ) ? &cg.weaponPose : NULL;
+#ifdef Q3_VM
+	// A nested VM pointer in refEntity_t is not translated by the renderer
+	// syscall. Use ordinary IQM frames in QVM builds, just as GL1 does.
+	entity->pose = NULL;
+#endif
+	for ( i = 0; i < ANIM_LAYER_COUNT; i++ ) {
+		if ( cg_weapLayers[i].weight < 0.5f ) continue;
+		if ( CG_WeapAnim_SampleFrame( &bg_weapAnimDefs[ps->weapon], &cg_weapLayers[i], entity ) ) {
+			sampled = qtrue;
+		}
+	}
+	return sampled;
+}
+
 // ---------------------------------------------------------------------------
 // CG_WeapAnim_RegisterClips
-// Called from CG_RegisterWeapon once IQM assets exist. Fills in the clip
-// table for the given weapon from a simple text config.
-// Placeholder: no-op until assets land. The frame ranges below are zeroed
-// stubs that will be filled in per-weapon.
+// Fills in the clip table for one weapon from the text config that sits beside
+// its viewmodel. Data, not code: the frame ranges belong to whoever exported
+// the model, so changing an export must never mean editing cgame.
+//
+// Format is one clip per line, "name firstFrame numFrames fps loop", and any
+// clip may be omitted - a missing clip has zero length, which every consumer
+// here already reads as "no animation for this".
+//
+// hModel of 0 or a NULL path clears the table, so the weapon falls back to the
+// legacy torso-mapped frame path instead of inheriting a previous weapon's.
 // ---------------------------------------------------------------------------
-void CG_WeapAnim_RegisterClips( int weapon, qhandle_t hModel ) {
-	weapAnimDef_t *def = &bg_weapAnimDefs[weapon];
-
-	(void)hModel;
+void CG_WeapAnim_RegisterClips( int weapon, qhandle_t hModel, const char *cfgPath ) {
+	// Indexed by WANIM_*; keep in step with the defines at the top of the file.
+	static const char *names[WANIM_COUNT] = {
+		"idle", "fire", "raise", "drop",
+		"reload_start", "reload_loop", "reload_end",
+		"sprint_in", "sprint_loop", "sprint_out"
+	};
+	weapAnimDef_t *def;
+	fileHandle_t   file;
+	char           buffer[4096], *cursor, *token;
+	int            length, clip, field;
+	float          values[4];
 
 	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
 		return;
 	}
-
-	// Cleared first, so a weapon with no clips defined below falls back to the
-	// legacy torso path rather than inheriting whatever was here before.
+	if ( !bg_weapAnimDefsLoaded ) {
+		CG_WeapAnim_Init();
+	}
+	def = &bg_weapAnimDefs[weapon];
 	Com_Memset( def, 0, sizeof(*def) );
 
-	switch ( weapon ) {
+	if ( !hModel || !cfgPath || !cfgPath[0] ) {
+		return;
+	}
 
-	case WP_SHOTGUN:
-		// SPAS-12. Frame counts read off the MW2 .smd pack (last "time N" + 1):
-		//   idle 11   Shoot 38   draw 26
-		//   start_reload 17   insert 25   after_reload 32      total 149
-		//
-		// 60fps is inferred - the pack has no .qc to state it. At 30fps a full
-		// 8-shell reload would be 6.7s and the refire 1.27s, which is plainly
-		// wrong; 60 lands on MW2's cadence. These MUST stay in step with the
-		// segment lengths in bg_weaponReloads (283/417/533ms).
-		//
-		// firstFrame assumes the clips are exported end to end in THIS order.
-		// Export in a different order and only this column changes.
-		//
-		// Uncomment once the .iqm exists - enabling them against an MD3 would
-		// ask the renderer to pose a model that has no skeleton.
-		//
-		// CG_SetClip( def, WANIM_IDLE,           0, 11, 60.0f, qtrue  );
-		// CG_SetClip( def, WANIM_FIRE,          11, 38, 60.0f, qfalse );
-		// CG_SetClip( def, WANIM_RAISE,         49, 26, 60.0f, qfalse );
-		// CG_SetClip( def, WANIM_RELOAD_START,  75, 17, 60.0f, qfalse );
-		// CG_SetClip( def, WANIM_RELOAD_LOOP,   92, 25, 60.0f, qfalse );
-		// CG_SetClip( def, WANIM_RELOAD_END,   117, 32, 60.0f, qfalse );
-		//
-		// Not in the pack - author on the same skeleton later:
-		//   WANIM_DROP, WANIM_SPRINT_IN/LOOP/OUT.
-		// SPRINT_IN must be NON-looping and SPRINT_LOOP looping: that one flag
-		// is what makes the IW4 still swap hold on its final frame.
-		break;
+	length = trap_FS_FOpenFile( cfgPath, &file, FS_READ );
+	if ( length < 0 ) {
+		return;
+	}
+	if ( length >= sizeof(buffer) ) {
+		trap_FS_FCloseFile( file );
+		CG_Printf( "^3Animation config %s is too large\n", cfgPath );
+		return;
+	}
+	trap_FS_Read( buffer, length, file );
+	trap_FS_FCloseFile( file );
+	buffer[length] = '\0';
 
-	default:
-		break;
+	cursor = buffer;
+	while ( ( token = COM_Parse( &cursor ) )[0] ) {
+		for ( clip = 0; clip < WANIM_COUNT; clip++ ) {
+			if ( !Q_stricmp( token, names[clip] ) ) {
+				break;
+			}
+		}
+		for ( field = 0; field < 4; field++ ) {
+			token = COM_ParseExt( &cursor, qfalse );
+			if ( !token[0] ) {
+				break;
+			}
+			values[field] = atof( token );
+		}
+		// One bad line invalidates the whole table rather than leaving a
+		// half-filled one: a clip pointing at frames that are not there draws
+		// garbage, and silently drawing garbage is worse than no animation.
+		if ( clip == WANIM_COUNT || field != 4 || values[0] < 0 ||
+		     values[1] < 1 || values[2] <= 0 ) {
+			CG_Printf( "^3Invalid animation config %s\n", cfgPath );
+			Com_Memset( def, 0, sizeof(*def) );
+			return;
+		}
+		def->clips[clip].firstFrame = (int)values[0];
+		def->clips[clip].numFrames  = (int)values[1];
+		def->clips[clip].framerate  = values[2];
+		def->clips[clip].loop       = values[3] != 0;
 	}
 }

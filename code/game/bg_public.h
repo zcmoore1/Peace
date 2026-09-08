@@ -189,6 +189,7 @@ typedef struct {
 
 typedef struct {
 	bg_weaponAnimSeg_t	seg[RSEQ_COUNT];
+	qboolean			interruptible;	// attack can stop loading and play END once ammo is available
 } bg_weaponReload_t;
 
 // pmove->pm_flags

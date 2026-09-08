@@ -596,6 +596,27 @@ static void CG_GrenadeTrail( centity_t *ent, const weaponInfo_t *wi ) {
 }
 
 
+// First-person viewmodels: arms and gun skinned into one IQM, with a clip table
+// of the same name beside it. Positional - one entry per weapon in enum order,
+// "" for a weapon that has none. Paths carry no extension: ".iqm" is the model
+// and ".cfg" the clip table.
+static const char *cg_viewModelBase[WP_NUM_WEAPONS] = {
+	"",									// WP_NONE
+	"",									// WP_GAUNTLET
+	"",									// WP_MACHINEGUN
+	"models/weapons2/spas12/view",		// WP_SHOTGUN
+	"",									// WP_GRENADE_LAUNCHER
+	"",									// WP_ROCKET_LAUNCHER
+	"",									// WP_LIGHTNING
+	"",									// WP_RAILGUN
+	"",									// WP_PLASMAGUN
+	"",									// WP_BFG
+	"",									// WP_GRAPPLING_HOOK
+	"",									// WP_KNIFE
+	"",									// WP_FRAG
+	""									// WP_FLASH
+};
+
 /*
 =================
 CG_RegisterWeapon
@@ -672,13 +693,15 @@ void CG_RegisterWeapon( int weaponNum ) {
 	}
 
 	// Optional CoD-style viewmodel: arms and gun exported together as one
-	// skinned IQM. Purely a naming convention - drop <weapon>_view.iqm next to
-	// the world model and it is picked up, no item table edit. Absent, the
-	// registration silently fails, viewModel stays 0, and the stock
-	// hands-md3-parents-the-gun path is used exactly as before.
-	COM_StripExtension( item->world_model[0], path, sizeof(path) );
-	Q_strcat( path, sizeof(path), "_view.iqm" );
-	weaponInfo->viewModel = trap_R_RegisterModel( path );
+	// skinned IQM. Named per weapon rather than derived from the world model,
+	// because the folder belongs to the MODEL and not to the weapon slot - the
+	// SPAS fills the shotgun slot today, and its material strings are baked to
+	// models/weapons2/spas12 inside the IQM itself. An empty entry means the
+	// weapon has no viewmodel and takes the stock hands-parents-the-gun path.
+	if ( cg_viewModelBase[weaponNum][0] ) {
+		Com_sprintf( path, sizeof(path), "%s.iqm", cg_viewModelBase[weaponNum] );
+		weaponInfo->viewModel = trap_R_RegisterModel( path );
+	}
 
 	switch ( weaponNum ) {
 	case WP_GAUNTLET:
@@ -825,9 +848,14 @@ void CG_RegisterWeapon( int weaponNum ) {
 		break;
 	}
 
-	// Register IQM animation clips for this weapon (no-op until assets exist).
-	CG_WeapAnim_RegisterClips( weaponNum,
-		weaponInfo->viewModel ? weaponInfo->viewModel : weaponInfo->weaponModel );
+	// Clip table lives beside the model it describes, so the two can never drift
+	// apart. No viewmodel means no clips, and the legacy torso path is used.
+	if ( weaponInfo->viewModel ) {
+		Com_sprintf( path, sizeof(path), "%s.cfg", cg_viewModelBase[weaponNum] );
+		CG_WeapAnim_RegisterClips( weaponNum, weaponInfo->viewModel, path );
+	} else {
+		CG_WeapAnim_RegisterClips( weaponNum, 0, NULL );
+	}
 }
 
 /*
@@ -1426,6 +1454,29 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	VectorMA( hand.origin, cg_gun_x.value, cg.refdef.viewaxis[0], hand.origin );
 	VectorMA( hand.origin, cg_gun_y.value, cg.refdef.viewaxis[1], hand.origin );
 	VectorMA( hand.origin, (cg_gun_z.value+fovOffset), cg.refdef.viewaxis[2], hand.origin );
+
+	if ( weapon->viewModel ) {
+		refEntity_t flash;
+		hand.hModel = weapon->viewModel;
+		hand.renderfx = RF_DEPTHHACK | RF_FIRST_PERSON | RF_MINLIGHT;
+		AnglesToAxis( angles, hand.axis );
+		CG_WeapAnim_Apply( ps, &hand, cg.frametime );
+		if ( cg_gun_frame.integer ) {
+			hand.frame = hand.oldframe = cg_gun_frame.integer;
+			hand.backlerp = 0;
+			hand.pose = NULL;
+		}
+		CG_AddWeaponWithPowerups( &hand, cent->currentState.powerups );
+		if ( weapon->flashModel && cg.time - cent->muzzleFlashTime <= MUZZLE_FLASH_TIME ) {
+			memset( &flash, 0, sizeof(flash) );
+			flash.hModel = weapon->flashModel;
+			flash.renderfx = hand.renderfx;
+			AxisClear( flash.axis );
+			CG_PositionRotatedEntityOnTag( &flash, &hand, hand.hModel, "tag_flash" );
+			trap_R_AddRefEntityToScene( &flash );
+		}
+		return;
+	}
 
 	// Placeholder reload animation: arc the weapon down and back using a sin curve.
 	// Replace TORSO_GESTURE + this offset with a real weapon anim when assets exist.

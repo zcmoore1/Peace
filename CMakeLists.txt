@@ -103,5 +103,14 @@ include(client)
 include(basegame)
 include(missionpack)
 
+# Peace's runtime assets accompany native and QVM builds. Source SMDs and
+# Blender previews are kept outside this directory and are not installed.
+add_custom_target(peace_assets ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/assets/baseq3"
+        "${CMAKE_BINARY_DIR}/$<CONFIG>/${BASEGAME}"
+    COMMENT "Copying Peace runtime assets"
+    VERBATIM)
+
 include(post_configure)
 include(installer)

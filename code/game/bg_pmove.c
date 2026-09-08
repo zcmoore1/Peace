@@ -1573,7 +1573,7 @@ static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
 	/* WP_MACHINEGUN      */ { { SEG_NONE, { 1000, bgnotes_mag },       SEG_NONE } },
 	/* WP_SHOTGUN         */ { { { 283, bgnotes_spas_start },
 	                             { 417, bgnotes_spas_loop },
-	                             { 533, bgnotes_spas_end } } },
+	                             { 533, bgnotes_spas_end } }, qtrue },
 	/* WP_GRENADE_LAUNCHER*/ { { SEG_NONE, { 1200, bgnotes_mag_heavy }, SEG_NONE } },
 	/* WP_ROCKET_LAUNCHER */ { { SEG_NONE, { 1200, bgnotes_mag_heavy }, SEG_NONE } },
 	/* WP_LIGHTNING       */ { { SEG_NONE, { 800,  bgnotes_mag_fast },  SEG_NONE } },
@@ -2117,6 +2117,19 @@ static void PM_AdvanceReloadSegments( void ) {
 
 	if ( pm->ps->weaponAnimSeq < 0 || pm->ps->weaponAnimSeq >= RSEQ_COUNT ) {
 		pm->ps->weaponAnimSeq = RSEQ_START;
+	}
+
+	// Attack stops an interruptible reload once there is a round to fire.
+	// Notes and their queued ammo transfer have already run this think, so a
+	// shell that just seated stays loaded; an unfinished insertion is abandoned.
+	// Keep RELOADING through END so the gun returns to ready before it can fire.
+	// An empty gun keeps loading until its first round is available.
+	if ( rl->interruptible && ( pm->cmd.buttons & BUTTON_ATTACK ) &&
+	     pm->ps->ammo[pm->ps->weapon] > 0 &&
+	     pm->ps->weaponAnimSeq != RSEQ_END ) {
+		pm->ps->weaponAnimSeq  = RSEQ_END;
+		pm->ps->weaponAnimTime = 0;
+		pm->ps->weaponTime     = rl->seg[RSEQ_END].length;
 	}
 
 	for ( guard = 0; guard < RSEQ_COUNT + 4; guard++ ) {

@@ -316,7 +316,9 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	if ( (ps->weaponstate == WEAPON_RAISING && move->clip == WANIM_RAISE) ||
 	     (ps->weaponstate == WEAPON_DROPPING && move->clip == WANIM_DROP) ) {
 		int duration = ps->weaponstate == WEAPON_RAISING ?
-		               BG_WeaponRaiseTime( ps->weapon ) : BG_WeaponDropTime( ps->weapon );
+		               BG_WeaponRaiseTime( ps->weapon ) :
+		               ((ps->stats[STAT_LADDER] & LADDER_HOLSTER) ?
+		                BG_LADDER_DROP_TIME : BG_WeaponDropTime( ps->weapon ));
 		float fraction = 1.0f - (float)ps->weaponTime / duration;
 		if ( fraction < 0 ) fraction = 0;
 		if ( fraction > 1 ) fraction = 1;

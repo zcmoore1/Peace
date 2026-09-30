@@ -2477,6 +2477,7 @@ static void CG_DrawWeaponDebug( void ) {
 		case WEAPON_READY:		stateName = "READY";	break;
 		case WEAPON_RAISING:	stateName = "RAISING";	break;
 		case WEAPON_DROPPING:	stateName = "DROPPING";	break;
+		case WEAPON_LADDER:		stateName = "LADDER";	break;
 		case WEAPON_FIRING:		stateName = "FIRING";	break;
 		case WEAPON_RELOADING:	stateName = "RELOADING";break;
 		case WEAPON_SPRINT_IN:	stateName = "SPRINT_IN";break;
@@ -2508,6 +2509,11 @@ static void CG_DrawWeaponDebug( void ) {
 	Com_sprintf( line, sizeof( line ), "wpn: %i  sel(hud): %i",
 		weapon, cg.weaponSelect );
 	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
+	Com_sprintf( line, sizeof( line ), "ladder: %s  lower:%i  detach:%i",
+		(ps->stats[STAT_LADDER] & LADDER_ATTACHED) ? "ON" : "off",
+		!!(ps->stats[STAT_LADDER] & LADDER_HOLSTER),
+		!!(ps->stats[STAT_LADDER] & LADDER_JUMP_OFF) );
+	CG_DrawSmallString( 8, y, line, 1.0f );
 }
 
 
@@ -2868,6 +2874,4 @@ void CG_DrawActive( stereoFrame_t stereoView ) {
 	// draw status bar and other floating elements
  	CG_Draw2D(stereoView);
 }
-
-
 

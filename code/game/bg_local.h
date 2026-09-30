@@ -51,6 +51,9 @@ typedef struct {
 	vec3_t		previous_origin;
 	vec3_t		previous_velocity;
 	int			previous_waterlevel;
+
+	vec3_t		ladderNormal;
+	qboolean	ladderGrabbed;	// contact this think, even if we immediately jump off
 } pml_t;
 
 extern	pmove_t		*pm;
@@ -78,5 +81,4 @@ void PM_AddEvent( int newEvent );
 
 qboolean	PM_SlideMove( qboolean gravity );
 void		PM_StepSlideMove( qboolean gravity );
-
 

@@ -159,8 +159,28 @@ typedef enum {
 						// its own lock, so anything that clears the lock (the
 						// mag-in note) collapses the transition
 	WEAPON_SPRINTING,	// gun is down; cannot fire
-	WEAPON_SPRINT_OUT	// bringing the gun back up
+	WEAPON_SPRINT_OUT,	// bringing the gun back up
+	WEAPON_LADDER		// hands occupied; entered through WEAPON_DROPPING
 } weaponstate_t;
+
+// Ladder tuning is shared by prediction, authority and presentation. These are
+// initial feel values, not measured MW2 constants. A grab always pays a positive,
+// weapon-independent holster; animation notes still own the busy lock.
+#define BG_LADDER_DROP_TIME       100
+#define BG_LADDER_REACH           4.0f
+#define BG_LADDER_SPEED           160.0f
+#define BG_LADDER_FRICTION        5.0f
+#define BG_LADDER_ACCELERATE      10.0f
+#define BG_LADDER_JUMP_PUSH       180.0f
+
+// One signed-short stat: three flags + 12-bit inward-facing yaw. No extra
+// pm_flags bit or animation sequence (both fields are already full).
+#define LADDER_ATTACHED           1
+#define LADDER_HOLSTER            2
+#define LADDER_JUMP_OFF           4  // re-arm on separation, not on a timer
+#define LADDER_YAW_SHIFT          3
+#define LADDER_YAW_MASK           4095
+#define LADDER_FACING(state) SHORT2ANGLE( (((state) >> LADDER_YAW_SHIFT) & LADDER_YAW_MASK) << 4 )
 
 // Typed notes on a weapon animation. Predicted in bg_pmove - never driven from
 // cgame, and never from weaponTime. They fire when the anim's ELAPSED clock
@@ -307,13 +327,17 @@ typedef enum {
 									// ammo[WP_FLASH] - no stat needed
 	STAT_USE_TARGET,				// entity being picked up, or -1
 	STAT_USE_PROGRESS,				// ms of hold accumulated toward the pickup
-	STAT_UNCHAMBERED				// bit per weapon: this gun has fired and its
+	STAT_UNCHAMBERED,			// bit per weapon: this gun has fired and its
 									// action has NOT been worked since. Per weapon
 									// because you carry two and only one of them
 									// is mid-cycle. Same 0-13 range and the same
 									// bit-15 rule as STAT_WEAPONS - stats[] go
 									// over the wire as SIGNED shorts.
+	STAT_LADDER,				// LADDER_* flags and surface-facing yaw
+	STAT_COUNT
 } statIndex_t;
+
+typedef char bg_stats_fit_network[(STAT_COUNT <= MAX_STATS) ? 1 : -1];
 
 
 // player_state->persistant[] indexes
@@ -872,4 +896,3 @@ qboolean	BG_PlayerTouchesItem( playerState_t *ps, entityState_t *item, int atTim
 #define KAMI_SHOCKWAVE_MAXRADIUS		1320
 #define KAMI_BOOMSPHERE_MAXRADIUS		720
 #define KAMI_SHOCKWAVE2_MAXRADIUS		704
-

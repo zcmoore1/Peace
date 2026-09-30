@@ -666,10 +666,126 @@ static void PM_AirMove( void ) {
 
 /*
 ===================
-PM_GrappleMove
+Ladder movement
 
 ===================
 */
+// Horizontal hull probes make grabbing independent of camera/input direction.
+// The *surface* must be marked: nearby ordinary walls and ladder top faces do
+// not attach. Full-height overlap lets feet clear the lip before climbing off.
+static qboolean PM_LadderTrace( const vec3_t origin, trace_t *best ) {
+	static const vec3_t directions[8] = {
+		{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0},
+		{0.707107f,0.707107f,0}, {-0.707107f,0.707107f,0},
+		{0.707107f,-0.707107f,0}, {-0.707107f,-0.707107f,0}
+	};
+	trace_t trace;
+	vec3_t end;
+	int i;
+	best->fraction = 1.0f;
+	for ( i = 0; i < 8; i++ ) {
+		VectorMA( origin, BG_LADDER_REACH, directions[i], end );
+		pm->trace( &trace, origin, pm->mins, pm->maxs, end,
+			pm->ps->clientNum, pm->tracemask );
+		if ( !trace.startsolid && !trace.allsolid &&
+			trace.fraction < best->fraction &&
+			(trace.surfaceFlags & SURF_LADDER) &&
+			fabs( trace.plane.normal[2] ) < 0.1f ) {
+			*best = trace;
+		}
+	}
+	return best->fraction < 1.0f;
+}
+
+static void PM_CheckLadder( void ) {
+	trace_t trace, below;
+	vec3_t inward, lower, angles;
+	int state = pm->ps->stats[STAT_LADDER];
+	qboolean found;
+	if ( pm->ps->pm_type != PM_NORMAL || pm->ps->stats[STAT_HEALTH] <= 0 ||
+		pm->waterlevel > 1 || pm->ps->powerups[PW_FLIGHT] ||
+		(pm->ps->pm_flags & (PMF_TIME_WATERJUMP | PMF_GRAPPLE_PULL))
+#ifdef MISSIONPACK
+		|| pm->ps->powerups[PW_INVULNERABILITY]
+#endif
+	) {
+		pm->ps->stats[STAT_LADDER] &= LADDER_HOLSTER;
+		return;
+	}
+	found = PM_LadderTrace( pm->ps->origin, &trace );
+	if ( !found ) {
+		// At the top, carry forward only if the ladder is still directly below
+		// us. A sideways slip must retain its sideways momentum, not auto-mantle.
+		if ( (state & LADDER_ATTACHED) && pm->cmd.forwardmove > 0 &&
+			pm->ps->velocity[2] > 0 ) {
+			VectorCopy( pm->ps->origin, lower );
+			lower[2] -= STEPSIZE;
+			if ( PM_LadderTrace( lower, &below ) ) {
+				VectorScale( below.plane.normal, -BG_LADDER_SPEED, inward );
+				VectorAdd( pm->ps->velocity, inward, pm->ps->velocity );
+			}
+		}
+		// Jump detach re-arms only once actually clear of all ladder surfaces.
+		pm->ps->stats[STAT_LADDER] &= LADDER_HOLSTER;
+		return;
+	}
+	if ( state & LADDER_JUMP_OFF ) {
+		return;
+	}
+	VectorCopy( trace.plane.normal, pml.ladderNormal );
+	pml.ladderNormal[2] = 0;
+	VectorNormalize( pml.ladderNormal );
+	VectorNegate( pml.ladderNormal, inward );
+	vectoangles( inward, angles );
+	pm->ps->stats[STAT_LADDER] = (state & LADDER_HOLSTER) | LADDER_ATTACHED |
+		((ANGLE2SHORT( angles[YAW] ) >> 4) << LADDER_YAW_SHIFT);
+	if ( !(state & LADDER_ATTACHED) ) {
+		pml.ladderGrabbed = qtrue;
+		// Kill only motion into/away from the face. Vertical and sideways
+		// momentum survive contact, including an airborne or falling grab.
+		VectorMA( pm->ps->velocity, -DotProduct( pm->ps->velocity, pml.ladderNormal ),
+			pml.ladderNormal, pm->ps->velocity );
+	}
+	PM_AddTouchEnt( trace.entityNum );
+	pml.walking = pml.groundPlane = qfalse;
+	pm->ps->groundEntityNum = ENTITYNUM_NONE;
+}
+
+static void PM_LadderMove( void ) {
+	vec3_t right, wishdir;
+	float speed, remaining, wishspeed;
+	int maxInput;
+
+	if ( PM_CheckJump() ) {
+		pm->ps->stats[STAT_LADDER] &= ~LADDER_ATTACHED;
+		pm->ps->stats[STAT_LADDER] |= LADDER_JUMP_OFF;
+		VectorMA( pm->ps->velocity, BG_LADDER_JUMP_PUSH, pml.ladderNormal,
+			pm->ps->velocity );
+		PM_AirMove();
+		return;
+	}
+
+	// Dampen ALL tangent velocity, not just XY. With no input, gravity is
+	// suspended and the final result is a hang, not an endless downward slide.
+	speed = VectorLength( pm->ps->velocity );
+	if ( speed > 0 ) {
+		remaining = speed - (speed < pm_stopspeed ? pm_stopspeed : speed) *
+			BG_LADDER_FRICTION * pml.frametime;
+		if ( remaining < 0 ) remaining = 0;
+		VectorScale( pm->ps->velocity, remaining / speed, pm->ps->velocity );
+	}
+
+	// W/S climb; A/D traverse relative to the face, independent of free look.
+	VectorSet( right, -pml.ladderNormal[1], pml.ladderNormal[0], 0 );
+	VectorScale( right, pm->cmd.rightmove, wishdir );
+	wishdir[2] = pm->cmd.forwardmove;
+	maxInput = abs( pm->cmd.forwardmove );
+	if ( abs( pm->cmd.rightmove ) > maxInput ) maxInput = abs( pm->cmd.rightmove );
+	wishspeed = VectorNormalize( wishdir ) > 0 ? BG_LADDER_SPEED * maxInput / 127.0f : 0;
+	PM_Accelerate( wishdir, wishspeed, BG_LADDER_ACCELERATE );
+	PM_SlideMove( qfalse );
+}
+
 static void PM_GrappleMove( void ) {
 	vec3_t vel, v;
 	float vlen;
@@ -2373,6 +2489,26 @@ static void PM_FinishWeaponChange( void ) {
 	PM_StartTorsoAnim( TORSO_RAISE );
 }
 
+// An alternate holster DESTINATION, not an alternate reload or swap. Leave the
+// animation clock live until the ordinary note pass has run this think.
+static qboolean PM_LadderWeapon( void ) {
+	int state = pm->ps->stats[STAT_LADDER];
+	if ( ((state & LADDER_ATTACHED) || pml.ladderGrabbed) &&
+		!(state & LADDER_HOLSTER) && pm->ps->weaponstate != WEAPON_LADDER ) {
+		pm->ps->stats[STAT_LADDER] |= LADDER_HOLSTER;
+		pm->ps->weaponstate = WEAPON_DROPPING;
+		pm->ps->weaponTime = BG_LADDER_DROP_TIME;
+		pm->ps->pm_flags &= ~PMF_ADS;
+		PM_StartTorsoAnim( TORSO_DROP );
+	}
+	if ( pm->ps->weaponstate == WEAPON_LADDER && !(state & LADDER_ATTACHED) ) {
+		PM_FinishWeaponChange();
+		return qtrue;
+	}
+	return (pm->ps->stats[STAT_LADDER] & LADDER_HOLSTER) ||
+		pm->ps->weaponstate == WEAPON_LADDER;
+}
+
 
 /*
 ==============
@@ -2409,7 +2545,8 @@ static void PM_CheckSprint( void ) {
 	qboolean wantSprint;
 	qboolean wasSprinting;
 
-	wantSprint = ( ( pm->cmd.buttons & BUTTON_SPRINT ) &&
+	wantSprint = ( !( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) &&
+	               ( pm->cmd.buttons & BUTTON_SPRINT ) &&
 	               pm->cmd.forwardmove > 0 &&
 	               pml.groundPlane &&
 	               !( pm->ps->pm_flags & PMF_DUCKED ) );
@@ -2453,6 +2590,8 @@ static void PM_CheckADS( void ) {
 	// reload here to aim through. It is a network artefact, not a permission,
 	// and must not be reproduced by loosening this gate.
 	canADS = ( ( pm->cmd.buttons & BUTTON_ADS ) &&
+	           !( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) &&
+	           pm->ps->weaponstate != WEAPON_LADDER &&
 	           !( pm->ps->pm_flags & PMF_SPRINTING ) &&
 	           pm->ps->weaponstate != WEAPON_RELOADING &&
 	           pm->ps->weaponstate != WEAPON_SPRINT_IN &&
@@ -2478,6 +2617,7 @@ Generates weapon events and modifes the weapon counter
 static void PM_Weapon( void ) {
 	int		addTime;
 	int		oldElapsed;
+	qboolean ladderWeapon;
 
 	// don't allow attack until all buttons are up
 	if ( pm->ps->pm_flags & PMF_RESPAWNED ) {
@@ -2496,7 +2636,9 @@ static void PM_Weapon( void ) {
 	}
 
 	// check for item using
-	if ( pm->cmd.buttons & BUTTON_USE_HOLDABLE ) {
+	if ( (pm->cmd.buttons & BUTTON_USE_HOLDABLE) &&
+		!(pm->ps->stats[STAT_LADDER] & (LADDER_ATTACHED | LADDER_HOLSTER)) &&
+		pm->ps->weaponstate != WEAPON_LADDER ) {
 		if ( ! ( pm->ps->pm_flags & PMF_USE_ITEM_HELD ) ) {
 			if ( bg_itemlist[pm->ps->stats[STAT_HOLDABLE_ITEM]].giTag == HI_MEDKIT
 				&& pm->ps->stats[STAT_HEALTH] >= (pm->ps->stats[STAT_MAX_HEALTH] + 25) ) {
@@ -2533,8 +2675,10 @@ static void PM_Weapon( void ) {
 		pm->ps->weaponTime -= pml.msec;
 	}
 
+	ladderWeapon = PM_LadderWeapon();
+
 	// 1. Weapon change ALWAYS stamps a real holster first.
-	if ( pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ) {
+	if ( !ladderWeapon && (pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING) ) {
 		int want = PM_DesiredWeapon();
 		if ( want != pm->ps->weapon ) {
 			PM_BeginWeaponChange( want );
@@ -2547,7 +2691,7 @@ static void PM_Weapon( void ) {
 	//     can take the lock away in the same think. Nothing here knows that is
 	//     possible; it just stamps honestly and lets step 3b notice.
 	//     Held off while a switch is resolving, so the drop/raise finishes first.
-	if ( pm->ps->weaponstate != WEAPON_DROPPING && pm->ps->weaponstate != WEAPON_RAISING ) {
+	if ( !ladderWeapon && pm->ps->weaponstate != WEAPON_DROPPING && pm->ps->weaponstate != WEAPON_RAISING ) {
 		if ( pm->ps->pm_flags & PMF_SPRINTING ) {
 			if ( pm->ps->weaponstate != WEAPON_SPRINT_IN &&
 			     pm->ps->weaponstate != WEAPON_SPRINTING ) {
@@ -2567,6 +2711,19 @@ static void PM_Weapon( void ) {
 	//    exist at all. MAG_IN zeroes the lock the holster just stamped.
 	if ( pm->ps->weaponAnimTime >= 0 ) {
 		PM_RunWeaponNotes( oldElapsed, pm->ps->weaponAnimTime );
+	}
+
+	// Same finish-before-fill ordering as any holster. No knowledge of reload
+	// timing: the shared note runner above is the only thing that can clear the
+	// freshly stamped positive lock on the grab think.
+	if ( ladderWeapon ) {
+		if ( (pm->ps->stats[STAT_LADDER] & LADDER_HOLSTER) && pm->ps->weaponTime <= 0 ) {
+			pm->ps->stats[STAT_LADDER] &= ~LADDER_HOLSTER;
+			pm->ps->weaponstate = WEAPON_LADDER;
+			pm->ps->weaponAnimTime = -1;
+			pm->ps->pm_flags &= ~PMF_PENDING_MAG;
+		}
+		return;
 	}
 
 	// 3. A holster whose lock is already spent finishes NOW, this think, and
@@ -2939,6 +3096,15 @@ void PM_UpdateViewAngles( playerState_t *ps, const usercmd_t *cmd ) {
 		ps->viewangles[i] = SHORT2ANGLE(temp);
 	}
 
+	if ( ps->pm_type == PM_NORMAL && (ps->stats[STAT_LADDER] & LADDER_ATTACHED) ) {
+		float facing = LADDER_FACING( ps->stats[STAT_LADDER] );
+		float delta = AngleSubtract( ps->viewangles[YAW], facing );
+		if ( delta > 90.0f || delta < -90.0f ) {
+			ps->viewangles[YAW] = facing + (delta > 0 ? 90.0f : -90.0f);
+			ps->delta_angles[YAW] = ANGLE2SHORT( ps->viewangles[YAW] ) - cmd->angles[YAW];
+		}
+	}
+
 }
 
 
@@ -3031,6 +3197,9 @@ void PmoveSingle (pmove_t *pmove) {
 	VectorCopy (pm->ps->velocity, pml.previous_velocity);
 
 	pml.frametime = pml.msec * 0.001;
+	if ( pm->ps->pm_type != PM_NORMAL || pm->ps->stats[STAT_HEALTH] <= 0 ) {
+		pm->ps->stats[STAT_LADDER] = 0;
+	}
 
 	// update the viewangles
 	PM_UpdateViewAngles( pm->ps, &pm->cmd );
@@ -3084,7 +3253,8 @@ void PmoveSingle (pmove_t *pmove) {
 	PM_CheckDuck ();
 
 	// set groundentity
-	PM_GroundTrace();
+	PM_CheckLadder();
+	if ( !(pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED) ) PM_GroundTrace();
 
 	if ( pm->ps->pm_type == PM_DEAD ) {
 		PM_DeadMove ();
@@ -3097,7 +3267,9 @@ void PmoveSingle (pmove_t *pmove) {
 		PM_InvulnerabilityMove();
 	} else
 #endif
-	if ( pm->ps->powerups[PW_FLIGHT] ) {
+	if ( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) {
+		PM_LadderMove();
+	} else if ( pm->ps->powerups[PW_FLIGHT] ) {
 		// flight powerup doesn't allow jump and has different friction
 		PM_FlyMove();
 	} else if (pm->ps->pm_flags & PMF_GRAPPLE_PULL) {
@@ -3120,8 +3292,11 @@ void PmoveSingle (pmove_t *pmove) {
 	PM_Animate();
 
 	// set groundentity, watertype, and waterlevel
-	PM_GroundTrace();
 	PM_SetWaterLevel();
+	PM_CheckLadder();
+	if ( !(pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED) ) PM_GroundTrace();
+	// Clamp on the contact think too; delta_angles prevents mouse wind-up.
+	PM_UpdateViewAngles( pm->ps, &pm->cmd );
 
 	// sprint and ADS: evaluate before weapon so weapon logic sees current flags
 	PM_CheckSprint();
@@ -3129,6 +3304,10 @@ void PmoveSingle (pmove_t *pmove) {
 
 	// weapons
 	PM_Weapon();
+	if ( (pm->ps->stats[STAT_LADDER] & (LADDER_ATTACHED | LADDER_HOLSTER)) ||
+		pm->ps->weaponstate == WEAPON_LADDER ) {
+		pm->ps->eFlags &= ~EF_FIRING;
+	}
 
 	// torso animation
 	PM_TorsoAnimation();
@@ -3194,4 +3373,3 @@ void Pmove (pmove_t *pmove) {
 	//PM_CheckStuck();
 
 }
-

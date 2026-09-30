@@ -480,6 +480,7 @@ static const char *CG_PD_StateName( int st ) {
 	case WEAPON_READY:			return "READY";
 	case WEAPON_RAISING:		return "RAISING";
 	case WEAPON_DROPPING:		return "DROPPING";
+	case WEAPON_LADDER:		return "LADDER";
 	case WEAPON_FIRING:			return "FIRING";
 	case WEAPON_RELOADING:		return "RELOADING";
 	case WEAPON_SPRINT_IN:		return "SPRINT_IN";
@@ -529,6 +530,11 @@ static void CG_PeaceDump_f( void ) {
 	CG_Printf( "timings  drop %i  raise %i  sprintIn %i  sprintOut %i\n",
 		BG_WeaponDropTime( w ), BG_WeaponRaiseTime( w ),
 		BG_WeaponSprintInTime( w ), BG_WeaponSprintOutTime( w ) );
+	CG_Printf( "ladder   attached %i  holster %i  detached %i  facing %.1f  drop %i\n",
+		!!(ps->stats[STAT_LADDER] & LADDER_ATTACHED),
+		!!(ps->stats[STAT_LADDER] & LADDER_HOLSTER),
+		!!(ps->stats[STAT_LADDER] & LADDER_JUMP_OFF),
+		LADDER_FACING( ps->stats[STAT_LADDER] ), BG_LADDER_DROP_TIME );
 
 	for ( i = 0; i < RSEQ_COUNT; i++ ) {
 		CG_Printf( "reload   %-5s len %4i  notes:", CG_PD_SeqName( i ), rl->seg[i].length );

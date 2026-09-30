@@ -87,10 +87,15 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 - `weaponAnimSeq` — **full.** 2 bits in `msg.c`; all four values are taken
   (`RSEQ_START/LOOP/END` + `ASEQ_FIRE`). A fifth animation segment has to widen
   the field.
-- `weaponstate` — 4 bits, 9 of 16 values used. Room for seven more states.
-- `stats[]` — **14 of 16 used.** Two free. Every entry round-trips as a SIGNED
+- `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
+- `stats[]` — **15 of 16 used in baseq3; all 16 in missionpack.** Every entry round-trips as a SIGNED
   short (`MSG_WriteShort`), so any new bitmask stat has the same bit-15 trap as
   `STAT_WEAPONS`. `STAT_UNCHAMBERED` uses bits 0–13, one per weapon.
+- `STAT_LADDER` packs attachment, holster destination, jump separation latch,
+  and 12-bit inward-facing yaw into bits 0–14. No bit 15, no extra pm_flags.
+  Ladder contact stamps `BG_LADDER_DROP_TIME` before the unchanged note pass;
+  its destination completes before queued ammo fill, just like a normal holster.
+  Never add a reload/NAC-specific ladder branch. See `dev/LADDERS.md`.
 
 ## Weapon animation assets
 

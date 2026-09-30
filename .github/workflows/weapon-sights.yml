@@ -1,4 +1,4 @@
-name: Weapon sights
+name: Movement and weapon checks
 on:
   push:
     branches: [dev-3b-gpt]
@@ -9,6 +9,7 @@ on:
       - 'assets/baseq3/**'
       - 'dev/tests/**'
       - 'dev/tools/build_sight_assets.js'
+      - 'dev/tools/build_ladder_map.py'
       - '.github/workflows/weapon-sights.yml'
 permissions:
   contents: read
@@ -22,6 +23,12 @@ jobs:
         run: |
           node dev/tools/build_sight_assets.js
           git diff --exit-code -- assets/baseq3
+      - name: Check generated ladder map
+        run: python3 dev/tools/build_ladder_map.py --check
+      - name: Test ladders against the real BSP collision engine
+        run: |
+          sh dev/tests/run-ladders.sh
+          LADDER_TEST_DEFINES=-DMISSIONPACK sh dev/tests/run-ladders.sh
       - name: Test weapon state and sight presentation
         run: |
           mkdir -p out/tests

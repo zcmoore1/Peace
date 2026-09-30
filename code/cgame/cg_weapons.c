@@ -1412,6 +1412,16 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	if ( ps->pm_type == PM_INTERMISSION ) {
 		return;
 	}
+	// No climbing-hand asset yet. Occupied hands hide the gun, never change
+	// gameplay state or decide whether a reload is real.
+	if ( ps->weaponstate == WEAPON_LADDER ) {
+		// Keep picture-only layers advancing while hidden, so leaving a long
+		// hang cannot resume a drop/sprint pose frozen on the contact frame.
+		if ( cg_weapons[ps->weapon].viewModel ) {
+			CG_WeapAnim_BuildPose( ps, cg_weapons[ps->weapon].viewModel, cg.frametime );
+		}
+		return;
+	}
 
 	// no gun if in third person view or a camera is active
 	//if ( cg.renderingThirdPerson || cg.cameraMode) {
@@ -1457,6 +1467,14 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	VectorMA( hand.origin, cg_gun_x.value, cg.refdef.viewaxis[0], hand.origin );
 	VectorMA( hand.origin, cg_gun_y.value, cg.refdef.viewaxis[1], hand.origin );
 	VectorMA( hand.origin, (cg_gun_z.value+fovOffset), cg.refdef.viewaxis[2], hand.origin );
+	// A short universal lowering works for the placeholder MD3s too, and does
+	// not take animation-layer ownership away from the existing still-swap rule.
+	if ( ps->stats[STAT_LADDER] & LADDER_HOLSTER ) {
+		float fraction = 1.0f - (float)ps->weaponTime / BG_LADDER_DROP_TIME;
+		if ( fraction < 0 ) fraction = 0;
+		if ( fraction > 1 ) fraction = 1;
+		VectorMA( hand.origin, -24.0f * fraction, cg.refdef.viewaxis[2], hand.origin );
+	}
 
 	if ( weapon->viewModel ) {
 		refEntity_t flash;

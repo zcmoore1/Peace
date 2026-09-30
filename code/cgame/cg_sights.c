@@ -86,7 +86,7 @@ void CG_Sights_Register( int weapon, const char *path ) {
 			valid = CG_Sights_Numbers( &cursor, values, 6 );
 			if ( !valid ) break;
 			VectorCopy( values, pose->eye );
-			VectorCopy( values + 3, pose->angles );
+			VectorSet( pose->angles, values[3], values[4], values[5] );
 			pose->valid = qtrue;
 		} else if ( !Q_stricmp( token, "timing" ) ) {
 			valid = CG_Sights_Numbers( &cursor, values, 2 );
@@ -115,8 +115,8 @@ void CG_Sights_Register( int weapon, const char *path ) {
 			if ( !valid || values[0] < 0 || values[0] >= MAX_MODEL_JOINTS ||
 			     values[0] != (int)values[0] ) { valid = qfalse; break; }
 			def.rootJoint = (int)values[0];
-			VectorCopy( values + 1, def.mountOrigin );
-			VectorCopy( values + 4, def.mountAngles );
+			VectorSet( def.mountOrigin, values[1], values[2], values[3] );
+			VectorSet( def.mountAngles, values[4], values[5], values[6] );
 		} else {
 			valid = qfalse;
 		}

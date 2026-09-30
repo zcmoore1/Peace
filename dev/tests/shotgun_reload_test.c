@@ -461,6 +461,42 @@ static void TestUnpumpedWeaponUnchanged( int step ) {
 	}
 }
 
+
+/* ADS permission belongs to weapon state, not the animation sequence/clock.
+   Do not add a fake reload here or relax the real reload gate. */
+static void TestADSPermission( void ) {
+	int i;
+	const int blocked[] = { WEAPON_RELOADING, WEAPON_DROPPING, WEAPON_RAISING,
+		WEAPON_SPRINT_IN, WEAPON_SPRINTING, WEAPON_SPRINT_OUT };
+	const int allowed[] = { WEAPON_READY, WEAPON_FIRING, WEAPON_BOLTING };
+	BeginReload( WP_SHOTGUN, 3, 10 );
+	testMove.cmd.buttons = BUTTON_ADS;
+	for ( i = 0; i < sizeof(blocked) / sizeof(blocked[0]); i++ ) {
+		testPs.weaponstate = blocked[i];
+		testPs.pm_flags |= PMF_ADS;
+		testPs.weaponTime = 0; /* An expired lock does not grant permission. */
+		PM_CheckADS();
+		CHECK( !(testPs.pm_flags & PMF_ADS) );
+	}
+	for ( i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++ ) {
+		testPs.weaponstate = allowed[i];
+		/* An old animation clock alone must never deny aim permission. */
+		testPs.weaponAnimSeq = RSEQ_LOOP;
+		testPs.weaponAnimTime = NoteTime( WP_SHOTGUN, RSEQ_LOOP, WNOTE_MAG_IN );
+		PM_CheckADS();
+		CHECK( testPs.pm_flags & PMF_ADS );
+		CHECK( testPs.ammo[WP_SHOTGUN] == 3 );
+		CHECK( testPs.ammoReserve[WP_SHOTGUN] == 10 );
+	}
+	testPs.pm_flags |= PMF_SPRINTING;
+	PM_CheckADS();
+	CHECK( !(testPs.pm_flags & PMF_ADS) );
+	testPs.pm_flags &= ~PMF_SPRINTING;
+	testMove.cmd.buttons = 0;
+	PM_CheckADS();
+	CHECK( !(testPs.pm_flags & PMF_ADS) );
+}
+
 int main( void ) {
 	int i, offset;
 	const int steps[] = { 1, 8, 16, 33, 66 };
@@ -474,6 +510,7 @@ int main( void ) {
 		TestPumpIsItsOwnState( steps[i] );
 		TestUnpumpedWeaponUnchanged( steps[i] );
 	}
+	TestADSPermission();
 	TestPumpCannotBeShortCircuited();
 	TestEarlyCancelCostsTheWholeCycle();
 	TestLateCancelKeepsTheRound();

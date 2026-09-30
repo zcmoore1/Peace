@@ -853,8 +853,11 @@ void CG_RegisterWeapon( int weaponNum ) {
 	if ( weaponInfo->viewModel ) {
 		Com_sprintf( path, sizeof(path), "%s.cfg", cg_viewModelBase[weaponNum] );
 		CG_WeapAnim_RegisterClips( weaponNum, weaponInfo->viewModel, path );
+		Com_sprintf( path, sizeof(path), "%s.sights", cg_viewModelBase[weaponNum] );
+		CG_Sights_Register( weaponNum, path );
 	} else {
 		CG_WeapAnim_RegisterClips( weaponNum, 0, NULL );
+		CG_Sights_Register( weaponNum, NULL );
 	}
 }
 
@@ -1466,7 +1469,13 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 			hand.backlerp = 0;
 			hand.pose = NULL;
 		}
+		// Align the whole animated viewmodel. Never replace a playing clip
+		// with idle or read its layer to decide whether aiming is permitted.
+		CG_Sights_Apply( ps->weapon, &hand );
 		CG_AddWeaponWithPowerups( &hand, cent->currentState.powerups );
+		if ( !(cent->currentState.powerups & (1 << PW_INVIS)) ) {
+			CG_Sights_AddOptic( ps->weapon, &hand );
+		}
 		if ( weapon->flashModel && cg.time - cent->muzzleFlashTime <= MUZZLE_FLASH_TIME ) {
 			memset( &flash, 0, sizeof(flash) );
 			flash.hModel = weapon->flashModel;

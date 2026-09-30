@@ -529,6 +529,7 @@ typedef struct {
 
 	// ADS (aim down sights): 0 = hipfire, 1 = fully aimed; eased each frame
 	float		adsFrac;
+	int			adsTime, adsWeapon, adsClientNum, adsSight;
 
 	// information screen text during loading
 	char		infoScreenText[MAX_STRING_CHARS];
@@ -1131,6 +1132,7 @@ extern	vmCvar_t		cg_footsteps;
 extern	vmCvar_t		cg_addMarks;
 extern	vmCvar_t		cg_brassTime;
 extern	vmCvar_t		cg_gun_frame;
+extern	vmCvar_t		cg_sight; // 0 = iron sights, 1 = red dot when the model supports it
 extern	vmCvar_t		cg_gun_x;
 extern	vmCvar_t		cg_gun_y;
 extern	vmCvar_t		cg_gun_z;
@@ -1364,6 +1366,15 @@ void CG_PositionRotatedEntityOnTag( refEntity_t *entity, const refEntity_t *pare
 void CG_NextWeapon_f( void );
 void CG_PrevWeapon_f( void );
 void CG_Weapon_f( void );
+
+// cg_sights.c: visual alignment, independent of the animation layers
+void CG_Sights_Register( int weapon, const char *path );
+void CG_Sights_Update( const playerState_t *ps );
+float CG_Sights_Fraction( void );
+float CG_Sights_FovScale( int weapon );
+qboolean CG_Sights_HideCrosshair( void );
+void CG_Sights_Apply( int weapon, refEntity_t *hand );
+void CG_Sights_AddOptic( int weapon, const refEntity_t *hand );
 
 // cg_anim.c
 void     CG_WeapAnim_Init( void );

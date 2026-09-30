@@ -1,0 +1,17 @@
+// Eye and angles are in the exported model's IDLE coordinates.
+// Quake axes: +X forward, +Y left, +Z up. Degrees: pitch yaw roll.
+// Rear aperture ~ (10.30, -2.698, -1.046); front post ~ (24.38, -2.711, -1.196).
+// Keep the rear aperture ahead of the near plane. FOV/hip offsets are ignored
+// at full aim. Tune here after playtesting; animation frames live in view.cfg.
+iron   5 -2.692 -0.989   -0.615 0.055 0
+reddot 5 -2.700  0.600    0 0 0
+timing 150 120
+fov 0.72
+
+// Original low-poly optic, attached to the animated, parentless Base joint.
+// mount: jointName jointIndex originX originY originZ pitch yaw roll
+optic models/optics/peace_reflex.md3
+reticle peace/optic_dot
+mount Base 0 -0.299569 -0.245950 3.723764 0 0 0
+// Lens plane in optic coordinates, followed by the usable aperture radius.
+lens -0.51 0 0 0.78

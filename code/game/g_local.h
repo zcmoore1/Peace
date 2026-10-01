@@ -250,6 +250,8 @@ typedef struct {
 	int			teamVoteCount;		// to prevent people from constantly calling votes
 	qboolean	teamInfo;			// send team overlay updates?
 	int			selectedClass;		// index into bg_classes, applied at spawn
+	bg_class_t  selectedLoadout;     // validated definition, applied only at spawn
+	char        loadoutUserinfo[BG_CLASS_STRING_SIZE];
 } clientPersistant_t;
 
 
@@ -964,4 +966,3 @@ void	trap_BotResetWeaponState(int weaponstate);
 int		trap_GeneticParentsAndChildSelection(int numranks, float *ranks, int *parent1, int *parent2, int *child);
 
 void	trap_SnapVector( float *v );
-

@@ -238,7 +238,15 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	// its normal timer, but the raise owns the layer and no drop is drawn.
 	if ( sprintHolds ) {
 		move->targetWeight = 0.0f;			// swap anim suppressed
+	} else if ( !swapping && (ps->weaponstate == WEAPON_READY ||
+	                         ps->weaponstate == WEAPON_FIRING ||
+	                         ps->weaponstate == WEAPON_BOLTING) ) {
+		// Gameplay has released the transition (including a reversed holster).
+		// Let the current pose blend back immediately; its clip is not a lock.
+		move->targetWeight = 0.0f;
+		move->blendSpeed = 0.025f;
 	} else if ( !CG_WeapAnim_TransitionBusy( def, move ) ) {
+		move->blendSpeed = 8.0f;
 		if ( ps->weaponstate == WEAPON_RAISING ) {
 			CG_WeapAnim_PlayLayer( move, WANIM_RAISE );
 		} else if ( ps->weaponstate == WEAPON_DROPPING ) {

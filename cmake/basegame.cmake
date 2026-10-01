@@ -90,6 +90,7 @@ set(UI_SOURCES
     ${SOURCE_DIR}/q3_ui/ui_display.c
     ${SOURCE_DIR}/q3_ui/ui_gameinfo.c
     ${SOURCE_DIR}/q3_ui/ui_ingame.c
+    ${SOURCE_DIR}/q3_ui/ui_classes.c
     ${SOURCE_DIR}/q3_ui/ui_loadconfig.c
     ${SOURCE_DIR}/q3_ui/ui_menu.c
     ${SOURCE_DIR}/q3_ui/ui_mfield.c
@@ -122,6 +123,7 @@ set(UI_BINARY_SOURCES ${SOURCE_DIR}/ui/ui_syscalls.c)
 set(UI_QVM_SOURCES ${SOURCE_DIR}/ui/ui_syscalls.asm)
 
 set(GAME_MODULE_SHARED_SOURCES
+    ${SOURCE_DIR}/game/bg_loadout.c
     ${SOURCE_DIR}/qcommon/q_math.c
     ${SOURCE_DIR}/qcommon/q_shared.c
 )

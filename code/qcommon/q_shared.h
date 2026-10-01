@@ -1179,6 +1179,7 @@ typedef struct playerState_s {
 	int			weapon;			// copied to entityState_t->weapon
 	int			weaponstate;
 	int			weaponAnimTime;	// ms ELAPSED into the current anim SEGMENT (counts UP). -1 = no anim playing. Notes fire on crossings of this; never derived from weaponTime.
+	int			weaponAction;	// predicted tap action + fired flag + previous action-button mask (6 bits)
 	int			weaponAnimSeq;	// which reload segment is playing (reloadSeq_t)
 
 	vec3_t		viewangles;		// for fixed views

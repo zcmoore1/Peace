@@ -40,6 +40,7 @@ MAIN MENU
 #define ID_TEAMARENA		15
 #define ID_MODS					16
 #define ID_EXIT					17
+#define ID_CLASSES               18
 
 #define MAIN_BANNER_MODEL				"models/mapobjects/banner/banner5.md3"
 #define MAIN_MENU_VERTICAL_SPACING		34
@@ -51,6 +52,7 @@ typedef struct {
 	menutext_s		singleplayer;
 	menutext_s		multiplayer;
 	menutext_s		setup;
+	menutext_s      classes;
 	menutext_s		demos;
 	menutext_s		cinematics;
 	menutext_s		teamArena;
@@ -96,6 +98,9 @@ void Main_MenuEvent (void* ptr, int event) {
 	}
 
 	switch( ((menucommon_s*)ptr)->id ) {
+	case ID_CLASSES:
+		UI_ClassesMenu();
+		break;
 	case ID_SINGLEPLAYER:
 		UI_SPLevelMenu();
 		break;
@@ -333,6 +338,17 @@ void UI_MainMenu( void ) {
 	s_main.multiplayer.style				= style;
 
 	y += MAIN_MENU_VERTICAL_SPACING;
+	s_main.classes.generic.type = MTYPE_PTEXT;
+	s_main.classes.generic.flags = QMF_CENTER_JUSTIFY | QMF_PULSEIFFOCUS;
+	s_main.classes.generic.x = 320;
+	s_main.classes.generic.y = y;
+	s_main.classes.generic.id = ID_CLASSES;
+	s_main.classes.generic.callback = Main_MenuEvent;
+	s_main.classes.string = "LOADOUTS / CLASSES";
+	s_main.classes.color = color_red;
+	s_main.classes.style = style;
+
+	y += MAIN_MENU_VERTICAL_SPACING;
 	s_main.setup.generic.type				= MTYPE_PTEXT;
 	s_main.setup.generic.flags				= QMF_CENTER_JUSTIFY|QMF_PULSEIFFOCUS;
 	s_main.setup.generic.x					= 320;
@@ -405,6 +421,7 @@ void UI_MainMenu( void ) {
 
 	Menu_AddItem( &s_main.menu,	&s_main.singleplayer );
 	Menu_AddItem( &s_main.menu,	&s_main.multiplayer );
+	Menu_AddItem( &s_main.menu, &s_main.classes );
 	Menu_AddItem( &s_main.menu,	&s_main.setup );
 	Menu_AddItem( &s_main.menu,	&s_main.demos );
 	Menu_AddItem( &s_main.menu,	&s_main.cinematics );

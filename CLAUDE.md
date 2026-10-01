@@ -73,6 +73,12 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   are read by `CG_WeapAnim_RegisterClips`. Re-exporting a model must never mean
   editing C, and no weapon may be named in that loader.
 - **cgame is picture only.** It never touches ammo or weapon state.
+- **Selection is a slot toggle.** `weapnext` advances the latest requested slot
+  modulo `SLOT_COUNT`, not the server's last acknowledged active slot. If an
+  unfinished ordinary holster's destination returns to the gun still held,
+  shared pmove cancels the drop and reaches the normal fire gates that think.
+  There is no YY timing window or extra delay. Initial drops still stamp their
+  real times; chamber debt, ammo, sprint and ladder ownership still apply.
 - **Never ADS through a reload.** `PM_CheckADS` blocks `WEAPON_RELOADING` on
   purpose. The ZOOMload trick is a client/server desync — the reload animation
   starts client-side and the server never agrees one is happening — not a rule
@@ -88,6 +94,10 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   (`RSEQ_START/LOOP/END` + `ASEQ_FIRE`). A fifth animation segment has to widen
   the field.
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
+- `weaponAction` — a separate 6-bit predicted/networked field: action type (2),
+  fired latch (1), previous melee/lethal/tactical buttons (3). It keeps quick
+  taps through holster/deploy and prevents held-button repeats. No new stats
+  or pm_flags. Client, server and all game modules must be rebuilt together.
 - `stats[]` — **15 of 16 used in baseq3; all 16 in missionpack.** Every entry round-trips as a SIGNED
   short (`MSG_WriteShort`), so any new bitmask stat has the same bit-15 trap as
   `STAT_WEAPONS`. `STAT_UNCHAMBERED` uses bits 0–13, one per weapon.
@@ -122,6 +132,15 @@ which `#include`s `bg_pmove.c` and drives `PM_Weapon` directly — reload
 segments, ammo conservation, swap/sprint ordering and the fire cycle. Every
 timing in it is read from the shipped tables; never write a literal there, or
 retiming a weapon breaks the test without telling you anything.
+
+`dev/tests/run-loadouts.cmd` (or `.sh`) checks class validation/persistence,
+modulo selection, same-update YY firing, reload/pull-out cancellation, tap/hold
+actions, all six action bits through the actual network codec, and pose release.
+Loadouts UI and class definitions are documented in `dev/LOADOUTS.md`.
+
+Do not statically initialize structs with inline char arrays mixed with ints:
+q3asm splits byte literals and word data into different segments. Use word-only
+source tables and fill editable structs at runtime, as in `bg_loadout.c`.
 
 ## Adding a weapon — touches TWO lists
 

@@ -6,6 +6,14 @@ on:
     paths:
       - 'code/cgame/**'
       - 'code/game/**'
+      - 'code/q3_ui/**'
+      - 'code/client/**'
+      - 'code/renderercommon/**'
+      - 'code/qcommon/vm.c'
+      - 'code/qcommon/qcommon.h'
+      - 'code/qcommon/q_shared.h'
+      - 'code/qcommon/msg.c'
+      - 'cmake/**'
       - 'assets/baseq3/**'
       - 'dev/tests/**'
       - 'dev/tools/build_sight_assets.js'
@@ -32,10 +40,12 @@ jobs:
       - name: Test weapon state and sight presentation
         run: |
           mkdir -p out/tests
-          cc -std=c99 -O0 -ffunction-sections -fdata-sections dev/tests/shotgun_reload_test.c code/game/bg_misc.c code/game/bg_slidemove.c code/qcommon/q_math.c code/qcommon/q_shared.c -Wl,--gc-sections -lm -o out/tests/weapon-test
+          cc -std=c99 -O0 -ffunction-sections -fdata-sections dev/tests/shotgun_reload_test.c code/game/bg_loadout.c code/game/bg_misc.c code/game/bg_slidemove.c code/qcommon/q_math.c code/qcommon/q_shared.c -Wl,--gc-sections -lm -o out/tests/weapon-test
           out/tests/weapon-test
           cc -std=c99 -O0 -ffunction-sections -fdata-sections dev/tests/sights_test.c code/qcommon/q_math.c code/qcommon/q_shared.c -Wl,--gc-sections -lm -o out/tests/sights-test
           out/tests/sights-test
+      - name: Test saved classes, YY, quick actions, poses and network deltas
+        run: sh dev/tests/run-loadouts.sh
       - name: Build native and QVM game modules
         run: |
           cmake -S . -B out/ci -DBUILD_CLIENT=OFF -DBUILD_SERVER=OFF -DBUILD_RENDERER_GL1=OFF -DBUILD_RENDERER_GL2=OFF -DBUILD_GAME_LIBRARIES=ON -DBUILD_GAME_QVMS=ON

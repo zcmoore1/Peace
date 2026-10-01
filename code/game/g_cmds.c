@@ -1734,6 +1734,7 @@ void Cmd_Class_f( gentity_t *ent ) {
 	}
 
 	ent->client->pers.selectedClass = n;
+	ent->client->pers.selectedLoadout = *BG_Class(n);
 	trap_SendServerCommand( ent - g_entities,
 		va( "print \"Class set to %s - respawn to apply.\n\"", BG_Class( n )->name ) );
 }

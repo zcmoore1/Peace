@@ -1701,7 +1701,7 @@ CG_NextWeapon_f
 */
 void CG_NextWeapon_f( void ) {
 	playerState_t	*ps;
-	int				slot, want;
+	int				want;
 
 	if ( !cg.snap ) {
 		return;
@@ -1710,17 +1710,14 @@ void CG_NextWeapon_f( void ) {
 		return;
 	}
 
-	ps = &cg.snap->ps;
+	ps = &cg.predictedPlayerState;
 
-	// Two slots: weapnext is a toggle between them. Melee, equipment and the
-	// underbarrel are NOT slots - they are temporary selections that return
+	// Two slots: weapnext is a toggle between them. Melee and equipment
+	// are NOT slots - they are temporary actions that return
 	// here, so the toggle is always primary <-> secondary.
-	slot = ( ps->stats[STAT_ACTIVE_SLOT] == SLOT_PRIMARY )
-	     ? SLOT_SECONDARY : SLOT_PRIMARY;
-
-	want = ( slot == SLOT_PRIMARY )
-	     ? ps->stats[STAT_SLOT_PRIMARY]
-	     : ps->stats[STAT_SLOT_SECONDARY];
+	// Toggle the requested selection, not the last acknowledged active slot.
+	// A second press must reverse the first even before a server snapshot lands.
+	want = BG_ToggleSlotWeapon( ps, cg.weaponSelect );
 
 	if ( want <= WP_NONE || want >= WP_NUM_WEAPONS ) {
 		return;					// empty slot - nothing to swap to
@@ -1768,6 +1765,10 @@ void CG_Weapon_f( void ) {
 
 	if ( ! ( cg.snap->ps.stats[STAT_WEAPONS] & ( 1 << num ) ) ) {
 		return;		// don't have the weapon
+	}
+	if ( num != cg.snap->ps.stats[STAT_SLOT_PRIMARY] &&
+	     num != cg.snap->ps.stats[STAT_SLOT_SECONDARY] ) {
+		return; // melee/equipment are button actions, never standalone selections
 	}
 
 	cg.weaponSelect = num;

@@ -1948,43 +1948,6 @@ float BG_WeaponSpread( const playerState_t *ps ) {
 	return (float)BG_WeaponBaseSpread( ps->weapon ) * BG_SpreadScale( ps );
 }
 
-// ---------------------------------------------------------------------------
-// Classes. Data only - add rows here and they appear in the class menu.
-// ---------------------------------------------------------------------------
-static const bg_class_t bg_classes[] = {
-	{	"Assault",
-		{ WP_MACHINEGUN, WP_SHOTGUN },
-		WP_FRAG,  2,
-		WP_FLASH, 2
-	},
-	{	"Scout",
-		{ WP_RAILGUN, WP_MACHINEGUN },
-		WP_FRAG,  1,
-		WP_FLASH, 3
-	},
-	{	"Demolition",
-		{ WP_ROCKET_LAUNCHER, WP_SHOTGUN },
-		WP_FRAG,  3,
-		WP_FLASH, 1
-	},
-	{	"Support",
-		{ WP_PLASMAGUN, WP_LIGHTNING },
-		WP_FRAG,  2,
-		WP_FLASH, 2
-	},
-};
-
-int BG_ClassCount( void ) {
-	return (int)( sizeof( bg_classes ) / sizeof( bg_classes[0] ) );
-}
-
-const bg_class_t *BG_Class( int index ) {
-	if ( index < 0 || index >= BG_ClassCount() ) {
-		index = 0;
-	}
-	return &bg_classes[index];
-}
-
 /*
 ===============
 BG_ApplyLoadout
@@ -2041,7 +2004,8 @@ void BG_SetSlotWeapon( playerState_t *ps, int slot, int weapon ) {
 	if ( slot < 0 || slot >= SLOT_COUNT ) {
 		return;
 	}
-	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
+	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ||
+	     weapon == WP_KNIFE || weapon == WP_FRAG || weapon == WP_FLASH ) {
 		return;
 	}
 
@@ -2056,8 +2020,12 @@ void BG_SetSlotWeapon( playerState_t *ps, int slot, int weapon ) {
 }
 
 void BG_ApplyLoadout( playerState_t *ps, int classIndex ) {
-	const bg_class_t	*cl = BG_Class( classIndex );
+	BG_ApplyClass( ps, BG_Class(classIndex) );
+}
+
+void BG_ApplyClass( playerState_t *ps, const bg_class_t *cl ) {
 	int					i, w;
+	if ( !BG_ValidateClass(cl) ) cl = BG_Class(0);
 
 	ps->stats[STAT_WEAPONS] = 0;
 	for ( i = 0; i < MAX_WEAPONS; i++ ) {
@@ -2096,6 +2064,9 @@ void BG_ApplyLoadout( playerState_t *ps, int classIndex ) {
 
 	ps->weapon      = cl->slot[SLOT_PRIMARY];
 	ps->weaponstate = WEAPON_READY;
+	ps->weaponTime = 0;
+	ps->weaponAnimTime = -1;
+	ps->weaponAction = 0;
 }
 
 /*
@@ -2369,13 +2340,45 @@ static qboolean PM_IsSpecialWeapon( int w ) {
 	return ( w == WP_KNIFE || w == WP_FRAG || w == WP_FLASH );
 }
 
+static int PM_ActionWeapon( void ) {
+	switch ( pm->ps->weaponAction & WA_TYPE_MASK ) {
+	case WA_MELEE: return WP_KNIFE;
+	case WA_LETHAL: return WP_FRAG;
+	case WA_TACTICAL: return WP_FLASH;
+	default: return WP_NONE;
+	}
+}
+
+// Latch a press through holster/deploy. Releasing the button cannot lose a tap,
+// and holding it cannot turn a quick action into a permanently selected weapon.
+static void PM_UpdateWeaponAction( void ) {
+	int held = (pm->cmd.buttons >> 15) & 7;
+	int pressed = held & ~(pm->ps->weaponAction >> WA_HELD_SHIFT);
+	int action = pm->ps->weaponAction & (WA_TYPE_MASK | WA_FIRED);
+	if ( (pm->ps->stats[STAT_LADDER] & (LADDER_ATTACHED | LADDER_HOLSTER)) ||
+		pm->ps->weaponstate == WEAPON_LADDER ) {
+		action = 0;
+	} else {
+		if ( (action & WA_FIRED) && pm->ps->weaponstate == WEAPON_FIRING && pm->ps->weaponTime <= 0 ) {
+			action = 0;
+		}
+		if ( !(action & WA_TYPE_MASK) ) {
+			if ( pressed & 1 ) action = WA_MELEE;
+			else if ( (pressed & 2) && pm->ps->ammo[WP_FRAG] > 0 ) action = WA_LETHAL;
+			else if ( (pressed & 4) && pm->ps->ammo[WP_FLASH] > 0 ) action = WA_TACTICAL;
+		}
+	}
+	pm->ps->weaponAction = action | (held << WA_HELD_SHIFT);
+	if ( action & WA_TYPE_MASK ) pm->ps->pm_flags &= ~PMF_ADS;
+}
+
 /*
 ===============
 PM_DesiredWeapon
 
 What the player wants in their hands this think. Normally that is whatever the
 client selected (cmd.weapon, which weapnext toggles between the two slots), but
-holding melee or an equipment button requests that instead.
+a latched melee or equipment press requests that instead.
 
 A tap is enough: once a special weapon is out we keep requesting it until it has
 finished its swing/throw, then fall back to cmd.weapon - which is still pointing
@@ -2387,36 +2390,16 @@ and the NAC is untouched.
 ===============
 */
 static int PM_DesiredWeapon( void ) {
-	int special = WP_NONE;
-
-	if ( pm->cmd.buttons & BUTTON_MELEE ) {
-		special = WP_KNIFE;
-	} else if ( ( pm->cmd.buttons & BUTTON_LETHAL ) && pm->ps->ammo[WP_FRAG] > 0 ) {
-		special = WP_FRAG;
-	} else if ( ( pm->cmd.buttons & BUTTON_TACTICAL ) && pm->ps->ammo[WP_FLASH] > 0 ) {
-		special = WP_FLASH;
+	int special = PM_ActionWeapon();
+	if ( special != WP_NONE && (pm->ps->stats[STAT_WEAPONS] & (1 << special)) ) {
+		return special;
 	}
-
-	if ( special != WP_NONE ) {
-		if ( pm->ps->stats[STAT_WEAPONS] & ( 1 << special ) ) {
-			return special;
-		}
+	if ( pm->cmd.weapon == pm->ps->stats[STAT_SLOT_PRIMARY] ||
+		pm->cmd.weapon == pm->ps->stats[STAT_SLOT_SECONDARY] ) {
 		return pm->cmd.weapon;
 	}
-
-	// Button released. Stay on the special until it is idle so a tap still
-	// completes, then hand control back to the client's selection.
-	if ( PM_IsSpecialWeapon( pm->ps->weapon ) ) {
-		if ( pm->ps->weaponstate != WEAPON_READY || pm->ps->weaponTime > 0 ) {
-			return pm->ps->weapon;
-		}
-		// Out of equipment? Never leave an empty hand out.
-		if ( pm->ps->weapon != WP_KNIFE && pm->ps->ammo[pm->ps->weapon] <= 0 ) {
-			return pm->cmd.weapon;
-		}
-	}
-
-	return pm->cmd.weapon;
+	return pm->ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ?
+		pm->ps->stats[STAT_SLOT_SECONDARY] : pm->ps->stats[STAT_SLOT_PRIMARY];
 }
 
 /*
@@ -2546,6 +2529,7 @@ static void PM_CheckSprint( void ) {
 	qboolean wasSprinting;
 
 	wantSprint = ( !( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) &&
+	               !( pm->ps->weaponAction & WA_TYPE_MASK ) &&
 	               ( pm->cmd.buttons & BUTTON_SPRINT ) &&
 	               pm->cmd.forwardmove > 0 &&
 	               pml.groundPlane &&
@@ -2590,6 +2574,8 @@ static void PM_CheckADS( void ) {
 	// reload here to aim through. It is a network artefact, not a permission,
 	// and must not be reproduced by loosening this gate.
 	canADS = ( ( pm->cmd.buttons & BUTTON_ADS ) &&
+	           !( pm->ps->weaponAction & WA_TYPE_MASK ) &&
+	           !PM_IsSpecialWeapon( pm->ps->weapon ) &&
 	           !( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) &&
 	           pm->ps->weaponstate != WEAPON_LADDER &&
 	           !( pm->ps->pm_flags & PMF_SPRINTING ) &&
@@ -2675,7 +2661,23 @@ static void PM_Weapon( void ) {
 		pm->ps->weaponTime -= pml.msec;
 	}
 
+	PM_UpdateWeaponAction();
 	ladderWeapon = PM_LadderWeapon();
+
+	// The requested destination came back to the gun still in our hands.
+	// Cancel the unfinished holster, without inserting a new deploy or delay.
+	// Ladder holsters and latched quick actions have their own destinations.
+	if ( !ladderWeapon && pm->ps->weaponstate == WEAPON_DROPPING &&
+		!PM_IsSpecialWeapon( pm->ps->weapon ) &&
+		PM_DesiredWeapon() == pm->ps->weapon ) {
+		pm->ps->weaponstate = WEAPON_READY;
+		pm->ps->weaponTime = 0;
+		pm->ps->weaponAnimTime = -1;
+		pm->ps->pm_flags &= ~PMF_PENDING_MAG;
+		PM_StartTorsoAnim( TORSO_STAND );
+		// Continue into the normal fire gate this think. Chamber debt, ammo,
+		// sprint and ladder rules remain authoritative.
+	}
 
 	// 1. Weapon change ALWAYS stamps a real holster first.
 	if ( !ladderWeapon && (pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING) ) {
@@ -2840,8 +2842,13 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
+	// A quick action fires once from its own button, never from the trigger.
+	if ( PM_IsSpecialWeapon( pm->ps->weapon ) &&
+		(PM_ActionWeapon() != pm->ps->weapon || (pm->ps->weaponAction & WA_FIRED)) ) {
+		return;
+	}
 	// check for fire
-	if ( ! (pm->cmd.buttons & BUTTON_ATTACK) ) {
+	if ( !(pm->cmd.buttons & BUTTON_ATTACK) && PM_ActionWeapon() != pm->ps->weapon ) {
 		// Manual reload: player pressed R while not firing
 		if ( pm->cmd.buttons & BUTTON_RELOAD ) {
 			int magSize = BG_WeaponMagSize( pm->ps->weapon );
@@ -2909,6 +2916,9 @@ static void PM_Weapon( void ) {
 
 	// fire weapon
 	PM_AddEvent( EV_FIRE_WEAPON );
+	if ( PM_IsSpecialWeapon( pm->ps->weapon ) ) {
+		pm->ps->weaponAction |= WA_FIRED;
+	}
 
 	switch( pm->ps->weapon ) {
 	default:

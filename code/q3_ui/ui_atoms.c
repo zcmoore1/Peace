@@ -858,6 +858,17 @@ void UI_KeyEvent( int key, int down ) {
 	if (!down) {
 		return;
 	}
+	// SDL's Xbox/GameController keys are distinct from the old JOY1 keys.
+	// Menu navigation must work while gameplay bindings are captured by the UI.
+	switch ( key ) {
+	case K_PAD0_A: key = K_ENTER; break;
+	case K_PAD0_B: case K_PAD0_START: key = K_ESCAPE; break;
+	case K_PAD0_DPAD_UP: case K_PAD0_LEFTSTICK_UP: key = K_UPARROW; break;
+	case K_PAD0_DPAD_DOWN: case K_PAD0_LEFTSTICK_DOWN: key = K_DOWNARROW; break;
+	case K_PAD0_DPAD_LEFT: case K_PAD0_LEFTSTICK_LEFT: key = K_LEFTARROW; break;
+	case K_PAD0_DPAD_RIGHT: case K_PAD0_LEFTSTICK_RIGHT: key = K_RIGHTARROW; break;
+	default: break;
+	}
 
 	if (uis.activemenu->key)
 		s = uis.activemenu->key( key );
@@ -1010,6 +1021,13 @@ qboolean UI_ConsoleCommand( int realTime ) {
 
 	// ensure minimum menu data is available
 	Menu_Cache();
+	if ( !Q_stricmp(cmd, "ui_classes") || !Q_stricmp(cmd, "ui_createclass") ) {
+		qboolean edit = !Q_stricmp(cmd, "ui_createclass");
+		int selected = trap_Cvar_VariableValue("peace_classSelected") - BG_ClassCount();
+		UI_ClassesMenu();
+		if ( edit ) UI_CreateClassMenu(selected);
+		return qtrue;
+	}
 
 	if ( Q_stricmp (cmd, "levelselect") == 0 ) {
 		UI_SPLevelMenu_f();
@@ -1069,6 +1087,7 @@ UI_Init
 */
 void UI_Init( void ) {
 	UI_RegisterCvars();
+	UI_ClassCvars();
 
 	UI_InitGameinfo();
 

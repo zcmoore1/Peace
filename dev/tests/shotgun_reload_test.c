@@ -83,6 +83,8 @@ static void BeginReload( int weapon, int loaded, int reserve ) {
 	testPs.weaponAnimTime = -1;
 	testPs.stats[STAT_HEALTH] = 100;
 	testPs.stats[STAT_WEAPONS] = (1 << WP_SHOTGUN) | (1 << WP_MACHINEGUN);
+	testPs.stats[STAT_SLOT_PRIMARY] = WP_SHOTGUN;
+	testPs.stats[STAT_SLOT_SECONDARY] = WP_MACHINEGUN;
 	testPs.ammo[weapon] = loaded;
 	testPs.ammoReserve[weapon] = reserve;
 	testPs.ammo[WP_MACHINEGUN] = weapon == WP_MACHINEGUN ? loaded : 10;
@@ -272,6 +274,8 @@ static void ReadyToFire( void ) {
 	testPs.stats[STAT_HEALTH] = 100;
 	testPs.stats[STAT_WEAPONS] = (1 << WP_SHOTGUN) | (1 << WP_MACHINEGUN);
 	testPs.ammo[WP_SHOTGUN] = 8;
+	testPs.stats[STAT_SLOT_PRIMARY] = WP_SHOTGUN;
+	testPs.stats[STAT_SLOT_SECONDARY] = WP_MACHINEGUN;
 	testPs.ammoReserve[WP_SHOTGUN] = 24;
 	testPs.ammo[WP_MACHINEGUN] = 30;
 	pm = &testMove;

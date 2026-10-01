@@ -726,6 +726,21 @@ void ClientUserinfoChanged( int clientNum ) {
 		trap_DropClient(clientNum, "Invalid userinfo");
 	}
 
+	// Class edits/selects are pending until respawn. Other userinfo updates must
+	// not refill ammo or overwrite a class selected through the legacy command.
+	s = Info_ValueForKey(userinfo, "peace_loadout");
+	if ( !BG_ValidateClass(&client->pers.selectedLoadout) ) {
+		client->pers.selectedLoadout = *BG_Class(0);
+	}
+	if ( strcmp(s, client->pers.loadoutUserinfo) ) {
+		bg_class_t loadout;
+		if ( BG_ParseClass(s, &loadout) ) {
+			client->pers.selectedLoadout = loadout;
+			client->pers.selectedClass = -1;
+		}
+		Q_strncpyz(client->pers.loadoutUserinfo, s, sizeof(client->pers.loadoutUserinfo));
+	}
+
 	// check the item prediction
 	s = Info_ValueForKey( userinfo, "cg_predictItems" );
 	if ( !atoi( s ) ) {
@@ -1167,7 +1182,7 @@ void ClientSpawn(gentity_t *ent) {
 	// Whole loadout comes from the chosen class - two weapon slots, melee,
 	// underbarrel and equipment counts. One shared function so the server and
 	// any future loadout-change path can never disagree.
-	BG_ApplyLoadout( &client->ps, client->pers.selectedClass );
+	BG_ApplyClass( &client->ps, &client->pers.selectedLoadout );
 
 	// health will count down towards max_health
 	ent->health = client->ps.stats[STAT_HEALTH] = client->ps.stats[STAT_MAX_HEALTH] + 25;
@@ -1330,5 +1345,3 @@ void ClientDisconnect( int clientNum ) {
 		BotAIShutdownClient( clientNum, qfalse );
 	}
 }
-
-

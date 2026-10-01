@@ -821,7 +821,7 @@ intptr_t CL_UISystemCalls( intptr_t *args ) {
 		return 0;
 
 	case UI_R_ADDREFENTITYTOSCENE:
-		re.AddRefEntityToScene( VMA(1) );
+		CL_AddRefEntityFromVM( uivm, args[1] );
 		return 0;
 
 	case UI_R_ADDPOLYTOSCENE:

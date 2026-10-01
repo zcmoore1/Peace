@@ -237,6 +237,13 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 	int				wep = ent->item->giTag;
 	int				slot;
 
+	// Equipment pickups replenish their own count; they cannot replace a gun.
+	if ( wep == WP_KNIFE || wep == WP_FRAG || wep == WP_FLASH ) {
+		ps->ammo[wep] = wep == WP_KNIFE ? -1 : 3;
+		BG_RebuildWeaponMask( ps );
+		return g_weaponRespawn.integer;
+	}
+
 	// Two slots, and the slots ARE the inventory. A picked-up gun replaces
 	// whatever is in the slot you are currently on; it never just appends.
 	//
@@ -1018,4 +1025,3 @@ void G_RunItem( gentity_t *ent ) {
 
 	G_BounceItem( ent, &tr );
 }
-

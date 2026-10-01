@@ -6,6 +6,15 @@ endif()
 
 include(ExternalProject)
 
+# q3lcc emits no compiler depfile. Shared structure edits (especially
+# playerState_t) must rebuild every VM translation unit, or one QVM silently
+# mixes old and new offsets even when the native modules rebuild correctly.
+file(GLOB_RECURSE QVM_HEADERS CONFIGURE_DEPENDS
+    "${SOURCE_DIR}/qcommon/*.h" "${SOURCE_DIR}/game/*.h"
+    "${SOURCE_DIR}/cgame/*.h" "${SOURCE_DIR}/q3_ui/*.h"
+    "${SOURCE_DIR}/ui/*.h" "${SOURCE_DIR}/renderercommon/*.h"
+    "${SOURCE_DIR}/botlib/*.h")
+
 set(TOOLS_DIR ${CMAKE_BINARY_DIR}/tools)
 
 if(CMAKE_BUILD_TYPE)
@@ -69,7 +78,7 @@ function(add_qvm MODULE_NAME)
         add_custom_command(
             OUTPUT ${ASM_FILE}
             COMMAND ${Q3LCC} ${LCC_FLAGS} -o ${ASM_FILE} ${SOURCE}
-            DEPENDS ${SOURCE} qvm_tools ${Q3RCC} ${Q3CPP} ${Q3LCC}
+            DEPENDS ${SOURCE} ${QVM_HEADERS} qvm_tools ${Q3RCC} ${Q3CPP} ${Q3LCC}
             COMMENT "Building C object ${ASM_FILE_COMMENT}")
 
         list(APPEND ASM_FILES ${ASM_FILE})

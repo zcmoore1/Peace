@@ -131,7 +131,9 @@ typedef struct {
 	float		radius;
 	float		rotation;
 
-	// pre-built skeletal pose; if non-NULL, overrides frame/oldframe for IQM models
+	// Pre-built skeletal pose; if non-NULL, overrides frame/oldframe for IQM.
+	// Keep this last: CL_AddRefEntityFromVM marshals its 32-bit QVM offset
+	// separately from the fixed-layout prefix when entering the native renderer.
 	const modelPose_t *pose;
 } refEntity_t;
 

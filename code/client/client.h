@@ -361,6 +361,8 @@ extern	vm_t			*cgvm;	// interface to cgame dll or vm
 extern	vm_t			*uivm;	// interface to ui dll or vm
 extern	refexport_t		re;		// interface to refresh .dll
 
+void CL_AddRefEntityFromVM( vm_t *vm, intptr_t entityAddress );
+
 
 //
 // cvars
@@ -640,4 +642,3 @@ qboolean CL_VideoRecording( void );
 // cl_main.c
 //
 void CL_WriteDemoMessage ( msg_t *msg, int headerBytes );
-

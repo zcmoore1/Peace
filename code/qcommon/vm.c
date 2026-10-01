@@ -745,6 +745,10 @@ void VM_Forced_Unload_Done(void) {
 	forced_unload = 0;
 }
 
+qboolean VM_IsNative( const vm_t *vm ) {
+	return vm && vm->entryPoint != NULL;
+}
+
 void *VM_ArgPtr( intptr_t intValue ) {
 	if ( !intValue ) {
 		return NULL;

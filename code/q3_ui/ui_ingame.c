@@ -34,7 +34,7 @@ INGAME MENU
 
 #define INGAME_FRAME					"menu/art/addbotframe"
 //#define INGAME_FRAME					"menu/art/cut_frame"
-#define INGAME_MENU_VERTICAL_SPACING	28
+#define INGAME_MENU_VERTICAL_SPACING	26
 
 #define ID_TEAM					10
 #define ID_ADDBOTS				11
@@ -46,6 +46,7 @@ INGAME MENU
 #define ID_QUIT					17
 #define ID_RESUME				18
 #define ID_TEAMORDERS			19
+#define ID_CLASSES               20
 
 
 typedef struct {
@@ -53,6 +54,7 @@ typedef struct {
 
 	menubitmap_s	frame;
 	menutext_s		team;
+	menutext_s      classes;
 	menutext_s		setup;
 	menutext_s		server;
 	menutext_s		leave;
@@ -107,6 +109,9 @@ void InGame_Event( void *ptr, int notification ) {
 	}
 
 	switch( ((menucommon_s*)ptr)->id ) {
+	case ID_CLASSES:
+		UI_ClassesMenu();
+		break;
 	case ID_TEAM:
 		UI_TeamMainMenu();
 		break;
@@ -177,7 +182,17 @@ void InGame_MenuInit( void ) {
 	s_ingame.frame.height				= 332;//256;
 
 	//y = 96;
-	y = 88;
+	y = 72;
+	s_ingame.classes.generic.type = MTYPE_PTEXT;
+	s_ingame.classes.generic.flags = QMF_CENTER_JUSTIFY | QMF_PULSEIFFOCUS;
+	s_ingame.classes.generic.x = 320;
+	s_ingame.classes.generic.y = y;
+	s_ingame.classes.generic.id = ID_CLASSES;
+	s_ingame.classes.generic.callback = InGame_Event;
+	s_ingame.classes.string = "LOADOUTS / CLASSES";
+	s_ingame.classes.color = color_red;
+	s_ingame.classes.style = UI_CENTER | UI_SMALLFONT;
+	y += INGAME_MENU_VERTICAL_SPACING;
 	s_ingame.team.generic.type			= MTYPE_PTEXT;
 	s_ingame.team.generic.flags			= QMF_CENTER_JUSTIFY|QMF_PULSEIFFOCUS;
 	s_ingame.team.generic.x				= 320;
@@ -308,6 +323,7 @@ void InGame_MenuInit( void ) {
 	s_ingame.quit.style					= UI_CENTER|UI_SMALLFONT;
 
 	Menu_AddItem( &s_ingame.menu, &s_ingame.frame );
+	Menu_AddItem( &s_ingame.menu, &s_ingame.classes );
 	Menu_AddItem( &s_ingame.menu, &s_ingame.team );
 	Menu_AddItem( &s_ingame.menu, &s_ingame.addbots );
 	Menu_AddItem( &s_ingame.menu, &s_ingame.removebots );

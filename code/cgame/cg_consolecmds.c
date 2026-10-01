@@ -526,6 +526,9 @@ static void CG_PeaceDump_f( void ) {
 		ps->ammo[w], ps->ammoReserve[w], ps->stats[STAT_WEAPONS] );
 	CG_Printf( "equip    lethal %i   tactical %i\n",
 		ps->ammo[WP_FRAG], ps->ammo[WP_FLASH] );
+	CG_Printf( "action   type %i   fired %i   held %i\n",
+		ps->weaponAction & WA_TYPE_MASK, !!(ps->weaponAction & WA_FIRED),
+		(ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT );
 
 	CG_Printf( "timings  drop %i  raise %i  sprintIn %i  sprintOut %i\n",
 		BG_WeaponDropTime( w ), BG_WeaponRaiseTime( w ),
@@ -556,7 +559,42 @@ static void CG_PeaceDump_f( void ) {
 	CG_Printf( "-------------------------------------------\n" );
 }
 
+static void CG_Class_f( void ) {
+	bg_class_t loadout;
+	char text[BG_CLASS_STRING_SIZE], arg[32];
+	int selected, i;
+	if ( trap_Argc() < 2 ) {
+		trap_SendConsoleCommand("ui_classes\n");
+		return;
+	}
+	Q_strncpyz(arg, CG_Argv(1), sizeof(arg));
+	if ( !arg[0] || strlen(arg) > 2 ) return;
+	for ( i = 0; arg[i]; i++ ) {
+		if ( arg[i] < '0' || arg[i] > '9' ) {
+			CG_Printf("Use class 0-%i, or class to open Loadouts.\n", BG_ClassCount() + BG_CUSTOM_CLASS_COUNT - 1);
+			return;
+		}
+	}
+	selected = atoi(arg);
+	if ( selected < 0 || selected >= BG_ClassCount() + BG_CUSTOM_CLASS_COUNT ) return;
+	if ( selected < BG_ClassCount() ) loadout = *BG_Class(selected);
+	else {
+		Com_sprintf(arg, sizeof(arg), "peace_class_%i", selected - BG_ClassCount());
+		trap_Cvar_VariableStringBuffer(arg, text, sizeof(text));
+		if ( !BG_ParseClass(text, &loadout) ) {
+			CG_Printf("Create this custom class in Loadouts first.\n");
+			return;
+		}
+	}
+	if ( !BG_SerializeClass(&loadout, text, sizeof(text)) ) return;
+	trap_Cvar_Set("peace_loadout", text);
+	Com_sprintf(arg, sizeof(arg), "%i", selected);
+	trap_Cvar_Set("peace_classSelected", arg);
+	CG_Printf("Selected %s. Applies on your next spawn.\n", loadout.name);
+}
+
 static consoleCommand_t	commands[] = {
+	{ "class", CG_Class_f },
 	{ "testgun", CG_TestGun_f },
 	{ "testmodel", CG_TestModel_f },
 	{ "nextframe", CG_TestModelNextFrame_f },

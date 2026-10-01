@@ -329,6 +329,9 @@ extern void UI_CreditMenu( void );
 //
 extern void InGame_Cache( void );
 extern void UI_InGameMenu(void);
+void UI_ClassCvars(void);
+void UI_ClassesMenu(void);
+void UI_CreateClassMenu(int slot);
 
 //
 // ui_confirm.c

@@ -1104,6 +1104,7 @@ netField_t	playerStateFields[] =
 { PSF(weapon), 5 },
 { PSF(weaponAnimTime), -16 },
 { PSF(weaponAnimSeq), 2 },
+{ PSF(weaponAction), 6 },
 { PSF(viewangles[2]), 0 },
 { PSF(grapplePoint[0]), 0 },
 { PSF(grapplePoint[1]), 0 },

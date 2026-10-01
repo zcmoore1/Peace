@@ -163,6 +163,16 @@ typedef enum {
 	WEAPON_LADDER		// hands occupied; entered through WEAPON_DROPPING
 } weaponstate_t;
 
+// A quick action borrows the existing holster/deploy/fire states, but is never
+// an inventory selection. Held-button history is predicted alongside the action.
+#define WA_TYPE_MASK       3
+#define WA_MELEE           1
+#define WA_LETHAL          2
+#define WA_TACTICAL        3
+#define WA_FIRED           4
+#define WA_HELD_SHIFT      3
+#define WA_HELD_MASK       (7 << WA_HELD_SHIFT)
+
 // Ladder tuning is shared by prediction, authority and presentation. These are
 // initial feel values, not measured MW2 constants. A grab always pays a positive,
 // weapon-independent holster; animation notes still own the busy lock.
@@ -464,22 +474,37 @@ typedef enum {
 	SLOT_COUNT
 } weaponSlot_t;
 
-// A class is a whole loadout: two weapons, an optional underbarrel attachment,
-// and the two equipment slots. Melee is not listed because it is always carried.
+#define BG_CUSTOM_CLASS_COUNT 5
+#define BG_CLASS_NAME_SIZE    24
+#define BG_CLASS_STRING_SIZE 160
+#define BG_PERK_SLOTS         3
+
+// A class has two guns, separate equipment and three reserved perk slots.
+// Only perk ID 0 (unassigned) is supported until a gameplay roster is defined.
+// Melee is always a button action, never one of the two gun slots.
 typedef struct {
-	const char	*name;
+	char        name[BG_CLASS_NAME_SIZE];
 	int			slot[SLOT_COUNT];	// weapon_t in each weapon slot
 	int			lethal;				// weapon_t thrown by BUTTON_LETHAL
 	int			lethalCount;
 	int			tactical;			// weapon_t thrown by BUTTON_TACTICAL
 	int			tacticalCount;
+	int         perk[BG_PERK_SLOTS];
 } bg_class_t;
 
 int					BG_ClassCount( void );
 const bg_class_t	*BG_Class( int index );
 void				BG_ApplyLoadout( playerState_t *ps, int classIndex );
+void                BG_ApplyClass( playerState_t *ps, const bg_class_t *loadout );
+qboolean            BG_ValidateClass( const bg_class_t *loadout );
+qboolean            BG_ParseClass( const char *text, bg_class_t *loadout );
+qboolean            BG_SerializeClass( const bg_class_t *loadout, char *text, int size );
+int                 BG_ClassWeaponCount( void );
+int                 BG_ClassWeapon( int index );
+const char          *BG_ClassWeaponName( int weapon );
 void				BG_RebuildWeaponMask( playerState_t *ps );
 void				BG_SetSlotWeapon( playerState_t *ps, int slot, int weapon );
+int                 BG_ToggleSlotWeapon( const playerState_t *ps, int selection );
 
 
 

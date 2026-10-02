@@ -41,9 +41,10 @@ MAIN MENU
 #define ID_MODS					16
 #define ID_EXIT					17
 #define ID_CLASSES               18
+#define ID_CREATE_CLASS          19
 
 #define MAIN_BANNER_MODEL				"models/mapobjects/banner/banner5.md3"
-#define MAIN_MENU_VERTICAL_SPACING		34
+#define MAIN_MENU_VERTICAL_SPACING		30
 
 
 typedef struct {
@@ -53,6 +54,7 @@ typedef struct {
 	menutext_s		multiplayer;
 	menutext_s		setup;
 	menutext_s      classes;
+	menutext_s      createClass;
 	menutext_s		demos;
 	menutext_s		cinematics;
 	menutext_s		teamArena;
@@ -100,6 +102,10 @@ void Main_MenuEvent (void* ptr, int event) {
 	switch( ((menucommon_s*)ptr)->id ) {
 	case ID_CLASSES:
 		UI_ClassesMenu();
+		break;
+	case ID_CREATE_CLASS:
+		UI_ClassesMenu();
+		UI_CreateClassMenu((int)trap_Cvar_VariableValue("peace_classSelected") - BG_ClassCount());
 		break;
 	case ID_SINGLEPLAYER:
 		UI_SPLevelMenu();
@@ -315,7 +321,8 @@ void UI_MainMenu( void ) {
 	s_main.menu.wrapAround = qtrue;
 	s_main.menu.showlogo = qtrue;
 
-	y = 134;
+	// Leave room for both class entries, including the optional Team Arena row.
+	y = 128;
 	s_main.singleplayer.generic.type		= MTYPE_PTEXT;
 	s_main.singleplayer.generic.flags		= QMF_CENTER_JUSTIFY|QMF_PULSEIFFOCUS;
 	s_main.singleplayer.generic.x			= 320;
@@ -344,9 +351,20 @@ void UI_MainMenu( void ) {
 	s_main.classes.generic.y = y;
 	s_main.classes.generic.id = ID_CLASSES;
 	s_main.classes.generic.callback = Main_MenuEvent;
-	s_main.classes.string = "LOADOUTS / CLASSES";
+	s_main.classes.string = "CLASS SELECT";
 	s_main.classes.color = color_red;
 	s_main.classes.style = style;
+
+	y += MAIN_MENU_VERTICAL_SPACING;
+	s_main.createClass.generic.type = MTYPE_PTEXT;
+	s_main.createClass.generic.flags = QMF_CENTER_JUSTIFY | QMF_PULSEIFFOCUS;
+	s_main.createClass.generic.x = 320;
+	s_main.createClass.generic.y = y;
+	s_main.createClass.generic.id = ID_CREATE_CLASS;
+	s_main.createClass.generic.callback = Main_MenuEvent;
+	s_main.createClass.string = "CREATE A CLASS";
+	s_main.createClass.color = color_red;
+	s_main.createClass.style = style;
 
 	y += MAIN_MENU_VERTICAL_SPACING;
 	s_main.setup.generic.type				= MTYPE_PTEXT;
@@ -422,6 +440,7 @@ void UI_MainMenu( void ) {
 	Menu_AddItem( &s_main.menu,	&s_main.singleplayer );
 	Menu_AddItem( &s_main.menu,	&s_main.multiplayer );
 	Menu_AddItem( &s_main.menu, &s_main.classes );
+	Menu_AddItem( &s_main.menu, &s_main.createClass );
 	Menu_AddItem( &s_main.menu,	&s_main.setup );
 	Menu_AddItem( &s_main.menu,	&s_main.demos );
 	Menu_AddItem( &s_main.menu,	&s_main.cinematics );

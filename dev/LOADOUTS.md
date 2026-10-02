@@ -1,7 +1,12 @@
 # Loadouts and weapon selection
 
-Peace's baseq3 UI now has **LOADOUTS / CLASSES** in the main and in-game menus.
-The four presets remain available, alongside five saved custom class slots.
+Peace's baseq3 main menu has **CLASS SELECT** and **CREATE A CLASS** directly
+below Multiplayer. The in-game menu also has **CLASS SELECT**. The four presets
+remain available, alongside five saved custom class slots.
+
+**CREATE A CLASS** opens the editor for the selected custom class, or Custom 1
+when a preset is selected. Back returns to class selection; another Back returns
+to the main menu.
 
 1. Choose a Custom slot and **CREATE / EDIT**, or run `ui_createclass`.
 2. Set the name, primary, secondary, grenade and tactical equipment. Both weapon

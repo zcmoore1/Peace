@@ -189,7 +189,7 @@ void InGame_MenuInit( void ) {
 	s_ingame.classes.generic.y = y;
 	s_ingame.classes.generic.id = ID_CLASSES;
 	s_ingame.classes.generic.callback = InGame_Event;
-	s_ingame.classes.string = "LOADOUTS / CLASSES";
+	s_ingame.classes.string = "CLASS SELECT";
 	s_ingame.classes.color = color_red;
 	s_ingame.classes.style = UI_CENTER | UI_SMALLFONT;
 	y += INGAME_MENU_VERTICAL_SPACING;

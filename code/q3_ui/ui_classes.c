@@ -124,7 +124,7 @@ static void UI_ClassSelectDraw( void ) {
 	const bg_class_t *loadout = &classSelect.classes[classSelect.pick.curvalue];
 	char line[80];
 	int i;
-	UI_ClassBackdrop("LOADOUTS", "Four presets. Five saved custom classes. Changes apply on spawn.");
+	UI_ClassBackdrop("CLASS SELECT", "Four presets. Five saved custom classes. Changes apply on spawn.");
 	Menu_Draw(&classSelect.menu);
 	Com_sprintf(line, sizeof(line), "PRIMARY     %s", BG_ClassWeaponName(loadout->slot[SLOT_PRIMARY]));
 	UI_DrawString(80, 158, line, UI_SMALLFONT, color_white);

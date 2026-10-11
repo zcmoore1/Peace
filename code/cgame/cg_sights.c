@@ -150,6 +150,7 @@ void CG_Sights_Update( const playerState_t *ps ) {
 	float target, duration, step;
 	int elapsed = cg.time - cg.adsTime;
 	int sight = cg_sight.integer == 1 ? 1 : 0;
+	int teleportBit = ps->eFlags & EF_TELEPORT_BIT;
 
 	if ( ps->weapon > WP_NONE && ps->weapon < WP_NUM_WEAPONS ) {
 		CG_RegisterWeapon( ps->weapon );
@@ -157,7 +158,7 @@ void CG_Sights_Update( const playerState_t *ps ) {
 	def = CG_Sights_Def( ps->weapon );
 	if ( !cg.adsTime || elapsed < 0 || cg.adsWeapon != ps->weapon ||
 	     cg.adsClientNum != ps->clientNum || cg.adsSight != sight ||
-	     cg.thisFrameTeleport || cg.renderingThirdPerson ||
+	     cg.adsTeleportBit != teleportBit || cg.renderingThirdPerson ||
 	     ps->stats[STAT_HEALTH] <= 0 || ps->pm_type == PM_INTERMISSION ||
 	     ps->persistant[PERS_TEAM] == TEAM_SPECTATOR ) {
 		cg.adsFrac = 0.0f;
@@ -167,6 +168,10 @@ void CG_Sights_Update( const playerState_t *ps ) {
 	cg.adsWeapon = ps->weapon;
 	cg.adsClientNum = ps->clientNum;
 	cg.adsSight = sight;
+	// thisFrameTeleport is prediction-owned and can remain set indefinitely
+	// with synchronous clients, no prediction, or demo playback. Consume the
+	// actual player teleport edge once instead of resetting aim every frame.
+	cg.adsTeleportBit = teleportBit;
 
 	// Gameplay supplies permission. In particular, no visual reload-layer
 	// check belongs here: a real reload is denied by PM_CheckADS in pmove.

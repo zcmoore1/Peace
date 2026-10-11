@@ -207,6 +207,44 @@ static void TestJump(int dt) {
     CHECK(!Attached()); /* still within reach: must not immediately re-stick */
 }
 
+static void TestBottomExit(int dt) {
+    float bottom;
+    Reset(111, 0, 100);
+    Tick(dt);
+    CHECK(Attached());
+    move.cmd.forwardmove = -127;
+    Run(1200, dt);
+    CHECK(!Attached() && ps.groundEntityNum == ENTITYNUM_WORLD);
+    CHECK(ps.origin[0] < 100); /* down becomes normal backpedaling on the floor */
+    Run(BG_WeaponRaiseTime(WP_SHOTGUN), dt);
+    CHECK(ps.weaponstate == WEAPON_READY);
+
+    /* Contact while standing still must not re-holster on every think. */
+    Reset(111, 0, 24.125f); /* collision hull rests an epsilon above the floor */
+    Run(200, dt);
+    CHECK(!Attached() && ps.weaponstate == WEAPON_READY);
+    bottom = ps.origin[2];
+    move.cmd.rightmove = 127;
+    Run(100, dt);
+    CHECK(!Attached() && ps.origin[1] < -1);
+
+    /* No cooldown: forward climbs straight back up from the same contact. */
+    move.cmd.rightmove = 0;
+    move.cmd.forwardmove = 127;
+    Run(200, dt);
+    CHECK(Attached() && ps.origin[2] > bottom + 5);
+
+    /* An airborne, no-input grab still slides; only floor contact releases. */
+    Reset(111, 0, 35);
+    ps.velocity[2] = -200;
+    Tick(1);
+    CHECK(Attached());
+    Run(300, dt);
+    CHECK(!Attached() && ps.groundEntityNum == ENTITYNUM_WORLD);
+    Run(BG_WeaponRaiseTime(WP_SHOTGUN) + BG_LADDER_DROP_TIME, dt);
+    CHECK(!Attached() && ps.weaponstate == WEAPON_READY);
+}
+
 static int Note(int weapon, int seq, weaponNote_t kind) {
     const bg_weaponNote_t *n = PM_SegNotes(weapon, seq);
     for (; n->note != WNOTE_NONE; n++) if (n->note == kind) return n->time;
@@ -334,6 +372,7 @@ int main(void) {
         TestGrabAndHang(steps[i]);
         TestTraverseAndExit(steps[i]);
         TestJump(steps[i]);
+        TestBottomExit(steps[i]);
         TestPredictionReplay(steps[i]);
     }
     TestWeaponOrdering();

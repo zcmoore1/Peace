@@ -120,10 +120,22 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   When they disagree the clip is time-warped to fit and reads as jittery.
 - Material strings are baked into the IQM (`models/weapons2/spas12/...`), so
   moving an asset folder breaks its textures until re-export.
+- SPAS normal holster is 1500ms; draw remains 433ms and ladder holster remains
+  the universal 100ms. The reversed-draw drop clip is retimed in `view.cfg` and
+  the importer. Transition-note ordering and YY cancellation are unchanged.
+- Export IQM triangle indices clockwise for Quake's GL_FRONT culling, while
+  retaining outward normals. Blender keeps CCW indices. Reusing Blender order
+  in the game renders inside surfaces and hides the front post during ADS.
+- `peace_spas.shader` maps the gun material explicitly to `gun_skin.jpg`, an
+  original generated UV skin. The explicit map avoids an older loose `gun.tga`
+  shadowing it after a build. Re-exporting must preserve authored textures.
 - Known SPAS gaps: no sprint clips exist (the gun plays idle while sprinting),
-  the drop is the draw reversed, and `gun.tga`/`hands.tga` are 2×2 flat
-  placeholders — the mesh UV-maps to `mw2_spas12.bmp`/`v_hands.bmp`, neither of
-  which is in the source pack.
+  the drop is the draw reversed, and hands still use a flat placeholder.
+  The source mesh references missing `mw2_spas12.bmp`/`v_hands.bmp` atlases;
+  other bundled BMPs do not match this model's UV layout. See `dev/SPAS12.md`.
+- ADS reset tracks the player `EF_TELEPORT_BIT` edge, not `thisFrameTeleport`:
+  prediction owns that flag and never clears it during interpolation/demo play.
+  Repeatedly using it would pin the ADS blend at zero.
 
 ## Tests
 

@@ -530,6 +530,7 @@ typedef struct {
 	// ADS (aim down sights): 0 = hipfire, 1 = fully aimed; eased each frame
 	float		adsFrac;
 	int			adsTime, adsWeapon, adsClientNum, adsSight;
+	int			adsTeleportBit;
 
 	// information screen text during loading
 	char		infoScreenText[MAX_STRING_CHARS];

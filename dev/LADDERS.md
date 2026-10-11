@@ -1,10 +1,10 @@
 # Ladder lab
 
-Branch: `dev-3b-gpt`. Run in **x64 Native Tools Command Prompt for VS**:
+Branch: `dev-gpt`. With that branch checked out, run in **x64 Native Tools Command Prompt for VS**:
 
 ```bat
 cd /d C:\Users\ZackI\Desktop\OneManIW\ProjectPeace\dev2\Peace
-git pull origin dev-3b-gpt
+git pull origin dev-gpt
 cmake --build out\build\x64-Debug --clean-first
 ```
 
@@ -20,6 +20,9 @@ A/D move sideways relative to the ladder, regardless of where you look. Approach
 or jump into it to grab automatically. Release and press jump again to jump off.
 Look is limited to 180 degrees total (90 either side of facing into the ladder).
 Climb to the top to step onto the platform; walk or drift past a side to fall off.
+At the bottom, holding down returns to normal walking as your feet reach the
+floor. Stopping or strafing beside the ladder on the floor leaves your gun up;
+press forward to climb again immediately.
 
 The map is an original, tiny room with one ladder and a landing platform. q3dm1
 source/BSP is not in this repository, so that retail map was not modified. The
@@ -35,6 +38,11 @@ assets are still required by the normal client; this is not a standalone game pa
   remains and friction settles it to a hang; there is no gravity while attached.
 - A jump preserves sideways motion, pushes away from the face, and restores normal
   airborne movement. Re-grab is armed by geometric separation, not a cooldown.
+- At a walkable floor, down/neutral input releases the ladder. The ground probe
+  uses the same 0.25-unit reach and slope threshold as ordinary grounding.
+  Landing consumes the velocity into the floor before walking, preventing a
+  clipped downward slide from being normalized into an upward bounce/re-grab.
+  This does not release a midair hang or require a timer to reattach.
 - Contact stamps a positive, universal `BG_LADDER_DROP_TIME` and enters ordinary
   `WEAPON_DROPPING`. The existing animation-note pass then runs unchanged. Its
   lock release can finish the transition into `WEAPON_LADDER` before queued ammo
@@ -66,7 +74,8 @@ must run this build; old clients do not understand the new ladder state.
 `dev/tests/run-ladders.cmd` (Windows) or `sh dev/tests/run-ladders.sh` (Linux)
 loads the committed BSP into the real engine collision code and drives actual
 Pmove at 8/16/33/66 ms. It checks auto-grab from different views, momentum, hang,
-traversal, edge slips, top exit, jump separation, yaw clamp, prediction replay,
+traversal, edge slips, top/bottom exits, immediate climb-back, grounded strafing,
+falling contact at the base, jump separation, yaw clamp, prediction replay,
 mode changes, and reload/bolt note ordering. Existing weapon/sight tests remain.
 Linux: repeat with `LADDER_TEST_DEFINES=-DMISSIONPACK` to check the full stat layout.
 

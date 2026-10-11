@@ -135,6 +135,27 @@ static void ModelPoint(const refEntity_t *hand, const vec3_t point, vec3_t out) 
 	VectorCopy(hand->origin,out);
 	for(i=0;i<3;i++) VectorMA(out,point[i],hand->axis[i],out);
 }
+
+static void TestTeleportWithoutPrediction(void) {
+	int in=(int)cg_sights[WP_SHOTGUN].inTime;
+	Reset();
+	cg.thisFrameTeleport=qtrue; /* interpolation never clears this flag */
+	Tick(in);
+	NEAR(cg.adsFrac,1);
+	cg.predictedPlayerState.eFlags ^= EF_TELEPORT_BIT;
+	Tick(1);
+	NEAR(cg.adsFrac,0);
+	Tick(in/2);
+	CHECK(cg.adsFrac>0 && cg.adsFrac<1);
+	Tick(in);
+	NEAR(cg.adsFrac,1);
+	/* A second teleport still resets, even though the global flag stayed set. */
+	cg.predictedPlayerState.eFlags ^= EF_TELEPORT_BIT;
+	Tick(1);
+	NEAR(cg.adsFrac,0);
+	Tick(in);
+	NEAR(cg.adsFrac,1);
+}
 static void TestAlignment(void) {
 	const vec3_t cameraAngles[]={{0,0,0},{70,143,10},{-75,285,-15}};
 	const vec3_t rear={10.30f,-2.698f,-1.046f};
@@ -241,6 +262,7 @@ int main(void) {
 	Load();
 	TestInvalidConfigs();
 	TestTransitions();
+	TestTeleportWithoutPrediction();
 	TestAlignment();
 	TestOptic();
 	printf("PASS: sight config, transitions, alignment and optic projection (%d checks).\n",checks);

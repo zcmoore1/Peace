@@ -732,6 +732,27 @@ static void PM_CheckLadder( void ) {
 	if ( state & LADDER_JUMP_OFF ) {
 		return;
 	}
+	// A ladder face can extend all the way into the floor. Once our feet are
+	// supported, down/neutral input must return to walking instead of pinning
+	// us in ladder movement. Probe here because attached players skip the
+	// normal ground trace. Use its short reach and walkable-slope threshold;
+	// an airborne grab must still preserve its slide and settle to a hang.
+	// Forward input can immediately climb again, with no cooldown or latch.
+	if ( pm->cmd.forwardmove <= 0 && pm->ps->velocity[2] <= 0 ) {
+		VectorCopy( pm->ps->origin, lower );
+		lower[2] -= 0.25f;
+		pm->trace( &below, pm->ps->origin, pm->mins, pm->maxs, lower,
+			pm->ps->clientNum, pm->tracemask );
+		if ( !below.startsolid && !below.allsolid && below.fraction < 1.0f &&
+			below.plane.normal[2] >= MIN_WALK_NORMAL ) {
+			// Consume the landing's downward motion before WalkMove can
+			// normalize its tiny OVERCLIP remainder back to the old speed.
+			PM_ClipVelocity( pm->ps->velocity, below.plane.normal,
+				pm->ps->velocity, 1.0f );
+			pm->ps->stats[STAT_LADDER] &= LADDER_HOLSTER;
+			return;
+		}
+	}
 	VectorCopy( trace.plane.normal, pml.ladderNormal );
 	pml.ladderNormal[2] = 0;
 	VectorNormalize( pml.ladderNormal );
@@ -1756,7 +1777,7 @@ static const int bg_weaponDropTime[MAX_WEAPONS] = {
 	200,	// WP_NONE
 	200,	// WP_GAUNTLET
 	200,	// WP_MACHINEGUN
-	200,	// WP_SHOTGUN
+	1500,	// WP_SHOTGUN (SPAS-12 heavy holster; ladder uses its universal time)
 	250,	// WP_GRENADE_LAUNCHER
 	250,	// WP_ROCKET_LAUNCHER
 	200,	// WP_LIGHTNING

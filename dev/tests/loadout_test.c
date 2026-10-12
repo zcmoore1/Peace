@@ -186,8 +186,41 @@ static void TestActions(void) {
  ps.stats[STAT_LADDER]=LADDER_ATTACHED; Step(1);
  CHECK(!(ps.weaponAction&WA_TYPE_MASK) && fired[WP_KNIFE]==0);
 }
+/* Full Pmove needs a world; an empty one is enough for button handling. */
+static void EmptyTrace(trace_t *t, const vec3_t s, const vec3_t mins, const vec3_t maxs,
+ const vec3_t e, int pass, int mask) {
+ (void)s; (void)mins; (void)maxs; (void)pass; (void)mask;
+ memset(t,0,sizeof(*t)); t->fraction=1; VectorCopy(e,t->endpos); t->entityNum=ENTITYNUM_NONE;
+}
+static int EmptyContents(const vec3_t p, int pass) { (void)p; (void)pass; return 0; }
+
+/* A quick-action button held THROUGH a respawn is not a press. The latch
+ * fires on held-now-and-not-before, and a spawn wipes "before", so without the
+ * respawn gate seeding it a grenade left the hand on the first think of the new
+ * life - every round start in S&D, where everyone respawns at once. Runs the
+ * full Pmove because that gate lives in PmoveSingle, not PM_Weapon. */
+static void TestHeldThroughRespawn(void) {
+ const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL};
+ const int weapons[]={WP_KNIFE,WP_FRAG,WP_FLASH};
+ int i,t,count;
+ for(i=0;i<3;i++) {
+  Ready(WP_MACHINEGUN,WP_SHOTGUN); count=ps.ammo[weapons[i]];
+  move.trace=EmptyTrace; move.pointcontents=EmptyContents; move.tracemask=MASK_PLAYERSOLID;
+  ps.pm_type=PM_NORMAL; ps.speed=320; ps.gravity=800;
+  ps.pm_flags|=PMF_RESPAWNED;                 /* as ClientSpawn leaves it */
+  move.cmd.buttons=buttons[i];
+  for(t=0;t<1000;t+=8) { move.cmd.serverTime=ps.commandTime+8; Pmove(&move); }
+  CHECK(!(ps.weaponAction&WA_TYPE_MASK));
+  CHECK(ps.weapon==WP_MACHINEGUN && ps.ammo[weapons[i]]==count);
+  /* let go and press again: that one IS a press */
+  move.cmd.buttons=0; move.cmd.serverTime=ps.commandTime+8; Pmove(&move);
+  move.cmd.buttons=buttons[i]; move.cmd.serverTime=ps.commandTime+8; Pmove(&move);
+  CHECK(ps.weaponAction&WA_TYPE_MASK);
+ }
+}
+
 int main(void) {
- TestClasses(); TestYY(); TestReloadTail(); TestActions();
+ TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;
 }

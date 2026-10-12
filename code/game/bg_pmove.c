@@ -2349,10 +2349,15 @@ static int PM_ActionWeapon( void ) {
 	}
 }
 
+// Melee, lethal and tactical as a 3-bit mask, in weaponAction's held order.
+static int PM_HeldActionButtons( void ) {
+	return ( pm->cmd.buttons >> 15 ) & 7;
+}
+
 // Latch a press through holster/deploy. Releasing the button cannot lose a tap,
 // and holding it cannot turn a quick action into a permanently selected weapon.
 static void PM_UpdateWeaponAction( void ) {
-	int held = (pm->cmd.buttons >> 15) & 7;
+	int held = PM_HeldActionButtons();
 	int pressed = held & ~(pm->ps->weaponAction >> WA_HELD_SHIFT);
 	int action = pm->ps->weaponAction & (WA_TYPE_MASK | WA_FIRED);
 	if ( (pm->ps->stats[STAT_LADDER] & (LADDER_ATTACHED | LADDER_HOLSTER)) ||
@@ -3173,6 +3178,16 @@ void PmoveSingle (pmove_t *pmove) {
 	// clear the respawned flag if attack and use are cleared
 	if ( pm->ps->stats[STAT_HEALTH] > 0 && 
 		!( pm->cmd.buttons & (BUTTON_ATTACK | BUTTON_USE_HOLDABLE) ) ) {
+		if ( pm->ps->pm_flags & PMF_RESPAWNED ) {
+			// The quick-action latch fires on a PRESS: held now, not held last
+			// think. A spawn resets "last think" to nothing, so a button still
+			// held from the previous life read as a fresh press - and with S&D
+			// respawning everyone at once, holding lethal through the countdown
+			// threw a grenade the instant the round went live. What is held when
+			// the new life starts counts as already held; a real press still fires.
+			pm->ps->weaponAction = ( pm->ps->weaponAction & ~WA_HELD_MASK ) |
+				( PM_HeldActionButtons() << WA_HELD_SHIFT );
+		}
 		pm->ps->pm_flags &= ~PMF_RESPAWNED;
 	}
 

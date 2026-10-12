@@ -48,6 +48,37 @@ Generation prompt (built-in tool, UV guide supplied as the edit target):
 > background with dark gunmetal for filtering. No text, logos, labels, stamps,
 > drawn screws, or new holes; the model already supplies its physical details.
 
+## Sprint animation
+
+Sprint now has three distinct clips: a **200ms sprint-in transition**, a
+**600ms repeating carry loop**, and a **250ms sprint-out**. Both hands keep
+their existing grip as the shotgun rises into a canted high carry; subtle
+bob and sway give the loop motion. This is original animation on the supplied
+rig, not a ripped or frame-matched MW2 animation.
+
+Entry and exit follow the existing predicted weapon timers. A short sprint
+tap reverses the partial transition; releasing sprint does not wait for a
+whole carry loop to finish. Swapping preserves the existing ownership rule:
+sprint-in plays to its last frame and holds, while the full carry keeps
+looping. No movement speeds, gameplay locks, reload notes, swap logic, or
+client/server state fields changed.
+
+Tune `assets/source/spas12/sprint.json`, then run:
+
+```sh
+python dev/tools/build_spas_sprint.py
+python dev/tools/build_spas_sprint.py --check
+python dev/tests/spas_asset_test.py
+sh dev/tests/run-loadouts.sh
+```
+
+The bake rebuilds source animation channels without cumulative quantization,
+preserving geometry, UVs, bind skeleton, skin weights and original clip ranges.
+Non-sprint clip-table rates and comments remain hand-editable. The Blender
+importer calls the same bake after exporting geometry; its `.blend` preview
+still contains the supplied SMD actions, with sprint authored in the JSON.
+CI checks reproducibility, endpoint/cycle continuity, and sprint/swap poses.
+
 ## Playtest
 
 With `dev-gpt` checked out, run in **x64 Native Tools Command Prompt for VS**:
@@ -61,4 +92,8 @@ cmake --build out\build\x64-Debug --clean-first
 Choose a class with SPAS-12, launch `devmap peace_ladder`, and hold ADS. Try
 `cg_sight 0` and `cg_sight 1`, a full swap, YY during the slower holster, and
 descending the ladder to the floor. `peacedump` reports state and drop time.
+Hold forward + sprint: watch the entry settle into the repeating carry, then
+release to return to hip/ADS. Also try a short sprint tap, swapping during
+entry, and swapping during the full loop. The first swap should hold the final
+entry pose; the second should keep moving throughout the holster.
 Rebuild both engine and game modules together as usual.

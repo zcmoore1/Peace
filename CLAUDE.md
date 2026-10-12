@@ -129,8 +129,13 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 - `peace_spas.shader` maps the gun material explicitly to `gun_skin.jpg`, an
   original generated UV skin. The explicit map avoids an older loose `gun.tga`
   shadowing it after a build. Re-exporting must preserve authored textures.
-- Known SPAS gaps: no sprint clips exist (the gun plays idle while sprinting),
-  the drop is the draw reversed, and hands still use a flat placeholder.
+- SPAS sprint has separate non-looping entry (200ms), looping carry (600ms),
+  and non-looping exit (250ms). `dev/tools/build_spas_sprint.py` bakes the
+  original motion from `assets/source/spas12/sprint.json` without Blender;
+  the full importer invokes it too. Sprint-in/out follow predicted transition
+  locks for presentation only. During swaps, the existing sprint clip owns the
+  picture: entry holds its last frame; the carry keeps looping.
+- Known SPAS gaps: the drop is the draw reversed, and hands still use a flat placeholder.
   The source mesh references missing `mw2_spas12.bmp`/`v_hands.bmp` atlases;
   other bundled BMPs do not match this model's UV layout. See `dev/SPAS12.md`.
 - ADS reset tracks the player `EF_TELEPORT_BIT` edge, not `thisFrameTeleport`:

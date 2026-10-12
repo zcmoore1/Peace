@@ -10,7 +10,7 @@ refEntity_t::pose.
 Layer stack (evaluated low→high, each blended onto the previous):
   LAYER_BASE      idle / fire cycle; always active
   LAYER_MOVE      raise, drop; active during weapon transitions
-  LAYER_SPRINT    sprint-in / sprint-loop; blends in when sprinting
+  LAYER_SPRINT    sprint-in / sprint-loop / sprint-out
   LAYER_ADDITIVE  reserved for procedural additive (recoil, sway)
 
 Each layer has:
@@ -59,6 +59,7 @@ typedef struct {
 typedef struct {
 	int     clip;           // WANIM_* index
 	float   time;           // ms within clip
+	float   startFraction;  // picture-only reversal point for sprint transitions
 	float   weight;
 	float   targetWeight;
 	float   blendSpeed;     // weight units per ms
@@ -138,6 +139,18 @@ static float CG_WeapAnim_ClipLength( const weapAnimDef_t *def, int clip ) {
 	return (float)c->numFrames * ( 1000.0f / c->framerate );
 }
 
+// Transition clips interpolate between their first and last authored poses.
+// There are numFrames-1 intervals between those poses, even though the clip's
+// metadata duration includes the final frame. Use that span when mapping a
+// normalized transition/reversal, so unequal entry/exit frame counts agree.
+static float CG_WeapAnim_LastFrameTime( const weapAnimDef_t *def, int clip ) {
+	const weapAnimClip_t *c;
+	if ( clip < 0 || clip >= WANIM_COUNT ) return 0.0f;
+	c = &def->clips[clip];
+	if ( c->numFrames < 2 || c->framerate <= 0.0f ) return 0.0f;
+	return (float)(c->numFrames - 1) * (1000.0f / c->framerate);
+}
+
 // ---------------------------------------------------------------------------
 // CG_WeapAnim_TransitionBusy
 //
@@ -163,13 +176,14 @@ static qboolean CG_WeapAnim_TransitionBusy( const weapAnimDef_t *def, const anim
 
 // ---------------------------------------------------------------------------
 // CG_WeapAnim_PlayLayer
-// Point a layer at a clip. Restarts the clip only when it actually changes,
-// so a repeated request does not stutter the animation.
+// Point a layer at a clip. Restart on a clip change or reactivation after its
+// release; repeated active requests do not stutter the animation.
 // ---------------------------------------------------------------------------
 static void CG_WeapAnim_PlayLayer( animLayer_t *l, int clip ) {
-	if ( l->clip != clip ) {
+	if ( l->clip != clip || l->targetWeight <= 0.0f ) {
 		l->clip = clip;
 		l->time = 0.0f;
+		l->startFraction = 0.0f;
 	}
 	l->targetWeight = 1.0f;
 }
@@ -257,24 +271,39 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	}
 
 	// -- Sprint layer --
-	// Sprint blend is driven by weaponTime during the stow (like NAC): if the
-	// stow is instant the sprint blend also completes instantly for free.
-	// For now wire to a simple ps->pm_flags sprint check (placeholder until
-	// PMF_SPRINTING exists).
-	// Same ownership rule. Note pmove already refuses to enter the sprint carry
-	// during a raise, so a held sprint is deferred there too - the picture and
-	// the state machine agree without either one being told about the other.
+	// Only a swap retains ownership of an old sprint clip. Ordinary posture
+	// changes follow gameplay immediately: a looping carry must not delay the
+	// exit until it has played a full lap, or hide a gun already allowed to fire.
+	// Pmove still defers sprint during a raise; this never changes permission.
 	if ( sprintHolds ) {
 		sprint->targetWeight = 1.0f;		// hold whatever it was already playing
-	} else if ( !CG_WeapAnim_TransitionBusy( def, sprint ) ) {
+	} else {
+		int clip = -1;
 		if ( ps->weaponstate == WEAPON_SPRINT_IN ) {
-			CG_WeapAnim_PlayLayer( sprint, WANIM_SPRINT_IN );
+			clip = WANIM_SPRINT_IN;
 		} else if ( ps->weaponstate == WEAPON_SPRINTING ) {
-			CG_WeapAnim_PlayLayer( sprint, WANIM_SPRINT_LOOP );
+			clip = WANIM_SPRINT_LOOP;
 		} else if ( ps->weaponstate == WEAPON_SPRINT_OUT ) {
-			CG_WeapAnim_PlayLayer( sprint, WANIM_SPRINT_OUT );
-		} else {
+			clip = WANIM_SPRINT_OUT;
+		}
+		if ( clip < 0 ) {
 			sprint->targetWeight = 0.0f;
+		} else {
+			float start = 0.0f;
+			qboolean reverse = sprint->weight > 0.0f &&
+				((clip == WANIM_SPRINT_OUT && sprint->clip == WANIM_SPRINT_IN) ||
+				 (clip == WANIM_SPRINT_IN && sprint->clip == WANIM_SPRINT_OUT));
+			if ( reverse ) {
+				float len = CG_WeapAnim_LastFrameTime( def, sprint->clip );
+				if ( len > 0.0f ) start = 1.0f - sprint->time / len;
+				if ( start < 0.0f ) start = 0.0f;
+				if ( start > 1.0f ) start = 1.0f;
+			}
+			CG_WeapAnim_PlayLayer( sprint, clip );
+			if ( reverse ) sprint->startFraction = start;
+			// Entry/exit clips already interpolate idle <-> carry. Blending their
+			// weight again delays a fast entry and makes a short tap snap to carry.
+			if ( CG_WeapAnim_ClipLength( def, clip ) > 0.0f ) sprint->weight = 1.0f;
 		}
 	}
 
@@ -331,6 +360,20 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 		if ( fraction < 0 ) fraction = 0;
 		if ( fraction > 1 ) fraction = 1;
 		move->time = fraction * CG_WeapAnim_ClipLength( def, move->clip );
+	}
+	// Fit sprint entry/exit to the same predicted transition timers. The
+	// reversal point affects only the distance the picture travels, never the
+	// busy lock. During a swap this is deliberately NOT re-aimed: non-looping
+	// entry holds its final pose, while a looping carry keeps running.
+	if ( (ps->weaponstate == WEAPON_SPRINT_IN && sprint->clip == WANIM_SPRINT_IN) ||
+	     (ps->weaponstate == WEAPON_SPRINT_OUT && sprint->clip == WANIM_SPRINT_OUT) ) {
+		int duration = ps->weaponstate == WEAPON_SPRINT_IN ?
+			BG_WeaponSprintInTime( ps->weapon ) : BG_WeaponSprintOutTime( ps->weapon );
+		float fraction = 1.0f - (float)ps->weaponTime / duration;
+		if ( fraction < 0.0f ) fraction = 0.0f;
+		if ( fraction > 1.0f ) fraction = 1.0f;
+		fraction = sprint->startFraction + (1.0f - sprint->startFraction) * fraction;
+		sprint->time = fraction * CG_WeapAnim_LastFrameTime( def, sprint->clip );
 	}
 }
 

@@ -15,10 +15,12 @@ on:
       - 'code/qcommon/msg.c'
       - 'cmake/**'
       - 'assets/baseq3/**'
+      - 'assets/source/spas12/**'
       - 'dev/tests/**'
       - 'dev/tools/build_sight_assets.js'
       - 'dev/tools/build_ladder_map.py'
       - 'dev/tools/import_spas.py'
+      - 'dev/tools/build_spas_sprint.py'
       - '.github/workflows/weapon-sights.yml'
 permissions:
   contents: read
@@ -35,7 +37,9 @@ jobs:
       - name: Check generated ladder map
         run: python3 dev/tools/build_ladder_map.py --check
       - name: Check SPAS mesh winding and clip metadata
-        run: python3 dev/tests/spas_asset_test.py
+        run: |
+          python3 dev/tools/build_spas_sprint.py --check
+          python3 dev/tests/spas_asset_test.py
       - name: Test ladders against the real BSP collision engine
         run: |
           sh dev/tests/run-ladders.sh

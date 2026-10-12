@@ -767,14 +767,18 @@ credit.
 #define	PICKUP_RANGE		72
 #define	PICKUP_HOLD_MS		600
 
-static void G_CheckWeaponPickup( gentity_t *ent, usercmd_t *ucmd ) {
+static void G_CheckWeaponPickup( gentity_t *ent, usercmd_t *ucmd, int msec ) {
 	playerState_t	*ps = &ent->client->ps;
 	vec3_t			forward, start, end;
 	trace_t			tr;
 	gentity_t		*target = NULL;
 	int				slot;
 
-	if ( !( ucmd->buttons & BUTTON_USE ) || ps->stats[STAT_HEALTH] <= 0 ) {
+	// The objective owns USE. Planting and defusing are also "hold use", and a
+	// weapon lying in a bomb site would otherwise be picked up 600ms into a 4s
+	// plant, swapping the carrier's gun out from under them.
+	if ( !( ucmd->buttons & BUTTON_USE ) || ps->stats[STAT_HEALTH] <= 0 ||
+	     G_OnObjective( ent ) ) {
 		ps->stats[STAT_USE_TARGET]   = -1;
 		ps->stats[STAT_USE_PROGRESS] = 0;
 		return;
@@ -806,7 +810,10 @@ static void G_CheckWeaponPickup( gentity_t *ent, usercmd_t *ucmd ) {
 		ps->stats[STAT_USE_PROGRESS] = 0;
 	}
 
-	ps->stats[STAT_USE_PROGRESS] += ucmd->serverTime - ent->client->pers.cmd.serverTime;
+	// msec is the time THIS usercmd covers, the same figure ClientTimerActions
+	// is given. It used to be ucmd->serverTime - pers.cmd.serverTime, but ucmd
+	// IS &pers.cmd, so that was always 0 and a pickup could never complete.
+	ps->stats[STAT_USE_PROGRESS] += msec;
 	if ( ps->stats[STAT_USE_PROGRESS] < PICKUP_HOLD_MS ) {
 		return;
 	}
@@ -921,6 +928,10 @@ void ClientThink_real( gentity_t *ent ) {
 		client->ps.pm_type = PM_NOCLIP;
 	} else if ( client->ps.stats[STAT_HEALTH] <= 0 ) {
 		client->ps.pm_type = PM_DEAD;
+	} else if ( G_RoundBasedGametype() && level.roundState == RND_PREROUND ) {
+		// S&D pre-round countdown: you can look around but not move or fire.
+		// pmove updates view angles before it honours PM_FREEZE.
+		client->ps.pm_type = PM_FREEZE;
 	} else {
 		client->ps.pm_type = PM_NORMAL;
 	}
@@ -1064,7 +1075,7 @@ void ClientThink_real( gentity_t *ent ) {
 	}
 
 	// hold-to-pickup for floor weapons (walking over them does nothing)
-	G_CheckWeaponPickup( ent, ucmd );
+	G_CheckWeaponPickup( ent, ucmd, msec );
 
 	// NOTE: now copy the exact origin over otherwise clients can be snapped into solid
 	VectorCopy( ent->client->ps.origin, ent->r.currentOrigin );

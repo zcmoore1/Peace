@@ -1084,9 +1084,12 @@ void ClientSpawn(gentity_t *ent) {
 	if ( client->sess.sessionTeam == TEAM_SPECTATOR ) {
 		spawnPoint = SelectSpectatorSpawnPoint ( 
 						spawn_origin, spawn_angles);
-	} else if (g_gametype.integer >= GT_CTF || G_RoundBasedGametype() ) {
-		// all base/team oriented games (CTF and search & destroy) spawn at the
-		// per-team CTF spawn points so attackers and defenders start together
+	} else if ( G_RoundBasedGametype() ) {
+		// search & destroy spawns by ROLE (attacker / defender), which swaps at
+		// halftime, not by team colour - see G_SelectSDSpawnPoint
+		spawnPoint = G_SelectSDSpawnPoint( ent, spawn_origin, spawn_angles );
+	} else if (g_gametype.integer >= GT_CTF ) {
+		// all base oriented team games use the CTF spawn points
 		spawnPoint = SelectCTFSpawnPoint (
 						client->sess.sessionTeam, 
 						client->pers.teamState.state, 
@@ -1241,6 +1244,24 @@ void ClientSpawn(gentity_t *ent) {
 		// move players to intermission
 		MoveClientToIntermission(ent);
 	}
+
+	// Search & Destroy is one life per round. Joining while a round is live, or
+	// after it has been decided, means waiting for the next one - not dropping
+	// in alive mid-fight. Health 0 hands the rest to the existing dead-player
+	// rules: no respawn until the round resets (g_active.c), and no shooting.
+	// No body is left, because there never was a life to end.
+	if ( G_RoundBasedGametype() && !level.sdRoundRespawn &&
+	     ( client->sess.sessionTeam == TEAM_RED || client->sess.sessionTeam == TEAM_BLUE ) &&
+	     ( level.roundState == RND_ACTIVE || level.roundState == RND_POSTROUND ) ) {
+		client->ps.stats[STAT_HEALTH] = ent->health = 0;
+		ent->takedamage = qfalse;
+		ent->r.contents = 0;
+		client->ps.eFlags |= EF_NODRAW;
+		trap_LinkEntity( ent );
+		trap_SendServerCommand( ent - g_entities,
+			"cp \"Round in progress\nYou will spawn next round\"" );
+	}
+
 	// run a client frame to drop exactly to the floor,
 	// initialize animations and other things
 	client->ps.commandTime = level.time - 100;

@@ -89,6 +89,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define CS_FLAGSTATUS			23		// string indicating flag status in CTF
 #define CS_SHADERSTATE			24
 #define CS_BOTINFO				25
+#define CS_SD_STATE				26		// search & destroy round + bomb state, an info string (g_round.c)
 
 #define	CS_ITEMS				27		// string of 0's and 1's that tell which items are present
 
@@ -119,6 +120,29 @@ typedef enum {
 	GT_HARVESTER,
 	GT_MAX_GAME_TYPE
 } gametype_t;
+
+// Search & Destroy. Shared because cgame reads these straight out of the
+// CS_SD_STATE configstring: the server owns the state, the HUD only draws it.
+typedef enum {
+	RND_NONE,			// no round running (not GT_SD, in warmup, or a team is empty)
+	RND_PREROUND,		// players (re)spawned and frozen; brief setup delay
+	RND_ACTIVE,			// combat live; deaths are permanent until the round resets
+	RND_POSTROUND		// round decided; result shown before the next round starts
+} roundState_t;
+
+typedef enum {
+	BOMB_NONE,			// no bomb in play (e.g. between rounds)
+	BOMB_CARRIED,		// an attacker is holding the bomb
+	BOMB_PLANTED,		// bomb is down and counting toward detonation
+	BOMB_DEFUSED,		// defenders disarmed it (round decided)
+	BOMB_DETONATED		// it exploded (round decided)
+} bombState_t;
+
+typedef enum {
+	SDACT_NONE,			// nobody is holding USE on the objective
+	SDACT_PLANT,
+	SDACT_DEFUSE
+} sdAction_t;
 
 typedef enum { GENDER_MALE, GENDER_FEMALE, GENDER_NEUTER } gender_t;
 

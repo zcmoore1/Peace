@@ -835,10 +835,17 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		return;
 	}
 
-	// in round-based play (search & destroy) nothing can be hurt outside the
-	// active combat phase: this protects the pre-round freeze and the
-	// post-round result screen from any damage source.
-	if ( G_RoundBasedGametype() && level.roundState != RND_ACTIVE ) {
+	// In round-based play (search & destroy) nothing can be hurt during the
+	// pre-round freeze or on the post-round result screen.
+	//
+	// Deliberately NOT "!= RND_ACTIVE". RND_NONE means no round is running at
+	// all - warmup, or a team with nobody on it - and then the round rules do
+	// not apply: you can respawn (g_active.c gates on != RND_NONE) and you can
+	// be hurt. Gating on != RND_ACTIVE made a solo devmap, where the other team
+	// is always empty, a world where nothing could ever take damage - including
+	// the training dummy.
+	if ( G_RoundBasedGametype() &&
+	     ( level.roundState == RND_PREROUND || level.roundState == RND_POSTROUND ) ) {
 		return;
 	}
 #ifdef MISSIONPACK

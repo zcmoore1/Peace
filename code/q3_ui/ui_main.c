@@ -113,6 +113,10 @@ vmCvar_t	ui_ctf_capturelimit;
 vmCvar_t	ui_ctf_timelimit;
 vmCvar_t	ui_ctf_friendly;
 
+vmCvar_t	ui_sd_roundlimit;
+vmCvar_t	ui_sd_timelimit;
+vmCvar_t	ui_sd_friendly;
+
 vmCvar_t	ui_arenasFile;
 vmCvar_t	ui_botsFile;
 vmCvar_t	ui_spScores1;
@@ -171,6 +175,12 @@ static cvarTable_t		cvarTable[] = {
 	{ &ui_ctf_capturelimit, "ui_ctf_capturelimit", "8", CVAR_ARCHIVE },
 	{ &ui_ctf_timelimit, "ui_ctf_timelimit", "30", CVAR_ARCHIVE },
 	{ &ui_ctf_friendly, "ui_ctf_friendly",  "0", CVAR_ARCHIVE },
+
+	// Search & Destroy is won on ROUNDS, so its limit is a round count and the
+	// match clock defaults off - the per-round timer (g_roundtime) does that job.
+	{ &ui_sd_roundlimit, "ui_sd_roundlimit", "4", CVAR_ARCHIVE },
+	{ &ui_sd_timelimit, "ui_sd_timelimit", "0", CVAR_ARCHIVE },
+	{ &ui_sd_friendly, "ui_sd_friendly", "0", CVAR_ARCHIVE },
 
 	{ &ui_arenasFile, "g_arenasFile", "", CVAR_INIT|CVAR_ROM },
 	{ &ui_botsFile, "g_botsFile", "", CVAR_INIT|CVAR_ROM },

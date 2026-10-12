@@ -67,6 +67,7 @@ vmCvar_t	g_warmup;
 vmCvar_t	g_roundlimit;
 vmCvar_t	g_roundtime;
 vmCvar_t	g_roundwarmup;
+vmCvar_t	g_roundswitch;
 vmCvar_t	g_bombplanttime;
 vmCvar_t	g_bombdefusetime;
 vmCvar_t	g_bombtimer;
@@ -126,9 +127,12 @@ static cvarTable_t		gameCvarTable[] = {
 
 	// search & destroy (GT_SD): rounds to win the match, active round length
 	// (seconds) and pre-round freeze (seconds)
-	{ &g_roundlimit, "g_roundlimit", "8", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
+	// first to g_roundlimit rounds. 4 is the MW2 public S&D score limit.
+	{ &g_roundlimit, "g_roundlimit", "4", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
 	{ &g_roundtime, "g_roundtime", "120", CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
 	{ &g_roundwarmup, "g_roundwarmup", "5", CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
+	// attackers and defenders swap every N rounds played; 0 = never swap
+	{ &g_roundswitch, "g_roundswitch", "1", CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
 
 	// bomb objective: plant/defuse hold times, time from plant to detonation
 	// (seconds) and the defuse reach radius (game units)

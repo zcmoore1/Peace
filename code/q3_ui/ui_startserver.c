@@ -93,11 +93,34 @@ static const char *gametype_items[] = {
 	"Team Deathmatch",
 	"Tournament",
 	"Capture the Flag",
+	"Search & Destroy",
 	NULL
 };
 
-static int gametype_remap[] = {GT_FFA, GT_TEAM, GT_TOURNAMENT, GT_CTF};
-static int gametype_remap2[] = {0, 2, 0, 1, 3};
+// Menu position -> gametype. The ONLY table: the reverse direction is a lookup
+// (GametypeMenuIndex) rather than a second positional array indexed by the enum.
+// That second array is what broke when GT_SD was inserted before GT_CTF - every
+// gametype after it shifted by one and overran the table - and a lookup cannot.
+static int gametype_remap[] = {GT_FFA, GT_TEAM, GT_TOURNAMENT, GT_CTF, GT_SD};
+
+/*
+=================
+GametypeMenuIndex
+
+Which menu entry a g_gametype value shows as. Single player has no entry of its
+own and presents as Free For All, as it always did.
+=================
+*/
+static int GametypeMenuIndex( int gametype ) {
+	int i;
+
+	for ( i = 0; i < ARRAY_LEN( gametype_remap ); i++ ) {
+		if ( gametype_remap[i] == gametype ) {
+			return i;
+		}
+	}
+	return 0;
+}
 
 // use ui_servers2.c definition
 extern const char* punkbuster_items[];
@@ -145,6 +168,11 @@ static int GametypeBits( char *string ) {
 
 		if( Q_stricmp( token, "ctf" ) == 0 ) {
 			bits |= 1 << GT_CTF;
+			continue;
+		}
+
+		if( Q_stricmp( token, "sd" ) == 0 ) {
+			bits |= 1 << GT_SD;
 			continue;
 		}
 	}
@@ -261,6 +289,11 @@ static void StartServer_GametypeEvent( void* ptr, int event ) {
 	matchbits = 1 << gametype_remap[s_startserver.gametype.curvalue];
 	if( gametype_remap[s_startserver.gametype.curvalue] == GT_FFA ) {
 		matchbits |= ( 1 << GT_SINGLE_PLAYER );
+	}
+	// Any team map can host S&D: with no bomb sites of its own, the game picks
+	// sites from the defenders' spawns. Maps tagged "sd" are built for it.
+	if( gametype_remap[s_startserver.gametype.curvalue] == GT_SD ) {
+		matchbits |= ( 1 << GT_TEAM );
 	}
 	for( i = 0; i < count; i++ ) {
 		info = UI_GetArenaInfoByNumber( i );
@@ -777,6 +810,16 @@ static void ServerOptions_Start( void ) {
 		trap_Cvar_SetValue( "ui_ctf_timelimit", timelimit );
 		trap_Cvar_SetValue( "ui_ctf_friendly", friendlyfire );
 		break;
+
+	case GT_SD:
+		// The frag-limit field is relabelled "Round Limit" for S&D (see
+		// ServerOptions_MenuInit). Frags never end a round-based match.
+		trap_Cvar_SetValue( "ui_sd_roundlimit", fraglimit );
+		trap_Cvar_SetValue( "ui_sd_timelimit", timelimit );
+		trap_Cvar_SetValue( "ui_sd_friendly", friendlyfire );
+		trap_Cvar_SetValue( "g_roundlimit", Com_Clamp( 1, 99, fraglimit ) );
+		fraglimit = 0;
+		break;
 	}
 
 	trap_Cvar_SetValue( "sv_maxclients", Com_Clamp( 0, 12, maxclients ) );
@@ -1030,7 +1073,7 @@ static void ServerOptions_LevelshotDraw( void *self ) {
 	UI_DrawString( x, y, s_serveroptions.mapnamebuffer, UI_CENTER|UI_SMALLFONT, color_orange );
 
 	y += SMALLCHAR_HEIGHT;
-	UI_DrawString( x, y, gametype_items[gametype_remap2[s_serveroptions.gametype]], UI_CENTER|UI_SMALLFONT, color_orange );
+	UI_DrawString( x, y, gametype_items[GametypeMenuIndex( s_serveroptions.gametype )], UI_CENTER|UI_SMALLFONT, color_orange );
 }
 
 
@@ -1161,6 +1204,12 @@ static void ServerOptions_SetMenuItems( void ) {
 		Com_sprintf( s_serveroptions.timelimit.field.buffer, 4, "%i", (int)Com_Clamp( 0, 999, trap_Cvar_VariableValue( "ui_ctf_timelimit" ) ) );
 		s_serveroptions.friendlyfire.curvalue = (int)Com_Clamp( 0, 1, trap_Cvar_VariableValue( "ui_ctf_friendly" ) );
 		break;
+
+	case GT_SD:
+		Com_sprintf( s_serveroptions.fraglimit.field.buffer, 4, "%i", (int)Com_Clamp( 1, 99, trap_Cvar_VariableValue( "ui_sd_roundlimit" ) ) );
+		Com_sprintf( s_serveroptions.timelimit.field.buffer, 4, "%i", (int)Com_Clamp( 0, 999, trap_Cvar_VariableValue( "ui_sd_timelimit" ) ) );
+		s_serveroptions.friendlyfire.curvalue = (int)Com_Clamp( 0, 1, trap_Cvar_VariableValue( "ui_sd_friendly" ) );
+		break;
 	}
 
 	Q_strncpyz( s_serveroptions.hostname.field.buffer, UI_Cvar_VariableString( "sv_hostname" ), sizeof( s_serveroptions.hostname.field.buffer ) );
@@ -1246,7 +1295,7 @@ static void ServerOptions_MenuInit( qboolean multiplayer ) {
 
 	memset( &s_serveroptions, 0 ,sizeof(serveroptions_t) );
 	s_serveroptions.multiplayer = multiplayer;
-	s_serveroptions.gametype = (int) Com_Clamp(0, ARRAY_LEN(gametype_remap2) - 1,
+	s_serveroptions.gametype = (int) Com_Clamp(0, GT_MAX_GAME_TYPE - 1,
 						trap_Cvar_VariableValue("g_gametype"));
 	s_serveroptions.punkbuster.curvalue = Com_Clamp( 0, 1, trap_Cvar_VariableValue( "sv_punkbuster" ) );
 
@@ -1282,7 +1331,7 @@ static void ServerOptions_MenuInit( qboolean multiplayer ) {
 	y = 272;
 	if( s_serveroptions.gametype != GT_CTF ) {
 		s_serveroptions.fraglimit.generic.type       = MTYPE_FIELD;
-		s_serveroptions.fraglimit.generic.name       = "Frag Limit:";
+		s_serveroptions.fraglimit.generic.name       = ( s_serveroptions.gametype == GT_SD ) ? "Round Limit:" : "Frag Limit:";
 		s_serveroptions.fraglimit.generic.flags      = QMF_NUMBERSONLY|QMF_PULSEIFFOCUS|QMF_SMALLFONT;
 		s_serveroptions.fraglimit.generic.x	         = OPTIONS_X;
 		s_serveroptions.fraglimit.generic.y	         = y;

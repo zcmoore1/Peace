@@ -334,22 +334,22 @@ struct gclient_s {
 #define	MAX_SPAWN_VARS			64
 #define	MAX_SPAWN_VARS_CHARS	4096
 
-// search & destroy round phases (g_round.c)
-typedef enum {
-	RND_NONE,			// no round running (not GT_SD, in warmup, or a team is empty)
-	RND_PREROUND,		// players (re)spawned and frozen; brief setup delay
-	RND_ACTIVE,			// combat live; deaths are permanent until the round resets
-	RND_POSTROUND		// round decided; result shown before the next round starts
-} roundState_t;
+// search & destroy: roundState_t and bombState_t live in bg_public.h, because
+// cgame decodes them from CS_SD_STATE.
 
-// search & destroy bomb objective (g_round.c)
-typedef enum {
-	BOMB_NONE,			// no bomb in play (e.g. between rounds)
-	BOMB_CARRIED,		// an attacker is holding the bomb
-	BOMB_PLANTED,		// bomb is down and counting toward detonation
-	BOMB_DEFUSED,		// defenders disarmed it (round decided)
-	BOMB_DETONATED		// it exploded (round decided)
-} bombState_t;
+// A place the bomb can be planted. Either a brush trigger_bombsite, whose
+// volume IS the site, or a point site: an origin and a radius. A map with no
+// sites at all gets point sites picked from the defenders' spawns at the first
+// round, so S&D is playable on any map with spawn points.
+#define	MAX_BOMBSITES		4
+#define	DEFAULT_SITE_RADIUS	128
+
+typedef struct {
+	vec3_t		origin;
+	float		radius;					// 0 = brush site; the trigger volume decides
+	char		label;					// 'A', 'B', ...
+	struct gentity_s	*trigger;		// brush site only
+} bombSite_t;
 
 typedef struct {
 	struct gclient_s	*clients;		// [maxclients]
@@ -434,7 +434,19 @@ typedef struct {
 	int			bombDetonateTime;		// level.time a planted bomb explodes
 	int			plantProgress;			// ms of planting accumulated this attempt
 	int			plantTouchTime;			// level.time the carrier last stood in a site
+	int			plantTouchSite;			// which site that was
 	int			defuseProgress;			// ms of defusing accumulated this attempt
+	int			defuser;				// clientNum making defuse progress, or -1
+	int			bombSite;				// site planted at, or -1
+
+	bombSite_t	bombSites[MAX_BOMBSITES];
+	int			numBombSites;
+	qboolean	sdLayoutDone;			// sites and spawn sides resolved for this map
+	qboolean	sdSidesFromDeathmatch;	// no team spawns: sides split from DM spawns
+	vec3_t		sdDefenderEnd;			// DM split: the defenders' end of the map
+	vec3_t		sdAttackerEnd;			// DM split: the attackers' end
+	team_t		attackingTeam;			// swaps every g_roundswitch rounds
+	qboolean	sdRoundRespawn;			// G_RoundRespawnAll is spawning everyone
 
 	// intermission state
 	int			intermissionQueued;		// intermission was qualified, but
@@ -668,6 +680,8 @@ team_t G_AttackingTeam( void );
 team_t G_DefendingTeam( void );
 void G_BombCarrierDied( gentity_t *self );
 void SP_trigger_bombsite( gentity_t *ent );
+qboolean G_OnObjective( gentity_t *ent );
+gentity_t *G_SelectSDSpawnPoint( gentity_t *ent, vec3_t origin, vec3_t angles );
 void InitTrigger( gentity_t *self );		// g_trigger.c
 
 //
@@ -777,6 +791,7 @@ extern	vmCvar_t	g_forcerespawn;
 extern	vmCvar_t	g_roundlimit;
 extern	vmCvar_t	g_roundtime;
 extern	vmCvar_t	g_roundwarmup;
+extern	vmCvar_t	g_roundswitch;
 extern	vmCvar_t	g_bombplanttime;
 extern	vmCvar_t	g_bombdefusetime;
 extern	vmCvar_t	g_bombtimer;

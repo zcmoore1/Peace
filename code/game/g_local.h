@@ -681,6 +681,7 @@ team_t G_DefendingTeam( void );
 void G_BombCarrierDied( gentity_t *self );
 void SP_trigger_bombsite( gentity_t *ent );
 qboolean G_OnObjective( gentity_t *ent );
+void G_InitRoundGame( void );
 gentity_t *G_SelectSDSpawnPoint( gentity_t *ent, vec3_t origin, vec3_t angles );
 void InitTrigger( gentity_t *self );		// g_trigger.c
 

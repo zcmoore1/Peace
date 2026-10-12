@@ -2619,6 +2619,8 @@ static void CG_DrawWarmup( void ) {
 			s = "Team Deathmatch";
 		} else if ( cgs.gametype == GT_CTF ) {
 			s = "Capture the Flag";
+		} else if ( cgs.gametype == GT_SD ) {
+			s = "Search & Destroy";
 #ifdef MISSIONPACK
 		} else if ( cgs.gametype == GT_1FCTF ) {
 			s = "One Flag CTF";
@@ -2731,6 +2733,8 @@ void CG_DrawTimedMenus( void ) {
 CG_Draw2D
 =================
 */
+static void CG_DrawSearchAndDestroy( void );
+
 static void CG_Draw2D(stereoFrame_t stereoFrame)
 {
 #ifdef MISSIONPACK
@@ -2811,6 +2815,8 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 #endif
 	}
 
+	CG_DrawSearchAndDestroy();
+
 	CG_DrawVote();
 	CG_DrawTeamVote();
 
@@ -2840,6 +2846,138 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 	}
 }
 
+
+/*
+=================
+CG_DrawSearchAndDestroy
+
+Round clock, score, your side's job, the bomb, and a plant/defuse bar. Drawn
+for the dead and for spectators too: in a one-life mode they are exactly the
+people watching the clock. Everything comes from cgs.sd; nothing is predicted
+or decided here.
+=================
+*/
+#define SD_PANEL_Y		4
+#define SD_BAR_W		200
+#define SD_BAR_H		10
+#define SD_BAR_Y		300
+
+static void CG_SDFormatClock( char *out, int size, int msec ) {
+	int sec;
+
+	if ( msec < 0 ) {
+		msec = 0;
+	}
+	sec = ( msec + 999 ) / 1000;
+	Com_sprintf( out, size, "%i:%02i", sec / 60, sec % 60 );
+}
+
+static void CG_DrawSDCentered( int y, const char *text, vec4_t color, qboolean big ) {
+	int w = CG_DrawStrlen( text ) * ( big ? BIGCHAR_WIDTH : SMALLCHAR_WIDTH );
+
+	if ( big ) {
+		CG_DrawBigStringColor( 320 - w / 2, y, text, color );
+	} else {
+		CG_DrawSmallStringColor( 320 - w / 2, y, text, color );
+	}
+}
+
+static void CG_DrawSearchAndDestroy( void ) {
+	static vec4_t	panel   = { 0.0f, 0.0f, 0.0f, 0.45f };
+	static vec4_t	barBack = { 0.0f, 0.0f, 0.0f, 0.6f };
+	static vec4_t	barFill = { 1.0f, 0.8f, 0.2f, 0.9f };
+	static vec4_t	red     = { 1.0f, 0.3f, 0.3f, 1.0f };
+	static vec4_t	blue    = { 0.4f, 0.6f, 1.0f, 1.0f };
+	static vec4_t	warn    = { 1.0f, 0.25f, 0.2f, 1.0f };
+	char			clock[16], line[128];
+	int				myTeam, me, remain, y;
+	qboolean		attacking, alive;
+	float			*sideColor;
+
+	if ( cgs.gametype != GT_SD ) {
+		return;
+	}
+	if ( cg.snap->ps.pm_type == PM_INTERMISSION ) {
+		return;
+	}
+
+	me        = cg.snap->ps.clientNum;
+	myTeam    = cg.snap->ps.persistant[PERS_TEAM];
+	attacking = ( myTeam == cgs.sd.attackers );
+	alive     = ( cg.snap->ps.stats[STAT_HEALTH] > 0 );
+
+	if ( cgs.sd.state == RND_NONE ) {
+		CG_FillRect( 220, SD_PANEL_Y, 200, 22, panel );
+		CG_DrawSDCentered( SD_PANEL_Y + 3, "Waiting for both teams", colorWhite, qfalse );
+		return;
+	}
+
+	// --- top panel: score  clock  score -----------------------------------
+	if ( cgs.sd.bombState == BOMB_PLANTED ) {
+		remain = cgs.sd.detonateTime - cg.time;
+	} else if ( cgs.sd.state == RND_PREROUND || cgs.sd.state == RND_POSTROUND ) {
+		remain = cgs.sd.stateEnd - cg.time;
+	} else {
+		remain = cgs.sd.roundEnd ? cgs.sd.roundEnd - cg.time : 0;
+	}
+	CG_SDFormatClock( clock, sizeof( clock ), remain );
+
+	CG_FillRect( 220, SD_PANEL_Y, 200, 40, panel );
+	CG_DrawBigStringColor( 228, SD_PANEL_Y + 4, va( "%i", cgs.scores1 ), red );
+	CG_DrawBigStringColor( 412 - CG_DrawStrlen( va( "%i", cgs.scores2 ) ) * BIGCHAR_WIDTH,
+		SD_PANEL_Y + 4, va( "%i", cgs.scores2 ), blue );
+	CG_DrawSDCentered( SD_PANEL_Y + 4, clock,
+		cgs.sd.bombState == BOMB_PLANTED ? warn : colorWhite, qtrue );
+
+	if ( myTeam == TEAM_RED || myTeam == TEAM_BLUE ) {
+		sideColor = ( myTeam == TEAM_RED ) ? red : blue;
+		Com_sprintf( line, sizeof( line ), "Round %i  -  %s", cgs.sd.round,
+			attacking ? "ATTACK" : "DEFEND" );
+	} else {
+		sideColor = colorWhite;
+		Com_sprintf( line, sizeof( line ), "Round %i", cgs.sd.round );
+	}
+	CG_DrawSDCentered( SD_PANEL_Y + 22, line, sideColor, qfalse );
+
+	// --- what is happening -------------------------------------------------
+	y = SD_PANEL_Y + 46;
+	if ( cgs.sd.state == RND_PREROUND ) {
+		CG_DrawSDCentered( y, va( "Round starts in %i", ( remain + 999 ) / 1000 ), colorWhite, qtrue );
+	} else if ( cgs.sd.state == RND_POSTROUND ) {
+		if ( cgs.sd.winner == TEAM_RED || cgs.sd.winner == TEAM_BLUE ) {
+			CG_DrawSDCentered( y, cgs.sd.winner == myTeam ? "Round won" :
+				( myTeam == TEAM_RED || myTeam == TEAM_BLUE ) ? "Round lost" :
+				cgs.sd.winner == TEAM_RED ? "Red wins the round" : "Blue wins the round",
+				cgs.sd.winner == TEAM_RED ? red : blue, qtrue );
+		} else {
+			CG_DrawSDCentered( y, "Round drawn", colorWhite, qtrue );
+		}
+	} else if ( cgs.sd.bombState == BOMB_PLANTED ) {
+		Com_sprintf( line, sizeof( line ), cgs.sd.site ? "Bomb planted at %c" : "Bomb planted",
+			cgs.sd.site );
+		CG_DrawSDCentered( y, line, warn, qfalse );
+		if ( alive && !attacking && myTeam != TEAM_SPECTATOR ) {
+			CG_DrawSDCentered( y + 16, "Defuse it - hold USE on the bomb", colorWhite, qfalse );
+		}
+	} else if ( alive && cgs.sd.carrier == me ) {
+		CG_DrawSDCentered( y, "You have the bomb - hold USE in a site to plant", barFill, qfalse );
+	} else if ( attacking && cgs.sd.carrier >= 0 && myTeam != TEAM_SPECTATOR ) {
+		CG_DrawSDCentered( y, va( "%s has the bomb", cgs.clientinfo[ cgs.sd.carrier ].name ),
+			colorWhite, qfalse );
+	}
+
+	// --- plant / defuse progress, only for the one doing it ------------------
+	if ( alive && cgs.sd.actKind != SDACT_NONE && cgs.sd.actor == me && cgs.sd.actDuration > 0 ) {
+		float frac = (float)( cg.time - cgs.sd.actStart ) / (float)cgs.sd.actDuration;
+
+		if ( frac < 0 ) frac = 0;
+		if ( frac > 1 ) frac = 1;
+		CG_FillRect( 320 - SD_BAR_W / 2 - 2, SD_BAR_Y - 2, SD_BAR_W + 4, SD_BAR_H + 4, barBack );
+		CG_FillRect( 320 - SD_BAR_W / 2, SD_BAR_Y, SD_BAR_W * frac, SD_BAR_H, barFill );
+		CG_DrawSDCentered( SD_BAR_Y + SD_BAR_H + 4,
+			cgs.sd.actKind == SDACT_PLANT ? "Planting..." : "Defusing...", colorWhite, qfalse );
+	}
+}
 
 /*
 =====================

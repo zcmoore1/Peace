@@ -58,6 +58,8 @@ int G_CountAliveOnTeam( team_t team ) {
 	return count;
 }
 
+static void G_SDUpdateConfigstring( void );
+
 /*
 ==================
 G_AttackingTeam / G_DefendingTeam
@@ -263,6 +265,28 @@ static void G_SDResolveLayout( void ) {
 
 /*
 ==================
+G_InitRoundGame
+
+Map load, after every entity has spawned. Resolve the layout and publish the
+initial (no round yet) state, so a HUD connecting before the first round still
+reads a valid configstring.
+==================
+*/
+void G_InitRoundGame( void ) {
+	if ( !G_RoundBasedGametype() ) {
+		trap_SetConfigstring( CS_SD_STATE, "" );
+		return;
+	}
+	G_SDResolveLayout();
+	level.bombSite = -1;
+	level.bombCarrier = -1;
+	level.defuser = -1;
+	level.roundWinner = -1;
+	G_SDUpdateConfigstring();
+}
+
+/*
+==================
 G_SelectSDSpawnPoint
 
 Spawn by ROLE. Attackers use the attacker spawns and defenders the defender
@@ -416,6 +440,54 @@ static void G_RoundRespawnAll( void ) {
 
 /*
 ==================
+G_ClearRoundWorld
+
+A new round starts on a clean map, as in CoD: nothing thrown or fired last
+round survives into this one, dropped weapons are gone, and the dead are
+cleared away. Runs BEFORE anyone respawns, so a grenade cooked at the end of
+the previous round cannot land on a player who has just been placed.
+==================
+*/
+static void G_ClearRoundWorld( void ) {
+	int			i;
+	gentity_t	*e;
+
+	for ( i = MAX_CLIENTS; i < level.num_entities; i++ ) {
+		e = &g_entities[i];
+		if ( !e->inuse ) {
+			continue;
+		}
+		if ( e->s.eType == ET_MISSILE || ( e->flags & FL_DROPPED_ITEM ) ) {
+			G_FreeEntity( e );
+		}
+	}
+	// body queue entries are never freed, only unlinked (see BodySink)
+	for ( i = 0; i < BODY_QUEUE_SIZE; i++ ) {
+		e = level.bodyQue[i];
+		if ( !e ) {
+			continue;
+		}
+		trap_UnlinkEntity( e );
+		e->physicsObject = qfalse;
+		e->think = NULL;
+		e->nextthink = 0;
+	}
+}
+
+/*
+==================
+G_OnFoot
+
+Planting and defusing are done standing on something. Mid-air, falling, or
+hanging on a ladder (which takes you off the ground) does not count.
+==================
+*/
+static qboolean G_OnFoot( gentity_t *ent ) {
+	return ent->client && ent->client->ps.groundEntityNum != ENTITYNUM_NONE;
+}
+
+/*
+==================
 G_StartRound
 
 Begin a new round: advance the round counter, respawn everyone and enter the
@@ -446,6 +518,7 @@ static void G_StartRound( void ) {
 	warmupMsec = ( g_roundwarmup.integer > 0 ) ? g_roundwarmup.integer * 1000 : 1000;
 	level.roundStateEndTime = level.time + warmupMsec;
 
+	G_ClearRoundWorld();
 	G_RoundRespawnAll();
 
 	// reset the bomb and hand it to a fresh attacker for the new round
@@ -559,7 +632,7 @@ static void G_RunBomb( void ) {
 		inSite = ( level.plantTouchTime != 0 && ( level.time - level.plantTouchTime ) <= 250 );
 
 		if ( inSite && carrier->client &&
-			carrier->client->ps.stats[STAT_HEALTH] > 0 &&
+			carrier->client->ps.stats[STAT_HEALTH] > 0 && G_OnFoot( carrier ) &&
 			( carrier->client->buttons & BUTTON_USE ) ) {
 			level.plantProgress += ( level.time - level.previousTime );
 			plantMsec = ( g_bombplanttime.integer > 0 ) ? g_bombplanttime.integer * 1000 : 4000;
@@ -599,7 +672,7 @@ static void G_RunBomb( void ) {
 		if ( cl->ps.stats[STAT_HEALTH] <= 0 ) {
 			continue;
 		}
-		if ( !( cl->buttons & BUTTON_USE ) ) {
+		if ( !( cl->buttons & BUTTON_USE ) || !G_OnFoot( ent ) ) {
 			continue;
 		}
 		VectorSubtract( ent->r.currentOrigin, level.bombOrigin, delta );
@@ -696,7 +769,7 @@ pickup checks this first so it can never steal the button mid-plant.
 qboolean G_OnObjective( gentity_t *ent ) {
 	vec3_t	delta;
 
-	if ( !G_RoundBasedGametype() || level.roundState != RND_ACTIVE || !ent->client ) {
+	if ( !G_RoundBasedGametype() || level.roundState != RND_ACTIVE || !G_OnFoot( ent ) ) {
 		return qfalse;
 	}
 	if ( level.bombState == BOMB_CARRIED && ( ent - g_entities ) == level.bombCarrier ) {

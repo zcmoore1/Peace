@@ -511,6 +511,10 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	// general initialization
 	G_FindTeams();
 
+	// search & destroy: decide sides and bomb sites now that every entity has
+	// spawned, so the console says what was found (or inferred) at map load
+	G_InitRoundGame();
+
 	// make sure we have flags for CTF, etc
 	if( g_gametype.integer >= GT_TEAM ) {
 		G_CheckTeamItems();

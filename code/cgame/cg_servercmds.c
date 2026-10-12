@@ -228,6 +228,37 @@ void CG_SetConfigValues( void ) {
 	}
 #endif
 	cg.warmup = atoi( CG_ConfigString( CS_WARMUP ) );
+	CG_ParseSDState();
+}
+
+/*
+================
+CG_ParseSDState
+
+Decode the search & destroy round and bomb state the server publishes. A
+missing key reads as 0, so an empty configstring (any other gametype) leaves
+everything at "no round, no bomb" and the HUD stays silent.
+================
+*/
+void CG_ParseSDState( void ) {
+	const char	*info = CG_ConfigString( CS_SD_STATE );
+	const char	*site;
+
+	cgs.sd.state        = atoi( Info_ValueForKey( info, "st" ) );
+	cgs.sd.round        = atoi( Info_ValueForKey( info, "n" ) );
+	cgs.sd.attackers    = atoi( Info_ValueForKey( info, "att" ) );
+	cgs.sd.stateEnd     = atoi( Info_ValueForKey( info, "se" ) );
+	cgs.sd.roundEnd     = atoi( Info_ValueForKey( info, "re" ) );
+	cgs.sd.winner       = info[0] ? atoi( Info_ValueForKey( info, "w" ) ) : -1;
+	cgs.sd.bombState    = atoi( Info_ValueForKey( info, "bs" ) );
+	cgs.sd.carrier      = info[0] ? atoi( Info_ValueForKey( info, "bc" ) ) : -1;
+	cgs.sd.detonateTime = atoi( Info_ValueForKey( info, "bt" ) );
+	site                = Info_ValueForKey( info, "site" );
+	cgs.sd.site         = site[0];
+	cgs.sd.actKind      = atoi( Info_ValueForKey( info, "ak" ) );
+	cgs.sd.actor        = info[0] ? atoi( Info_ValueForKey( info, "aa" ) ) : -1;
+	cgs.sd.actStart     = atoi( Info_ValueForKey( info, "as" ) );
+	cgs.sd.actDuration  = atoi( Info_ValueForKey( info, "ad" ) );
 }
 
 /*
@@ -351,6 +382,8 @@ static void CG_ConfigStringModified( void ) {
 	} else if ( num >= CS_PLAYERS && num < CS_PLAYERS+MAX_CLIENTS ) {
 		CG_NewClientInfo( num - CS_PLAYERS );
 		CG_BuildSpectatorString();
+	} else if ( num == CS_SD_STATE ) {
+		CG_ParseSDState();
 	} else if ( num == CS_FLAGSTATUS ) {
 		if( cgs.gametype == GT_CTF ) {
 			// format is rb where its red/blue, 0 is at base, 1 is taken, 2 is dropped

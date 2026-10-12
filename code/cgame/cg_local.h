@@ -1040,6 +1040,25 @@ typedef struct {
 	int				redflag, blueflag;		// flag status from configstrings
 	int				flagStatus;
 
+	// search & destroy, decoded from CS_SD_STATE. All times are server times,
+	// the same base as cg.time, so the HUD counts down without any traffic.
+	struct {
+		int			state;					// roundState_t
+		int			round;
+		int			attackers;				// team_t
+		int			stateEnd;				// pre/post-round phase ends
+		int			roundEnd;				// active round times out; 0 = untimed
+		int			winner;					// team_t of the last round, or -1
+		int			bombState;				// bombState_t
+		int			carrier;				// clientNum, or -1
+		int			detonateTime;
+		char		site;					// planted site label, or 0
+		int			actKind;				// sdAction_t
+		int			actor;					// who is planting / defusing
+		int			actStart;
+		int			actDuration;
+	} sd;
+
 	qboolean  newHud;
 
 	//
@@ -1492,6 +1511,7 @@ void CG_InitConsoleCommands( void );
 void CG_ExecuteNewServerCommands( int latestSequence );
 void CG_ParseServerinfo( void );
 void CG_SetConfigValues( void );
+void CG_ParseSDState( void );
 void CG_ShaderStateChanged(void);
 #ifdef MISSIONPACK
 void CG_LoadVoiceChats( void );

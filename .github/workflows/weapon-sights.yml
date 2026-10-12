@@ -1,7 +1,7 @@
 name: Movement and weapon checks
 on:
   push:
-    branches: [dev-3b-gpt]
+    branches: [dev-3b-gpt, dev-claude]
   pull_request:
     paths:
       - 'code/cgame/**'
@@ -18,6 +18,8 @@ on:
       - 'dev/tests/**'
       - 'dev/tools/build_sight_assets.js'
       - 'dev/tools/build_ladder_map.py'
+      - 'dev/tools/build_sd_map.py'
+      - 'dev/tools/q3bsp.py'
       - '.github/workflows/weapon-sights.yml'
 permissions:
   contents: read
@@ -33,6 +35,10 @@ jobs:
           git diff --exit-code -- assets/baseq3
       - name: Check generated ladder map
         run: python3 dev/tools/build_ladder_map.py --check
+      - name: Check generated S&D arena, and that the shared BSP writer is faithful
+        run: |
+          python3 dev/tools/build_sd_map.py --check
+          python3 dev/tools/q3bsp.py
       - name: Test ladders against the real BSP collision engine
         run: |
           sh dev/tests/run-ladders.sh
@@ -46,6 +52,8 @@ jobs:
           out/tests/sights-test
       - name: Test saved classes, YY, quick actions, poses and network deltas
         run: sh dev/tests/run-loadouts.sh
+      - name: Test Search & Destroy rounds and the S&D arena against real collision
+        run: sh dev/tests/run-sd.sh
       - name: Build native and QVM game modules
         run: |
           cmake -S . -B out/ci -DBUILD_CLIENT=OFF -DBUILD_SERVER=OFF -DBUILD_RENDERER_GL1=OFF -DBUILD_RENDERER_GL2=OFF -DBUILD_GAME_LIBRARIES=ON -DBUILD_GAME_QVMS=ON

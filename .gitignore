@@ -76,3 +76,6 @@ __pycache__/
 
 # Visual Studio IDE cache - Browse.VC.db alone is over GitHub's 100MB limit
 .vs/
+
+# Native test binaries written by dev/tests/run-*.sh
+out/tests/

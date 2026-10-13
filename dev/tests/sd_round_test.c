@@ -32,6 +32,7 @@ static void SetCvar(vmCvar_t *v, int value) { v->integer = value; v->value = (fl
 
 /* --- stubs: record, don't simulate ------------------------------------------ */
 void QDECL G_Printf(const char *fmt, ...) { (void)fmt; }
+void QDECL G_LogPrintf(const char *fmt, ...) { (void)fmt; }
 void QDECL Com_Error(int level, const char *fmt, ...) { (void)level; (void)fmt; exit(2); }
 void QDECL Com_Printf(const char *fmt, ...) { (void)fmt; }
 void trap_LinkEntity(gentity_t *ent) { ent->r.linked = qtrue; }

@@ -533,6 +533,8 @@ static void G_StartRound( void ) {
 	level.bombSite = -1;
 	G_AssignBombCarrier();
 
+	G_LogPrintf( "SD_RoundStart: %i %s%s\n", level.roundNumber,
+		G_AttackingTeam() == TEAM_RED ? "red" : "blue", switched ? " switched" : "" );
 	trap_SendServerCommand( -1, va( "cp \"Round %i%s\n%s attack - get ready...\"",
 		level.roundNumber, switched ? "  -  Switching sides" : "",
 		G_AttackingTeam() == TEAM_RED ? "Red" : "Blue" ) );
@@ -555,6 +557,10 @@ static void G_RoundWin( team_t winner, const char *reason ) {
 	level.roundState = RND_POSTROUND;
 	level.roundStateEndTime = level.time + POSTROUND_TIME;
 
+	G_LogPrintf( "SD_RoundWin: %s %i %i: %s\n",
+		winner == TEAM_RED ? "red" : winner == TEAM_BLUE ? "blue" : "draw",
+		level.teamScores[TEAM_RED], level.teamScores[TEAM_BLUE], reason );
+
 	trap_SendServerCommand( -1, va( "print \"%s\n\"", reason ) );
 	trap_SendServerCommand( -1, va( "cp \"%s\nRed %i  -  Blue %i\"", reason,
 		level.teamScores[TEAM_RED], level.teamScores[TEAM_BLUE] ) );
@@ -574,6 +580,8 @@ static void G_BombPlanted( gentity_t *carrier, gentity_t *site ) {
 
 	level.bombState = BOMB_PLANTED;
 	level.bombSite = level.plantTouchSite;
+	G_LogPrintf( "SD_Plant: %i %c\n", (int)( carrier - g_entities ),
+		level.bombSite >= 0 ? level.bombSites[ level.bombSite ].label : '?' );
 	VectorCopy( carrier->r.currentOrigin, level.bombOrigin );
 	level.bombDetonateTime = level.time + timerMsec;
 	level.bombCarrier = -1;
@@ -652,6 +660,7 @@ static void G_RunBomb( void ) {
 	// detonation: attackers win if the countdown expires before a defuse
 	if ( level.time >= level.bombDetonateTime ) {
 		level.bombState = BOMB_DETONATED;
+		G_LogPrintf( "SD_Detonate\n" );
 		G_RoundWin( G_AttackingTeam(), "Bomb detonated" );
 		return;
 	}
@@ -688,6 +697,7 @@ static void G_RunBomb( void ) {
 		level.defuseProgress += ( level.time - level.previousTime );
 		if ( level.defuseProgress >= defuseMsec ) {
 			level.bombState = BOMB_DEFUSED;
+			G_LogPrintf( "SD_Defuse: %i\n", level.defuser );
 			G_RoundWin( defenders, "Bomb defused" );
 		}
 	} else {

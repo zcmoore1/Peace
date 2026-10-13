@@ -42,6 +42,15 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   appends, with a `===== session started` banner per run.
 - `peacedump` prints the full weapon/loadout state. `F11` = `peacedump; condump`.
 - In-game: `cg_weaponDebug 1`, `g_debugMove 1`, `devmap <map>` (not `map`).
+- `spawndummy [red|blue]` (server console) adds a stationary training dummy on
+  any map. It needs no bot AI and no `.aas` file — Peace's maps have none, and
+  botlib refuses a map without one. The mark is the `peace_dummy` userinfo key,
+  so it survives `map_restart`. In team games it joins the named or smaller team.
+- **Testing S&D alone:** `g_gametype 4`, `devmap peace_sd`, `team red`, then
+  `spawndummy blue`. A round needs someone on both teams. Kill the dummy to win
+  by elimination, or plant: you attack round 1, sides swap every round.
+- `games.log` records `SD_RoundStart`, `SD_Plant`, `SD_Defuse`, `SD_Detonate`
+  and `SD_RoundWin` (winner, both scores, reason).
 
 ## Design invariants — do not violate
 

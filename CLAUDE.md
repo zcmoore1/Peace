@@ -126,9 +126,9 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   When they disagree the clip is time-warped to fit and reads as jittery.
 - Material strings are baked into the IQM (`models/weapons2/spas12/...`), so
   moving an asset folder breaks its textures until re-export.
-- SPAS normal holster is 1500ms; draw remains 433ms and ladder holster remains
-  the universal 100ms. The reversed-draw drop clip is retimed in `view.cfg` and
-  the importer. Transition-note ordering and YY cancellation are unchanged.
+- SPAS normal holster and draw are both 1500ms; ladder holster remains the
+  universal 100ms. Both clips are retimed to 1500ms in `view.cfg`, the IQM and
+  the importer (`CLIP_SECONDS`). Transition-note ordering and YY cancellation are unchanged.
 - Export IQM triangle indices clockwise for Quake's GL_FRONT culling, while
   retaining outward normals. Blender keeps CCW indices. Reusing Blender order
   in the game renders inside surfaces and hides the front post during ADS.

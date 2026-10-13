@@ -1794,7 +1794,7 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 	250,	// WP_NONE
 	250,	// WP_GAUNTLET
 	250,	// WP_MACHINEGUN
-	433,	// WP_SHOTGUN  (MW2 draw, 26f @60fps)
+	1500,	// WP_SHOTGUN  (heavy draw, matches the 1500ms holster; YY still cancels it)
 	300,	// WP_GRENADE_LAUNCHER
 	300,	// WP_ROCKET_LAUNCHER
 	250,	// WP_LIGHTNING

@@ -4,7 +4,7 @@
   skin. Its triangle winding is corrected for Quake's culling; the old export
   rendered inside surfaces and hid the front sight post during ADS. UVs,
   vertices, skin weights and animation frames are preserved.
-- Normal holster takes **1500ms**. Raising remains 433ms, and grabbing a ladder
+- Normal holster and draw both take **1500ms** (YY cancels the draw), and grabbing a ladder
   still uses the shared 100ms holster. YY and reload-note cancellation retain
   their existing shared state-machine behavior.
 - `cg_sight 0` (default) uses the rear aperture and front post. `cg_sight 1`

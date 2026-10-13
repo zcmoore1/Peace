@@ -29,7 +29,7 @@ typedef struct {
 
 static classSelect_t classSelect;
 static classEdit_t classEdit;
-static const char *lethals[] = { "None", "Frag grenade", NULL };
+static const char *lethals[] = { "None", "Frag grenade", "Semtex", NULL };
 static const char *tacticals[] = { "None", "Flash grenade", NULL };
 static const char *counts[] = { "1", "2", "3", NULL };
 static vec4_t classBackground = {0.045f, 0.06f, 0.08f, 1};
@@ -130,7 +130,7 @@ static void UI_ClassSelectDraw( void ) {
 	UI_DrawString(80, 158, line, UI_SMALLFONT, color_white);
 	Com_sprintf(line, sizeof(line), "SECONDARY   %s", BG_ClassWeaponName(loadout->slot[SLOT_SECONDARY]));
 	UI_DrawString(80, 184, line, UI_SMALLFONT, color_white);
-	Com_sprintf(line, sizeof(line), "GRENADE     %s   x%i", loadout->lethal ? "Frag" : "None", loadout->lethalCount);
+	Com_sprintf(line, sizeof(line), "GRENADE     %s   x%i", loadout->lethal == WP_SEMTEX ? "Semtex" : loadout->lethal ? "Frag" : "None", loadout->lethalCount);
 	UI_DrawString(80, 210, line, UI_SMALLFONT, color_white);
 	Com_sprintf(line, sizeof(line), "TACTICAL    %s   x%i", loadout->tactical ? "Flash" : "None", loadout->tacticalCount);
 	UI_DrawString(80, 236, line, UI_SMALLFONT, color_white);
@@ -216,7 +216,7 @@ static void UI_ClassEditEvent( void *ptr, int event ) {
 	Q_strncpyz(loadout.name, classEdit.name.field.buffer, sizeof(loadout.name));
 	loadout.slot[0] = BG_ClassWeapon(classEdit.primary.curvalue);
 	loadout.slot[1] = BG_ClassWeapon(classEdit.secondary.curvalue);
-	loadout.lethal = classEdit.lethal.curvalue ? WP_FRAG : WP_NONE;
+	loadout.lethal = classEdit.lethal.curvalue == 2 ? WP_SEMTEX : classEdit.lethal.curvalue ? WP_FRAG : WP_NONE;
 	loadout.lethalCount = loadout.lethal ? classEdit.lethalCount.curvalue + 1 : 0;
 	loadout.tactical = classEdit.tactical.curvalue ? WP_FLASH : WP_NONE;
 	loadout.tacticalCount = loadout.tactical ? classEdit.tacticalCount.curvalue + 1 : 0;
@@ -265,7 +265,7 @@ void UI_CreateClassMenu( int slot ) {
 	Q_strncpyz(classEdit.name.field.buffer, loadout.name, sizeof(classEdit.name.field.buffer));
 	UI_ClassSpin(&classEdit.menu, &classEdit.primary, "PRIMARY", classEdit.weapons, primary, 132);
 	UI_ClassSpin(&classEdit.menu, &classEdit.secondary, "SECONDARY", classEdit.weapons, secondary, 158);
-	UI_ClassSpin(&classEdit.menu, &classEdit.lethal, "GRENADE", lethals, !!loadout.lethal, 184);
+	UI_ClassSpin(&classEdit.menu, &classEdit.lethal, "GRENADE", lethals, loadout.lethal == WP_SEMTEX ? 2 : !!loadout.lethal, 184);
 	UI_ClassSpin(&classEdit.menu, &classEdit.lethalCount, "GRENADE COUNT", counts, loadout.lethalCount ? loadout.lethalCount - 1 : 0, 208);
 	UI_ClassSpin(&classEdit.menu, &classEdit.tactical, "TACTICAL", tacticals, !!loadout.tactical, 234);
 	UI_ClassSpin(&classEdit.menu, &classEdit.tacticalCount, "TACTICAL COUNT", counts, loadout.tacticalCount ? loadout.tacticalCount - 1 : 0, 258);

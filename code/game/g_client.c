@@ -961,12 +961,12 @@ char *ClientConnect( int clientNum, qboolean firstTime, qboolean isBot ) {
 	// maps have one, so this is what lets a dummy exist at all. The mark lives
 	// in userinfo because map_restart reconnects every client and the client
 	// struct is wiped above.
-	client->isDummy = isBot && atoi( Info_ValueForKey( userinfo, "peace_dummy" ) );
+	client->pers.isDummy = isBot && atoi( Info_ValueForKey( userinfo, "peace_dummy" ) );
 
 	if( isBot ) {
 		ent->r.svFlags |= SVF_BOT;
 		ent->inuse = qtrue;
-		if( !client->isDummy && !G_BotConnect( clientNum, !firstTime ) ) {
+		if( !client->pers.isDummy && !G_BotConnect( clientNum, !firstTime ) ) {
 			return "BotConnectfailed";
 		}
 	}
@@ -1352,7 +1352,7 @@ void ClientDisconnect( int clientNum ) {
 
 	CalculateRanks();
 
-	if ( ( ent->r.svFlags & SVF_BOT ) && !ent->client->isDummy ) {
+	if ( ( ent->r.svFlags & SVF_BOT ) && !ent->client->pers.isDummy ) {
 		BotAIShutdownClient( clientNum, qfalse );		// a dummy never had bot AI
 	}
 }

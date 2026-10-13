@@ -11,7 +11,7 @@ to the main menu.
 1. Choose a Custom slot and **CREATE / EDIT**, or run `ui_createclass`.
 2. Set the name, primary, secondary, grenade and tactical equipment. Both weapon
    slots use the existing gun catalog and must contain different guns. Equipment
-   can be None or the existing Frag/Flash, with 1–3 charges when equipped.
+   can be None, Frag or Semtex for lethal, and Flash for tactical, with 1–3 charges.
 3. **SAVE CLASS**, then **SELECT CLASS**. Selection applies on the next spawn;
    selecting or editing a class never refills the current life's ammo.
 
@@ -64,20 +64,40 @@ usercmd cannot start a transition the simulation never observed.
 The initial holster, note timing and finish-before-fill ordering remain intact.
 There is no named-glitch branch, NAC helper, fake reload or zoomload feature.
 
+## Sprint and animation ownership
+
+Starting sprint during a draw, drop or fire/bolt animation keeps that clip as
+the visible source. If a holster starts, that source owns the picture for the
+whole drop. A one-shot finishes and holds its final pose; a looping clip keeps
+playing. Sprinting into a ladder uses the same ownership rule. Reload clips
+are excluded, and equipment actions/recovery block sprint.
+
+Sprint + Y and sprint + YY use the ordinary slot-toggle/drop-cancellation path.
+On cancellation the retained pose blends back to the current posture. A held
+sprint input still requests sprint, so its entry resumes without jumping back
+to frame zero; releasing sprint returns the picture toward ready. Firing owns
+the picture immediately once gameplay permits it. The blend never changes a
+busy timer, ammunition or chamber debt.
+
+Clip ranges and loop flags come from the model's config. The rule works with
+any weapon that provides those clips; SPAS currently has the complete authored
+set. It does not manufacture missing animations for legacy placeholder models.
+
 ## Quick actions and networking
 
 A press latches melee/lethal/tactical through normal holster and deploy timing,
 fires the action once without requiring the trigger, then returns to the selected
 gun. A held action button does not repeat. Empty equipment does nothing; a ladder
-grab clears queued actions. Grenades and melee retain their existing effects
-and animation assets.
+grab clears queued actions. Frag/flash/melee keep their existing behavior.
+Semtex uses hold/release, pre-throw cancel, and post-throw queued swaps; see
+`dev/SEMTEX.md` for controls, timing, art and compatibility notes.
 
 Only the selected validated definition is sent in `peace_loadout` userinfo.
 `peace_class_0`–`peace_class_4` stay local. The server rejects malformed names,
 invalid guns, duplicate slots, unsupported perks, and impossible counts without
 partially replacing the last valid selection.
 
-The six-bit `weaponAction` field is carried by playerstate deltas so prediction
+The nine-bit `weaponAction` field is carried by playerstate deltas so prediction
 replays do not forget a tap or replay it twice. **Rebuild the executable, server
 and all modules together; mixing old and new network/module layouts is unsupported.**
 QVM build rules now depend on shared headers to avoid stale structure offsets.
@@ -87,8 +107,9 @@ the SPAS from a QVM could pass that address to the native renderer as a pointer
 and crash; native DLLs bypass this translation and retain their actual pointers.
 
 This UI and gameplay validation target Peace/baseq3. The legacy Team Arena
-missionpack builds but does not have this class menu; its pre-existing expanded
-weapon enumeration also exceeds Peace's current equipment/ammo bit capacity.
+missionpack builds but does not have this class menu. Its equipment capacity and
+positional tables are fixed in protocol 72: 24 ammo entries and a full-width
+inventory mask. Both builds run the shared class/action regression tests.
 
 ## Checks
 

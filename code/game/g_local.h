@@ -158,6 +158,9 @@ struct gentity_s {
 
 	gentity_t	*chain;
 	gentity_t	*enemy;
+	// Server-only sticky projectile attachment identity. Do not follow a
+	// recycled mover, a respawned player, or a new connection in the same slot.
+	int semtexHostFreeTime, semtexHostSpawn, semtexHostConnect, semtexOwnerConnect;
 	gentity_t	*activator;
 	gentity_t	*teamchain;		// next entity in team
 	gentity_t	*teammaster;	// master of the team
@@ -239,6 +242,7 @@ typedef struct {
 	clientConnected_t	connected;	
 	usercmd_t	cmd;				// we would lose angles if not persistant
 	qboolean	localClient;		// true if "ip" info key is "localhost"
+	qboolean	isDummy;			// connection identity; survives ClientSpawn
 	qboolean	initialSpawn;		// the first spawn should be at a cool location
 	qboolean	predictItemPickup;	// based on cg_predictItems userinfo
 	qboolean	pmoveFixed;			//
@@ -268,8 +272,6 @@ struct gclient_s {
 	qboolean	readyToExit;		// wishes to leave the intermission
 
 	qboolean	noclip;
-
-	qboolean	isDummy;			// training dummy: all input zeroed, just stands still
 
 	int			lastCmdTime;		// level.time of last usercmd_t, for EF_CONNECTION
 									// we can't just use pers.lastCommand.time, because
@@ -546,6 +548,7 @@ void G_RunMissile( gentity_t *ent );
 
 gentity_t *fire_plasma (gentity_t *self, vec3_t start, vec3_t aimdir);
 gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t aimdir);
+gentity_t *fire_semtex (gentity_t *self, vec3_t start, vec3_t aimdir);
 gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir);
 gentity_t *fire_bfg (gentity_t *self, vec3_t start, vec3_t dir);
 gentity_t *fire_grapple (gentity_t *self, vec3_t start, vec3_t dir);

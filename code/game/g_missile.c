@@ -67,6 +67,11 @@ Explode a missile without an impact
 void G_ExplodeMissile( gentity_t *ent ) {
 	vec3_t		dir;
 	vec3_t		origin;
+	gentity_t *attacker = ent->parent;
+	if (!attacker || !attacker->inuse || !attacker->client ||
+		attacker->client->pers.connected != CON_CONNECTED ||
+		(ent->s.weapon == WP_SEMTEX && attacker->client->pers.enterTime != ent->semtexOwnerConnect))
+		attacker = &g_entities[ENTITYNUM_WORLD];
 
 	BG_EvaluateTrajectory( &ent->s.pos, level.time, origin );
 	SnapVector( origin );
@@ -83,9 +88,9 @@ void G_ExplodeMissile( gentity_t *ent ) {
 
 	// splash damage
 	if ( ent->splashDamage ) {
-		if( G_RadiusDamage( ent->r.currentOrigin, ent->parent, ent->splashDamage, ent->splashRadius, ent
-			, ent->splashMethodOfDeath ) ) {
-			g_entities[ent->r.ownerNum].client->accuracy_hits++;
+		if( G_RadiusDamage( ent->r.currentOrigin, attacker, ent->splashDamage, ent->splashRadius, ent
+			, ent->splashMethodOfDeath ) && attacker->client ) {
+			attacker->client->accuracy_hits++;
 		}
 	}
 
@@ -267,6 +272,63 @@ static void ProximityMine_Player( gentity_t *mine, gentity_t *player ) {
 G_MissileImpact
 ================
 */
+static void SemtexHostAxis(gentity_t *host, vec3_t axis[3]) {
+	vec3_t angles;
+	VectorCopy(host->r.currentAngles, angles);
+	if (host->client) VectorSet(angles, 0, host->client->ps.viewangles[YAW], 0);
+	AnglesToAxis(angles, axis);
+}
+
+static void SemtexStick(gentity_t *ent, trace_t *trace, gentity_t *host) {
+	vec3_t origin, offset, axis[3];
+	int i;
+	VectorMA(trace->endpos, 1.0f, trace->plane.normal, origin);
+	G_SetOrigin(ent, origin);
+	VectorClear(ent->s.pos.trDelta);
+	VectorCopy(trace->plane.normal, ent->movedir);
+	vectoangles(ent->movedir, ent->s.angles);
+	ent->s.angles[PITCH] += 90;
+	if (host->inuse && (host->client || host->s.eType == ET_MOVER)) {
+		ent->enemy = host;
+		ent->semtexHostFreeTime = host->freetime;
+		ent->semtexHostSpawn = host->client ? host->client->ps.persistant[PERS_SPAWN_COUNT] : 0;
+		ent->semtexHostConnect = host->client ? host->client->pers.enterTime : 0;
+		SemtexHostAxis(host, axis);
+		VectorSubtract(origin, host->r.currentOrigin, offset);
+		for (i=0; i<3; i++) {
+			ent->pos1[i] = DotProduct(offset, axis[i]);
+			ent->pos2[i] = DotProduct(ent->movedir, axis[i]);
+		}
+	}
+	// The fuse began on release, not contact. No impact damage or bounce.
+	trap_LinkEntity(ent);
+}
+
+static void SemtexFollow(gentity_t *ent) {
+	gentity_t *host = ent->enemy;
+	vec3_t origin, normal, axis[3];
+	int i;
+	if (!host) return;
+	if (!host->inuse || host->freetime != ent->semtexHostFreeTime ||
+		(host->client && (host->client->pers.connected != CON_CONNECTED ||
+		host->client->ps.persistant[PERS_SPAWN_COUNT] != ent->semtexHostSpawn ||
+		host->client->pers.enterTime != ent->semtexHostConnect))) {
+		ent->enemy = NULL; // remain at last contact, never teleport to a respawn
+		return;
+	}
+	SemtexHostAxis(host, axis);
+	VectorCopy(host->r.currentOrigin, origin);
+	VectorClear(normal);
+	for (i=0; i<3; i++) {
+		VectorMA(origin, ent->pos1[i], axis[i], origin);
+		VectorMA(normal, ent->pos2[i], axis[i], normal);
+	}
+	G_SetOrigin(ent, origin);
+	vectoangles(normal, ent->s.angles);
+	ent->s.angles[PITCH] += 90;
+	trap_LinkEntity(ent);
+}
+
 void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 	gentity_t		*other;
 	qboolean		hitClient = qfalse;
@@ -275,6 +337,10 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 	int				eFlags;
 #endif
 	other = &g_entities[trace->entityNum];
+	if (ent->s.weapon == WP_SEMTEX) {
+		SemtexStick(ent, trace, other);
+		return;
+	}
 
 	// check for bounce
 	if ( !other->takedamage &&
@@ -449,6 +515,11 @@ void G_RunMissile( gentity_t *ent ) {
 	vec3_t		origin;
 	trace_t		tr;
 	int			passent;
+	if (ent->s.weapon == WP_SEMTEX && ent->s.pos.trType == TR_STATIONARY) {
+		SemtexFollow(ent);
+		G_RunThink(ent);
+		return;
+	}
 
 	// get current position
 	BG_EvaluateTrajectory( &ent->s.pos, level.time, origin );
@@ -560,6 +631,19 @@ gentity_t *fire_plasma (gentity_t *self, vec3_t start, vec3_t dir) {
 fire_grenade
 =================
 */
+#define SEMTEX_FUSE_TIME 2500
+
+gentity_t *fire_semtex(gentity_t *self, vec3_t start, vec3_t dir) {
+	gentity_t *bolt = fire_grenade(self, start, dir);
+	bolt->classname = "semtex";
+	bolt->s.weapon = WP_SEMTEX;
+	bolt->s.eFlags = 0;
+	bolt->damage = 0;
+	bolt->nextthink = level.time + SEMTEX_FUSE_TIME;
+	bolt->semtexOwnerConnect = self->client ? self->client->pers.enterTime : 0;
+	return bolt;
+}
+
 gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir) {
 	gentity_t	*bolt;
 

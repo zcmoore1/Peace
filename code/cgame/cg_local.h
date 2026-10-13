@@ -1379,6 +1379,7 @@ void CG_Sights_AddOptic( int weapon, const refEntity_t *hand );
 
 // cg_anim.c
 void     CG_WeapAnim_Init( void );
+qboolean CG_WeapAnim_HoldsDrop( void );
 qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec );
 qboolean CG_WeapAnim_Apply( playerState_t *ps, refEntity_t *entity, int msec );
 void     CG_WeapAnim_RegisterClips( int weapon, qhandle_t hModel, const char *cfgPath );

@@ -837,7 +837,8 @@ void Weapon_Knife( gentity_t *ent ) {
 void Weapon_ThrowEquipment( gentity_t *ent, qboolean lethal ) {
 	gentity_t	*m;
 
-	m = fire_grenade( ent, muzzle, forward );
+	m = ent->s.weapon == WP_SEMTEX ? fire_semtex(ent, muzzle, forward) :
+		fire_grenade( ent, muzzle, forward );
 	if ( !m ) {
 		return;
 	}
@@ -895,6 +896,7 @@ void FireWeapon( gentity_t *ent ) {
 		Weapon_Knife( ent );
 		break;
 	case WP_FRAG:
+	case WP_SEMTEX:
 		Weapon_ThrowEquipment( ent, qtrue );
 		break;
 	case WP_FLASH:

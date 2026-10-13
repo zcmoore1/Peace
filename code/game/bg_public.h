@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-1"
+#define	GAME_VERSION		BASEGAME "-2"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -181,16 +181,23 @@ typedef enum {
 #define WA_FIRED           4
 #define WA_HELD_SHIFT      3
 #define WA_HELD_MASK       (7 << WA_HELD_SHIFT)
+#define WA_RETURNING       64   // keep the original slot until cmd.weapon acknowledges it
+#define WA_SWAP_HELD       128  // edge latch across usercmd pmove substeps
+#define WA_RECOVERING      256  // thrown equipment returns original gun before queued selection
+
+// Shared fast destination holster (future sidearms may use the same rule).
+// These are authored Peace timings, not claims of measured MW2 frame data.
+#define BG_FAST_HOLSTER_TIME 150
 
 // Ladder tuning is shared by prediction, authority and presentation. These are
 // initial feel values, not measured MW2 constants. A grab always pays a positive,
 // weapon-independent holster; animation notes still own the busy lock.
 #define BG_LADDER_DROP_TIME       100
 // One rapid holster for every gun, same value as the minimum swap. Used for the
-// gun going down for melee, and for a knife, frag or flash going away at the
+// gun going down for melee, and for any quick action going away at the
 // start of every recovery.
 #define BG_RAPID_DROP_TIME        50
-// How long a swung knife or a thrown frag/flash is held before recovery starts.
+// How long a swung knife or a thrown grenade is held before recovery starts.
 // One value: recovering from melee and from equipment is the same thing.
 #define BG_QUICK_ACTION_HOLD      500
 #define BG_LADDER_REACH           4.0f
@@ -334,10 +341,7 @@ float BG_WeaponSpread( const playerState_t *ps );
 typedef enum {
 	STAT_HEALTH,
 	STAT_HOLDABLE_ITEM,
-#ifdef MISSIONPACK
-	STAT_PERSISTANT_POWERUP,
-#endif
-	STAT_WEAPONS,					// 16 bit fields
+	STAT_WEAPONS = PS_STAT_WEAPONS, // full-width inventory mask
 	STAT_ARMOR,
 	STAT_DEAD_YAW,					// look this direction when dead (FIXME: get rid of?)
 	STAT_CLIENTS_READY,				// bit mask of clients wishing to exit the intermission (FIXME: configstring?)
@@ -357,10 +361,12 @@ typedef enum {
 	STAT_UNCHAMBERED,			// bit per weapon: this gun has fired and its
 									// action has NOT been worked since. Per weapon
 									// because you carry two and only one of them
-									// is mid-cycle. Same 0-13 range and the same
-									// bit-15 rule as STAT_WEAPONS - stats[] go
-									// over the wire as SIGNED shorts.
+									// is mid-cycle. Gun bits stay in 0-13; this
+									// stat still uses a SIGNED short on the wire.
 	STAT_LADDER,				// LADDER_* flags and surface-facing yaw
+#ifdef MISSIONPACK
+	STAT_PERSISTANT_POWERUP, // keep engine-visible stat indices identical in both builds
+#endif
 	STAT_COUNT
 } statIndex_t;
 
@@ -476,13 +482,18 @@ typedef enum {
 	// Loadout extras. These are weapon_t entries so they reuse the whole pmove
 	// state machine (switch timing, notes, firing) for free, but they are NOT
 	// inventory slots - melee is always available and equipment lives in its
-	// own slots. Basegame indices: KNIFE 11, FRAG 12, FLASH 13, M203 14.
+	// own slots. Basegame indices: KNIFE 11, FRAG 12, FLASH 13, SEMTEX 14.
 	WP_KNIFE,			// melee, always carried
 	WP_FRAG,			// lethal equipment
 	WP_FLASH,			// tactical equipment
+	WP_SEMTEX,           // held lethal equipment; release to throw
 
 	WP_NUM_WEAPONS
 } weapon_t;
+
+int BG_LethalWeapon( const playerState_t *ps );
+int BG_ActiveSlotWeapon( const playerState_t *ps );
+qboolean BG_IsActionWeapon( int weapon );
 
 // Inventory slots. Two weapons, CoD style.
 typedef enum {

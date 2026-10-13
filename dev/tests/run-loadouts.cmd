@@ -12,6 +12,14 @@ cl %test_flags% /Feout\build\loadout-tests\loadout.exe dev\tests\loadout_test.c 
 if errorlevel 1 goto fail
 out\build\loadout-tests\loadout.exe
 if errorlevel 1 goto fail
+cl %test_flags% /Feout\build\loadout-tests\semtex.exe dev\tests\semtex_test.c %test_game% code\qcommon\msg.c code\qcommon\huffman.c %test_common% /link /OPT:REF
+if errorlevel 1 goto fail
+out\build\loadout-tests\semtex.exe
+if errorlevel 1 goto fail
+cl %test_flags% /Feout\build\loadout-tests\missile.exe dev\tests\semtex_missile_test.c code\game\bg_misc.c %test_common% /link /OPT:REF
+if errorlevel 1 goto fail
+out\build\loadout-tests\missile.exe
+if errorlevel 1 goto fail
 cl %test_flags% /Feout\build\loadout-tests\menu.exe dev\tests\class_menu_test.c code\game\bg_loadout.c %test_common% /link /OPT:REF
 if errorlevel 1 goto fail
 out\build\loadout-tests\menu.exe

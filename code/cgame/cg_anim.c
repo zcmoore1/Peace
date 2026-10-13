@@ -11,7 +11,7 @@ Layer stack (evaluated low→high, each blended onto the previous):
   LAYER_BASE      idle / fire cycle; always active
   LAYER_MOVE      raise, drop; active during weapon transitions
   LAYER_SPRINT    sprint-in / sprint-loop / sprint-out
-  LAYER_ADDITIVE  reserved for procedural additive (recoil, sway)
+  LAYER_RETAINED  current non-reload animation carried through sprint/holster
 
 Each layer has:
   clip     -- index into the weapon's weapAnimClips_t table
@@ -43,7 +43,8 @@ Each layer has:
 #define LAYER_BASE          0
 #define LAYER_MOVE          1
 #define LAYER_SPRINT        2
-#define LAYER_ADDITIVE      3
+#define LAYER_RETAINED      3
+#define RETAINED_BLEND_SPEED 0.0125f // 80ms picture release; never a gameplay lock
 
 typedef struct {
 	int     firstFrame;
@@ -73,6 +74,10 @@ static qboolean      bg_weapAnimDefsLoaded = qfalse;
 // Active layer state for the local player's viewmodel.
 static animLayer_t   cg_weapLayers[ANIM_LAYER_COUNT];
 static int           cg_weapAnimWeapon = WP_NONE;   // weapon these layers belong to
+static qboolean      cg_retainedActive, cg_retainedDrop, cg_previousSprint;
+static float         cg_retainedRate = 1.0f;
+static qboolean      cg_animContextValid;
+static int           cg_animClient, cg_animSpawn, cg_animTeleport;
 
 // ---------------------------------------------------------------------------
 // Clip definitions.
@@ -96,6 +101,8 @@ void CG_WeapAnim_Init( void ) {
 	Com_Memset( bg_weapAnimDefs, 0, sizeof(bg_weapAnimDefs) );
 	Com_Memset( cg_weapLayers,   0, sizeof(cg_weapLayers) );
 	cg_weapAnimWeapon = WP_NONE;
+	cg_retainedActive = cg_retainedDrop = cg_previousSprint = qfalse;
+	cg_animContextValid = qfalse;
 	bg_weapAnimDefsLoaded = qtrue;
 }
 
@@ -105,6 +112,8 @@ void CG_WeapAnim_Init( void ) {
 // ---------------------------------------------------------------------------
 static void CG_WeapAnim_WeaponChanged( int weapon ) {
 	Com_Memset( cg_weapLayers, 0, sizeof(cg_weapLayers) );
+	cg_retainedActive = cg_retainedDrop = cg_previousSprint = qfalse;
+	cg_retainedRate = 1.0f;
 
 	// Start with idle on base layer at full weight.
 	cg_weapLayers[LAYER_BASE].clip         = WANIM_IDLE;
@@ -154,16 +163,8 @@ static float CG_WeapAnim_LastFrameTime( const weapAnimDef_t *def, int clip ) {
 // ---------------------------------------------------------------------------
 // CG_WeapAnim_TransitionBusy
 //
-// A transition clip OWNS its layer until it has played out. This is the general
-// rule that produces the "still swap": the weapon state machine is free to move
-// on underneath - start a holster, defer a sprint - but the picture does not
-// restart mid-transition. So a swap requested during a raise runs its full
-// timer while the raise keeps playing, and the next thing you see is the new
-// weapon's raise. No drop is ever drawn, and nothing here knows what a still
-// swap is; it is just a clip refusing to be cut short.
-//
-// Returns qfalse when the weapon has no animation data, so the fallback path
-// behaves exactly as before.
+// Whether a one-shot has reached its end. A retained holster is allowed to
+// keep that endpoint; otherwise normal sprint presentation can take over.
 // ---------------------------------------------------------------------------
 static qboolean CG_WeapAnim_TransitionBusy( const weapAnimDef_t *def, const animLayer_t *l ) {
 	float len = CG_WeapAnim_ClipLength( def, l->clip );
@@ -188,6 +189,91 @@ static void CG_WeapAnim_PlayLayer( animLayer_t *l, int clip ) {
 	l->targetWeight = 1.0f;
 }
 
+static qboolean CG_WeapAnim_Retainable(int clip) {
+	return clip != WANIM_IDLE && (clip < WANIM_RELOAD_START || clip > WANIM_RELOAD_END);
+}
+
+// Sprint does not erase an in-flight action. Carry its presentation forward;
+// a holster then owns that same clip until its destination completes. This is
+// independent of pmove's busy/note clocks and cannot confer weapon readiness.
+static void CG_WeapAnim_UpdateRetention(const weapAnimDef_t *def, const playerState_t *ps) {
+	animLayer_t *retained = &cg_weapLayers[LAYER_RETAINED];
+	qboolean sprinting = (ps->pm_flags & PMF_SPRINTING) ||
+		ps->weaponstate == WEAPON_SPRINT_IN || ps->weaponstate == WEAPON_SPRINTING;
+	qboolean dropping = ps->weaponstate == WEAPON_DROPPING;
+	qboolean released = qfalse;
+	qboolean forbidden = (ps->weaponAction & WA_TYPE_MASK) || BG_IsActionWeapon(ps->weapon) ||
+		ps->weaponstate == WEAPON_RELOADING ||
+		ps->weaponstate == WEAPON_LADDER || ps->stats[STAT_HEALTH] <= 0;
+	int i, source = -1;
+	retained->blendSpeed = RETAINED_BLEND_SPEED;
+
+	if (forbidden) {
+		cg_retainedActive = qfalse;
+		retained->weight = retained->targetWeight = 0;
+	} else if (cg_retainedActive) {
+		if (dropping) cg_retainedDrop = qtrue;
+		if ((cg_retainedDrop && !dropping) || (!cg_retainedDrop && !sprinting) ||
+			(!dropping && !def->clips[retained->clip].loop &&
+			 !CG_WeapAnim_TransitionBusy(def, retained))) {
+			cg_retainedActive = qfalse;
+			retained->targetWeight = 0;
+			released = qtrue;
+		}
+	}
+
+	if (!forbidden && !released && !cg_retainedActive && retained->targetWeight <= 0 &&
+		((sprinting && !cg_previousSprint) || (dropping && cg_previousSprint))) {
+		// Choose the animation the player actually saw, not the newly requested
+		// weapon state. Reload clips cannot become a retained source.
+		for (i=LAYER_BASE; i<=LAYER_SPRINT; i++) {
+			animLayer_t *l = &cg_weapLayers[i];
+			if (l->weight >= .5f && l->targetWeight > 0 &&
+				CG_WeapAnim_ClipLength(def, l->clip) > 0) source = i;
+		}
+		// Initial pullout can coincide with the first rendered frame.
+		if ((source < 0 || cg_weapLayers[source].clip == WANIM_IDLE) &&
+			ps->weaponstate == WEAPON_RAISING && sprinting) {
+			animLayer_t *move = &cg_weapLayers[LAYER_MOVE];
+			move->clip = WANIM_RAISE;
+			move->time = (1.0f - (float)ps->weaponTime / BG_WeaponRaiseTime(ps->weapon)) *
+				CG_WeapAnim_ClipLength(def, WANIM_RAISE);
+			source = LAYER_MOVE;
+		}
+		// Sprint-to-sprint changes already preserve continuity by reversing the
+		// posture layer. Retain across competing owners, not within that layer.
+		if (source >= 0 && (source != LAYER_SPRINT || dropping) &&
+			CG_WeapAnim_Retainable(cg_weapLayers[source].clip) &&
+			CG_WeapAnim_ClipLength(def, cg_weapLayers[source].clip) > 0) {
+			int duration = 0;
+			float length;
+			*retained = cg_weapLayers[source];
+			retained->weight = retained->targetWeight = 1;
+			retained->blendSpeed = RETAINED_BLEND_SPEED;
+			cg_retainedActive = qtrue;
+			cg_retainedDrop = dropping;
+			cg_retainedRate = 1;
+			length = CG_WeapAnim_ClipLength(def, retained->clip);
+			switch (retained->clip) {
+			case WANIM_RAISE: duration = BG_WeaponRaiseTime(ps->weapon); break;
+			case WANIM_DROP: duration = BG_WeaponDropTime(ps->weapon); break;
+			case WANIM_FIRE: duration = BG_WeaponFireLength(ps->weapon); break;
+			case WANIM_SPRINT_IN:
+				duration = BG_WeaponSprintInTime(ps->weapon);
+				length = CG_WeapAnim_LastFrameTime(def, retained->clip); break;
+			case WANIM_SPRINT_OUT:
+				duration = BG_WeaponSprintOutTime(ps->weapon);
+				length = CG_WeapAnim_LastFrameTime(def, retained->clip); break;
+			}
+			if (duration > 0) cg_retainedRate = length / duration;
+		}
+	}
+	// Actual fire owns the picture immediately; a cosmetic blend is not a lock.
+	if (!cg_retainedActive && ps->weaponstate == WEAPON_FIRING)
+		retained->weight = retained->targetWeight = 0;
+	cg_previousSprint = sprinting && !forbidden;
+}
+
 // ---------------------------------------------------------------------------
 // CG_WeapAnim_UpdateLayers
 // Called every frame with current weapon state. Updates layer weights and
@@ -200,30 +286,11 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	int i;
 	int baseClip = WANIM_IDLE;
 
-	// IW4 still swap. When a weapon swap collides with the sprint carry, the
-	// SPRINT animation wins and the swap is never drawn.
-	//
-	// This is deliberately NOT configurable and must not be made configurable.
-	// The other CoD family (Treyarch) lets the swap anim take priority instead;
-	// that is a different game and Peace is not it. This behaviour is load
-	// bearing for how the weapon system is meant to feel, so it is expressed as
-	// a rule in code rather than a cvar that could be archived to the wrong
-	// value and quietly change the feel of the game.
-	//
-	// Two consequences fall out of "hold the layer and stop re-aiming it", and
-	// neither is coded for directly:
-	//   - Swapping out of the sprint-IN transition holds that clip's final
-	//     frame - the last pose before the full sprint would have begun -
-	//     because CG_WeapAnim_SampleLayer clamps a NON-LOOPING clip to its end.
-	//   - Swapping out of the full sprint carry keeps the carry running, because
-	//     that clip is LOOPING and the same clamp does not apply.
-	// The clip's loop flag decides which of the two happens. There is no branch.
-	//
-	// The weapon state machine is untouched either way: the holster still runs
-	// its full BG_WeaponDropTime, so this changes the tell, never the timing.
+	// Normal layers follow state; a retained source owns only the picture.
+	// Its authored loop flag decides whether to loop or hold the final frame.
 	qboolean swapping    = ( ps->weaponstate == WEAPON_RAISING ||
 	                         ps->weaponstate == WEAPON_DROPPING );
-	qboolean sprintHolds = ( swapping && sprint->weight > 0.0f );
+	CG_WeapAnim_UpdateRetention(def, ps);
 
 	// -- Base layer: swap between idle and fire --
 	// Firing and pumping share one clip. On a pump gun the shot and the action
@@ -247,19 +314,15 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	CG_WeapAnim_PlayLayer( base, baseClip );
 
 	// -- Move layer: raise / drop transitions --
-	// Only re-aimed while the current transition has finished. THIS is the
-	// still swap: press swap during a raise and the state machine holsters on
-	// its normal timer, but the raise owns the layer and no drop is drawn.
-	if ( sprintHolds ) {
-		move->targetWeight = 0.0f;			// swap anim suppressed
-	} else if ( !swapping && (ps->weaponstate == WEAPON_READY ||
+	// Outside sprint retention, a new transition replaces the old one normally.
+	if ( !swapping && (ps->weaponstate == WEAPON_READY ||
 	                         ps->weaponstate == WEAPON_FIRING ||
 	                         ps->weaponstate == WEAPON_BOLTING) ) {
 		// Gameplay has released the transition (including a reversed holster).
 		// Let the current pose blend back immediately; its clip is not a lock.
 		move->targetWeight = 0.0f;
 		move->blendSpeed = 0.025f;
-	} else if ( !CG_WeapAnim_TransitionBusy( def, move ) ) {
+	} else {
 		move->blendSpeed = 8.0f;
 		if ( ps->weaponstate == WEAPON_RAISING ) {
 			CG_WeapAnim_PlayLayer( move, WANIM_RAISE );
@@ -271,13 +334,9 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	}
 
 	// -- Sprint layer --
-	// Only a swap retains ownership of an old sprint clip. Ordinary posture
-	// changes follow gameplay immediately: a looping carry must not delay the
-	// exit until it has played a full lap, or hide a gun already allowed to fire.
-	// Pmove still defers sprint during a raise; this never changes permission.
-	if ( sprintHolds ) {
-		sprint->targetWeight = 1.0f;		// hold whatever it was already playing
-	} else {
+	// Retention is independent of this requested posture. Outside retention,
+	// ordinary posture changes follow gameplay immediately, including reversal.
+	{
 		int clip = -1;
 		if ( ps->weaponstate == WEAPON_SPRINT_IN ) {
 			clip = WANIM_SPRINT_IN;
@@ -299,6 +358,18 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 				if ( start < 0.0f ) start = 0.0f;
 				if ( start > 1.0f ) start = 1.0f;
 			}
+			// A still-held sprint may be requested again after a reversed drop.
+			// Resume the already-visible entry, never snap its picture to frame 0.
+			if (clip == WANIM_SPRINT_IN && sprint->targetWeight <= 0 &&
+				((sprint->clip == clip && sprint->time > 0) ||
+				 (cg_weapLayers[LAYER_RETAINED].clip == clip && cg_weapLayers[LAYER_RETAINED].weight > 0))) {
+				float len = CG_WeapAnim_LastFrameTime(def, clip);
+				float time = cg_weapLayers[LAYER_RETAINED].weight > 0 &&
+					cg_weapLayers[LAYER_RETAINED].clip == clip ? cg_weapLayers[LAYER_RETAINED].time : sprint->time;
+				if (len > 0) start = time / len;
+				if (start > 1) start = 1;
+				reverse = qtrue;
+			}
 			CG_WeapAnim_PlayLayer( sprint, clip );
 			if ( reverse ) sprint->startFraction = start;
 			// Entry/exit clips already interpolate idle <-> carry. Blending their
@@ -307,6 +378,11 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 		}
 	}
 
+	if (cg_retainedActive) {
+		// Hidden transition clips must not leak back out during cancellation.
+		move->weight = move->targetWeight = 0;
+		sprint->weight = sprint->targetWeight = 0;
+	}
 	// -- Advance clip times and lerp weights --
 	for ( i = 0; i < ANIM_LAYER_COUNT; i++ ) {
 		animLayer_t *l = &cg_weapLayers[i];
@@ -324,7 +400,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 
 		// Advance clip time (will be clamped/looped in pose sample).
 		if ( l->weight > 0.0f ) {
-			l->time += (float)msec;
+			l->time += (float)msec * (i == LAYER_RETAINED ? cg_retainedRate : 1.0f);
 		}
 	}
 
@@ -447,8 +523,14 @@ qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec ) 
 		CG_WeapAnim_Init();
 
 	// Reset layer state on weapon change.
-	if ( ps->weapon != cg_weapAnimWeapon )
+	if ( ps->weapon != cg_weapAnimWeapon || (cg_animContextValid &&
+		(ps->clientNum != cg_animClient || ps->persistant[PERS_SPAWN_COUNT] != cg_animSpawn ||
+		 (ps->eFlags & EF_TELEPORT_BIT) != cg_animTeleport)) )
 		CG_WeapAnim_WeaponChanged( ps->weapon );
+	cg_animContextValid = qtrue;
+	cg_animClient = ps->clientNum;
+	cg_animSpawn = ps->persistant[PERS_SPAWN_COUNT];
+	cg_animTeleport = ps->eFlags & EF_TELEPORT_BIT;
 
 	def = &bg_weapAnimDefs[ps->weapon];
 
@@ -483,10 +565,36 @@ qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec ) 
 
 // Apply the pose to the actual IQM entity. Both renderers support IQM frame
 // sampling; GL1 currently has no external-pose implementation, so keep the
-// highest active layer's frames as its fallback without changing that renderer.
-qboolean CG_WeapAnim_Apply( playerState_t *ps, refEntity_t *entity, int msec ) {
+// active layers' frames as a crossfaded fallback without changing that renderer.
+static qboolean CG_WeapAnim_SampleLayers(const weapAnimDef_t *def, refEntity_t *entity) {
 	qboolean sampled = qfalse;
 	int i;
+	for (i=0; i<ANIM_LAYER_COUNT; i++) {
+		animLayer_t *layer = &cg_weapLayers[i];
+		refEntity_t source;
+		if (layer->weight <= .001f || !CG_WeapAnim_SampleFrame(def, layer, &source)) continue;
+		if (sampled && layer->weight < .999f) {
+			// Frame-only renderers have one interpolation pair, not a full pose
+			// stack. Crossfade nearest source/destination samples instead of
+			// abruptly changing clips at weight .5 (the old QVM/GL1 pop).
+			entity->frame = entity->backlerp >= .5f ? entity->oldframe : entity->frame;
+			entity->oldframe = source.backlerp >= .5f ? source.oldframe : source.frame;
+			entity->backlerp = layer->weight;
+		} else {
+			entity->frame = source.frame;
+			entity->oldframe = source.oldframe;
+			entity->backlerp = source.backlerp;
+		}
+		sampled = qtrue;
+	}
+	return sampled;
+}
+
+qboolean CG_WeapAnim_HoldsDrop(void) {
+	return cg_retainedActive && cg_retainedDrop;
+}
+
+qboolean CG_WeapAnim_Apply( playerState_t *ps, refEntity_t *entity, int msec ) {
 	if ( ps->weapon <= WP_NONE || ps->weapon >= WP_NUM_WEAPONS ) return qfalse;
 	entity->pose = CG_WeapAnim_BuildPose( ps, entity->hModel, msec ) ? &cg.weaponPose : NULL;
 #ifdef Q3_VM
@@ -494,13 +602,7 @@ qboolean CG_WeapAnim_Apply( playerState_t *ps, refEntity_t *entity, int msec ) {
 	// syscall. Use ordinary IQM frames in QVM builds, just as GL1 does.
 	entity->pose = NULL;
 #endif
-	for ( i = 0; i < ANIM_LAYER_COUNT; i++ ) {
-		if ( cg_weapLayers[i].weight < 0.5f ) continue;
-		if ( CG_WeapAnim_SampleFrame( &bg_weapAnimDefs[ps->weapon], &cg_weapLayers[i], entity ) ) {
-			sampled = qtrue;
-		}
-	}
-	return sampled;
+	return CG_WeapAnim_SampleLayers(&bg_weapAnimDefs[ps->weapon], entity);
 }
 
 // ---------------------------------------------------------------------------

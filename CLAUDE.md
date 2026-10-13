@@ -23,7 +23,7 @@ When a pull is also needed, put `git pull origin <branch>` between the two lines
 - `dev3` — NAC rebuilt on notetracks + segmented reloads
 - `dev3b` — Two-weapon loadout, melee/lethal/tactical, classes,
   sprint transitions, still swap, gamepad, logging
-- `dev-gpt` — current GPT work: classes, YY, ladders, SPAS art/sprint, Search and Destroy.
+- `dev-gpt` — current GPT work: classes, YY, ladders, SPAS art/sprint, Search and Destroy, Semtex.
 
 ## Config files
 
@@ -44,6 +44,8 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   botlib refuses a map without one. The mark is the `peace_dummy` userinfo key,
   so it survives `map_restart`. In team games it joins the named or smaller
   team, which makes S&D testable alone: `team red`, then `spawndummy blue`.
+  `pers.isDummy` survives `ClientSpawn`'s clear/restore; putting the flag in the
+  transient part of `gclient_t` loses it on the very first spawn and every round.
 
 ## Design invariants — do not violate
 
@@ -56,9 +58,14 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   fire off; `weaponTime` counts DOWN and is only a busy lock. Never derive note
   times from `weaponTime`.
 - **Reload never resumes.** It always restarts from 0. No partial-reload state.
-- **IW4 still swap is a rule, not a setting.** When a swap collides with the
-  sprint carry the sprint animation wins. The Treyarch behaviour is explicitly
-  unwanted — do not reintroduce it as a cvar or a branch.
+- **Animation ownership is generic.** Sprint preserves a running non-reload
+  action; a holster keeps that source through its whole duration, including a
+  ladder holster. One-shots finish and hold their endpoint; loops keep playing.
+  Ordinary sprint entry/exit still reverses continuously within its own layer.
+  Returning the requested slot releases the retained picture through the same
+  cancellation used for any drop. No named-glitch branch, weapon-specific
+  retention list, zero lock, or separate glide state. Reloads and quick actions
+  cannot own a retained layer. Cgame must never confer gameplay readiness.
 - **Bolting is a state, not a phase of firing.** `WEAPON_FIRING` is the shot;
   `WEAPON_BOLTING` is the action being worked. "Bolting" covers bolt, pump,
   cock and lever — they differ only in cycle length and note placement, never
@@ -79,6 +86,9 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   are read by `CG_WeapAnim_RegisterClips`. Re-exporting a model must never mean
   editing C, and no weapon may be named in that loader.
 - **cgame is picture only.** It never touches ammo or weapon state.
+- **Movement modifiers are per-command values.** `PM_CmdScale` must not write
+  sprint/ADS multipliers into `ps.speed`: prediction replay and pmove substeps
+  would apply them repeatedly, making speed depend on latency or command count.
 - **Selection is a slot toggle.** `weapnext` advances the latest requested slot
   modulo `SLOT_COUNT`, not the server's last acknowledged active slot. If an
   unfinished ordinary holster's destination returns to the gun still held,
@@ -90,16 +100,20 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   its own holster; melee asked for part way through a heavy holster shortens it
   to that, never lengthens it. `BG_HolsterTime` is the single rule — gun's own
   drop, rapid, or the ladder's — used by pmove to stamp and by cgame to fit
-  the drop clip, so the two cannot disagree. Equipment keeps the gun's holster.
+  the drop clip, so the two cannot disagree. Frag/flash keep the gun's holster;
+  Semtex uses the shared fast-destination time. Do not add a second timing rule
+  in the renderer.
 - **Recovering from melee and from equipment is ONE thing, in time and
-  function.** Knife, frag and flash are held `BG_QUICK_ACTION_HOLD` (500ms),
+  function.** Knife, frag, flash and a released Semtex use `BG_QUICK_ACTION_HOLD` (500ms),
   go away in `BG_RAPID_DROP_TIME`, then the gun comes back with its own normal
   draw. As in MW2 that draw is the normal one except **you cannot sprint
   through it**: the `weaponAction` latch lasts until the gun is fully drawn,
   and the latch is what blocks sprint. Once fired, selection asks for the gun.
-  YY cancels the recovery draw like any draw; a quick action pressed during
-  the draw starts the next one. A real swap out of it is a normal holster.
-- **A raise is always cancellable by YY.** That is the owner's rule, not a
+  YY cancels an ordinary recovery draw like any draw; a quick action pressed
+  during the draw starts the next one. The owner's Semtex exception queues
+  slot changes until the throw and original-gun recovery finish. The requested
+  slot/HUD updates immediately; the physical holster starts at that boundary.
+- **An ordinary raise is cancellable by YY.** That is the owner's rule, not a
   bug: the NAC skips a holster, YY skips a draw, so long swap times on both
   halves reward technique instead of only slowing play.
 - **Never ADS through a reload.** `PM_CheckADS` blocks `WEAPON_RELOADING` on
@@ -111,20 +125,20 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 
 - `pm_flags` — **full.** All 16 networked bits used. A 17th needs the wire
   format widened.
-- `STAT_WEAPONS` — bits 0–13 used. Bit 15 must stay unused: `stats[]` round-trip
-  as **signed** int16, so a bit-15 weapon reads back negative.
+- `STAT_WEAPONS` — full 32-bit wire mask at `PS_STAT_WEAPONS`. `MAX_WEAPONS`
+  is 24, with equipment through 14 in baseq3 and 17 in missionpack. Other
+  stats remain signed int16: their bit 15 must stay unused.
 - `weaponAnimSeq` — **full.** 2 bits in `msg.c`; all four values are taken
   (`RSEQ_START/LOOP/END` + `ASEQ_FIRE`). A fifth animation segment has to widen
   the field.
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
-- `weaponAction` — a separate 6-bit predicted/networked field: action type (2),
-  fired latch (1), previous melee/lethal/tactical buttons (3). It keeps quick
-  taps through holster/deploy, prevents held-button repeats, and stays set
-  through recovery until the gun is back. No new stats
-  or pm_flags. Client, server and all game modules must be rebuilt together.
+- `weaponAction` — a separate 9-bit predicted/networked field: action type (2),
+  fired latch (1), previous action buttons (3), cancel return acknowledgement,
+  swap edge latch, and post-throw recovery. Protocol 72 requires client, server
+  and all modules rebuilt together. Older builds/demos are incompatible.
 - `stats[]` — **15 of 16 used in baseq3; all 16 in missionpack.** Every entry round-trips as a SIGNED
-  short (`MSG_WriteShort`), so any new bitmask stat has the same bit-15 trap as
-  `STAT_WEAPONS`. `STAT_UNCHAMBERED` uses bits 0–13, one per weapon.
+  short (`MSG_WriteShort`) except `STAT_WEAPONS`. Other bitmask stats still
+  have the bit-15 trap. `STAT_UNCHAMBERED` uses gun bits 0–13.
 - `STAT_LADDER` packs attachment, holster destination, jump separation latch,
   and 12-bit inward-facing yaw into bits 0–14. No bit 15, no extra pm_flags.
   Ladder contact stamps `BG_LADDER_DROP_TIME` before the unchanged note pass;
@@ -157,8 +171,11 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   and non-looping exit (250ms). `dev/tools/build_spas_sprint.py` bakes the
   original motion from `assets/source/spas12/sprint.json` without Blender;
   the full importer invokes it too. Sprint-in/out follow predicted transition
-  locks for presentation only. During swaps, the existing sprint clip owns the
-  picture: entry holds its last frame; the carry keeps looping.
+  locks for presentation only. Sprint/holster retention also covers draw,
+  drop, initial pullout and fire/bolt clips through the generic layer owner.
+  Frame-only QVM/GL1 rendering crossfades the released source; native GL2 blends
+  skeletal poses. The full authored clip coverage currently belongs to SPAS;
+  legacy placeholder weapons still need their own animation assets.
 - Known SPAS gaps: the drop is the draw reversed, and hands still use a flat placeholder.
   The source mesh references missing `mw2_spas12.bmp`/`v_hands.bmp` atlases;
   other bundled BMPs do not match this model's UV layout. See `dev/SPAS12.md`.
@@ -176,7 +193,9 @@ retiming a weapon breaks the test without telling you anything.
 
 `dev/tests/run-loadouts.cmd` (or `.sh`) checks class validation/persistence,
 modulo selection, same-update YY firing, reload/pull-out cancellation, tap/hold
-actions, all six action bits through the actual network codec, and pose release.
+actions, all nine action bits through the actual network codec, and pose release.
+Pose checks cover source retention, ladder holsters, loop/endpoint semantics,
+reload/action exclusions, ordinary sprint reversal and frame-only crossfades.
 Loadouts UI and class definitions are documented in `dev/LOADOUTS.md`.
 
 Do not statically initialize structs with inline char arrays mixed with ints:
@@ -200,3 +219,9 @@ The enum is not enough. A weapon in `STAT_WEAPONS` with no `bg_itemlist` entry
 crashes on spawn: `CG_RegisterWeapon` calls `CG_Error`, and `BG_FindItemForWeapon`
 calls `Com_Error`. This has already caused one map-load crash. Also check every
 `MAX_WEAPONS` table in `bg_pmove.c` — they are positional.
+
+Semtex: pre-release Y cancels to the same gun using its melee-return raise.
+Post-release Y queues a normal slot swap behind throw and original-gun recovery.
+Never treat an emitted throw as a cancellable equip or reset queued selection
+during recovery. Keep note ordering intact; no NAC/zoomload feature branches.
+See `dev/SEMTEX.md` and the Semtex tests in `dev/tests/run-loadouts.*`.

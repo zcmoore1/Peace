@@ -239,6 +239,11 @@ static void RStep(void) {
 static int RecoverPhases(int gun, int button, int special, int *hold, int *down, int *draw) {
  int t, act, d = -1, u = -1, back = -1, other = gun == WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN;
  Ready(gun, other);
+ if(special==WP_SEMTEX) {
+  bg_class_t cl=*BG_Class(0);
+  cl.slot[0]=gun; cl.slot[1]=other; cl.lethal=WP_SEMTEX;
+  BG_ApplyClass(&ps,&cl);
+ }
  move.cmd.buttons = button;
  for (t = 1; t < 9000 && !fired[special]; t++) { RStep(); if (t == 1) move.cmd.buttons = 0; }
  CHECK(fired[special] == 1);
@@ -260,19 +265,19 @@ static int RecoverPhases(int gun, int button, int special, int *hold, int *down,
  return back - act;
 }
 static void TestRecovery(void) {
- const int buttons[] = { BUTTON_MELEE, BUTTON_LETHAL, BUTTON_TACTICAL };
- const int specials[] = { WP_KNIFE, WP_FRAG, WP_FLASH };
+ const int buttons[] = { BUTTON_MELEE, BUTTON_LETHAL, BUTTON_TACTICAL, BUTTON_LETHAL };
+ const int specials[] = { WP_KNIFE, WP_FRAG, WP_FLASH, WP_SEMTEX };
  int i, a, n = BG_ClassWeaponCount();
  for (i = 0; i < n; i++) {
   int gun = BG_ClassWeapon(i), first = -1;
   if (gun <= WP_NONE) continue;
-  for (a = 0; a < 3; a++) {
+  for (a = 0; a < ARRAY_LEN(specials); a++) {
    int hold, down, draw, total = RecoverPhases(gun, buttons[a], specials[a], &hold, &down, &draw);
    CHECK(hold >= BG_QUICK_ACTION_HOLD - 1 && hold <= BG_QUICK_ACTION_HOLD + 1);
    CHECK(down == BG_RAPID_DROP_TIME);
    CHECK(draw == BG_WeaponRaiseTime(gun));
    if (first < 0) first = total;
-   CHECK(total == first);                         /* melee == frag == flash */
+   CHECK(total == first);                         /* all quick actions recover alike */
   }
  }
  /* YY cancels the recovery draw, like any draw */
@@ -300,8 +305,79 @@ static void TestRecovery(void) {
  }
 }
 
+static void SprintStep(int msec) {
+ pml.groundPlane=qtrue; move.cmd.forwardmove=127;
+ PM_CheckSprint(); Step(msec);
+}
+static void TestSprintTransitions(void) {
+ const int equipment[]={WP_KNIFE,WP_FRAG,WP_FLASH,WP_SEMTEX};
+ const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL};
+ int i,ammo;
+ for(i=0;i<BG_ClassWeaponCount();i++) {
+  int weapon=BG_ClassWeapon(i), other=BG_ClassWeapon((i+1)%BG_ClassWeaponCount());
+  Ready(weapon,other); ammo=ps.ammo[weapon];
+  move.cmd.buttons=BUTTON_SPRINT; SprintStep(1);
+  CHECK(ps.weaponstate==WEAPON_SPRINT_IN && ps.weaponTime==BG_WeaponSprintInTime(weapon));
+  SprintStep(BG_WeaponSprintInTime(weapon)/2);
+  Toggle(); SprintStep(1);
+  CHECK(ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_WeaponDropTime(weapon));
+  Toggle(); move.cmd.buttons=BUTTON_ATTACK; SprintStep(1);
+  CHECK(fired[weapon]==1 && ps.ammo[weapon]==ammo-1);
+  CHECK(!(ps.pm_flags&PMF_SPRINTING));
+  /* Keeping sprint held still requests sprint; presentation cannot erase the
+   * real sprint lock. Releasing input allows ordinary same-think YY firing. */
+  Ready(weapon,other); move.cmd.buttons=BUTTON_SPRINT; SprintStep(1);
+  Toggle(); SprintStep(1); Toggle(); SprintStep(1);
+  CHECK(ps.weaponstate==WEAPON_SPRINT_IN && ps.weaponTime==BG_WeaponSprintInTime(weapon));
+  CHECK(fired[weapon]==0 && (ps.pm_flags&PMF_SPRINTING));
+ }
+ Ready(WP_SHOTGUN,WP_MACHINEGUN);
+ ps.stats[STAT_UNCHAMBERED]=1<<WP_SHOTGUN;
+ move.cmd.buttons=BUTTON_SPRINT; SprintStep(1); Toggle(); SprintStep(1);
+ Toggle(); move.cmd.buttons=BUTTON_ATTACK; SprintStep(1);
+ CHECK(fired[WP_SHOTGUN]==0 && ps.weaponstate==WEAPON_BOLTING);
+ CHECK(ps.stats[STAT_UNCHAMBERED]&(1<<WP_SHOTGUN));
+ /* Action press arrives after PM_CheckSprint. It must clear sprint in that
+  * very think, not leave a one-frame opening for equipment retention. */
+ for(i=0;i<ARRAY_LEN(buttons);i++) {
+  Ready(WP_MACHINEGUN,WP_SHOTGUN); move.cmd.buttons=BUTTON_SPRINT; SprintStep(1);
+  move.cmd.buttons|=buttons[i]; SprintStep(1);
+  CHECK(ps.weaponAction&WA_TYPE_MASK);
+  CHECK(!(ps.pm_flags&PMF_SPRINTING));
+ }
+ /* Once the action latch has cleared for return, equipment is still in hand
+  * during its drop. Classification, not the latch alone, must block sprint. */
+ for(i=0;i<ARRAY_LEN(equipment);i++) {
+  Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.weapon=equipment[i];
+  ps.weaponAction=0; ps.weaponstate=WEAPON_DROPPING;
+  move.cmd.buttons=BUTTON_SPRINT; move.cmd.forwardmove=127; pml.groundPlane=qtrue;
+  PM_CheckSprint(); CHECK(!(ps.pm_flags&PMF_SPRINTING));
+ }
+}
+static void TestMovementScale(void) {
+ const int flags[]={0,PMF_SPRINTING,PMF_ADS};
+ int i,j;
+ float scale,normal;
+ Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.speed=320;
+ move.cmd.forwardmove=127; normal=PM_CmdScale(&move.cmd);
+ for(i=0;i<ARRAY_LEN(flags);i++) {
+  ps.pm_flags=flags[i]; scale=PM_CmdScale(&move.cmd);
+  if(i==1) CHECK(scale>normal);
+  if(i==2) CHECK(scale<normal);
+  /* Prediction may replay many commands from one snapshot; no command may
+   * compound the modifier into the authoritative base speed. */
+  for(j=0;j<100;j++) {
+   CHECK(fabs(PM_CmdScale(&move.cmd)-scale)<.0001f);
+   CHECK(ps.speed==320);
+  }
+ }
+ move.cmd.forwardmove=0; ps.pm_flags=PMF_SPRINTING;
+ CHECK(PM_CmdScale(&move.cmd)==0 && ps.speed==320);
+}
 int main(void) {
- TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestMeleeHolster(); TestRecovery();
+ TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
+ TestMeleeHolster(); TestRecovery();
+ TestMovementScale();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;
 }

@@ -274,6 +274,9 @@ void IN_Button18Down(void) {IN_KeyDown(&in_buttons[18]);}
 void IN_Button18Up(void) {IN_KeyUp(&in_buttons[18]);}
 void IN_Button19Down(void) {IN_KeyDown(&in_buttons[19]);}
 void IN_Button19Up(void) {IN_KeyUp(&in_buttons[19]);}
+// cgame reports the swap press as well as the desired slot. Equipment can
+// consume that intent without having to manufacture a different selection.
+static void IN_WeaponSwap(void) { in_buttons[20].wasPressed = qtrue; }
 
 void IN_CenterView (void) {
 	cl.viewangles[PITCH] = -SHORT2ANGLE(cl.snap.ps.delta_angles[PITCH]);
@@ -984,6 +987,7 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-use", IN_Button18Up);
 	Cmd_AddCommand ("+altfire", IN_Button19Down);	// BUTTON_ALTFIRE = bit 19
 	Cmd_AddCommand ("-altfire", IN_Button19Up);
+	Cmd_AddCommand ("_peaceWeaponSwap", IN_WeaponSwap);
 	Cmd_AddCommand ("+button0", IN_Button0Down);
 	Cmd_AddCommand ("-button0", IN_Button0Up);
 	Cmd_AddCommand ("+button1", IN_Button1Down);

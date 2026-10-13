@@ -256,6 +256,13 @@ Tactical equipment. Placeholder visuals until real assets land.
 /* sounds */ ""
 	},
 
+/* Held lethal equipment, not a primary/secondary slot. */
+	{
+		"weapon_semtex", "sound/misc/w_pkup.wav",
+		{ "models/weapons2/semtex/semtex.md3", NULL, NULL, NULL },
+		"icons/peace_semtex", "Semtex", 0, IT_WEAPON, WP_SEMTEX, "", ""
+	},
+
 /*QUAKED weapon_shotgun (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{

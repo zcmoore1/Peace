@@ -87,6 +87,14 @@ int main(void) {
  UI_ClassEditEvent(&classEdit.save,QM_ACTIVATED);
  CHECK(BG_ParseClass(vars[Find("peace_loadout")].value,&cl));
  CHECK(!strcmp(cl.name,"Equipped edit"));
+ UI_CreateClassMenu(0);
+ classEdit.lethal.curvalue=2; classEdit.lethalCount.curvalue=1;
+ UI_ClassEditEvent(&classEdit.save,QM_ACTIVATED);
+ CHECK(BG_ParseClass(vars[Find("peace_loadout")].value,&cl));
+ CHECK(cl.lethal==WP_SEMTEX && cl.lethalCount==2);
+ UI_CreateClassMenu(0);
+ CHECK(classEdit.lethal.curvalue==2 && classEdit.lethalCount.curvalue==1);
+ UI_ClassEditEvent(&classEdit.back,QM_ACTIVATED);
  trap_Cvar_Set("peace_class_1","corrupt"); UI_ReadClasses();
  CHECK(BG_ValidateClass(&classSelect.classes[BG_ClassCount()+1]));
  CHECK(!strcmp(classSelect.names[BG_ClassCount()+1],"Custom 2"));

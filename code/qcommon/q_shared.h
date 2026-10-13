@@ -49,7 +49,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
   #define GAMENAME_FOR_MASTER		"Quake3Arena"
   #define CINEMATICS_LOGO		"idlogo.RoQ"
   #define CINEMATICS_INTRO		"intro.RoQ"
-  #define LEGACY_PROTOCOL
+  // Peace's playerstate layout is incompatible with stock / older protocols.
   #define PROTOCOL_HANDLER		"quake3"
   #define CONFIG_PREFIX			"q3config"
 #endif
@@ -1119,7 +1119,9 @@ typedef struct {
 #define	MAX_STATS				16
 #define	MAX_PERSISTANT			16
 #define	MAX_POWERUPS			16
-#define	MAX_WEAPONS				16		
+#define	MAX_WEAPONS				24
+// Shared with bg_public.h: this inventory mask has a full-width wire value.
+#define PS_STAT_WEAPONS 2
 
 #define	MAX_PS_EVENTS			2
 
@@ -1179,7 +1181,7 @@ typedef struct playerState_s {
 	int			weapon;			// copied to entityState_t->weapon
 	int			weaponstate;
 	int			weaponAnimTime;	// ms ELAPSED into the current anim SEGMENT (counts UP). -1 = no anim playing. Notes fire on crossings of this; never derived from weaponTime.
-	int			weaponAction;	// predicted tap action + fired flag + previous action-button mask (6 bits)
+	int			weaponAction;	// action, button history, cancel acknowledgement, recovery (9 bits)
 	int			weaponAnimSeq;	// which reload segment is playing (reloadSeq_t)
 
 	vec3_t		viewangles;		// for fixed views
@@ -1243,6 +1245,7 @@ typedef struct playerState_s {
 #define BUTTON_TACTICAL		131072			// throw tactical equipment (bit 17)
 #define BUTTON_USE			262144			// hold to pick up / interact (bit 18)
 #define BUTTON_ALTFIRE		524288			// underbarrel / alt weapon toggle (bit 19)
+#define BUTTON_WEAPON_SWAP   1048576         // selection intent, even when cancelling equipment
 // usercmd_t.buttons is delta-encoded with 32 bits (msg.c) - bits 20..31 spare.
 
 #define	MOVE_RUN			120			// if forwardmove or rightmove are >= MOVE_RUN,

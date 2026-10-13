@@ -8,6 +8,11 @@ game="code/game/bg_loadout.c code/game/bg_misc.c code/game/bg_slidemove.c"
 flags="-std=c99 -O0 -g -ffunction-sections -fdata-sections ${LOADOUT_TEST_FLAGS:-}"
 ${CC:-cc} $flags dev/tests/loadout_test.c $game $common -Wl,--gc-sections -lm -o out/tests/loadout-test
 out/tests/loadout-test
+${CC:-cc} $flags dev/tests/semtex_test.c $game code/qcommon/msg.c code/qcommon/huffman.c $common -Wl,--gc-sections -lm -o out/tests/semtex-test
+out/tests/semtex-test
+# Projectile boundary harness is basegame; both complete modules also build in CI.
+${CC:-cc} $flags -UMISSIONPACK dev/tests/semtex_missile_test.c code/game/bg_misc.c $common -Wl,--gc-sections -lm -o out/tests/semtex-missile-test
+out/tests/semtex-missile-test
 ${CC:-cc} $flags dev/tests/class_menu_test.c code/game/bg_loadout.c $common -Wl,--gc-sections -lm -o out/tests/class-menu-test
 out/tests/class-menu-test
 ${CC:-cc} $flags dev/tests/action_wire_test.c code/qcommon/msg.c code/qcommon/huffman.c $common -Wl,--gc-sections -lm -o out/tests/action-wire-test

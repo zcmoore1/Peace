@@ -288,15 +288,17 @@ without getting a sqrt(2) distortion in speed.
 */
 static float PM_CmdScale( usercmd_t *cmd ) {
 	int		max;
+	int		speed = pm->ps->speed;
 	float	total;
 	float	scale;
 
 	// Sprint: forward speed boost. ADS: movement penalty.
-	// Both are applied as a multiplier on top of ps->speed.
+	// Modify this command's scale, never the authoritative base speed. Pmove
+	// subdivisions and prediction replay can evaluate this more than once.
 	if ( pm->ps->pm_flags & PMF_SPRINTING ) {
-		pm->ps->speed = (int)( pm->ps->speed * 1.4f );
+		speed = (int)( speed * 1.4f );
 	} else if ( pm->ps->pm_flags & PMF_ADS ) {
-		pm->ps->speed = (int)( pm->ps->speed * 0.5f );
+		speed = (int)( speed * 0.5f );
 	}
 
 	max = abs( cmd->forwardmove );
@@ -312,7 +314,7 @@ static float PM_CmdScale( usercmd_t *cmd ) {
 
 	total = sqrt( cmd->forwardmove * cmd->forwardmove
 		+ cmd->rightmove * cmd->rightmove + cmd->upmove * cmd->upmove );
-	scale = (float)pm->ps->speed * max / ( 127.0 * total );
+	scale = (float)speed * max / ( 127.0 * total );
 
 	return scale;
 }
@@ -1619,11 +1621,13 @@ static const int bg_weaponMagSize[MAX_WEAPONS] = {
 	30,		// WP_PLASMAGUN
 	1,		// WP_BFG
 	0,		// WP_GRAPPLING_HOOK (infinite)
-	// NOTE: basegame has no missionpack weapons, so slots 11..14 are the
-	// loadout extras. STAT_WEAPONS is a 16-bit mask, so 15 weapons is the cap.
+#ifdef MISSIONPACK
+	10, 5, 100, // nailgun, proximity launcher, chaingun
+#endif
 	0,		// WP_KNIFE          (no magazine)
 	1,		// WP_FRAG           (one in hand)
 	1,		// WP_FLASH
+	1,      // WP_SEMTEX
 };
 
 // ---------------------------------------------------------------------------
@@ -1740,9 +1744,13 @@ static const bg_weaponAnimSeg_t bg_weaponFire[MAX_WEAPONS] = {
 	/* WP_PLASMAGUN       */ { 0, bgnotes_none },
 	/* WP_BFG             */ { 0, bgnotes_none },
 	/* WP_GRAPPLING_HOOK  */ { 0, bgnotes_none },
+#ifdef MISSIONPACK
+	{ 0, bgnotes_none }, { 0, bgnotes_none }, { 0, bgnotes_none },
+#endif
 	/* WP_KNIFE           */ { 0, bgnotes_none },
 	/* WP_FRAG            */ { 0, bgnotes_none },
-	/* WP_FLASH           */ { 0, bgnotes_none }
+	/* WP_FLASH           */ { 0, bgnotes_none },
+	/* WP_SEMTEX          */ { 0, bgnotes_none }
 };
 
 int BG_WeaponFireLength( int weapon ) {
@@ -1764,9 +1772,15 @@ static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
 	/* WP_PLASMAGUN       */ { { SEG_NONE, { 800,  bgnotes_mag_fast },  SEG_NONE } },
 	/* WP_BFG             */ { { SEG_NONE, { 1500, bgnotes_mag_bfg },   SEG_NONE } },
 	/* WP_GRAPPLING_HOOK  */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
+#ifdef MISSIONPACK
+	{ { SEG_NONE, { 1200, bgnotes_mag_heavy }, SEG_NONE } },
+	{ { SEG_NONE, { 1200, bgnotes_mag_heavy }, SEG_NONE } },
+	{ { SEG_NONE, { 1000, bgnotes_mag }, SEG_NONE } },
+#endif
 	/* WP_KNIFE           */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 	/* WP_FRAG            */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 	/* WP_FLASH           */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
+	/* WP_SEMTEX          */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 };
 
 // Holster / deploy lengths. Always stamped on a weapon change - never 0, so a
@@ -1785,9 +1799,13 @@ static const int bg_weaponDropTime[MAX_WEAPONS] = {
 	200,	// WP_PLASMAGUN
 	300,	// WP_BFG
 	150,	// WP_GRAPPLING_HOOK
-	80,		// WP_KNIFE          (snappy melee)
-	100,	// WP_FRAG
-	100,	// WP_FLASH
+#ifdef MISSIONPACK
+	250, 250, 250,
+#endif
+	BG_RAPID_DROP_TIME,	// WP_KNIFE
+	BG_RAPID_DROP_TIME,	// WP_FRAG
+	BG_RAPID_DROP_TIME,	// WP_FLASH
+	BG_RAPID_DROP_TIME,	// WP_SEMTEX
 };
 
 static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
@@ -1802,9 +1820,13 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 	250,	// WP_PLASMAGUN
 	400,	// WP_BFG
 	200,	// WP_GRAPPLING_HOOK
+#ifdef MISSIONPACK
+	300, 300, 300,
+#endif
 	120,	// WP_KNIFE
 	150,	// WP_FRAG
 	150,	// WP_FLASH
+	350,    // WP_SEMTEX pull back into held pose
 };
 
 int BG_WeaponMagSize( int weapon ) {
@@ -1835,10 +1857,18 @@ int BG_WeaponReloadTime( int weapon ) {
 // always stamped, never zero. The instant version is not authored anywhere - it
 // only happens when something else clears the lock in the same think.
 static const int bg_weaponSprintInTime[MAX_WEAPONS] = {
-	150, 150, 200, 200, 250, 250, 200, 250, 200, 300, 120, 150, 150, 150, 150, 150
+	150, 150, 200, 200, 250, 250, 200, 250, 200, 300, 120,
+#ifdef MISSIONPACK
+	250, 250, 250,
+#endif
+	150, 150, 150, 150
 };
 static const int bg_weaponSprintOutTime[MAX_WEAPONS] = {
-	180, 180, 250, 250, 300, 300, 250, 300, 250, 350, 150, 180, 180, 180, 180, 180
+	180, 180, 250, 250, 300, 300, 250, 300, 250, 350, 150,
+#ifdef MISSIONPACK
+	300, 300, 300,
+#endif
+	180, 180, 180, 180
 };
 
 int BG_WeaponSprintInTime( int weapon ) {
@@ -1871,8 +1901,7 @@ ONE rule, read by pmove when it stamps the holster and by cgame when it fits the
 drop clip, so the picture can never disagree with the timer.
 
   ladder grab - the universal BG_LADDER_DROP_TIME
-  recovery    - a knife, frag or flash going away: the universal
-                BG_RAPID_DROP_TIME, the same for all three
+  recovery    - any quick action going away: the universal BG_RAPID_DROP_TIME
   melee       - the gun going down for a knife not yet swung: the same rapid
                 time. Melee is its own kind of swap and never waits on a
                 heavy gun's holster
@@ -1886,11 +1915,15 @@ int BG_HolsterTime( const playerState_t *ps ) {
 	if ( ps->stats[STAT_LADDER] & LADDER_HOLSTER ) {
 		return BG_LADDER_DROP_TIME;
 	}
-	if ( ps->weapon == WP_KNIFE || ps->weapon == WP_FRAG || ps->weapon == WP_FLASH ) {
+	if ( BG_IsActionWeapon(ps->weapon) ) {
 		return BG_RAPID_DROP_TIME;
 	}
 	if ( ( ps->weaponAction & WA_TYPE_MASK ) == WA_MELEE && !( ps->weaponAction & WA_FIRED ) ) {
 		return BG_RAPID_DROP_TIME;
+	}
+	if ( (ps->weaponAction & WA_TYPE_MASK) == WA_LETHAL &&
+		!(ps->weaponAction & WA_FIRED) && BG_LethalWeapon(ps) == WP_SEMTEX ) {
+		return BG_FAST_HOLSTER_TIME;
 	}
 	return BG_WeaponDropTime( ps->weapon );
 }
@@ -1900,6 +1933,18 @@ int BG_WeaponRaiseTime( int weapon ) {
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return WEAPON_MIN_SWAP_TIME;
 	t = bg_weaponRaiseTime[weapon];
 	return ( t < WEAPON_MIN_SWAP_TIME ) ? WEAPON_MIN_SWAP_TIME : t;
+}
+
+int BG_ActiveSlotWeapon( const playerState_t *ps ) {
+	return ps->stats[ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ?
+		STAT_SLOT_SECONDARY : STAT_SLOT_PRIMARY];
+}
+
+int BG_LethalWeapon( const playerState_t *ps ) {
+	// Keep the action's identity through its last throw and inventory rebuilds.
+	if (ps->weapon == WP_SEMTEX || ps->ammo[WP_SEMTEX] > 0 ||
+		(ps->stats[STAT_WEAPONS] & (1 << WP_SEMTEX))) return WP_SEMTEX;
+	return WP_FRAG;
 }
 
 // Maximum reserve ammo the player can carry per weapon (mags not including the one loaded).
@@ -1915,9 +1960,13 @@ static const int bg_weaponMaxReserve[MAX_WEAPONS] = {
 	120,	// WP_PLASMAGUN      (30 * 4)
 	3,		// WP_BFG            (1 * 3)
 	0,		// WP_GRAPPLING_HOOK
+#ifdef MISSIONPACK
+	30, 15, 300,
+#endif
 	0,		// WP_KNIFE
 	0,		// WP_FRAG           (count lives in STAT_LETHAL_COUNT)
 	0,		// WP_FLASH          (count lives in STAT_TACTICAL_COUNT)
+	0,      // WP_SEMTEX
 };
 
 int BG_WeaponMaxReserve( int weapon ) {
@@ -1942,9 +1991,13 @@ static const int bg_weaponSpread[MAX_WEAPONS] = {
 	0,		// WP_PLASMAGUN
 	0,		// WP_BFG
 	0,		// WP_GRAPPLING_HOOK
+#ifdef MISSIONPACK
+	0, 0, 0,
+#endif
 	0,		// WP_KNIFE
 	0,		// WP_FRAG
 	0,		// WP_FLASH
+	0,      // WP_SEMTEX
 };
 
 int BG_WeaponBaseSpread( int weapon ) {
@@ -2041,6 +2094,7 @@ void BG_RebuildWeaponMask( playerState_t *ps ) {
 
 	if ( ps->ammo[WP_FRAG]  > 0 ) mask |= ( 1 << WP_FRAG );
 	if ( ps->ammo[WP_FLASH] > 0 ) mask |= ( 1 << WP_FLASH );
+	if ( ps->ammo[WP_SEMTEX] > 0 ) mask |= ( 1 << WP_SEMTEX );
 
 	ps->stats[STAT_WEAPONS] = mask;
 }
@@ -2059,7 +2113,7 @@ void BG_SetSlotWeapon( playerState_t *ps, int slot, int weapon ) {
 		return;
 	}
 	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ||
-	     weapon == WP_KNIFE || weapon == WP_FRAG || weapon == WP_FLASH ) {
+	     weapon == WP_KNIFE || weapon == WP_FRAG || weapon == WP_FLASH || weapon == WP_SEMTEX ) {
 		return;
 	}
 
@@ -2382,22 +2436,10 @@ static void PM_AdvanceReloadSegments( void ) {
 	}
 }
 
-/*
-===============
-PM_IsSpecialWeapon
-
-Melee and equipment are weapon_t entries so they reuse the pmove state machine,
-but they are not inventory slots - the player always returns to their gun.
-===============
-*/
-static qboolean PM_IsSpecialWeapon( int w ) {
-	return ( w == WP_KNIFE || w == WP_FRAG || w == WP_FLASH );
-}
-
 static int PM_ActionWeapon( void ) {
 	switch ( pm->ps->weaponAction & WA_TYPE_MASK ) {
 	case WA_MELEE: return WP_KNIFE;
-	case WA_LETHAL: return WP_FRAG;
+	case WA_LETHAL: return BG_LethalWeapon(pm->ps);
 	case WA_TACTICAL: return WP_FLASH;
 	default: return WP_NONE;
 	}
@@ -2407,32 +2449,65 @@ static int PM_ActionWeapon( void ) {
 // and holding it cannot turn a quick action into a permanently selected weapon.
 static void PM_UpdateWeaponAction( void ) {
 	int held = (pm->cmd.buttons >> 15) & 7;
-	int pressed = held & ~(pm->ps->weaponAction >> WA_HELD_SHIFT);
+	int pressed = held & ~((pm->ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT);
 	int action = pm->ps->weaponAction & (WA_TYPE_MASK | WA_FIRED);
+	int returning = pm->ps->weaponAction & WA_RETURNING;
+	int recovering = pm->ps->weaponAction & WA_RECOVERING;
+	qboolean swap = (pm->cmd.buttons & BUTTON_WEAPON_SWAP) != 0;
+	qboolean swapPressed = swap && !(pm->ps->weaponAction & WA_SWAP_HELD);
+	if (pm->cmd.weapon == BG_ActiveSlotWeapon(pm->ps)) returning = 0;
+	// A requested slot change waits for the ORIGINAL gun to finish recovery.
+	// Clear on the ready boundary so its normal holster can start this think.
+	if (recovering && pm->ps->weapon == BG_ActiveSlotWeapon(pm->ps) &&
+		pm->ps->weaponstate == WEAPON_RAISING && pm->ps->weaponTime <= 0) recovering = 0;
 	if ( (pm->ps->stats[STAT_LADDER] & (LADDER_ATTACHED | LADDER_HOLSTER)) ||
 		pm->ps->weaponstate == WEAPON_LADDER ) {
 		action = 0;
+		returning = 0;
+		recovering = 0;
 	} else {
 		// A quick action is not over when it fires. It is over when the gun is
 		// back in hand and fully drawn: that whole recovery keeps the latch, and
 		// the latch is what blocks sprint (PM_CheckSprint) - MW2's recovery draw
 		// is the normal draw, except you cannot sprint through it.
-		if ( (action & WA_FIRED) && !PM_IsSpecialWeapon( pm->ps->weapon ) &&
-			pm->ps->weaponstate != WEAPON_RAISING && pm->ps->weaponstate != WEAPON_DROPPING ) {
+		if ( (action & WA_FIRED) && !BG_IsActionWeapon( pm->ps->weapon ) &&
+			((pm->ps->weaponstate != WEAPON_RAISING && pm->ps->weaponstate != WEAPON_DROPPING) ||
+			 (pm->ps->weaponstate == WEAPON_RAISING && pm->ps->weaponTime <= 0)) ) {
 			action = 0;
 		}
+		if (pm->ps->weapon == WP_SEMTEX && (action & WA_FIRED) &&
+			pm->ps->weaponstate == WEAPON_FIRING && pm->ps->weaponTime <= 0) recovering = WA_RECOVERING;
 		// A press during the recovery DRAW starts the next quick action, exactly
 		// as it would during any other draw. The gun being in hand is what makes
 		// it a draw; while the knife or grenade is still out, presses wait.
 		if ( !(action & WA_TYPE_MASK) ||
-			( (action & WA_FIRED) && !PM_IsSpecialWeapon( pm->ps->weapon ) ) ) {
-			if ( pressed & 1 ) action = WA_MELEE;
-			else if ( (pressed & 2) && pm->ps->ammo[WP_FRAG] > 0 ) action = WA_LETHAL;
-			else if ( (pressed & 4) && pm->ps->ammo[WP_FLASH] > 0 ) action = WA_TACTICAL;
+			( (action & WA_FIRED) && !BG_IsActionWeapon( pm->ps->weapon ) ) ) {
+			int nextAction = 0;
+			if ( pressed & 1 ) nextAction = WA_MELEE;
+			else if ( (pressed & 2) && pm->ps->ammo[BG_LethalWeapon(pm->ps)] > 0 ) nextAction = WA_LETHAL;
+			else if ( (pressed & 4) && pm->ps->ammo[WP_FLASH] > 0 ) nextAction = WA_TACTICAL;
+			if (nextAction) {
+				action = nextAction;
+				returning = recovering = 0;
+			}
+		}
+		if (swapPressed && !(action & WA_FIRED) && (action & WA_TYPE_MASK) == WA_LETHAL &&
+			BG_LethalWeapon(pm->ps) == WP_SEMTEX) {
+			// Equipment never changes the active slot. Do not refund a throw
+			// already emitted. Use the same gun raise as the melee return.
+			action = 0;
+			returning = WA_RETURNING;
+			pm->ps->weapon = BG_ActiveSlotWeapon(pm->ps);
+			pm->ps->weaponstate = WEAPON_RAISING;
+			pm->ps->weaponTime = BG_WeaponRaiseTime(pm->ps->weapon);
+			pm->ps->weaponAnimTime = -1;
+			pm->ps->pm_flags &= ~PMF_PENDING_MAG;
+			PM_StartTorsoAnim(TORSO_RAISE);
 		}
 	}
-	pm->ps->weaponAction = action | (held << WA_HELD_SHIFT);
-	if ( action & WA_TYPE_MASK ) pm->ps->pm_flags &= ~PMF_ADS;
+	pm->ps->weaponAction = action | (held << WA_HELD_SHIFT) | returning | recovering |
+		(swap ? WA_SWAP_HELD : 0);
+	if ( action & WA_TYPE_MASK ) pm->ps->pm_flags &= ~(PMF_ADS | PMF_SPRINTING);
 }
 
 /*
@@ -2454,6 +2529,7 @@ and the NAC is untouched.
 */
 static int PM_DesiredWeapon( void ) {
 	int special = PM_ActionWeapon();
+	if (pm->ps->weaponAction & (WA_RETURNING | WA_RECOVERING)) return BG_ActiveSlotWeapon(pm->ps);
 	// Once it has fired, the action wants the gun back. Nothing leaves early:
 	// step 1 holds the holster until the knife or grenade's lock has run out.
 	if ( special != WP_NONE && !(pm->ps->weaponAction & WA_FIRED) &&
@@ -2472,10 +2548,9 @@ static int PM_DesiredWeapon( void ) {
 ===============
 PM_BeginWeaponChange
 
-Stock holster. Always stamps a real per-weapon drop time - it never inspects
-what we were doing, never shortens itself, never skips. If something else
-clears the lock in the same think (the mag-in note), the drop simply finishes
-early on its own.
+Always stamps the real shared holster time. Changing to a faster destination
+may shorten a drop already in progress; it never skips the drop. If a note
+clears the lock in the same think, the drop finishes early on its own.
 ===============
 */
 static void PM_BeginWeaponChange( int weapon ) {
@@ -2598,18 +2673,14 @@ before the mag can seat). ADS is cleared immediately on sprint entry.
 */
 static void PM_CheckSprint( void ) {
 	qboolean wantSprint;
-	qboolean wasSprinting;
 
 	wantSprint = ( !( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) &&
 	               !( pm->ps->weaponAction & WA_TYPE_MASK ) &&
+	               !BG_IsActionWeapon(pm->ps->weapon) &&
 	               ( pm->cmd.buttons & BUTTON_SPRINT ) &&
 	               pm->cmd.forwardmove > 0 &&
 	               pml.groundPlane &&
 	               !( pm->ps->pm_flags & PMF_DUCKED ) );
-
-	wasSprinting = !!( pm->ps->pm_flags & PMF_SPRINTING );
-
-	(void)wasSprinting;
 
 	if ( wantSprint ) {
 		pm->ps->pm_flags |= PMF_SPRINTING;
@@ -2647,7 +2718,7 @@ static void PM_CheckADS( void ) {
 	// and must not be reproduced by loosening this gate.
 	canADS = ( ( pm->cmd.buttons & BUTTON_ADS ) &&
 	           !( pm->ps->weaponAction & WA_TYPE_MASK ) &&
-	           !PM_IsSpecialWeapon( pm->ps->weapon ) &&
+	           !BG_IsActionWeapon( pm->ps->weapon ) &&
 	           !( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) &&
 	           pm->ps->weaponstate != WEAPON_LADDER &&
 	           !( pm->ps->pm_flags & PMF_SPRINTING ) &&
@@ -2740,7 +2811,7 @@ static void PM_Weapon( void ) {
 	// Cancel the unfinished holster, without inserting a new deploy or delay.
 	// Ladder holsters and latched quick actions have their own destinations.
 	if ( !ladderWeapon && pm->ps->weaponstate == WEAPON_DROPPING &&
-		!PM_IsSpecialWeapon( pm->ps->weapon ) &&
+		!BG_IsActionWeapon( pm->ps->weapon ) &&
 		PM_DesiredWeapon() == pm->ps->weapon ) {
 		pm->ps->weaponstate = WEAPON_READY;
 		pm->ps->weaponTime = 0;
@@ -2915,7 +2986,9 @@ static void PM_Weapon( void ) {
 	}
 
 	// A quick action fires once from its own button, never from the trigger.
-	if ( PM_IsSpecialWeapon( pm->ps->weapon ) &&
+	// Release-to-throw. A short tap stays queued through holster and deploy.
+	if (pm->ps->weapon == WP_SEMTEX && (pm->cmd.buttons & BUTTON_LETHAL)) return;
+	if ( BG_IsActionWeapon( pm->ps->weapon ) &&
 		(PM_ActionWeapon() != pm->ps->weapon || (pm->ps->weaponAction & WA_FIRED)) ) {
 		return;
 	}
@@ -2988,7 +3061,7 @@ static void PM_Weapon( void ) {
 
 	// fire weapon
 	PM_AddEvent( EV_FIRE_WEAPON );
-	if ( PM_IsSpecialWeapon( pm->ps->weapon ) ) {
+	if ( BG_IsActionWeapon( pm->ps->weapon ) ) {
 		pm->ps->weaponAction |= WA_FIRED;
 	}
 
@@ -2998,6 +3071,7 @@ static void PM_Weapon( void ) {
 		addTime = 400;
 		break;
 	case WP_KNIFE:
+	case WP_SEMTEX:
 	case WP_FRAG:
 	case WP_FLASH:
 		addTime = BG_QUICK_ACTION_HOLD;	// one hold: melee and equipment recover alike

@@ -533,11 +533,13 @@ static void CG_PeaceDump_f( void ) {
 		ps->stats[STAT_ACTIVE_SLOT] );
 	CG_Printf( "ammo     mag %i / reserve %i        owned mask 0x%04x\n",
 		ps->ammo[w], ps->ammoReserve[w], ps->stats[STAT_WEAPONS] );
-	CG_Printf( "equip    lethal %i   tactical %i\n",
-		ps->ammo[WP_FRAG], ps->ammo[WP_FLASH] );
+	CG_Printf( "equip    lethal %i (weapon %i)   tactical %i   semtex %i\n",
+		ps->ammo[BG_LethalWeapon(ps)], BG_LethalWeapon(ps), ps->ammo[WP_FLASH], ps->ammo[WP_SEMTEX] );
 	CG_Printf( "action   type %i   fired %i   held %i\n",
 		ps->weaponAction & WA_TYPE_MASK, !!(ps->weaponAction & WA_FIRED),
 		(ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT );
+	CG_Printf("selection requested %i   cancelAck %i   recovering %i\n", cg.weaponSelect,
+		!!(ps->weaponAction & WA_RETURNING), !!(ps->weaponAction & WA_RECOVERING));
 
 	CG_Printf( "timings  drop %i  raise %i  sprintIn %i  sprintOut %i\n",
 		BG_WeaponDropTime( w ), BG_WeaponRaiseTime( w ),

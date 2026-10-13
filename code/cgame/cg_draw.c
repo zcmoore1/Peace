@@ -2415,6 +2415,10 @@ static void CG_DrawLoadoutHud( void ) {
 	ps = &cg.predictedPlayerState;
 	x  = 420;
 	y  = 380;
+	if (cg.weaponSelect == ps->stats[STAT_SLOT_PRIMARY] || cg.weaponSelect == ps->stats[STAT_SLOT_SECONDARY]) {
+		gitem_t *selected = BG_FindItemForWeapon(cg.weaponSelect);
+		CG_DrawSmallString(x, y - SMALLCHAR_HEIGHT - 4, selected->pickup_name, 1.0f);
+	}
 
 	for ( i = 0; i < SLOT_COUNT; i++ ) {
 		slotWpn = ( i == SLOT_PRIMARY )
@@ -2425,9 +2429,8 @@ static void CG_DrawLoadoutHud( void ) {
 			continue;
 		}
 
-		// The active slot is the one the player is "on", even while a temporary
-		// selection (melee / equipment / underbarrel) is out.
-		trap_R_SetColor( ( ps->stats[STAT_ACTIVE_SLOT] == i ) ? bright : dim );
+		// Selection is visible immediately, including a swap queued behind a throw.
+		trap_R_SetColor( (cg.weaponSelect == slotWpn) ? bright : dim );
 
 		if ( BG_WeaponMagSize( slotWpn ) > 0 ) {
 			Com_sprintf( line, sizeof( line ), "%s  %i / %i",
@@ -2444,8 +2447,9 @@ static void CG_DrawLoadoutHud( void ) {
 	trap_R_SetColor( bright );
 
 	// Equipment counts are just the ammo on those weapon entries.
-	Com_sprintf( line, sizeof( line ), "LETHAL %i   TAC %i",
-		ps->ammo[WP_FRAG], ps->ammo[WP_FLASH] );
+	Com_sprintf( line, sizeof( line ), "%s %i   TAC %i",
+		BG_LethalWeapon(ps) == WP_SEMTEX ? "SEMTEX" : "LETHAL",
+		ps->ammo[BG_LethalWeapon(ps)], ps->ammo[WP_FLASH] );
 	CG_DrawSmallString( x, y, line, 1.0f );
 
 	trap_R_SetColor( NULL );

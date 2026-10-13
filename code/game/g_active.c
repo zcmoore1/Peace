@@ -849,7 +849,7 @@ void ClientThink_real( gentity_t *ent ) {
 	ucmd = &ent->client->pers.cmd;
 
 	// training dummy: erase all AI/input so pmove sees a frozen player
-	if ( ent->client->isDummy ) {
+	if ( ent->client->pers.isDummy ) {
 		int savedTime = level.time;
 		memset( ucmd, 0, sizeof( *ucmd ) );
 		ucmd->serverTime = savedTime;

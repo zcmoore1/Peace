@@ -510,6 +510,8 @@ static void CG_Missile( centity_t *cent ) {
 		}
 	}
 
+	if (s1->weapon == WP_SEMTEX && s1->pos.trType == TR_STATIONARY)
+		AnglesToAxis(cent->lerpAngles, ent.axis);
 	// add to refresh list, possibly with quad glow
 	CG_AddRefEntityWithPowerups( &ent, s1, TEAM_FREE );
 }

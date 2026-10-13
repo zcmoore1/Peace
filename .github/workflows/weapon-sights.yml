@@ -13,6 +13,7 @@ on:
       - 'code/qcommon/qcommon.h'
       - 'code/qcommon/q_shared.h'
       - 'code/qcommon/msg.c'
+      - 'code/qcommon/common.c'
       - 'cmake/**'
       - 'assets/baseq3/**'
       - 'assets/source/spas12/**'
@@ -20,6 +21,7 @@ on:
       - 'dev/tools/build_sight_assets.js'
       - 'dev/tools/build_ladder_map.py'
       - 'dev/tools/build_snd_assets.py'
+      - 'dev/tools/build_semtex_assets.py'
       - 'dev/tools/import_spas.py'
       - 'dev/tools/build_spas_sprint.py'
       - '.github/workflows/weapon-sights.yml'
@@ -58,7 +60,10 @@ jobs:
           cc -std=c99 -O0 -ffunction-sections -fdata-sections dev/tests/sights_test.c code/qcommon/q_math.c code/qcommon/q_shared.c -Wl,--gc-sections -lm -o out/tests/sights-test
           out/tests/sights-test
       - name: Test saved classes, YY, quick actions, poses and network deltas
-        run: sh dev/tests/run-loadouts.sh
+        run: |
+          python3 dev/tools/build_semtex_assets.py --check
+          sh dev/tests/run-loadouts.sh
+          LOADOUT_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-loadouts.sh
       - name: Build native and QVM game modules
         run: |
           cmake -S . -B out/ci -DBUILD_CLIENT=OFF -DBUILD_SERVER=OFF -DBUILD_RENDERER_GL1=OFF -DBUILD_RENDERER_GL2=OFF -DBUILD_GAME_LIBRARIES=ON -DBUILD_GAME_QVMS=ON

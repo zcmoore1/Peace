@@ -16,6 +16,13 @@ static const struct { const char *name; int primary, secondary, lethal, tactical
 static bg_class_t bg_classes[ARRAY_LEN(presets)];
 static qboolean classesReady;
 
+// Quick actions reuse weapon states, but never become either inventory slot.
+// Gameplay and presentation share this classification, including recovery.
+qboolean BG_IsActionWeapon( int weapon ) {
+	return weapon == WP_KNIFE || weapon == WP_FRAG ||
+		weapon == WP_FLASH || weapon == WP_SEMTEX;
+}
+
 static const struct { int weapon; const char *name; } classWeapons[] = {
 	{WP_MACHINEGUN, "Machinegun"}, {WP_SHOTGUN, "SPAS-12"},
 	{WP_RAILGUN, "Railgun"}, {WP_ROCKET_LAUNCHER, "Rocket launcher"},
@@ -76,7 +83,7 @@ qboolean BG_ValidateClass( const bg_class_t *loadout ) {
 	if ( !loadout || !BG_ClassNameValid(loadout->name) ) return qfalse;
 	if ( !BG_IsClassWeapon(loadout->slot[0]) || !BG_IsClassWeapon(loadout->slot[1]) ||
 		loadout->slot[0] == loadout->slot[1] ) return qfalse;
-	if ( loadout->lethal != WP_NONE && loadout->lethal != WP_FRAG ) return qfalse;
+	if ( loadout->lethal != WP_NONE && loadout->lethal != WP_FRAG && loadout->lethal != WP_SEMTEX ) return qfalse;
 	if ( loadout->tactical != WP_NONE && loadout->tactical != WP_FLASH ) return qfalse;
 	if ( loadout->lethalCount < 0 || loadout->lethalCount > 3 ||
 		loadout->tacticalCount < 0 || loadout->tacticalCount > 3 ) return qfalse;

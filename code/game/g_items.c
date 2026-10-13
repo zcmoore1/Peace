@@ -238,7 +238,7 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 	int				slot;
 
 	// Equipment pickups replenish their own count; they cannot replace a gun.
-	if ( wep == WP_KNIFE || wep == WP_FRAG || wep == WP_FLASH ) {
+	if ( wep == WP_KNIFE || wep == WP_FRAG || wep == WP_FLASH || wep == WP_SEMTEX ) {
 		ps->ammo[wep] = wep == WP_KNIFE ? -1 : 3;
 		BG_RebuildWeaponMask( ps );
 		return g_weaponRespawn.integer;

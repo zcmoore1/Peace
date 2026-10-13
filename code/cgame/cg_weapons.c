@@ -612,9 +612,13 @@ static const char *cg_viewModelBase[WP_NUM_WEAPONS] = {
 	"",									// WP_PLASMAGUN
 	"",									// WP_BFG
 	"",									// WP_GRAPPLING_HOOK
+#ifdef MISSIONPACK
+	"", "", "",
+#endif
 	"",									// WP_KNIFE
 	"",									// WP_FRAG
-	""									// WP_FLASH
+	"",                                 // WP_FLASH
+	""                                  // WP_SEMTEX (procedural MD3 hand pose)
 };
 
 /*
@@ -704,6 +708,12 @@ void CG_RegisterWeapon( int weaponNum ) {
 	}
 
 	switch ( weaponNum ) {
+	case WP_SEMTEX:
+		weaponInfo->missileModel = weaponInfo->weaponModel;
+		weaponInfo->flashModel = 0;
+		weaponInfo->barrelModel = 0;
+		cgs.media.grenadeExplosionShader = trap_R_RegisterShader("grenadeExplosion");
+		break;
 	case WP_GAUNTLET:
 		MAKERGB( weaponInfo->flashDlightColor, 0.6f, 0.6f, 1.0f );
 		weaponInfo->firingSound = trap_S_RegisterSound( "sound/weapons/melee/fstrun.wav", qfalse );
@@ -1397,6 +1407,43 @@ CG_AddViewWeapon
 Add the weapon, and flash for the player's view
 ==============
 */
+static void CG_SemtexView(playerState_t *ps, weaponInfo_t *weapon) {
+	refEntity_t hand;
+	vec3_t angles;
+	float t = 1, x = 18, y = -8, z = -8;
+	if (ps->weaponstate == WEAPON_RAISING) {
+		t = 1.0f - (float)ps->weaponTime / BG_WeaponRaiseTime(WP_SEMTEX);
+		if (t < 0) t = 0;
+		if (t > 1) t = 1;
+		t = t*t*(3-2*t);
+		x += 7*(1-t); z -= 19*(1-t);
+	} else if (ps->weaponstate == WEAPON_FIRING) {
+		t = 1.0f - (float)ps->weaponTime / BG_QUICK_ACTION_HOLD;
+		if (t < 0) t = 0;
+		if (t > 1) t = 1;
+		x += 18*sin(t*M_PI); z += 8*sin(t*M_PI)-24*t;
+	} else if (ps->weaponstate == WEAPON_DROPPING) {
+		t = 1.0f - (float)ps->weaponTime / BG_HolsterTime(ps);
+		z -= 24*t;
+	}
+	memset(&hand, 0, sizeof(hand));
+	VectorCopy(cg.refdef.vieworg, hand.origin);
+	VectorMA(hand.origin, x, cg.refdef.viewaxis[0], hand.origin);
+	VectorMA(hand.origin, y, cg.refdef.viewaxis[1], hand.origin);
+	VectorMA(hand.origin, z, cg.refdef.viewaxis[2], hand.origin);
+	VectorCopy(ps->viewangles, angles);
+	angles[ROLL] -= 15;
+	AnglesToAxis(angles, hand.axis);
+	VectorCopy(hand.origin, hand.oldorigin);
+	hand.renderfx = RF_DEPTHHACK | RF_FIRST_PERSON | RF_MINLIGHT;
+	hand.hModel = weapon->handsModel;
+	trap_R_AddRefEntityToScene(&hand);
+	if (!(ps->weaponAction & (WA_FIRED | WA_RECOVERING))) {
+		hand.hModel = weapon->weaponModel;
+		trap_R_AddRefEntityToScene(&hand);
+	}
+}
+
 void CG_AddViewWeapon( playerState_t *ps ) {
 	refEntity_t	hand;
 	centity_t	*cent;
@@ -1458,6 +1505,10 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	cent = &cg.predictedPlayerEntity;	// &cg_entities[cg.snap->ps.clientNum];
 	CG_RegisterWeapon( ps->weapon );
 	weapon = &cg_weapons[ ps->weapon ];
+	if (ps->weapon == WP_SEMTEX) {
+		CG_SemtexView(ps, weapon);
+		return;
+	}
 
 	memset (&hand, 0, sizeof(hand));
 
@@ -1469,7 +1520,7 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	VectorMA( hand.origin, (cg_gun_z.value+fovOffset), cg.refdef.viewaxis[2], hand.origin );
 	// A short universal lowering works for the placeholder MD3s too, and does
 	// not take animation-layer ownership away from the existing still-swap rule.
-	if ( ps->stats[STAT_LADDER] & LADDER_HOLSTER ) {
+	if ( !weapon->viewModel && (ps->stats[STAT_LADDER] & LADDER_HOLSTER) ) {
 		float fraction = 1.0f - (float)ps->weaponTime / BG_LADDER_DROP_TIME;
 		if ( fraction < 0 ) fraction = 0;
 		if ( fraction > 1 ) fraction = 1;
@@ -1482,6 +1533,12 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		hand.renderfx = RF_DEPTHHACK | RF_FIRST_PERSON | RF_MINLIGHT;
 		AnglesToAxis( angles, hand.axis );
 		CG_WeapAnim_Apply( ps, &hand, cg.frametime );
+		if ((ps->stats[STAT_LADDER] & LADDER_HOLSTER) && !CG_WeapAnim_HoldsDrop()) {
+			float fraction = 1.0f - (float)ps->weaponTime / BG_LADDER_DROP_TIME;
+			if (fraction < 0) fraction = 0;
+			if (fraction > 1) fraction = 1;
+			VectorMA(hand.origin, -24.0f*fraction, cg.refdef.viewaxis[2], hand.origin);
+		}
 		if ( cg_gun_frame.integer ) {
 			hand.frame = hand.oldframe = cg_gun_frame.integer;
 			hand.backlerp = 0;
@@ -1711,6 +1768,12 @@ void CG_NextWeapon_f( void ) {
 	}
 
 	ps = &cg.predictedPlayerState;
+	trap_SendConsoleCommand("_peaceWeaponSwap\n");
+	if (!(ps->weaponAction & WA_FIRED) && (ps->weaponAction & WA_TYPE_MASK) == WA_LETHAL && BG_LethalWeapon(ps) == WP_SEMTEX) {
+		cg.weaponSelect = BG_ActiveSlotWeapon(ps);
+		cg.weaponSelectTime = cg.time;
+		return;
+	}
 
 	// Two slots: weapnext is a toggle between them. Melee and equipment
 	// are NOT slots - they are temporary actions that return
@@ -1825,6 +1888,10 @@ void CG_ValidateWeaponSelect( void ) {
 		return;
 	}
 	ps  = &cg.snap->ps;
+	if (cg.predictedPlayerState.weaponAction & WA_RETURNING) {
+		cg.weaponSelect = BG_ActiveSlotWeapon(&cg.predictedPlayerState);
+		return;
+	}
 	pri = ps->stats[STAT_SLOT_PRIMARY];
 	sec = ps->stats[STAT_SLOT_SECONDARY];
 
@@ -1989,6 +2056,7 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 		isSprite = qtrue;
 		break;
 #endif
+	case WP_SEMTEX:
 	case WP_GRENADE_LAUNCHER:
 		mod = cgs.media.dishFlashModel;
 		shader = cgs.media.grenadeExplosionShader;
@@ -2133,6 +2201,7 @@ void CG_MissileHitPlayer( int weapon, vec3_t origin, vec3_t dir, int entityNum )
 	// some weapons will make an explosion with the blood, while
 	// others will just make the blood
 	switch ( weapon ) {
+	case WP_SEMTEX:
 	case WP_GRENADE_LAUNCHER:
 	case WP_ROCKET_LAUNCHER:
 #ifdef MISSIONPACK

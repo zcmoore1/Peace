@@ -955,10 +955,18 @@ char *ClientConnect( int clientNum, qboolean firstTime, qboolean isBot ) {
 		client->pers.localClient = qtrue;
 	}
 
+	// A training dummy takes a bot slot but has no brain - it zeroes its own
+	// input every think (ClientThink_real) - so it must not go through botlib,
+	// which refuses any map without an .aas navigation file. None of Peace's
+	// maps have one, so this is what lets a dummy exist at all. The mark lives
+	// in userinfo because map_restart reconnects every client and the client
+	// struct is wiped above.
+	client->isDummy = isBot && atoi( Info_ValueForKey( userinfo, "peace_dummy" ) );
+
 	if( isBot ) {
 		ent->r.svFlags |= SVF_BOT;
 		ent->inuse = qtrue;
-		if( !G_BotConnect( clientNum, !firstTime ) ) {
+		if( !client->isDummy && !G_BotConnect( clientNum, !firstTime ) ) {
 			return "BotConnectfailed";
 		}
 	}
@@ -1344,7 +1352,7 @@ void ClientDisconnect( int clientNum ) {
 
 	CalculateRanks();
 
-	if ( ent->r.svFlags & SVF_BOT ) {
-		BotAIShutdownClient( clientNum, qfalse );
+	if ( ( ent->r.svFlags & SVF_BOT ) && !ent->client->isDummy ) {
+		BotAIShutdownClient( clientNum, qfalse );		// a dummy never had bot AI
 	}
 }

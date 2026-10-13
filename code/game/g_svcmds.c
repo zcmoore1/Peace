@@ -416,13 +416,21 @@ gclient_t	*ClientForString( const char *s ) {
 ===================
 Svcmd_SpawnDummy_f
 
+spawndummy [red|blue]
+
 Spawn a stationary training dummy. It acts as a full player client (takes
 damage, dies, respawns) but all input is zeroed so it never moves or shoots.
+Needs no bot AI and no .aas file, so it works on any map.
+
+In team games it joins the given team, or the smaller one. That is what makes
+Search & Destroy testable alone: a round needs someone on both teams, so join
+one and spawndummy the other.
 ===================
 */
 void Svcmd_SpawnDummy_f( void ) {
 	int		clientNum;
 	char	userinfo[MAX_INFO_STRING];
+	char	team[MAX_TOKEN_CHARS];
 
 	clientNum = trap_BotAllocateClient();
 	if ( clientNum == -1 ) {
@@ -444,6 +452,16 @@ void Svcmd_SpawnDummy_f( void ) {
 	Info_SetValueForKey( userinfo, "color2",          "5" );
 	Info_SetValueForKey( userinfo, "characterfile",   "bots/default_c.c" );
 	Info_SetValueForKey( userinfo, "teamoverlay",     "0" );
+	Info_SetValueForKey( userinfo, "peace_dummy",     "1" );
+
+	// Same team rule as G_AddBot: as asked, else the smaller team.
+	trap_Argv( 1, team, sizeof( team ) );
+	if ( g_gametype.integer >= GT_TEAM ) {
+		if ( Q_stricmp( team, "red" ) && Q_stricmp( team, "blue" ) ) {
+			Q_strncpyz( team, PickTeam( clientNum ) == TEAM_RED ? "red" : "blue", sizeof( team ) );
+		}
+		Info_SetValueForKey( userinfo, "teampref", team );	// what G_InitSessionData reads
+	}
 
 	trap_SetUserinfo( clientNum, userinfo );
 
@@ -455,9 +473,9 @@ void Svcmd_SpawnDummy_f( void ) {
 
 	ClientBegin( clientNum );
 
-	g_entities[clientNum].client->isDummy = qtrue;
-
-	G_Printf( "Training dummy spawned as client %i.\n", clientNum );
+	G_Printf( "Training dummy spawned as client %i%s%s.\n", clientNum,
+		g_gametype.integer >= GT_TEAM ? " on " : "",
+		g_gametype.integer >= GT_TEAM ? team : "" );
 }
 
 /*

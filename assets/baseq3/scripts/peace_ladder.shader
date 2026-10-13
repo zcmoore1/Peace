@@ -42,3 +42,17 @@ textures/peace_ladder/rung
         rgbGen const ( 0.76 0.84 0.88 )
     }
 }
+textures/peace_ladder/site
+{
+    {
+        map $whiteimage
+        rgbGen const ( 0.98 0.72 0.14 )
+    }
+}
+textures/peace_ladder/site_panel
+{
+    {
+        map $whiteimage
+        rgbGen const ( 0.07 0.09 0.11 )
+    }
+}

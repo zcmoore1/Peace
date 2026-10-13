@@ -442,6 +442,9 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	if ( self->client->ps.pm_type == PM_DEAD ) {
 		return;
 	}
+	// Team changes and kill commands must not score another death while a
+	// player is already eliminated or waiting between S&D rounds.
+	if ( g_gametype.integer == GT_SND && !G_SNDCanDamage( self ) ) return;
 
 	if ( level.intermissiontime ) {
 		return;
@@ -463,6 +466,7 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	}
 #endif
 	self->client->ps.pm_type = PM_DEAD;
+	G_SNDClientDied( self );
 
 	if ( attacker ) {
 		killer = attacker->s.number;
@@ -823,6 +827,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	if (!targ->takedamage) {
 		return;
 	}
+	if ( !G_SNDCanDamage( targ ) ) return;
 
 	// the intermission has already been qualified for, so don't
 	// allow any extra scoring

@@ -30,6 +30,10 @@ compiled `assets/baseq3/maps/peace_ladder.bsp` and its shaders are copied by the
 existing CMake assets target. You need no map compiler to play it. Existing game
 assets are still required by the normal client; this is not a standalone game pack.
 
+The platform now also contains **Site A** for Search and Destroy, with separate
+attacker/defender spawns. These additions do not change ladder collision.
+See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
+
 ## Behavior and ordering
 
 - Shared `bg_pmove.c` handles both prediction and server movement. Horizontal

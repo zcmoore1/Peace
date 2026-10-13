@@ -868,7 +868,8 @@ void ClientThink_real( gentity_t *ent ) {
 	msec = ucmd->serverTime - client->ps.commandTime;
 	// following others may result in bad times, but we still want
 	// to check for follow toggles
-	if ( msec < 1 && client->sess.spectatorState != SPECTATOR_FOLLOW ) {
+	if ( msec < 1 && client->sess.spectatorState != SPECTATOR_FOLLOW &&
+	     !(client->ps.pm_flags & PMF_FOLLOW) ) {
 		return;
 	}
 	if ( msec > 200 ) {
@@ -897,6 +898,8 @@ void ClientThink_real( gentity_t *ent ) {
 		ClientIntermissionThink( client );
 		return;
 	}
+
+	if ( G_SNDClientThink( ent, ucmd ) ) return;
 
 	// spectators don't do much
 	if ( client->sess.sessionTeam == TEAM_SPECTATOR ) {
@@ -1064,7 +1067,7 @@ void ClientThink_real( gentity_t *ent ) {
 	}
 
 	// hold-to-pickup for floor weapons (walking over them does nothing)
-	G_CheckWeaponPickup( ent, ucmd );
+	if ( !G_SNDUse( ent, ucmd ) ) G_CheckWeaponPickup( ent, ucmd );
 
 	// NOTE: now copy the exact origin over otherwise clients can be snapped into solid
 	VectorCopy( ent->client->ps.origin, ent->r.currentOrigin );
@@ -1087,6 +1090,7 @@ void ClientThink_real( gentity_t *ent ) {
 
 	// check for respawning
 	if ( client->ps.stats[STAT_HEALTH] <= 0 ) {
+		if ( !G_SNDCanRespawn() ) return;
 		// wait for the attack button to be pressed
 		if ( level.time > client->respawnTime ) {
 			// forcerespawn is to prevent users from waiting out powerups
@@ -1200,6 +1204,7 @@ while a slow client may have multiple ClientEndFrame between ClientThink.
 */
 void ClientEndFrame( gentity_t *ent ) {
 	int			i;
+	if ( G_SNDClientEndFrame( ent ) ) return;
 
 	if ( ent->client->sess.sessionTeam == TEAM_SPECTATOR ) {
 		SpectatorClientEndFrame( ent );

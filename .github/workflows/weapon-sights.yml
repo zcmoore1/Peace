@@ -19,6 +19,7 @@ on:
       - 'dev/tests/**'
       - 'dev/tools/build_sight_assets.js'
       - 'dev/tools/build_ladder_map.py'
+      - 'dev/tools/build_snd_assets.py'
       - 'dev/tools/import_spas.py'
       - 'dev/tools/build_spas_sprint.py'
       - '.github/workflows/weapon-sights.yml'
@@ -36,6 +37,11 @@ jobs:
           git diff --exit-code -- assets/baseq3
       - name: Check generated ladder map
         run: python3 dev/tools/build_ladder_map.py --check
+      - name: Check Search and Destroy objectives and round rules
+        run: |
+          python3 dev/tools/build_snd_assets.py --check
+          sh dev/tests/run-snd.sh
+          SND_TEST_DEFINES=-DMISSIONPACK sh dev/tests/run-snd.sh
       - name: Check SPAS mesh winding and clip metadata
         run: |
           python3 dev/tools/build_spas_sprint.py --check

@@ -250,6 +250,9 @@ void CG_DrawInformation( void ) {
 	case GT_CTF:
 		s = "Capture The Flag";
 		break;
+	case GT_SND:
+		s = "Search and Destroy";
+		break;
 #ifdef MISSIONPACK
 	case GT_1FCTF:
 		s = "One Flag CTF";
@@ -285,7 +288,7 @@ void CG_DrawInformation( void ) {
 		}
 	}
 
-	if (cgs.gametype >= GT_CTF) {
+	if (cgs.gametype >= GT_CTF && cgs.gametype != GT_SND) {
 		value = atoi( Info_ValueForKey( info, "capturelimit" ) );
 		if ( value ) {
 			UI_DrawProportionalString( 320, y, va( "capturelimit %i", value ),

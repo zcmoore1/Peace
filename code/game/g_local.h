@@ -429,6 +429,21 @@ typedef struct {
 //
 // g_spawn.c
 //
+void G_SNDInit( void );
+void LogExit( const char *string );
+void G_SNDMapReady( void );
+void G_SNDRunFrame( void );
+void SP_peace_bombsite( gentity_t *ent );
+qboolean G_SNDWaitForRound( gentity_t *ent );
+void G_SNDClientSpawned( gentity_t *ent );
+void G_SNDClientDied( gentity_t *ent );
+qboolean G_SNDClientThink( gentity_t *ent, usercmd_t *cmd );
+qboolean G_SNDClientEndFrame( gentity_t *ent );
+qboolean G_SNDUse( gentity_t *ent, usercmd_t *cmd );
+qboolean G_SNDCanDamage( gentity_t *ent );
+qboolean G_SNDCanRespawn( void );
+team_t G_SNDSpawnTeam( team_t team );
+
 qboolean	G_SpawnString( const char *key, const char *defaultString, char **out );
 // spawn string returns a temporary reference, you must CopyString() if you want to keep it
 qboolean	G_SpawnFloat( const char *key, const char *defaultString, float *out );

@@ -1023,6 +1023,7 @@ static float CG_DrawScores( float y ) {
 	vec4_t		color;
 	float		y1;
 	gitem_t		*item;
+	if ( cgs.gametype == GT_SND ) return y; // round scoreboard is in the S&D HUD
 
 	s1 = cgs.scores1;
 	s2 = cgs.scores2;
@@ -2619,6 +2620,8 @@ static void CG_DrawWarmup( void ) {
 			s = "Team Deathmatch";
 		} else if ( cgs.gametype == GT_CTF ) {
 			s = "Capture the Flag";
+		} else if ( cgs.gametype == GT_SND ) {
+			s = "Search and Destroy";
 #ifdef MISSIONPACK
 		} else if ( cgs.gametype == GT_1FCTF ) {
 			s = "One Flag CTF";
@@ -2731,6 +2734,118 @@ void CG_DrawTimedMenus( void ) {
 CG_Draw2D
 =================
 */
+// S&D reads authoritative configstrings and use progress. This is only HUD;
+// range hints grant no planting/defusing permission and never change ps.
+static void CG_SNDText( float y, const char *text, const vec4_t color ) {
+	CG_DrawStringExt(320-CG_DrawStrlen(text)*4, y, text, color,
+		qfalse, qtrue, 8, 12, 0);
+}
+
+static void CG_SNDMarker( vec3_t origin, const char *label, const vec4_t color ) {
+	vec3_t delta;
+	float depth, x, y;
+	VectorSubtract(origin, cg.refdef.vieworg, delta);
+	delta[2] += 28;
+	depth = DotProduct(delta, cg.refdef.viewaxis[0]);
+	if ( depth <= 1 ) return;
+	x = 320-320*DotProduct(delta,cg.refdef.viewaxis[1]) /
+		(depth*tan(cg.refdef.fov_x*M_PI/360));
+	y = 240-240*DotProduct(delta,cg.refdef.viewaxis[2]) /
+		(depth*tan(cg.refdef.fov_y*M_PI/360));
+	x = Com_Clamp(24,616,x); y = Com_Clamp(108,350,y);
+	CG_DrawStringExt(x-CG_DrawStrlen(label)*4,y,label,color,qfalse,qtrue,8,12,0);
+}
+
+static qboolean CG_SNDReadSite( const char *text, vec3_t origin, float *radius ) {
+	char buffer[128], *cursor, *token;
+	float values[4];
+	int n;
+	// QVM's small sscanf implementation always returns zero. Use the shared
+	// token parser so native and VM HUDs agree on whether a site exists.
+	Q_strncpyz(buffer,text,sizeof(buffer)); cursor = buffer;
+	for ( n = 0; n < 4; n++ ) {
+		token = COM_Parse(&cursor);
+		if ( !token[0] ) return qfalse;
+		values[n] = atof(token);
+	}
+	if ( values[3] < 1 || values[3] > 160 ) return qfalse;
+	VectorCopy(values,origin); *radius = values[3];
+	return qtrue;
+}
+
+static void CG_DrawSND( void ) {
+	const char *state, *sites, *value, *status, *prompt = NULL;
+	int phase, attack, carrier, deadline, seconds, n, ownTeam, winner, result;
+	float radius;
+	vec3_t origin, delta;
+	vec4_t back = { .02f,.025f,.035f,.82f }, gold = { 1,.76f,.24f,1 };
+	playerState_t *ps = &cg.snap->ps;
+	char text[128];
+	if ( cgs.gametype != GT_SND ) return;
+	state = CG_ConfigString(CS_SND);
+	if ( !state[0] ) return;
+	sites = CG_ConfigString(CS_SND_SITES);
+	phase = atoi(Info_ValueForKey(state,"phase"));
+	attack = atoi(Info_ValueForKey(state,"attack"));
+	carrier = atoi(Info_ValueForKey(state,"carrier"));
+	deadline = atoi(Info_ValueForKey(state,"deadline"));
+	seconds = (deadline-cg.time+999)/1000;
+	if ( seconds < 0 ) seconds = 0;
+	ownTeam = cgs.clientinfo[cg.clientNum].team;
+	winner = atoi(Info_ValueForKey(state,"winner"));
+	result = atoi(Info_ValueForKey(state,"result"));
+	CG_FillRect(100,16,440,76,back);
+	Com_sprintf(text,sizeof(text),"SEARCH & DESTROY   ROUND %i   FIRST TO %i",
+		atoi(Info_ValueForKey(state,"round")), atoi(Info_ValueForKey(state,"goal")));
+	CG_SNDText(22,text,gold);
+	Com_sprintf(text,sizeof(text),"^1RED %i ^7(%i alive)     ^4BLUE %i ^7(%i alive)",
+		cgs.scores1, atoi(Info_ValueForKey(state,"red")),
+		cgs.scores2, atoi(Info_ValueForKey(state,"blue")));
+	CG_SNDText(38,text,colorWhite);
+	status = ownTeam == TEAM_SPECTATOR ? "SPECTATING" : (ownTeam == attack ? "ATTACK" : "DEFEND");
+	if ( phase == SND_WAITING ) {
+		Com_sprintf(text,sizeof(text),"%s", sites[0] ? "Waiting for players on both teams" : "This map has no bomb site");
+	} else if ( phase == SND_COUNTDOWN ) {
+		Com_sprintf(text,sizeof(text),"%s - deploy in %i",status,seconds);
+	} else if ( phase == SND_ROUND_OVER ) {
+		status = result == SND_DEFUSED ? "BOMB DEFUSED" : result == SND_EXPLODED ? "BOMB DETONATED" :
+			result == SND_TIME ? "TIME EXPIRED" : result == SND_DRAW ? "DRAW" : "TEAM ELIMINATED";
+		Com_sprintf(text,sizeof(text),"%s - %s",status,winner == TEAM_RED ? "RED WINS" : winner == TEAM_BLUE ? "BLUE WINS" : "NO WINNER");
+	} else {
+		Com_sprintf(text,sizeof(text),"%s  %i:%02i  %s",status,seconds/60,seconds%60,
+			phase == SND_PLANTED ? "BOMB PLANTED" : carrier == cg.clientNum ? "YOU HAVE THE BOMB" :
+			ownTeam == attack ? (carrier < 0 ? "RECOVER THE BOMB" : "ESCORT THE CARRIER") : "DEFEND THE SITES");
+	}
+	CG_SNDText(54,text,colorWhite);
+	if ( atoi(Info_ValueForKey(state,"practice")) ) CG_SNDText(74,"SOLO PRACTICE",gold);
+	else if ( (ps->pm_flags & PMF_FOLLOW) || ps->stats[STAT_HEALTH] <= 0 )
+		CG_SNDText(74,"Next round to respawn - Attack cycles teammates",gold);
+	for ( n = 0; n < SND_MAX_SITES; n++ ) {
+		value = Info_ValueForKey(sites,va("s%i",n));
+		if ( !CG_SNDReadSite(value,origin,&radius) ) continue;
+		// The planted case owns this marker; don't overprint A and BOMB.
+		if ( phase != SND_PLANTED || n != atoi(Info_ValueForKey(state,"site")) )
+			CG_SNDMarker(origin,va("[ %c ]",'A'+n),gold);
+		VectorSubtract(ps->origin,origin,delta);
+		if ( phase == SND_LIVE && carrier == cg.clientNum && VectorLengthSquared(delta) <= radius*radius )
+			prompt = "Hold USE to plant - stay still";
+	}
+	if ( phase == SND_PLANTED || (phase == SND_LIVE && carrier < 0 && ownTeam == attack) ) {
+		VectorSet(origin,atoi(Info_ValueForKey(state,"x")),atoi(Info_ValueForKey(state,"y")),atoi(Info_ValueForKey(state,"z")));
+		CG_SNDMarker(origin,"BOMB",gold);
+		VectorSubtract(ps->origin,origin,delta);
+		if ( phase == SND_PLANTED && ownTeam != TEAM_SPECTATOR && ownTeam != attack && VectorLengthSquared(delta) <= 72*72 )
+			prompt = "Hold USE to defuse - stay still";
+	}
+	if ( ownTeam == TEAM_SPECTATOR || (ps->pm_flags & PMF_FOLLOW) || ps->stats[STAT_HEALTH] <= 0 ) return;
+	if ( ps->stats[STAT_USE_TARGET] == SND_USE_PLANT || ps->stats[STAT_USE_TARGET] == SND_USE_DEFUSE ) {
+		prompt = ps->stats[STAT_USE_TARGET] == SND_USE_PLANT ? "PLANTING" : "DEFUSING";
+		CG_FillRect(218,332,204,10,back);
+		CG_FillRect(220,334,200*Com_Clamp(0,1,ps->stats[STAT_USE_PROGRESS]/1000.0f),6,gold);
+	}
+	if ( prompt ) CG_SNDText(314,prompt,gold);
+}
+
 static void CG_Draw2D(stereoFrame_t stereoFrame)
 {
 #ifdef MISSIONPACK
@@ -2835,6 +2950,7 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 
 	// don't draw center string if scoreboard is up
 	cg.scoreBoardShowing = CG_DrawScoreboard();
+	CG_DrawSND();
 	if ( !cg.scoreBoardShowing) {
 		CG_DrawCenterString();
 	}

@@ -1075,6 +1075,7 @@ void ClientSpawn(gentity_t *ent) {
 
 	index = ent - g_entities;
 	client = ent->client;
+	if ( G_SNDWaitForRound( ent ) ) return;
 
 	VectorClear(spawn_origin);
 
@@ -1087,8 +1088,8 @@ void ClientSpawn(gentity_t *ent) {
 	} else if (g_gametype.integer >= GT_CTF ) {
 		// all base oriented team games use the CTF spawn points
 		spawnPoint = SelectCTFSpawnPoint ( 
-						client->sess.sessionTeam, 
-						client->pers.teamState.state, 
+						G_SNDSpawnTeam( client->sess.sessionTeam ),
+						g_gametype.integer == GT_SND ? TEAM_BEGIN : client->pers.teamState.state,
 						spawn_origin, spawn_angles,
 						!!(ent->r.svFlags & SVF_BOT));
 	}
@@ -1240,6 +1241,7 @@ void ClientSpawn(gentity_t *ent) {
 		// move players to intermission
 		MoveClientToIntermission(ent);
 	}
+	G_SNDClientSpawned( ent );
 	// run a client frame to drop exactly to the floor,
 	// initialize animations and other things
 	client->ps.commandTime = level.time - 100;
@@ -1281,6 +1283,7 @@ void ClientDisconnect( int clientNum ) {
 	if (!ent->client || ent->client->pers.connected == CON_DISCONNECTED) {
 		return;
 	}
+	G_SNDClientDied( ent );
 
 	// stop any following clients
 	for ( i = 0 ; i < level.maxclients ; i++ ) {

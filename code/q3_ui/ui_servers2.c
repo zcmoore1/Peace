@@ -104,7 +104,8 @@ MULTIPLAYER MENU (SERVER BROWSER)
 #define GAMES_TEAMPLAY		2
 #define GAMES_TOURNEY		3
 #define GAMES_CTF			4
-#define GAMES_NUM_GAMES		5
+#define GAMES_SND             5
+#define GAMES_NUM_GAMES		6
 
 static const char *master_items[] = {
 	"Local",
@@ -124,6 +125,7 @@ static const char *servertype_items[] = {
 	"Team Deathmatch",
 	"Tournament",
 	"Capture the Flag",
+	"Search and Destroy",
 	NULL
 };
 
@@ -145,7 +147,7 @@ static char* gamenames[] = {
 	"One Flag CTF",		// one flag ctf
 	"OverLoad",				// Overload
 	"Harvester",			// Harvester
-	"Rocket Arena 3",	// Rocket Arena 3
+	"S&D",				// Peace Search and Destroy (GT_SND)
 	"Q3F",						// Q3F
 	"Urban Terror",		// Urban Terror
 	"OSP",						// Orange Smoothie Productions
@@ -543,6 +545,9 @@ static void ArenaServers_UpdateMenu( void ) {
 			if( servernodeptr->gametype != GT_CTF ) {
 				continue;
 			}
+			break;
+		case GAMES_SND:
+			if ( servernodeptr->gametype != GT_SND ) continue;
 			break;
 		}
 

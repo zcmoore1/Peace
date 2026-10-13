@@ -182,6 +182,7 @@ void SP_team_neutralobelisk( gentity_t *ent );
 void SP_item_botroam( gentity_t *ent ) { }
 
 spawn_t	spawns[] = {
+	{"peace_bombsite", SP_peace_bombsite},
 	// info entities don't do anything at all, but provide positional
 	// information for things controlled by other processes
 	{"info_player_start", SP_info_player_start},
@@ -398,7 +399,7 @@ void G_SpawnGEntityFromSpawnVars( void ) {
 	int			i;
 	gentity_t	*ent;
 	char		*s, *value, *gametypeName;
-	static char *gametypeNames[] = {"ffa", "tournament", "single", "team", "ctf", "oneflag", "obelisk", "harvester"};
+	static char *gametypeNames[] = {"ffa", "tournament", "single", "team", "ctf", "oneflag", "obelisk", "harvester", "snd"};
 
 	// get the next free entity
 	ent = G_Spawn();

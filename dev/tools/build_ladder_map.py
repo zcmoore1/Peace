@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a tiny, original, vertex-lit Q3 BSP without retail data or q3map2.
 
-Only axis-aligned brushes/flat faces: one sealed room, one platform, one ladder.
+Only axis-aligned brushes/flat faces: one room, platform, ladder and bomb site.
 The source geometry here is authoritative. --check verifies committed outputs.
 Q3 structures/flags are defined in code/qcommon/{qfiles.h,surfaceflags.h}.
 """
@@ -20,6 +20,8 @@ MATERIALS = [
     ("ladder", (0.13, 0.14, 0.16), LADDER),
     ("rail", (0.97, 0.61, 0.12), 0),
     ("rung", (0.76, 0.84, 0.88), 0),
+    ("site", (0.98, 0.72, 0.14), 0),
+    ("site_panel", (0.07, 0.09, 0.11), 0),
 ]
 
 
@@ -84,9 +86,24 @@ def build():
     for z in range(16, 320, 24):
         box((121,-48,z), (128,48,z+4), 5, collision=False)
 
+    # Site A on top of the ladder platform. Painted outlines/letter have no
+    # collision: climbing and the existing ladder regression traces stay intact.
+    box((208,48,320.1), (320,160,320.2), 7, collision=False)
+    for lo, hi in [((208,48,320.2),(320,52,320.4)),
+                   ((208,156,320.2),(320,160,320.4)),
+                   ((208,48,320.2),(212,160,320.4)),
+                   ((316,48,320.2),(320,160,320.4))]:
+        box(lo, hi, 6, collision=False)
+    # Block-letter A, readable from the ladder approach.
+    for lo, hi in [((244,82,320.2),(250,126,320.5)),
+                   ((278,82,320.2),(284,126,320.5)),
+                   ((244,120,320.2),(284,126,320.5)),
+                   ((244,99,320.2),(284,105,320.5))]:
+        box(lo, hi, 6, collision=False)
+
     entities = '''{
 "classname" "worldspawn"
-"message" "Peace - ladder lab"
+"message" "Peace - ladder and Search and Destroy lab"
 "gridsize" "64 64 128"
 }
 {
@@ -100,6 +117,19 @@ def build():
 "angles" "0 25 0"
 }
 '''
+    entities += '''{
+"classname" "peace_bombsite"
+"origin" "264 104 328"
+"site" "0"
+"radius" "72"
+}
+'''
+    # CTF's red/blue spawn names represent attacking/defending *sides* in
+    # S&D; the round controller remaps teams when sides switch.
+    for side, x, z, yaw in (("red", -280, 24, 0), ("blue", 330, 344, 180)):
+        for y in (-168, -84, 0, 84):
+            entities += ('{\n"classname" "team_CTF_' + side + 'player"\n' +
+                         f'"origin" "{x} {y} {z}"\n"angle" "{yaw}"\n}}\n')
     lumps[0] = entities.encode() + b"\0"
     for name, _, flags in MATERIALS:
         lumps[1] += struct.pack("<64sii", f"textures/peace_ladder/{name}".encode(), flags, SOLID)
@@ -142,7 +172,7 @@ def build():
             shader += "    surfaceparm ladder\n"
         shader += ("    {\n        map $whiteimage\n        rgbGen const ( " +
                    " ".join(map(str, color)) + " )\n    }\n}\n")
-    arena = '{\nmap "peace_ladder"\nlongname "Peace Ladder Lab"\ntype "ffa tourney"\n}\n'
+    arena = '{\nmap "peace_ladder"\nlongname "Peace Ladder Lab"\ntype "ffa tourney team snd"\n}\n'
     return {BASE / "maps/peace_ladder.bsp": bsp,
             BASE / "scripts/peace_ladder.shader": shader.encode(),
             BASE / "scripts/peace_ladder.arena": arena.encode()}

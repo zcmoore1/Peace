@@ -480,9 +480,11 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	InitBodyQue();
 
 	ClearRegisteredItems();
+	G_SNDInit();
 
 	// parse the key/value pairs and spawn gentities
 	G_SpawnEntitiesFromString();
+	G_SNDMapReady();
 
 	// general initialization
 	G_FindTeams();
@@ -1373,6 +1375,9 @@ void CheckExitRules( void ) {
 		return;
 	}
 
+	// S&D owns round wins and the match limit, not frag/capture/map timers.
+	if ( g_gametype.integer == GT_SND ) return;
+
 	// check for sudden death
 	if ( ScoreIsTied() ) {
 		// always wait for sudden death
@@ -1471,6 +1476,7 @@ Once a frame, check for changes in tournement player state
 =============
 */
 void CheckTournament( void ) {
+	if ( g_gametype.integer == GT_SND ) return;
 	// check because we run 3 game frames before calling Connect and/or ClientBegin
 	// for clients on a map_restart
 	if ( level.numPlayingClients == 0 ) {
@@ -1873,6 +1879,8 @@ void G_RunFrame( int levelTime ) {
 
 		G_RunThink( ent );
 	}
+
+	G_SNDRunFrame();
 
 	// perform final fixups on the players
 	ent = &g_entities[0];

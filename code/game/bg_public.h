@@ -91,6 +91,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define CS_BOTINFO				25
 
 #define	CS_ITEMS				27		// string of 0's and 1's that tell which items are present
+#define CS_SND                  28      // authoritative round/bomb HUD state
+#define CS_SND_SITES            29      // map-authored objective positions
 
 #define	CS_MODELS				32
 #define	CS_SOUNDS				(CS_MODELS+MAX_MODELS)
@@ -116,8 +118,15 @@ typedef enum {
 	GT_1FCTF,
 	GT_OBELISK,
 	GT_HARVESTER,
+	GT_SND,                     // Search and Destroy; append to preserve old IDs
 	GT_MAX_GAME_TYPE
 } gametype_t;
+
+typedef enum { SND_WAITING, SND_COUNTDOWN, SND_LIVE, SND_PLANTED, SND_ROUND_OVER } sndPhase_t;
+typedef enum { SND_NONE, SND_ELIMINATION, SND_TIME, SND_DEFUSED, SND_EXPLODED, SND_DRAW } sndResult_t;
+#define SND_MAX_SITES 2
+#define SND_USE_PLANT -2
+#define SND_USE_DEFUSE -3
 
 typedef enum { GENDER_MALE, GENDER_FEMALE, GENDER_NEUTER } gender_t;
 

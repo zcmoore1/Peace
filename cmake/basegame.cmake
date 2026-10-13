@@ -62,6 +62,7 @@ set(GAME_SOURCES
     ${SOURCE_DIR}/game/g_missile.c
     ${SOURCE_DIR}/game/g_mover.c
     ${SOURCE_DIR}/game/g_session.c
+    ${SOURCE_DIR}/game/g_snd.c
     ${SOURCE_DIR}/game/g_spawn.c
     ${SOURCE_DIR}/game/g_svcmds.c
     ${SOURCE_DIR}/game/g_target.c

@@ -93,11 +93,12 @@ static const char *gametype_items[] = {
 	"Team Deathmatch",
 	"Tournament",
 	"Capture the Flag",
+	"Search and Destroy",
 	NULL
 };
 
-static int gametype_remap[] = {GT_FFA, GT_TEAM, GT_TOURNAMENT, GT_CTF};
-static int gametype_remap2[] = {0, 2, 0, 1, 3};
+static int gametype_remap[] = {GT_FFA, GT_TEAM, GT_TOURNAMENT, GT_CTF, GT_SND};
+static int gametype_remap2[] = {0, 2, 0, 1, 3, 0, 0, 0, 4};
 
 // use ui_servers2.c definition
 extern const char* punkbuster_items[];
@@ -145,6 +146,10 @@ static int GametypeBits( char *string ) {
 
 		if( Q_stricmp( token, "ctf" ) == 0 ) {
 			bits |= 1 << GT_CTF;
+			continue;
+		}
+		if( Q_stricmp( token, "snd" ) == 0 ) {
+			bits |= 1 << GT_SND;
 			continue;
 		}
 	}
@@ -755,6 +760,8 @@ static void ServerOptions_Start( void ) {
 	}
 
 	switch( s_serveroptions.gametype ) {
+	case GT_SND:
+		break; // own settings below; do not overwrite the saved FFA preferences
 	case GT_FFA:
 	default:
 		trap_Cvar_SetValue( "ui_ffa_fraglimit", fraglimit );
@@ -785,6 +792,14 @@ static void ServerOptions_Start( void ) {
 	trap_Cvar_SetValue ("fraglimit", Com_Clamp( 0, fraglimit, fraglimit ) );
 	trap_Cvar_SetValue ("capturelimit", Com_Clamp( 0, flaglimit, flaglimit ) );
 	trap_Cvar_SetValue( "g_friendlyfire", friendlyfire );
+	if ( s_serveroptions.gametype == GT_SND ) {
+		trap_Cvar_SetValue("g_sndWinLimit", Com_Clamp(1,99,fraglimit));
+		trap_Cvar_SetValue("g_sndRoundTime", Com_Clamp(10,999,timelimit));
+		trap_Cvar_SetValue("g_sndPractice", 0);
+		trap_Cvar_SetValue("timelimit", 0);
+		trap_Cvar_SetValue("fraglimit", 0);
+		trap_Cvar_SetValue("capturelimit", 0);
+	}
 	trap_Cvar_SetValue( "sv_pure", pure );
 	trap_Cvar_Set("sv_hostname", s_serveroptions.hostname.field.buffer );
 	
@@ -993,6 +1008,10 @@ ServerOptions_StatusBar
 =================
 */
 static void ServerOptions_StatusBar( void* ptr ) {
+	if ( s_serveroptions.gametype == GT_SND ) {
+		UI_DrawString(320,440,"ONE LIFE PER ROUND - HUMAN PLAYERS",UI_CENTER|UI_SMALLFONT,colorWhite);
+		return;
+	}
 	switch( ((menucommon_s*)ptr)->id ) {
 	default:
 		UI_DrawString( 320, 440, "0 = NO LIMIT", UI_CENTER|UI_SMALLFONT, colorWhite );
@@ -1042,6 +1061,12 @@ static void ServerOptions_InitBotNames( void ) {
 	char		*p;
 	char		*bot;
 	char		bots[MAX_INFO_STRING];
+	// Stock arena bots do not understand bomb objectives. Default S&D slots
+	// to human/open rather than presenting them as working objective bots.
+	if ( s_serveroptions.gametype == GT_SND ) {
+		for ( n = 1; n < PLAYER_SLOTS; n++ ) s_serveroptions.playerType[n].curvalue = 0;
+		return;
+	}
 
 	if( s_serveroptions.gametype >= GT_TEAM ) {
 		Q_strncpyz( s_serveroptions.playerNameBuffers[1], "grunt", 16 );
@@ -1139,6 +1164,13 @@ static void ServerOptions_SetMenuItems( void ) {
 	const char	*info;
 
 	switch( s_serveroptions.gametype ) {
+	case GT_SND:
+		Com_sprintf(s_serveroptions.fraglimit.field.buffer, 4, "%i",
+			(int)Com_Clamp(1,99,trap_Cvar_VariableValue("g_sndWinLimit")));
+		Com_sprintf(s_serveroptions.timelimit.field.buffer, 4, "%i",
+			(int)Com_Clamp(10,999,trap_Cvar_VariableValue("g_sndRoundTime")));
+		s_serveroptions.friendlyfire.curvalue = trap_Cvar_VariableValue("g_friendlyFire") != 0;
+		break;
 	case GT_FFA:
 	default:
 		Com_sprintf( s_serveroptions.fraglimit.field.buffer, 4, "%i", (int)Com_Clamp( 0, 999, trap_Cvar_VariableValue( "ui_ffa_fraglimit" ) ) );
@@ -1282,7 +1314,7 @@ static void ServerOptions_MenuInit( qboolean multiplayer ) {
 	y = 272;
 	if( s_serveroptions.gametype != GT_CTF ) {
 		s_serveroptions.fraglimit.generic.type       = MTYPE_FIELD;
-		s_serveroptions.fraglimit.generic.name       = "Frag Limit:";
+		s_serveroptions.fraglimit.generic.name       = s_serveroptions.gametype == GT_SND ? "Rounds to Win:" : "Frag Limit:";
 		s_serveroptions.fraglimit.generic.flags      = QMF_NUMBERSONLY|QMF_PULSEIFFOCUS|QMF_SMALLFONT;
 		s_serveroptions.fraglimit.generic.x	         = OPTIONS_X;
 		s_serveroptions.fraglimit.generic.y	         = y;
@@ -1303,7 +1335,7 @@ static void ServerOptions_MenuInit( qboolean multiplayer ) {
 
 	y += BIGCHAR_HEIGHT+2;
 	s_serveroptions.timelimit.generic.type       = MTYPE_FIELD;
-	s_serveroptions.timelimit.generic.name       = "Time Limit:";
+	s_serveroptions.timelimit.generic.name       = s_serveroptions.gametype == GT_SND ? "Round Seconds:" : "Time Limit:";
 	s_serveroptions.timelimit.generic.flags      = QMF_NUMBERSONLY|QMF_PULSEIFFOCUS|QMF_SMALLFONT;
 	s_serveroptions.timelimit.generic.x	         = OPTIONS_X;
 	s_serveroptions.timelimit.generic.y	         = y;

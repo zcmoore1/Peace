@@ -1,5 +1,5 @@
 {
 map "peace_ladder"
 longname "Peace Ladder Lab"
-type "ffa tourney"
+type "ffa tourney team snd"
 }

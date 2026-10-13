@@ -509,6 +509,15 @@ static void CG_PeaceDump_f( void ) {
 	rl = BG_WeaponReload( w );
 
 	CG_Printf( "---------------- peacedump ----------------\n" );
+	CG_Printf( "position %.1f %.1f %.1f   ground %i   health %i\n",
+		ps->origin[0], ps->origin[1], ps->origin[2], ps->groundEntityNum,
+		ps->stats[STAT_HEALTH] );
+	if ( cgs.gametype == GT_SND ) {
+		CG_Printf( "snd      %s\n", CG_ConfigString(CS_SND) );
+		CG_Printf( "sites    %s\n", CG_ConfigString(CS_SND_SITES) );
+		CG_Printf( "use      target %i   progress %i / 1000\n",
+			ps->stats[STAT_USE_TARGET], ps->stats[STAT_USE_PROGRESS] );
+	}
 	CG_Printf( "weapon   %i   state %s   wTime %i\n",
 		w, CG_PD_StateName( ps->weaponstate ), ps->weaponTime );
 	CG_Printf( "anim     elapsed %i   seq %s   pendingMag %s\n",

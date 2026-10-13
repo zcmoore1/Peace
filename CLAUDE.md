@@ -21,8 +21,9 @@ When a pull is also needed, put `git pull origin <branch>` between the two lines
 - `dev2` — NAC via a one-frame `WEAPON_RELOAD_END` state (superseded)
 - `dev2-standalone` — skips the retail-data boot check (`fs_checkPak0`)
 - `dev3` — NAC rebuilt on notetracks + segmented reloads
-- `dev3b` — **current.** Two-weapon loadout, melee/lethal/tactical, classes,
+- `dev3b` — Two-weapon loadout, melee/lethal/tactical, classes,
   sprint transitions, still swap, gamepad, logging
+- `dev-gpt` — current GPT work: classes, YY, ladders, SPAS art/sprint, Search and Destroy.
 
 ## Config files
 
@@ -158,6 +159,17 @@ Loadouts UI and class definitions are documented in `dev/LOADOUTS.md`.
 Do not statically initialize structs with inline char arrays mixed with ints:
 q3asm splits byte literals and word data into different segments. Use word-only
 source tables and fill editable structs at runtime, as in `bg_loadout.c`.
+
+## Search and Destroy
+
+- `g_gametype 8` (`GT_SND`) uses server-owned `g_snd.c`, configstrings 28/29,
+  and the existing Use stats. Do not use weapon states or playerState bits
+  for bomb ownership or round membership. `bg_pmove.c` remains unchanged.
+- `peace_ladder` has Site A on the platform. Normal rounds need both teams;
+  `exec peace-snd-practice` is a separate cheat-only solo test setup.
+- Run `dev/tests/run-snd.cmd` or `.sh`; see `dev/SEARCH_AND_DESTROY.md`.
+- QVM `sscanf` returns zero even after parsing! Do not use its return count
+  to validate HUD data. The S&D site reader uses `COM_Parse` instead.
 
 ## Adding a weapon — touches TWO lists
 

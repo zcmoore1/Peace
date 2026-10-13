@@ -1871,8 +1871,11 @@ ONE rule, read by pmove when it stamps the holster and by cgame when it fits the
 drop clip, so the picture can never disagree with the timer.
 
   ladder grab - the universal BG_LADDER_DROP_TIME
-  melee       - the universal BG_MELEE_DROP_TIME: melee is its own kind of swap
-                and never waits on a heavy gun's holster
+  recovery    - a knife, frag or flash going away: the universal
+                BG_RAPID_DROP_TIME, the same for all three
+  melee       - the gun going down for a knife not yet swung: the same rapid
+                time. Melee is its own kind of swap and never waits on a
+                heavy gun's holster
   otherwise   - the weapon's own BG_WeaponDropTime
 
 Every answer is a real, nonzero time, so the NAC is untouched: a melee pressed
@@ -1883,8 +1886,11 @@ int BG_HolsterTime( const playerState_t *ps ) {
 	if ( ps->stats[STAT_LADDER] & LADDER_HOLSTER ) {
 		return BG_LADDER_DROP_TIME;
 	}
-	if ( ( ps->weaponAction & WA_TYPE_MASK ) == WA_MELEE ) {
-		return BG_MELEE_DROP_TIME;
+	if ( ps->weapon == WP_KNIFE || ps->weapon == WP_FRAG || ps->weapon == WP_FLASH ) {
+		return BG_RAPID_DROP_TIME;
+	}
+	if ( ( ps->weaponAction & WA_TYPE_MASK ) == WA_MELEE && !( ps->weaponAction & WA_FIRED ) ) {
+		return BG_RAPID_DROP_TIME;
 	}
 	return BG_WeaponDropTime( ps->weapon );
 }
@@ -2407,10 +2413,19 @@ static void PM_UpdateWeaponAction( void ) {
 		pm->ps->weaponstate == WEAPON_LADDER ) {
 		action = 0;
 	} else {
-		if ( (action & WA_FIRED) && pm->ps->weaponstate == WEAPON_FIRING && pm->ps->weaponTime <= 0 ) {
+		// A quick action is not over when it fires. It is over when the gun is
+		// back in hand and fully drawn: that whole recovery keeps the latch, and
+		// the latch is what blocks sprint (PM_CheckSprint) - MW2's recovery draw
+		// is the normal draw, except you cannot sprint through it.
+		if ( (action & WA_FIRED) && !PM_IsSpecialWeapon( pm->ps->weapon ) &&
+			pm->ps->weaponstate != WEAPON_RAISING && pm->ps->weaponstate != WEAPON_DROPPING ) {
 			action = 0;
 		}
-		if ( !(action & WA_TYPE_MASK) ) {
+		// A press during the recovery DRAW starts the next quick action, exactly
+		// as it would during any other draw. The gun being in hand is what makes
+		// it a draw; while the knife or grenade is still out, presses wait.
+		if ( !(action & WA_TYPE_MASK) ||
+			( (action & WA_FIRED) && !PM_IsSpecialWeapon( pm->ps->weapon ) ) ) {
 			if ( pressed & 1 ) action = WA_MELEE;
 			else if ( (pressed & 2) && pm->ps->ammo[WP_FRAG] > 0 ) action = WA_LETHAL;
 			else if ( (pressed & 4) && pm->ps->ammo[WP_FLASH] > 0 ) action = WA_TACTICAL;
@@ -2439,7 +2454,10 @@ and the NAC is untouched.
 */
 static int PM_DesiredWeapon( void ) {
 	int special = PM_ActionWeapon();
-	if ( special != WP_NONE && (pm->ps->stats[STAT_WEAPONS] & (1 << special)) ) {
+	// Once it has fired, the action wants the gun back. Nothing leaves early:
+	// step 1 holds the holster until the knife or grenade's lock has run out.
+	if ( special != WP_NONE && !(pm->ps->weaponAction & WA_FIRED) &&
+		(pm->ps->stats[STAT_WEAPONS] & (1 << special)) ) {
 		return special;
 	}
 	if ( pm->cmd.weapon == pm->ps->stats[STAT_SLOT_PRIMARY] ||
@@ -2980,11 +2998,9 @@ static void PM_Weapon( void ) {
 		addTime = 400;
 		break;
 	case WP_KNIFE:
-		addTime = 500;			// swing cooldown
-		break;
 	case WP_FRAG:
 	case WP_FLASH:
-		addTime = 1000;			// stops equipment being spammed
+		addTime = BG_QUICK_ACTION_HOLD;	// one hold: melee and equipment recover alike
 		break;
 	case WP_LIGHTNING:
 		addTime = 50;

@@ -186,9 +186,13 @@ typedef enum {
 // initial feel values, not measured MW2 constants. A grab always pays a positive,
 // weapon-independent holster; animation notes still own the busy lock.
 #define BG_LADDER_DROP_TIME       100
-// Melee is its own kind of swap: the gun in hand goes down in this one rapid
-// time whatever it is, never its own holster. Same value as the minimum swap.
-#define BG_MELEE_DROP_TIME        50
+// One rapid holster for every gun, same value as the minimum swap. Used for the
+// gun going down for melee, and for a knife, frag or flash going away at the
+// start of every recovery.
+#define BG_RAPID_DROP_TIME        50
+// How long a swung knife or a thrown frag/flash is held before recovery starts.
+// One value: recovering from melee and from equipment is the same thing.
+#define BG_QUICK_ACTION_HOLD      500
 #define BG_LADDER_REACH           4.0f
 #define BG_LADDER_SPEED           160.0f
 #define BG_LADDER_FRICTION        5.0f

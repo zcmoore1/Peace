@@ -86,11 +86,19 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   There is no YY timing window or extra delay. Initial drops still stamp their
   real times; chamber debt, ammo, sprint and ladder ownership still apply.
 - **Melee is its own kind of swap.** Whatever gun is out, it goes down for the
-  knife in the one universal `BG_MELEE_DROP_TIME` (50ms, the minimum swap), not
+  knife in the one universal `BG_RAPID_DROP_TIME` (50ms, the minimum swap), not
   its own holster; melee asked for part way through a heavy holster shortens it
   to that, never lengthens it. `BG_HolsterTime` is the single rule — gun's own
-  drop, melee's, or the ladder's — used by pmove to stamp and by cgame to fit
+  drop, rapid, or the ladder's — used by pmove to stamp and by cgame to fit
   the drop clip, so the two cannot disagree. Equipment keeps the gun's holster.
+- **Recovering from melee and from equipment is ONE thing, in time and
+  function.** Knife, frag and flash are held `BG_QUICK_ACTION_HOLD` (500ms),
+  go away in `BG_RAPID_DROP_TIME`, then the gun comes back with its own normal
+  draw. As in MW2 that draw is the normal one except **you cannot sprint
+  through it**: the `weaponAction` latch lasts until the gun is fully drawn,
+  and the latch is what blocks sprint. Once fired, selection asks for the gun.
+  YY cancels the recovery draw like any draw; a quick action pressed during
+  the draw starts the next one. A real swap out of it is a normal holster.
 - **A raise is always cancellable by YY.** That is the owner's rule, not a
   bug: the NAC skips a holster, YY skips a draw, so long swap times on both
   halves reward technique instead of only slowing play.
@@ -111,7 +119,8 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 6-bit predicted/networked field: action type (2),
   fired latch (1), previous melee/lethal/tactical buttons (3). It keeps quick
-  taps through holster/deploy and prevents held-button repeats. No new stats
+  taps through holster/deploy, prevents held-button repeats, and stays set
+  through recovery until the gun is back. No new stats
   or pm_flags. Client, server and all game modules must be rebuilt together.
 - `stats[]` — **15 of 16 used in baseq3; all 16 in missionpack.** Every entry round-trips as a SIGNED
   short (`MSG_WriteShort`), so any new bitmask stat has the same bit-15 trap as

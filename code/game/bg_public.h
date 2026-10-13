@@ -186,6 +186,9 @@ typedef enum {
 // initial feel values, not measured MW2 constants. A grab always pays a positive,
 // weapon-independent holster; animation notes still own the busy lock.
 #define BG_LADDER_DROP_TIME       100
+// Melee is its own kind of swap: the gun in hand goes down in this one rapid
+// time whatever it is, never its own holster. Same value as the minimum swap.
+#define BG_MELEE_DROP_TIME        50
 #define BG_LADDER_REACH           4.0f
 #define BG_LADDER_SPEED           160.0f
 #define BG_LADDER_FRICTION        5.0f
@@ -309,6 +312,7 @@ int  BG_WeaponMaxReserve( int weapon );
 int  BG_WeaponReloadTime( int weapon );		// nominal single-pass length (start+loop+end)
 const bg_weaponReload_t *BG_WeaponReload( int weapon );
 int  BG_WeaponReloadSegLength( int weapon, int seq );
+int  BG_HolsterTime( const playerState_t *ps );	// the holster this player is doing right now
 int  BG_WeaponFireLength( int weapon );		// 0 = no modelled fire animation
 int  BG_WeaponDropTime( int weapon );		// holster length, never 0
 int  BG_WeaponRaiseTime( int weapon );		// deploy length, never 0

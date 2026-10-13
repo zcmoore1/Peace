@@ -48,7 +48,7 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 ## Design invariants — do not violate
 
 - **The NAC is not code.** It emerges from ordering in `PM_Weapon`: a holster
-  ALWAYS stamps `BG_WeaponDropTime`, `WNOTE_MAG_IN` zeroes `weaponTime`, and a
+  ALWAYS stamps a real time from `BG_HolsterTime`, `WNOTE_MAG_IN` zeroes `weaponTime`, and a
   transition whose lock is already spent finishes that think and `return`s —
   before the queued clip fill. Never add `if (nac)`, a NAC-named function, a
   special state, or a zero drop time.
@@ -85,6 +85,15 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   shared pmove cancels the drop and reaches the normal fire gates that think.
   There is no YY timing window or extra delay. Initial drops still stamp their
   real times; chamber debt, ammo, sprint and ladder ownership still apply.
+- **Melee is its own kind of swap.** Whatever gun is out, it goes down for the
+  knife in the one universal `BG_MELEE_DROP_TIME` (50ms, the minimum swap), not
+  its own holster; melee asked for part way through a heavy holster shortens it
+  to that, never lengthens it. `BG_HolsterTime` is the single rule — gun's own
+  drop, melee's, or the ladder's — used by pmove to stamp and by cgame to fit
+  the drop clip, so the two cannot disagree. Equipment keeps the gun's holster.
+- **A raise is always cancellable by YY.** That is the owner's rule, not a
+  bug: the NAC skips a holster, YY skips a draw, so long swap times on both
+  halves reward technique instead of only slowing play.
 - **Never ADS through a reload.** `PM_CheckADS` blocks `WEAPON_RELOADING` on
   purpose. The ZOOMload trick is a client/server desync — the reload animation
   starts client-side and the server never agrees one is happening — not a rule

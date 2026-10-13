@@ -354,8 +354,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	     (ps->weaponstate == WEAPON_DROPPING && move->clip == WANIM_DROP) ) {
 		int duration = ps->weaponstate == WEAPON_RAISING ?
 		               BG_WeaponRaiseTime( ps->weapon ) :
-		               ((ps->stats[STAT_LADDER] & LADDER_HOLSTER) ?
-		                BG_LADDER_DROP_TIME : BG_WeaponDropTime( ps->weapon ));
+		               BG_HolsterTime( ps );	// the same rule pmove stamped with
 		float fraction = 1.0f - (float)ps->weaponTime / duration;
 		if ( fraction < 0 ) fraction = 0;
 		if ( fraction > 1 ) fraction = 1;

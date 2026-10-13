@@ -186,8 +186,46 @@ static void TestActions(void) {
  ps.stats[STAT_LADDER]=LADDER_ATTACHED; Step(1);
  CHECK(!(ps.weaponAction&WA_TYPE_MASK) && fired[WP_KNIFE]==0);
 }
+/* Melee is its own kind of swap. Whatever gun is out, it goes down in the one
+ * universal BG_MELEE_DROP_TIME - never its own holster - and asking for melee
+ * part way through a heavy gun's holster finishes that holster as a melee one.
+ * Equipment and ordinary swaps keep the gun's own holster. Every time here is
+ * read from the shipped constants and tables. */
+static void TestMeleeHolster(void) {
+ int i, n = BG_ClassWeaponCount(), t;
+ for (i = 0; i < n; i++) {
+  int gun = BG_ClassWeapon(i), other = gun == WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN;
+  if (gun <= WP_NONE) continue;
+  /* melee: the universal holster, not the gun's */
+  Ready(gun, other);
+  move.cmd.buttons = BUTTON_MELEE; Step(1); move.cmd.buttons = 0;
+  CHECK(ps.weaponstate == WEAPON_DROPPING);
+  CHECK(ps.weaponTime == BG_MELEE_DROP_TIME && BG_HolsterTime(&ps) == BG_MELEE_DROP_TIME);
+  for (t = 0; t < BG_MELEE_DROP_TIME + BG_WeaponRaiseTime(WP_KNIFE) + 5 && !fired[WP_KNIFE]; t++) Step(1);
+  CHECK(fired[WP_KNIFE] == 1);
+  /* equipment: still the gun's own holster */
+  Ready(gun, other);
+  move.cmd.buttons = BUTTON_LETHAL; Step(1); move.cmd.buttons = 0;
+  CHECK(ps.weaponTime == BG_WeaponDropTime(gun) && BG_HolsterTime(&ps) == BG_WeaponDropTime(gun));
+  /* an ordinary swap: the gun's own holster */
+  Ready(gun, other);
+  move.cmd.weapon = other; Step(1);
+  CHECK(ps.weaponTime == BG_WeaponDropTime(gun));
+  /* melee asked for part way through that holster: shortened, never lengthened */
+  Run(1);
+  move.cmd.buttons = BUTTON_MELEE; Step(1); move.cmd.buttons = 0;
+  CHECK(ps.weaponTime <= BG_MELEE_DROP_TIME);
+  for (t = 0; t < BG_MELEE_DROP_TIME + BG_WeaponRaiseTime(WP_KNIFE) + 5 && !fired[WP_KNIFE]; t++) Step(1);
+  CHECK(fired[WP_KNIFE] == 1);
+ }
+ /* a ladder holster keeps its own universal time */
+ Ready(WP_SHOTGUN, WP_MACHINEGUN);
+ ps.stats[STAT_LADDER] = LADDER_HOLSTER;
+ CHECK(BG_HolsterTime(&ps) == BG_LADDER_DROP_TIME);
+}
+
 int main(void) {
- TestClasses(); TestYY(); TestReloadTail(); TestActions();
+ TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestMeleeHolster();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;
 }

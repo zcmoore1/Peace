@@ -1862,6 +1862,33 @@ int BG_WeaponDropTime( int weapon ) {
 	return ( t < WEAPON_MIN_SWAP_TIME ) ? WEAPON_MIN_SWAP_TIME : t;
 }
 
+/*
+==============
+BG_HolsterTime
+
+How long the gun in hand takes to go down on the holster this player is doing.
+ONE rule, read by pmove when it stamps the holster and by cgame when it fits the
+drop clip, so the picture can never disagree with the timer.
+
+  ladder grab - the universal BG_LADDER_DROP_TIME
+  melee       - the universal BG_MELEE_DROP_TIME: melee is its own kind of swap
+                and never waits on a heavy gun's holster
+  otherwise   - the weapon's own BG_WeaponDropTime
+
+Every answer is a real, nonzero time, so the NAC is untouched: a melee pressed
+on the mag-in frame is cancelled by the same note-and-lock collision as any swap.
+==============
+*/
+int BG_HolsterTime( const playerState_t *ps ) {
+	if ( ps->stats[STAT_LADDER] & LADDER_HOLSTER ) {
+		return BG_LADDER_DROP_TIME;
+	}
+	if ( ( ps->weaponAction & WA_TYPE_MASK ) == WA_MELEE ) {
+		return BG_MELEE_DROP_TIME;
+	}
+	return BG_WeaponDropTime( ps->weapon );
+}
+
 int BG_WeaponRaiseTime( int weapon ) {
 	int t;
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return WEAPON_MIN_SWAP_TIME;
@@ -2443,12 +2470,18 @@ static void PM_BeginWeaponChange( int weapon ) {
 	}
 
 	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
-		return;			// already holstering
+		// Already going down. If where we are going now has a quicker holster -
+		// melee asked for part way through a heavy gun's holster - finish as
+		// that one. Shortened only, never lengthened.
+		if ( pm->ps->weaponTime > BG_HolsterTime( pm->ps ) ) {
+			pm->ps->weaponTime = BG_HolsterTime( pm->ps );
+		}
+		return;
 	}
 
 	PM_AddEvent( EV_CHANGE_WEAPON );
 	pm->ps->weaponstate = WEAPON_DROPPING;
-	pm->ps->weaponTime  = BG_WeaponDropTime( pm->ps->weapon );
+	pm->ps->weaponTime  = BG_HolsterTime( pm->ps );
 	PM_StartTorsoAnim( TORSO_DROP );
 }
 

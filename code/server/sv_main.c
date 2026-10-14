@@ -1147,6 +1147,7 @@ void SV_Frame( int msec ) {
 
 		// let everything in the world think and move
 		VM_Call (gvm, GAME_RUN_FRAME, sv.time);
+		SV_RecordReplayFrame();
 	}
 
 	if ( com_speeds->integer ) {

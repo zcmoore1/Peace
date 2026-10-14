@@ -99,11 +99,16 @@ static int           cg_animClient, cg_animSpawn, cg_animTeleport;
 // ---------------------------------------------------------------------------
 void CG_WeapAnim_Init( void ) {
 	Com_Memset( bg_weapAnimDefs, 0, sizeof(bg_weapAnimDefs) );
+	CG_WeapAnim_Reset();
+	bg_weapAnimDefsLoaded = qtrue;
+}
+
+// Discard pose ownership at a camera cut without losing registered clips.
+void CG_WeapAnim_Reset( void ) {
 	Com_Memset( cg_weapLayers,   0, sizeof(cg_weapLayers) );
 	cg_weapAnimWeapon = WP_NONE;
 	cg_retainedActive = cg_retainedDrop = cg_previousSprint = qfalse;
 	cg_animContextValid = qfalse;
-	bg_weapAnimDefsLoaded = qtrue;
 }
 
 // ---------------------------------------------------------------------------

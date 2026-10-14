@@ -24,6 +24,7 @@ typedef struct {
     team_t attacking;
     qboolean spawning, practice;
     int roundMs, bombMs, plantMs, defuseMs, winLimit, switchRounds, pauseMs;
+    struct { int killer, time; } lastDeath[TEAM_NUM_TEAMS];
     gentity_t *sites[SND_MAX_SITES], *bomb;
     int numSites;
     vec3_t bombOrigin;
@@ -89,6 +90,7 @@ void G_SNDInit( void ) {
     int n;
     memset(&snd, 0, sizeof(snd));
     snd.carrier = snd.plantedSite = -1;
+    for ( n = 0; n < TEAM_NUM_TEAMS; n++ ) snd.lastDeath[n].killer = -1;
     snd.attacking = TEAM_RED;
     snd.winLimit = 4;
     for ( n = 0; n < MAX_CLIENTS; n++ ) {
@@ -193,11 +195,29 @@ static void SND_DropBomb( gentity_t *ent ) {
 void G_SNDClientDied( gentity_t *ent ) {
     int n = ent - g_entities;
     if ( g_gametype.integer != GT_SND || n < 0 || n >= level.maxclients ) return;
+    // A suicide, disconnect or team change must not replay an earlier kill
+    // as the winning shot. player_die records a valid enemy kill afterwards.
+    if ( snd.alive[n] ) snd.lastDeath[snd.team[n]].killer = -1;
     if ( snd.carrier == n && snd.phase == SND_LIVE ) SND_DropBomb(ent);
     else if ( snd.carrier == n ) snd.carrier = -1;
     snd.alive[n] = qfalse;
     snd.following[n] = -1;
     SND_ClearUse(n);
+}
+
+void G_SNDRecordKill( gentity_t *victim, gentity_t *attacker ) {
+    int n;
+    team_t team;
+    if ( g_gametype.integer != GT_SND ||
+         (snd.phase != SND_LIVE && snd.phase != SND_PLANTED) ||
+         !attacker || !attacker->client || !victim || !victim->client ||
+         attacker == victim ) return;
+    n = attacker - g_entities;
+    team = victim->client->sess.sessionTeam;
+    if ( !SND_Player(n) || (team != TEAM_RED && team != TEAM_BLUE) ||
+         attacker->client->sess.sessionTeam == team ) return;
+    snd.lastDeath[team].killer = n;
+    snd.lastDeath[team].time = level.time;
 }
 
 qboolean G_SNDCanDamage( gentity_t *ent ) {
@@ -330,10 +350,17 @@ static qboolean SND_Near( gentity_t *ent, vec3_t point, float radius ) {
 
 static void SND_EndRound( team_t winner, sndResult_t result ) {
     int n;
+    team_t losing = winner == TEAM_RED ? TEAM_BLUE : TEAM_RED;
     if ( snd.phase != SND_LIVE && snd.phase != SND_PLANTED ) return;
     snd.phase = SND_ROUND_OVER;
     snd.winner = winner; snd.result = result;
     snd.deadline = level.time + snd.pauseMs;
+    if ( result == SND_ELIMINATION && snd.lastDeath[losing].killer >= 0 ) {
+        level.replayEndTime = trap_ReplayStart(snd.lastDeath[losing].killer,
+            snd.lastDeath[losing].time - KILLCAM_REWIND, snd.lastDeath[losing].time + KILLCAM_LINGER);
+        if ( level.replayEndTime && snd.deadline < level.replayEndTime + INTERMISSION_DELAY_TIME )
+            snd.deadline = level.replayEndTime + INTERMISSION_DELAY_TIME;
+    }
     snd.carrier = -1;
     if ( winner == TEAM_RED || winner == TEAM_BLUE ) level.teamScores[winner]++;
     for ( n = 0; n < level.maxclients; n++ ) SND_ClearUse(n);
@@ -415,6 +442,8 @@ static void SND_AssignCarrier( void ) {
 
 static void SND_WaitForPlayers( void ) {
     int n;
+    trap_ReplayReset(qtrue);
+    level.replayEndTime = 0;
     snd.phase = SND_WAITING; snd.carrier = -1; snd.deadline = 0;
     SND_HideBomb();
     // Release chase cameras/freeze when a team empties between rounds.
@@ -426,6 +455,9 @@ static void SND_WaitForPlayers( void ) {
 static void SND_StartRound( void ) {
     int n;
     gentity_t *ent;
+    trap_ReplayReset(qtrue);
+    level.replayEndTime = 0;
+    for ( n = 0; n < TEAM_NUM_TEAMS; n++ ) snd.lastDeath[n].killer = -1;
     snd.spawning = qtrue;
     snd.phase = SND_COUNTDOWN;
     snd.practice = sndPractice.integer && g_cheats.integer;

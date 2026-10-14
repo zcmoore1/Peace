@@ -481,6 +481,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 
 	ClearRegisteredItems();
 	G_SNDInit();
+	trap_ReplayReset( qtrue );
 
 	// parse the key/value pairs and spawn gentities
 	G_SpawnEntitiesFromString();
@@ -1155,15 +1156,13 @@ void LogExit( const char *string ) {
 
 	level.intermissionQueued = level.time;
 
-	// If the match ended on a fresh player-vs-player kill, replay it as a
-	// final killcam before the scoreboard. Clients rewind their own recorded
-	// snapshot history to the killer's view; see CG_Killcam_Start. The extra
-	// intermission delay (handled in CheckExitRules) gives the replay time to
-	// run before everyone is teleported to the intermission point.
-	if ( level.lastKillTime && ( level.time - level.lastKillTime ) <= KILLCAM_RECENT ) {
-		level.finalKillcam = qtrue;
-		trap_SendServerCommand( -1, va( "finalkillcam %i %i %i",
-			level.lastKillerNum, level.lastVictimNum, level.lastKillTime ) );
+	// S&D has already selected its round-winning kill. Reuse that playback
+	// on the match-winning round; never restart it or replace an objective win
+	// with an unrelated earlier kill.
+	if ( g_gametype.integer != GT_SND && level.lastKillTime &&
+	     level.time - level.lastKillTime <= KILLCAM_LINGER ) {
+		level.replayEndTime = trap_ReplayStart( level.lastKillerNum,
+			level.lastKillTime - KILLCAM_REWIND, level.time + KILLCAM_LINGER );
 	}
 
 	// this will keep the clients from playing any voice sounds
@@ -1360,16 +1359,15 @@ void CheckExitRules( void ) {
 	if ( level.intermissionQueued ) {
 		// A final killcam holds off the intermission long enough for the replay
 		// to finish; otherwise use the normal short "watch the last frag" delay.
-		int delay = level.finalKillcam ? ( KILLCAM_DURATION + INTERMISSION_DELAY_TIME )
-		                               : INTERMISSION_DELAY_TIME;
+		int delay = INTERMISSION_DELAY_TIME;
 #ifdef MISSIONPACK
-		if (g_singlePlayer.integer && !level.finalKillcam) {
+		if (g_singlePlayer.integer && !level.replayEndTime) {
 			delay = SP_INTERMISSION_DELAY_TIME;
 		}
 #endif
-		if ( level.time - level.intermissionQueued >= delay ) {
+		if ( level.time - level.intermissionQueued >= delay && level.time >= level.replayEndTime ) {
 			level.intermissionQueued = 0;
-			level.finalKillcam = qfalse;
+			level.replayEndTime = 0;
 			BeginIntermission();
 		}
 		return;

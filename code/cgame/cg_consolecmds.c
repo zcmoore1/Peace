@@ -509,6 +509,8 @@ static void CG_PeaceDump_f( void ) {
 	rl = BG_WeaponReload( w );
 
 	CG_Printf( "---------------- peacedump ----------------\n" );
+	CG_Printf( "replay   %i   viewer %i   camera %i   snapshot %i\n",
+		!!CG_Killcam_Active(), cg.clientNum, ps->clientNum, cg.snap ? cg.snap->serverTime : 0 );
 	CG_Printf( "position %.1f %.1f %.1f   ground %i   health %i\n",
 		ps->origin[0], ps->origin[1], ps->origin[2], ps->groundEntityNum,
 		ps->stats[STAT_HEALTH] );

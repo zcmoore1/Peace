@@ -42,9 +42,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	INTERMISSION_DELAY_TIME	1000
 #define	SP_INTERMISSION_DELAY_TIME	5000
 
-// KILLCAM_* timing lives in bg_public.h so cgame shares the same values.
-#define	KILLCAM_RECENT			8000	// only replay kills this fresh at match end
-
 // gentity->flags
 #define	FL_GODMODE				0x00000010
 #define	FL_NOTARGET				0x00000020
@@ -403,7 +400,7 @@ typedef struct {
 	int			lastKillerNum;			// client number of the most recent killer
 	int			lastVictimNum;			// client number of the most recent victim
 	int			lastKillTime;			// level.time of the most recent kill
-	qboolean	finalKillcam;			// a killcam is playing before intermission
+	int			replayEndTime;			// shared lobby replay deadline, 0 when absent
 
 	// intermission state
 	int			intermissionQueued;		// intermission was qualified, but
@@ -439,6 +436,7 @@ void SP_peace_bombsite( gentity_t *ent );
 qboolean G_SNDWaitForRound( gentity_t *ent );
 void G_SNDClientSpawned( gentity_t *ent );
 void G_SNDClientDied( gentity_t *ent );
+void G_SNDRecordKill( gentity_t *victim, gentity_t *attacker );
 qboolean G_SNDClientThink( gentity_t *ent, usercmd_t *cmd );
 qboolean G_SNDClientEndFrame( gentity_t *ent );
 qboolean G_SNDUse( gentity_t *ent, usercmd_t *cmd );
@@ -781,6 +779,8 @@ extern	vmCvar_t	g_proxMineTimeout;
 extern	vmCvar_t	g_localTeamPref;
 
 void	trap_Print( const char *text );
+void trap_ReplayReset( qboolean enabled );
+int trap_ReplayStart( int clientNum, int fromTime, int toTime );
 void	trap_Error( const char *text ) Q_NO_RETURN;
 int		trap_Milliseconds( void );
 int	trap_RealTime( qtime_t *qtime );

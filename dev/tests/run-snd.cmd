@@ -19,6 +19,10 @@ cl %test_flags% /Feout\build\snd-tests\snd_menu.exe dev\tests\snd_menu_test.c %t
 if errorlevel 1 goto fail
 out\build\snd-tests\snd_menu.exe
 if errorlevel 1 goto fail
+cl %test_flags% /Feout\build\snd-tests\replay_test.exe dev\tests\replay_test.c %test_common% /link /OPT:REF
+if errorlevel 1 goto fail
+out\build\snd-tests\replay_test.exe
+if errorlevel 1 goto fail
 popd
 exit /b 0
 :fail

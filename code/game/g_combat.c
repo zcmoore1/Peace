@@ -467,6 +467,14 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 #endif
 	self->client->ps.pm_type = PM_DEAD;
 	G_SNDClientDied( self );
+	G_SNDRecordKill( self, attacker );
+	// Record before AddScore/CalculateRanks can end a non-round match.
+	if ( attacker && attacker->client && attacker != self && !OnSameTeam( self, attacker ) &&
+	     attacker->s.number < MAX_CLIENTS && self->s.number < MAX_CLIENTS ) {
+		level.lastKillerNum = attacker->s.number;
+		level.lastVictimNum = self->s.number;
+		level.lastKillTime = level.time;
+	}
 
 	if ( attacker ) {
 		killer = attacker->s.number;
@@ -544,16 +552,6 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		}
 	} else {
 		AddScore( self, self->r.currentOrigin, -1 );
-	}
-
-	// Remember this kill for a possible final killcam. We only care about a
-	// real player-vs-player frag (not suicides or world deaths); whichever one
-	// happens to end the match is the kill LogExit will replay.
-	if ( attacker && attacker->client && attacker != self
-		&& attacker->s.number < MAX_CLIENTS && self->s.number < MAX_CLIENTS ) {
-		level.lastKillerNum = attacker->s.number;
-		level.lastVictimNum = self->s.number;
-		level.lastKillTime  = level.time;
 	}
 
 	// Add team bonuses

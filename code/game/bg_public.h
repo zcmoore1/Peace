@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-2"
+#define	GAME_VERSION		BASEGAME "-3"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -57,10 +57,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define INVUL_RADIUS		42
 
 //
-// final killcam timing, shared by the game (intermission delay) and cgame
-// (replay length / rewind depth).
-#define	KILLCAM_DURATION		5000	// total replay length shown to clients
+// The server captures this window, then streams it to every client.
 #define	KILLCAM_REWIND			5000	// how far before the kill the replay starts
+#define KILLCAM_LINGER           750     // include the impact and immediate aftermath
 
 // config strings are a general means of communicating variable length strings
 // from the server to all connected clients.

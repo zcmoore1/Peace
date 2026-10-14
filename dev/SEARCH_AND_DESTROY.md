@@ -14,7 +14,7 @@ In the base-game menu: **Multiplayer → Create → Game Type: Search and Destro
 select **peace_ladder**, then set the round target and duration and start.
 Join Red or Blue. Normal play needs at least one player on each team.
 Alternatively set `g_gametype 8`, `g_sndPractice 0`, then `map peace_ladder`.
-Everyone must use the updated client and game modules.
+Everyone must rebuild the client, server and game modules together (protocol 73).
 
 **Site A is on the upper ladder platform**, marked by a gold outline and an A.
 Attackers spawn on the floor opposite the ladder; defenders spawn on the platform.
@@ -37,10 +37,19 @@ It has four starts per side and no retail map geometry.
   detonation. Killing all attackers **after** a plant does not cancel the bomb.
 - The HUD shows roles, round scores, living players, objective markers, the active
   timer and hold progress. The first team to four round wins takes the match.
+- A decisive enemy elimination plays **ROUND WINNING KILLCAM** for the entire
+  lobby, including the victim, surviving players and spectators. It shows up to
+  five seconds before the shot and 750 ms afterwards from the killer's first-person
+  view, including weapon actions and ADS. Everyone returns on the server's shared
+  deadline; individual input cannot steer or skip the replay. The match-winning
+  round finishes its replay before the scoreboard.
+- Bomb, timer and draw results, suicides and disconnect eliminations have no
+  unrelated kill replay. If there is too little history, the normal pause applies.
 
 Default round time is 2:30; after planting, a separate 45-second bomb timer runs.
 There is a five-second deployment countdown and five-second round-result pause.
-The result uses the existing intermission/final-killcam flow. Detonation currently
+An elimination replay extends the result pause as needed, with one second after
+playback before the next deployment. Detonation currently
 uses an existing impact effect; dedicated planting/defusing hand animations,
 announcer audio and a cinematic explosion are not included.
 
@@ -80,7 +89,8 @@ Friendly fire still uses the existing `g_friendlyFire` setting.
 server. HUD state uses previously unused configstrings 28/29. Existing signed
 `STAT_USE_TARGET` values -2/-3 identify plant/defuse; `STAT_USE_PROGRESS` is 0–1000
 for objectives. Ordinary weapon pickup retains its existing timing convention.
-There are no new playerState fields or network bits. Reload, swap, sprint,
+There are no new playerState fields. A snapshot flag identifies replay scenes.
+Reload, swap, sprint,
 ladder holster and notetrack code are unchanged; no named glitches are simulated.
 
 Use progress requires continuous valid commands and uses server time, never the
@@ -103,6 +113,17 @@ Between rounds, players/classes/ammo reset; missiles, dropped items and corpses
 are cleared. Arbitrary map-specific movers or destroyed props are not reset by
 this first pass; the supported ladder map has none.
 
+The engine records complete entity states once per sample (at most 40 Hz) and
+each connected player's visibility and player state into a bounded 262-frame
+history. It streams the selected killer's snapshots through the ordinary delta
+channel to every recipient. This works outside a viewer's original PVS and for
+clients arriving during playback; no client replay buffer or bulk reliable
+transfer is required. Storage is allocated outside the fixed engine zone and
+released on shutdown. Recording is pinned during playback and reset each round.
+Only snapshot copies are rebased to the live transport clock. Game simulation,
+ammo, reload notes and weapon readiness are never rewound or changed by playback.
+Client presentation clears old effects/animation ownership at each replay cut.
+
 ## Checks
 
 `dev/tests/run-snd.cmd` (Windows) or `sh dev/tests/run-snd.sh` (Linux) drives the
@@ -111,7 +132,15 @@ with `SND_TEST_DEFINES=-DMISSIONPACK`. Tests cover deadlines, holds, interrupted
 actions, carrier loss/recovery, late joins, teammate spectating, side changes,
 round limits, empty teams, cheat-only practice and menu launch settings.
 
-`peacedump` now includes position/grounding, S&D configstrings and use progress.
+`sh dev/tests/run-replay.sh` also drives the actual engine recorder and snapshot
+builder: disjoint visibility areas, all lobby recipients, early kills, different
+server frame rates, ADS/weapon clocks, projectile trajectories, late arrival,
+camera retention, immutable live state and history reset. Repeat with
+`REPLAY_TEST_FLAGS=-DMISSIONPACK`; sanitizers can be supplied through the same
+variable. The Windows S&D runner includes this engine test.
+
+`peacedump` includes replay activity, viewer/camera IDs, snapshot time,
+position/grounding, S&D configstrings and use progress.
 For a network playtest, check plant/defuse interruption, carrier disconnect,
 death after a plant, teammate camera, class changes taking effect next round,
 and the ladder exit into Site A. Artificial lag and packet-loss feel still need

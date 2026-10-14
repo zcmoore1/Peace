@@ -529,6 +529,9 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 
 	es = &cent->currentState;
 	event = es->event & ~EV_EVENT_BITS;
+	// Reproduce the shot and impact, not a second kill feed / score award.
+	if ( CG_Killcam_Active() && (event == EV_OBITUARY || event == EV_SCOREPLUM ||
+	                            event == EV_GLOBAL_TEAM_SOUND) ) return;
 
 	if ( cg_debugEvents.integer ) {
 		CG_Printf( "ent:%3i  event:%3i ", es->number, event );

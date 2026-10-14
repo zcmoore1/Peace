@@ -134,7 +134,7 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 9-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, and post-throw recovery. Protocol 72 requires client, server
+  swap edge latch, and post-throw recovery. Protocol 73 requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
 - `stats[]` — **15 of 16 used in baseq3; all 16 in missionpack.** Every entry round-trips as a SIGNED
   short (`MSG_WriteShort`) except `STAT_WEAPONS`. Other bitmask stats still
@@ -212,6 +212,16 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
 - Run `dev/tests/run-snd.cmd` or `.sh`; see `dev/SEARCH_AND_DESTROY.md`.
 - QVM `sscanf` returns zero even after parsing! Do not use its return count
   to validate HUD data. The S&D site reader uses `COM_Parse` instead.
+- Round-winning killcams use a bounded engine snapshot history in
+  `sv_snapshot.c`, including the killer's player state and original visibility.
+  `trap_ReplayStart` returns the shared playback deadline; S&D must wait for it
+  before spawning the next round, and `LogExit` must reuse it on the final round.
+  `SNAPFLAG_REPLAY` disables client prediction and marks presentation cuts.
+  Playback rebases absolute clocks only; never rewind live entities, change
+  weapon/note timers, predict the viewer's input, or use their local PVS history.
+  Reset capture each round and on map restart. Objective/world/disconnect wins
+  without a decisive enemy kill use the normal result pause. Run
+  `dev/tests/run-replay.sh` alongside the S&D tests.
 
 ## Adding a weapon — touches TWO lists
 

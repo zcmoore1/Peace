@@ -8,6 +8,7 @@ on:
       - 'code/game/**'
       - 'code/q3_ui/**'
       - 'code/client/**'
+      - 'code/server/**'
       - 'code/renderercommon/**'
       - 'code/qcommon/vm.c'
       - 'code/qcommon/qcommon.h'
@@ -44,6 +45,8 @@ jobs:
           python3 dev/tools/build_snd_assets.py --check
           sh dev/tests/run-snd.sh
           SND_TEST_DEFINES=-DMISSIONPACK sh dev/tests/run-snd.sh
+          sh dev/tests/run-replay.sh
+          REPLAY_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-replay.sh
       - name: Check SPAS mesh winding and clip metadata
         run: |
           python3 dev/tools/build_spas_sprint.py --check

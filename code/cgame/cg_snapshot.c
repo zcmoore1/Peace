@@ -150,6 +150,7 @@ static void CG_TransitionSnapshot( void ) {
 	// move nextSnap to snap and do the transitions
 	oldFrame = cg.snap;
 	cg.snap = cg.nextSnap;
+	CG_Killcam_Transition(oldFrame, cg.snap);
 
 	BG_PlayerStateToEntityState( &cg.snap->ps, &cg_entities[ cg.snap->ps.clientNum ].currentState, qfalse );
 	cg_entities[ cg.snap->ps.clientNum ].interpolate = qfalse;
@@ -177,8 +178,9 @@ static void CG_TransitionSnapshot( void ) {
 
 		// if we are not doing client side movement prediction for any
 		// reason, then the client events and view changes will be issued now
-		if ( cg.demoPlayback || (cg.snap->ps.pm_flags & PMF_FOLLOW)
-			|| cg_nopredict.integer || cg_synchronousClients.integer ) {
+		if ( !((oldFrame->snapFlags ^ cg.snap->snapFlags) & SNAPFLAG_REPLAY) &&
+		     (cg.demoPlayback || CG_Killcam_Active() || (cg.snap->ps.pm_flags & PMF_FOLLOW)
+			|| cg_nopredict.integer || cg_synchronousClients.integer) ) {
 			CG_TransitionPlayerState( ps, ops );
 		}
 	}
@@ -213,7 +215,8 @@ static void CG_SetNextSnap( snapshot_t *snap ) {
 
 		// if this frame is a teleport, or the entity wasn't in the
 		// previous frame, don't interpolate
-		if ( !cent->currentValid || ( ( cent->currentState.eFlags ^ es->eFlags ) & EF_TELEPORT_BIT )  ) {
+		if ( !cent->currentValid || ((snap->snapFlags ^ cg.snap->snapFlags) & SNAPFLAG_REPLAY) ||
+		     ( ( cent->currentState.eFlags ^ es->eFlags ) & EF_TELEPORT_BIT ) ) {
 			cent->interpolate = qfalse;
 		} else {
 			cent->interpolate = qtrue;
@@ -234,7 +237,7 @@ static void CG_SetNextSnap( snapshot_t *snap ) {
 	}
 
 	// if changing server restarts, don't interpolate
-	if ( ( cg.nextSnap->snapFlags ^ cg.snap->snapFlags ) & SNAPFLAG_SERVERCOUNT ) {
+	if ( ( cg.nextSnap->snapFlags ^ cg.snap->snapFlags ) & (SNAPFLAG_SERVERCOUNT | SNAPFLAG_REPLAY) ) {
 		cg.nextFrameTeleport = qtrue;
 	}
 

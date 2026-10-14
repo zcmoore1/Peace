@@ -1379,18 +1379,15 @@ void CG_Sights_AddOptic( int weapon, const refEntity_t *hand );
 
 // cg_anim.c
 void     CG_WeapAnim_Init( void );
+void     CG_WeapAnim_Reset( void );
 qboolean CG_WeapAnim_HoldsDrop( void );
 qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec );
 qboolean CG_WeapAnim_Apply( playerState_t *ps, refEntity_t *entity, int msec );
 void     CG_WeapAnim_RegisterClips( int weapon, qhandle_t hModel, const char *cfgPath );
 
 // cg_killcam.c
-void     CG_Killcam_Init( void );
-void     CG_Killcam_Record( void );
-void     CG_Killcam_Start( int killerNum, int victimNum, int killTime );
 qboolean CG_Killcam_Active( void );
-qboolean CG_Killcam_Setup( void );
-void     CG_Killcam_CalcView( void );
+void     CG_Killcam_Transition( const snapshot_t *previous, const snapshot_t *next );
 void     CG_Killcam_Draw( void );
 
 void CG_RegisterWeapon( int weaponNum );

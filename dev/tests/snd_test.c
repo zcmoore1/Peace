@@ -7,6 +7,7 @@ gentity_t g_entities[MAX_GENTITIES];
 gclient_t g_clients[MAX_CLIENTS];
 vmCvar_t g_gametype, g_cheats;
 static int checks, exits, blocked, contents, spawnSite, copies;
+static int replayStarts, replayResets, replayKiller, replayFrom, replayTo, replayDeadline;
 static char configs[32][MAX_INFO_STRING];
 #define CHECK(x) do { checks++; if (!(x)) { \
  fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x); exit(1); } } while (0)
@@ -22,6 +23,10 @@ void trap_Cvar_Register(vmCvar_t *v,const char *name,const char *initial,int fla
 void trap_Cvar_Update(vmCvar_t *v) { (void)v; }
 void trap_SetConfigstring(int n,const char *s) { CHECK(n>=0 && n<32); Q_strncpyz(configs[n],s,sizeof(configs[n])); }
 void trap_SendServerCommand(int n,const char *s) { (void)n; (void)s; }
+void trap_ReplayReset(qboolean enabled) { CHECK(enabled); replayResets++; }
+int trap_ReplayStart(int killer,int from,int to) {
+ replayStarts++; replayKiller=killer; replayFrom=from; replayTo=to; return replayDeadline;
+}
 void trap_LinkEntity(gentity_t *e) { e->r.linked=qtrue; }
 void trap_UnlinkEntity(gentity_t *e) { e->r.linked=qfalse; }
 void trap_Trace(trace_t *tr,const vec3_t start,const vec3_t mins,const vec3_t maxs,
@@ -68,6 +73,7 @@ static void Reset(int players) {
  gentity_t *site;
  memset(&level,0,sizeof(level)); memset(g_entities,0,sizeof(g_entities)); memset(g_clients,0,sizeof(g_clients));
  memset(configs,0,sizeof(configs)); exits=blocked=contents=spawnSite=copies=0;
+ replayStarts=replayResets=0; replayDeadline=17000;
  level.time=1000; level.maxclients=4; level.num_entities=MAX_CLIENTS; level.clients=g_clients;
  g_gametype.integer=GT_SND; g_cheats.integer=1;
  G_SNDInit(); sndCountdown.integer=1; sndRoundPause.integer=1;
@@ -209,9 +215,57 @@ static void TestCountdownAndEmptyTeam(void) {
  CHECK(!(g_clients[2].ps.pm_flags&PMF_FOLLOW) && !snd.bomb->r.linked);
  Player(1,TEAM_BLUE); G_SNDRunFrame(); CHECK(snd.phase==SND_COUNTDOWN && snd.round==2);
 }
+static void TestRoundKillcam(void) {
+ int deadline, resets;
+ Reset(2); Live(); level.time+=6000;
+ Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]); G_SNDRunFrame();
+ CHECK(replayStarts==1 && replayKiller==0);
+ CHECK(replayFrom==level.time-KILLCAM_REWIND && replayTo==level.time+KILLCAM_LINGER);
+ CHECK(snd.deadline==replayDeadline+INTERMISSION_DELAY_TIME);
+ CHECK(level.replayEndTime==replayDeadline && level.teamScores[TEAM_RED]==1);
+ deadline=snd.deadline; resets=replayResets;
+ level.time=deadline-1; G_SNDRunFrame();
+ CHECK(snd.phase==SND_ROUND_OVER && replayStarts==1 && replayResets==resets);
+ level.time=deadline; G_SNDRunFrame();
+ CHECK(snd.phase==SND_COUNTDOWN && snd.round==2 && replayResets==resets+1);
+ CHECK(level.replayEndTime==0 && snd.lastDeath[TEAM_BLUE].killer==-1);
+ /* Match-winning round reuses this exact replay; no second selection. */
+ Reset(2); sndWinLimit.integer=1; Live();
+ Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]); G_SNDRunFrame();
+ CHECK(exits==1 && replayStarts==1 && level.replayEndTime==replayDeadline);
+ G_SNDRunFrame(); CHECK(replayStarts==1);
+ /* A later non-kill elimination must not inherit an earlier frag. */
+ Reset(4); Live(); Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]);
+ Die(3); G_SNDRunFrame(); CHECK(snd.result==SND_ELIMINATION && !replayStarts);
+ Reset(2); Live(); Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[1]);
+ G_SNDRunFrame(); CHECK(!replayStarts);
+ Reset(2); Live(); Die(1); G_SNDRecordKill(&g_entities[1],NULL);
+ G_SNDRunFrame(); CHECK(!replayStarts);
+ Reset(3); Live(); Die(0); G_SNDRecordKill(&g_entities[0],&g_entities[2]);
+ CHECK(snd.lastDeath[TEAM_RED].killer==-1); /* friendly fire */
+ /* Objective wins/draws never replay an unrelated kill. */
+ Reset(3); Live(); Die(0); G_SNDRecordKill(&g_entities[0],&g_entities[1]);
+ level.time=snd.deadline; G_SNDRunFrame(); CHECK(snd.result==SND_TIME && !replayStarts);
+ Reset(2); Live(); Die(0); G_SNDRecordKill(&g_entities[0],&g_entities[1]);
+ Die(1); G_SNDRunFrame(); CHECK(snd.result==SND_DRAW && !replayStarts);
+ /* A killer can already be dead when their projectile eliminates defenders. */
+ Reset(2); Live(); MoveToSite(0); Hold(0,snd.plantMs);
+ Die(0); G_SNDRecordKill(&g_entities[0],&g_entities[1]);
+ Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]); G_SNDRunFrame();
+ CHECK(snd.winner==TEAM_RED && replayStarts==1 && replayKiller==0);
+ /* The reverse splash-damage order must select the same decisive kill. */
+ Reset(2); Live(); MoveToSite(0); Hold(0,snd.plantMs);
+ Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]); Die(0);
+ G_SNDRunFrame(); CHECK(snd.winner==TEAM_RED && replayStarts==1 && replayKiller==0);
+ /* Missing history falls back to the ordinary pause instead of hanging. */
+ Reset(2); Live(); replayDeadline=0; Die(1);
+ G_SNDRecordKill(&g_entities[1],&g_entities[0]); G_SNDRunFrame();
+ CHECK(snd.deadline==level.time+snd.pauseMs && level.replayEndTime==0);
+}
 int main(void) {
  TestPlantDefuse(); TestInterrupts(); TestCarrierSpectateJoin(); TestWinsAndSides(); TestWaitingPracticeAndMode();
  TestCountdownAndEmptyTeam();
+ TestRoundKillcam();
  printf("PASS: %i S&D round, bomb, timing, spectating, late-join and side-switch checks\n",checks);
  return 0;
 }

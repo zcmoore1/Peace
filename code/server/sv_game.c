@@ -337,6 +337,11 @@ intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		return FS_GetFileList( VMA(1), VMA(2), VMA(3), args[4] );
 	case G_FS_SEEK:
 		return FS_Seek( args[1], args[2], args[3] );
+	case G_REPLAY_RESET:
+		SV_ReplayReset( args[1] );
+		return 0;
+	case G_REPLAY_START:
+		return SV_ReplayStart( args[1], args[2], args[3] );
 
 	case G_LOCATE_GAME_DATA:
 		SV_LocateGameData( VMA(1), args[2], args[3], VMA(4), args[5] );
@@ -857,6 +862,7 @@ Called every time a map changes
 ===============
 */
 void SV_ShutdownGameProgs( void ) {
+	SV_ReplayReset( qfalse );
 	if ( !gvm ) {
 		return;
 	}
@@ -874,6 +880,7 @@ Called for both a full init and a restart
 */
 static void SV_InitGameVM( qboolean restart ) {
 	int		i;
+	SV_ReplayReset( qfalse );
 
 	// start the entity parsing at the beginning
 	sv.entityParsePoint = CM_EntityString();

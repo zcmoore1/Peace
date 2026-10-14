@@ -167,15 +167,15 @@ static void SV_WriteSnapshotToClient( client_t *client, msg_t *msg ) {
 		// the client's perspective this time is strictly speaking
 		// incorrect, but since it'll be busy loading a map at
 		// the time it doesn't really matter.
-		MSG_WriteLong (msg, sv.time + client->oldServerTime);
+		MSG_WriteLong (msg, frame->serverTime + client->oldServerTime);
 	} else {
-		MSG_WriteLong (msg, sv.time);
+		MSG_WriteLong (msg, frame->serverTime);
 	}
 
 	// what we are delta'ing from
 	MSG_WriteByte (msg, lastframe);
 
-	snapFlags = svs.snapFlagServerBit;
+	snapFlags = svs.snapFlagServerBit | frame->snapFlags;
 	if ( client->rateDelayed ) {
 		snapFlags |= SNAPFLAG_RATE_DELAYED;
 	}
@@ -426,6 +426,171 @@ static void SV_AddEntitiesVisibleFromPoint( vec3_t origin, clientSnapshot_t *fra
 	}
 }
 
+// A bounded, time-sampled history independent of any recipient's rate or PVS.
+// Entity states are shared between recorded viewpoints; each viewpoint retains
+// its original visibility and player state. Playback uses the ordinary delta
+// snapshot channel, so spectators, late arrivals and distant players see the
+// same scene without a burst of reliable commands or a local rewind buffer.
+#define REPLAY_SAMPLE_MSEC 25
+#define REPLAY_HISTORY_MSEC 6500
+#define REPLAY_FRAMES (REPLAY_HISTORY_MSEC / REPLAY_SAMPLE_MSEC + 2)
+
+typedef struct {
+	qboolean valid;
+	playerState_t ps;
+	int areabytes;
+	byte areabits[MAX_MAP_AREA_BYTES];
+	byte visible[MAX_GENTITIES / 8];
+} replayView_t;
+
+typedef struct {
+	int time, numEntities;
+	replayView_t views[MAX_CLIENTS];
+	entityState_t entities[MAX_GENTITIES];
+} replayFrame_t;
+
+static struct {
+	replayFrame_t *frames;
+	int head, count;
+	int clientNum, fromTime, toTime, beginTime, endTime;
+} replay;
+
+static replayFrame_t *SV_ReplayFrame( int index ) {
+	return &replay.frames[(replay.head - replay.count + index + REPLAY_FRAMES) % REPLAY_FRAMES];
+}
+
+void SV_ReplayReset( qboolean enabled ) {
+	replayFrame_t *frames = replay.frames;
+	if ( !enabled && frames ) {
+		free(frames);
+		frames = NULL;
+	} else if ( enabled && !frames ) {
+		// Keep bounded replay storage outside the engine's small fixed zone.
+		frames = calloc(REPLAY_FRAMES, sizeof(*frames));
+		if ( !frames ) Com_Error(ERR_FATAL, "Could not allocate replay history");
+	}
+	Com_Memset(&replay, 0, sizeof(replay));
+	replay.frames = frames;
+}
+
+int SV_ReplayStart( int clientNum, int fromTime, int toTime ) {
+	int i;
+	replayFrame_t *frame;
+	if ( !replay.frames || replay.count < 2 || clientNum < 0 ||
+	     clientNum >= sv_maxclients->integer || fromTime >= toTime ||
+	     toTime > sv.time + 1000 || toTime < sv.time || replay.endTime > sv.time ) return 0;
+	// Start at an actual recorded frame, never extend the clip with a frozen
+	// opening when the kill happens early in a round or the killer just joined.
+	for ( i = 0; i < replay.count; i++ ) {
+		frame = SV_ReplayFrame(i);
+		if ( frame->time >= fromTime && frame->views[clientNum].valid ) break;
+	}
+	if ( i == replay.count || frame->time >= toTime ) return 0;
+	replay.clientNum = clientNum;
+	replay.fromTime = frame->time;
+	replay.toTime = toTime;
+	// Allow the final sample to be captured before switching to playback.
+	replay.beginTime = toTime + REPLAY_SAMPLE_MSEC;
+	replay.endTime = replay.beginTime + toTime - replay.fromTime;
+	Com_Printf("Replay: client %i source %i..%i playback %i..%i\n", clientNum,
+		replay.fromTime, toTime, replay.beginTime, replay.endTime);
+	return replay.endTime;
+}
+
+void SV_RecordReplayFrame( void ) {
+	replayFrame_t *frame, *previous;
+	replayView_t *view;
+	clientSnapshot_t snapshot;
+	snapshotEntityNumbers_t numbers;
+	playerState_t *ps;
+	vec3_t eye;
+	int n, i, e;
+	if ( !replay.frames ) return;
+	// Pin the complete clip during playback. Only reset/next round resumes
+	// capture; real game state continues to advance independently.
+	if ( replay.endTime && sv.time > replay.toTime ) return;
+	previous = replay.count ? SV_ReplayFrame(replay.count-1) : NULL;
+	if ( previous && sv.time - previous->time < REPLAY_SAMPLE_MSEC ) return;
+	frame = &replay.frames[replay.head];
+	frame->time = sv.time;
+	frame->numEntities = sv.num_entities;
+	for ( n = 0; n < sv_maxclients->integer; n++ ) {
+		view = &frame->views[n];
+		Com_Memset(view, 0, sizeof(*view));
+		ps = SV_GameClientNum(n);
+		if ( svs.clients[n].state == CS_ACTIVE && ps->clientNum == n ) view->ps = *ps;
+		else if ( previous && previous->views[n].valid ) {
+			if ( svs.clients[n].state != CS_ACTIVE &&
+			     (!replay.endTime || n != replay.clientNum) ) continue;
+			// An eliminated killer may now be following a teammate (e.g. a
+			// grenade kill after death). Keep their own last camera instead.
+			view->ps = previous->views[n].ps;
+		} else continue;
+		view->valid = qtrue;
+		Com_Memset(&snapshot, 0, sizeof(snapshot));
+		snapshot.ps = view->ps;
+		numbers.numSnapshotEntities = 0;
+		sv.snapshotCounter++;
+		sv.svEntities[n].snapshotCounter = sv.snapshotCounter;
+		VectorCopy(view->ps.origin, eye);
+		eye[2] += view->ps.viewheight;
+		SV_AddEntitiesVisibleFromPoint(eye, &snapshot, &numbers, qfalse);
+		view->areabytes = snapshot.areabytes;
+		for ( i = 0; i < MAX_MAP_AREA_BYTES; i++ ) view->areabits[i] = ~snapshot.areabits[i];
+		for ( i = 0; i < numbers.numSnapshotEntities; i++ ) {
+			e = numbers.snapshotEntities[i];
+			view->visible[e >> 3] |= 1 << (e & 7);
+		}
+	}
+	// Visibility collection also validates/fixes entity numbers, just as it
+	// does for live snapshots. Copy the states after that validation.
+	for ( e = 0; e < sv.num_entities; e++ ) frame->entities[e] = SV_GentityNum(e)->s;
+	replay.head = (replay.head + 1) % REPLAY_FRAMES;
+	if ( replay.count < REPLAY_FRAMES ) replay.count++;
+}
+
+static qboolean SV_BuildReplaySnapshot( clientSnapshot_t *out ) {
+	replayFrame_t *frame = NULL, *candidate;
+	replayView_t *view;
+	entityState_t *state;
+	int i, offset, sourceTime;
+	if ( !replay.endTime || sv.time < replay.beginTime || sv.time >= replay.endTime ) return qfalse;
+	offset = replay.beginTime - replay.fromTime;
+	sourceTime = sv.time - offset;
+	for ( i = 0; i < replay.count; i++ ) {
+		candidate = SV_ReplayFrame(i);
+		if ( candidate->time > sourceTime ) break;
+		if ( candidate->views[replay.clientNum].valid ) frame = candidate;
+	}
+	if ( !frame ) return qfalse;
+	view = &frame->views[replay.clientNum];
+	out->serverTime = frame->time + offset;
+	out->snapFlags = SNAPFLAG_REPLAY;
+	out->ps = view->ps;
+	// Rebase absolute clocks onto the live transport timeline. Durations and
+	// elapsed weapon/note clocks stay untouched. No live entity or ps is edited.
+	out->ps.commandTime += offset;
+	if ( out->ps.externalEventTime ) out->ps.externalEventTime += offset;
+	for ( i = 0; i < MAX_POWERUPS; i++ ) {
+		if ( out->ps.powerups[i] && out->ps.powerups[i] < INT_MAX - offset ) out->ps.powerups[i] += offset;
+	}
+	out->areabytes = view->areabytes;
+	Com_Memcpy(out->areabits, view->areabits, sizeof(out->areabits));
+	out->first_entity = svs.nextSnapshotEntities;
+	out->num_entities = 0;
+	for ( i = 0; i < frame->numEntities; i++ ) {
+		if ( !(view->visible[i >> 3] & (1 << (i & 7))) ) continue;
+		state = &svs.snapshotEntities[svs.nextSnapshotEntities % svs.numSnapshotEntities];
+		*state = frame->entities[i];
+		state->pos.trTime += offset;
+		state->apos.trTime += offset;
+		svs.nextSnapshotEntities++;
+		if ( svs.nextSnapshotEntities >= 0x7FFFFFFE ) Com_Error(ERR_FATAL, "svs.nextSnapshotEntities wrapped");
+		out->num_entities++;
+	}
+	return qtrue;
+}
+
 /*
 =============
 SV_BuildClientSnapshot
@@ -456,6 +621,8 @@ static void SV_BuildClientSnapshot( client_t *client ) {
 
 	// this is the frame we are creating
 	frame = &client->frames[ client->netchan.outgoingSequence & PACKET_MASK ];
+	frame->serverTime = sv.time;
+	frame->snapFlags = 0;
 
 	// clear everything in this snapshot
 	entityNumbers.numSnapshotEntities = 0;
@@ -468,6 +635,7 @@ static void SV_BuildClientSnapshot( client_t *client ) {
 	if ( !clent || client->state == CS_ZOMBIE ) {
 		return;
 	}
+	if ( SV_BuildReplaySnapshot(frame) ) return;
 
 	// grab the current playerState_t
 	ps = SV_GameClientNum( client - svs.clients );

@@ -631,12 +631,6 @@ static int CG_CalcViewValues( void ) {
 
 	ps = &cg.predictedPlayerState;
 
-	// final killcam: chase camera on the killer
-	if ( CG_Killcam_Active() ) {
-		CG_Killcam_CalcView();
-		AnglesToAxis( cg.refdefViewAngles, cg.refdef.viewaxis );
-		return CG_CalcFov();
-	}
 /*
 	if (cg.cameraMode) {
 		vec3_t origin, angles;
@@ -805,30 +799,21 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 		return;
 	}
 
-	// record snapshots for a possible final killcam (no-op while one plays)
-	CG_Killcam_Record();
-
 	// let the client system know what our weapon and zoom settings are
 	// Clamp before it becomes cmd.weapon - nothing may ask pmove for a weapon
 	// that is not in a slot.
-	CG_ValidateWeaponSelect();
+	if ( !CG_Killcam_Active() ) CG_ValidateWeaponSelect();
 	trap_SetUserCmdValue( cg.weaponSelect, cg.zoomSensitivity );
 
 	// this counter will be bumped for every valid scene we generate
 	cg.clientFrame++;
 
-	// During a final killcam, swap in the rewound recording and skip
-	// prediction; the camera chases the killer in third person.
-	if ( CG_Killcam_Active() && CG_Killcam_Setup() ) {
-		cg.renderingThirdPerson = qtrue;
-	} else {
-		// update cg.predictedPlayerState
-		CG_PredictPlayerState();
-
-		// decide on third person view
-		cg.renderingThirdPerson = cg.snap->ps.persistant[PERS_TEAM] != TEAM_SPECTATOR
-								&& (cg_thirdPerson.integer || (cg.snap->ps.stats[STAT_HEALTH] <= 0));
-	}
+	CG_PredictPlayerState();
+	// All viewers get the recorded first-person camera, including ADS and
+	// weapon state. Local mouse input and third-person settings cannot steer it.
+	cg.renderingThirdPerson = !CG_Killcam_Active() &&
+		cg.snap->ps.persistant[PERS_TEAM] != TEAM_SPECTATOR &&
+		(cg_thirdPerson.integer || cg.snap->ps.stats[STAT_HEALTH] <= 0);
 
 	// build cg.refdef
 	inwater = CG_CalcViewValues();

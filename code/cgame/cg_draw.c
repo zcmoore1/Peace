@@ -2866,7 +2866,7 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 		return;
 	}
 
-	// final killcam plays before the intermission scoreboard
+	// Lobby replay owns the HUD until the server returns to round/intermission.
 	if ( CG_Killcam_Active() ) {
 		CG_Killcam_Draw();
 		return;

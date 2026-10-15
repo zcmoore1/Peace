@@ -151,15 +151,16 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 9-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, and post-throw recovery. Protocol 74 requires client, server
+  swap edge latch, and post-throw recovery. Protocol 75 requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
   Dropped ET_ITEM uses `generic1` for attachments, `time2` for packed magazine
   and reserve, `otherEntityNum2` for chamber debt, and `time` as a spawn serial.
 - `stats[]` — **15 of 16 used in baseq3; all 16 in missionpack.** Every entry round-trips as a SIGNED
-  short (`MSG_WriteShort`) except `STAT_WEAPONS`. Other bitmask stats still
-  have the bit-15 trap. `STAT_UNCHAMBERED` uses gun bits 0–13.
+  short (`MSG_WriteShort`) except `STAT_WEAPONS` and `STAT_UNCHAMBERED`.
+  Both weapon masks are full-width so guns at IDs 15+ keep chamber debt through
+  prediction corrections. Other bitmask stats still have the bit-15 trap.
 - `STAT_LADDER` packs attachment, holster destination, jump separation latch,
   and 12-bit inward-facing yaw into bits 0–14. No bit 15, no extra pm_flags.
   Ladder contact stamps `BG_LADDER_DROP_TIME` before the unchanged note pass;
@@ -245,6 +246,21 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   `dev/tests/run-replay.sh` alongside the S&D tests.
 
 ## Adding a weapon — touches TWO lists
+
+- M40A3 is a separate, appended weapon (15 basegame / 18 missionpack). The
+  Sniper preset occupies the former Scout index; custom-class indices and
+  existing serialized weapon IDs are unchanged. Railgun remains selectable.
+- `assets/source/m40a3/weapon.json` is the rifle's timing source. Run
+  `python3 dev/tools/build_m40a3.py` after changes; it generates the IQM, MD3,
+  clip/sight configs and `bg_m40a3_data.h`. `--check` is deterministic/read-only.
+  Keep every IQM/MD3 surface below 1000 vertices for GL1. Run
+  `dev/tests/run-sniper.sh` and `dev/tests/m40a3_asset_test.py`.
+- `scope` in a viewmodel's `.sights` file opts into the aspect-correct ocular
+  overlay. At full ADS the overlay replaces the gun picture; its animation
+  layers still advance. This never changes ADS permission or note clocks.
+- Supported attachment masks live in the shared class weapon catalog. The
+  M40's scope is integral, so a red-dot spawn preference cannot invent a
+  nonexistent attachment variant. See `dev/M40A3.md`.
 
 The enum is not enough. A weapon in `STAT_WEAPONS` with no `bg_itemlist` entry
 crashes on spawn: `CG_RegisterWeapon` calls `CG_Error`, and `BG_FindItemForWeapon`

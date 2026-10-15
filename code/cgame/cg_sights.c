@@ -18,7 +18,7 @@ typedef struct {
 	char mountTag[MAX_QPATH];
 	int rootJoint;                 // parentless joint; matches mountTag
 	vec3_t mountOrigin, mountAngles, lensOrigin;
-	qhandle_t opticModel, reticleShader;
+	qhandle_t opticModel, reticleShader, scopeShader;
 } weaponSights_t;
 
 static weaponSights_t cg_sights[WP_NUM_WEAPONS];
@@ -54,7 +54,7 @@ static qboolean CG_Sights_Numbers( char **cursor, float *values, int count ) {
 void CG_Sights_Register( int weapon, const char *path ) {
 	weaponSights_t def;
 	fileHandle_t file;
-	char buffer[4096], optic[MAX_QPATH], reticle[MAX_QPATH];
+	char buffer[4096], optic[MAX_QPATH], reticle[MAX_QPATH], scope[MAX_QPATH];
 	char *cursor, *token;
 	int length;
 	float values[7];
@@ -80,7 +80,7 @@ void CG_Sights_Register( int weapon, const char *path ) {
 	def.fovScale = 0.72f;
 	def.aperture = 0.78f;
 	def.rootJoint = -1;
-	optic[0] = reticle[0] = '\0';
+	optic[0] = reticle[0] = scope[0] = '\0';
 	cursor = buffer;
 	while ( valid && (token = COM_Parse( &cursor ))[0] ) {
 		if ( !Q_stricmp( token, "iron" ) || !Q_stricmp( token, "reddot" ) ) {
@@ -104,8 +104,8 @@ void CG_Sights_Register( int weapon, const char *path ) {
 			if ( !valid || values[3] <= 0 ) { valid = qfalse; break; }
 			VectorCopy( values, def.lensOrigin );
 			def.aperture = values[3];
-		} else if ( !Q_stricmp( token, "optic" ) || !Q_stricmp( token, "reticle" ) ) {
-			char *name = !Q_stricmp( token, "optic" ) ? optic : reticle;
+		} else if ( !Q_stricmp( token, "optic" ) || !Q_stricmp( token, "reticle" ) || !Q_stricmp(token, "scope") ) {
+			char *name = !Q_stricmp(token, "scope") ? scope : (!Q_stricmp( token, "optic" ) ? optic : reticle);
 			token = COM_ParseExt( &cursor, qfalse );
 			if ( !token[0] || strlen(token) >= MAX_QPATH ) { valid = qfalse; break; }
 			Q_strncpyz( name, token, MAX_QPATH );
@@ -134,7 +134,38 @@ void CG_Sights_Register( int weapon, const char *path ) {
 		// A missing attachment falls back to the authored iron sights.
 		if ( !def.opticModel || !def.reticleShader ) def.redDot.valid = qfalse;
 	}
+	if (scope[0]) def.scopeShader = trap_R_RegisterShader(scope);
 	cg_sights[weapon] = def;
+}
+
+// Scope presentation is configured beside the model, not a weapon-ID branch.
+// Draw even with the ordinary HUD disabled and during replay, but never grant
+// aim permission: the existing predicted ADS blend is its only clock.
+void CG_Sights_DrawScope(void) {
+	const weaponSights_t *def = CG_Sights_Def(cg.predictedPlayerState.weapon);
+	float alpha, width, x;
+	vec4_t white = {1,1,1,1}, black = {0,0,0,1};
+	if (!def || !def->scopeShader || !CG_Sights_Pose(def) || cg.renderingThirdPerson ||
+		cg.predictedPlayerState.stats[STAT_HEALTH] <= 0 ||
+		cg.predictedPlayerState.pm_type == PM_INTERMISSION || cg.adsFrac <= .8f) return;
+	alpha = Com_Clamp(0,1,(cg.adsFrac-.8f)/.2f);
+	alpha = alpha*alpha*(3-2*alpha);
+	white[3] = black[3] = alpha;
+	// Correct physical aspect, including widescreen and reduced viewports.
+	width = 480.0f*cgs.screenYScale/cgs.screenXScale;
+	x = (640.0f-width)*.5f;
+	if (x > 0) {
+		CG_FillRect(0,0,x,480,black);
+		CG_FillRect(640-x,0,x,480,black);
+	}
+	trap_R_SetColor(white);
+	CG_DrawPic(x,0,width,480,def->scopeShader);
+	trap_R_SetColor(NULL);
+}
+
+qboolean CG_Sights_HideViewModel(void) {
+	const weaponSights_t *def = CG_Sights_Def(cg.predictedPlayerState.weapon);
+	return def && def->scopeShader && cg.adsFrac >= .99f;
 }
 
 float CG_Sights_Fraction( void ) {
@@ -187,8 +218,9 @@ void CG_Sights_Update( const playerState_t *ps ) {
 }
 
 qboolean CG_Sights_HideCrosshair( void ) {
-	return cg_drawGun.integer && !cg.testGun && !cg.renderingThirdPerson &&
-	       CG_Sights_Pose( CG_Sights_Def( cg.predictedPlayerState.weapon ) ) &&
+	const weaponSights_t *def = CG_Sights_Def(cg.predictedPlayerState.weapon);
+	return (cg_drawGun.integer || (def && def->scopeShader)) && !cg.testGun && !cg.renderingThirdPerson &&
+	       CG_Sights_Pose( def ) &&
 	       cg.adsFrac > 0.05f;
 }
 

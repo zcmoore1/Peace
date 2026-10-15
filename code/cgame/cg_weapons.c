@@ -618,7 +618,8 @@ static const char *cg_viewModelBase[WP_NUM_WEAPONS] = {
 	"",									// WP_KNIFE
 	"",									// WP_FRAG
 	"",                                 // WP_FLASH
-	""                                  // WP_SEMTEX (procedural MD3 hand pose)
+	"",                                 // WP_SEMTEX (procedural MD3 hand pose)
+	"models/weapons2/m40a3/view"          // WP_M40A3
 };
 
 /*
@@ -708,6 +709,11 @@ void CG_RegisterWeapon( int weaponNum ) {
 	}
 
 	switch ( weaponNum ) {
+	case WP_M40A3:
+		MAKERGB( weaponInfo->flashDlightColor, 1, 0.8f, 0.45f );
+		weaponInfo->flashSound[0] = trap_S_RegisterSound("sound/weapons/m40a3/fire.wav", qfalse);
+		cgs.media.bulletExplosionShader = trap_R_RegisterShader("bulletExplosion");
+		break;
 	case WP_SEMTEX:
 		weaponInfo->missileModel = weaponInfo->weaponModel;
 		weaponInfo->flashModel = 0;
@@ -1547,6 +1553,9 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		// Align the whole animated viewmodel. Never replace a playing clip
 		// with idle or read its layer to decide whether aiming is permitted.
 		CG_Sights_Apply( ps->weapon, &hand );
+		// A full-screen ocular replaces the model only once fully aimed. Keep
+		// evaluating its layers above, so unscoping never resumes stale frames.
+		if (CG_Sights_HideViewModel()) return;
 		CG_AddWeaponWithPowerups( &hand, cent->currentState.powerups );
 		if ( !(cent->currentState.powerups & (1 << PW_INVIS)) ) {
 			CG_Sights_AddOptic( ps->weapon, &hand );

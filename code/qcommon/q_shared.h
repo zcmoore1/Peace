@@ -1123,6 +1123,7 @@ typedef struct {
 #define	MAX_WEAPONS				24
 // Shared with bg_public.h: this inventory mask has a full-width wire value.
 #define PS_STAT_WEAPONS 2
+#define PS_STAT_UNCHAMBERED 12
 
 #define	MAX_PS_EVENTS			2
 

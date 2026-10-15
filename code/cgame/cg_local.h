@@ -1377,6 +1377,8 @@ float CG_Sights_FovScale( int weapon );
 qboolean CG_Sights_HideCrosshair( void );
 void CG_Sights_Apply( int weapon, refEntity_t *hand );
 void CG_Sights_AddOptic( int weapon, const refEntity_t *hand );
+void CG_Sights_DrawScope(void);
+qboolean CG_Sights_HideViewModel(void);
 
 // cg_anim.c
 void     CG_WeapAnim_Init( void );

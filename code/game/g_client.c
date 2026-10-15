@@ -1199,7 +1199,8 @@ void ClientSpawn(gentity_t *ent) {
 		trap_GetUserinfo(index, userinfo, sizeof(userinfo));
 		attachments = atoi(Info_ValueForKey(userinfo, "cg_sight")) == 1 ? BG_ATTACHMENT_REDDOT : 0;
 		for (i = 0; i < SLOT_COUNT; i++) {
-			client->ps.slotAttachments[i] = attachments;
+			client->ps.slotAttachments[i] = attachments &
+				BG_WeaponAttachmentMask(client->ps.stats[STAT_SLOT_PRIMARY+i]);
 			client->ps.slotFlags[i] = BG_GUN_FIRST_DRAW;
 		}
 	}

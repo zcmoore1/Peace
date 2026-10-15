@@ -2880,6 +2880,7 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 		return;
 	}
 
+	CG_Sights_DrawScope();
 	if ( cg_draw2D.integer == 0 ) {
 		return;
 	}

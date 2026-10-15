@@ -9,7 +9,7 @@
 // time, identically in native modules and VMs.
 static const struct { const char *name; int primary, secondary, lethal, tactical; } presets[] = {
 	{ "Assault", WP_MACHINEGUN, WP_SHOTGUN, 2, 2 },
-	{ "Scout", WP_RAILGUN, WP_MACHINEGUN, 1, 3 },
+	{ "Sniper", WP_M40A3, WP_MACHINEGUN, 1, 3 },
 	{ "Demolition", WP_ROCKET_LAUNCHER, WP_SHOTGUN, 3, 1 },
 	{ "Support", WP_PLASMAGUN, WP_LIGHTNING, 2, 2 }
 };
@@ -23,12 +23,20 @@ qboolean BG_IsActionWeapon( int weapon ) {
 		weapon == WP_FLASH || weapon == WP_SEMTEX;
 }
 
-static const struct { int weapon; const char *name; } classWeapons[] = {
-	{WP_MACHINEGUN, "Machinegun"}, {WP_SHOTGUN, "SPAS-12"},
-	{WP_RAILGUN, "Railgun"}, {WP_ROCKET_LAUNCHER, "Rocket launcher"},
-	{WP_GRENADE_LAUNCHER, "Grenade launcher"}, {WP_LIGHTNING, "Lightning gun"},
-	{WP_PLASMAGUN, "Plasma gun"}, {WP_BFG, "BFG"}
+static const struct { int weapon; const char *name; int attachments; } classWeapons[] = {
+	{WP_MACHINEGUN, "Machinegun", BG_ATTACHMENT_REDDOT}, {WP_SHOTGUN, "SPAS-12", BG_ATTACHMENT_REDDOT},
+	{WP_RAILGUN, "Railgun", BG_ATTACHMENT_REDDOT}, {WP_ROCKET_LAUNCHER, "Rocket launcher", BG_ATTACHMENT_REDDOT},
+	{WP_GRENADE_LAUNCHER, "Grenade launcher", BG_ATTACHMENT_REDDOT}, {WP_LIGHTNING, "Lightning gun", BG_ATTACHMENT_REDDOT},
+	{WP_PLASMAGUN, "Plasma gun", BG_ATTACHMENT_REDDOT}, {WP_BFG, "BFG", BG_ATTACHMENT_REDDOT},
+	{WP_M40A3, "M40A3", 0}
 };
+
+int BG_WeaponAttachmentMask(int weapon) {
+	int i;
+	for (i=0; i<ARRAY_LEN(classWeapons); i++)
+		if (classWeapons[i].weapon == weapon) return classWeapons[i].attachments;
+	return 0;
+}
 
 int BG_ClassCount( void ) { return ARRAY_LEN(bg_classes); }
 const bg_class_t *BG_Class( int index ) {

@@ -20,6 +20,7 @@ int main(void) {
   to=from; to.weaponAction=j;
   to.ammo[3]=7; to.ammoReserve[3]=24;
   to.stats[PS_STAT_WEAPONS]=(1<<14)|(1<<17)|(1<<(MAX_WEAPONS-1));
+  to.stats[PS_STAT_UNCHAMBERED]=(1<<15)|(1<<18)|(1<<(MAX_WEAPONS-1));
   to.ammo[17]=2; to.ammo[MAX_WEAPONS-1]=3; to.ammoReserve[MAX_WEAPONS-1]=99;
   to.weapon=3; to.weaponstate=2; to.weaponTime=37;
   to.weaponDraw=j&1; to.slotAmmo[0]=7; to.slotAmmo[1]=2;
@@ -34,6 +35,7 @@ int main(void) {
   CHECK(decoded.weaponAction==j);
   CHECK(decoded.ammo[3]==7 && decoded.ammoReserve[3]==24);
   CHECK(decoded.stats[PS_STAT_WEAPONS]==to.stats[PS_STAT_WEAPONS]);
+  CHECK(decoded.stats[PS_STAT_UNCHAMBERED]==to.stats[PS_STAT_UNCHAMBERED]);
   CHECK(decoded.ammo[17]==2 && decoded.ammo[MAX_WEAPONS-1]==3 && decoded.ammoReserve[MAX_WEAPONS-1]==99);
   CHECK(decoded.weapon==3 && decoded.weaponstate==2 && decoded.weaponTime==37);
   CHECK(decoded.weaponDraw==to.weaponDraw && decoded.slotAmmo[0]==7 && decoded.slotAmmo[1]==2);

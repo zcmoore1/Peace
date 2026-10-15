@@ -26,6 +26,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/q_shared.h"
 #include "bg_public.h"
 #include "bg_local.h"
+#include "bg_m40a3_data.h"
 
 pmove_t		*pm;
 pml_t		pml;
@@ -1631,6 +1632,7 @@ static const int bg_weaponMagSize[MAX_WEAPONS] = {
 	1,		// WP_FRAG           (one in hand)
 	1,		// WP_FLASH
 	1,      // WP_SEMTEX
+	M40_MAG_SIZE,
 };
 
 // ---------------------------------------------------------------------------
@@ -1732,6 +1734,22 @@ static const bg_weaponNote_t bgnotes_spas_fire[] = {
 	{ 0, WNOTE_NONE, 0 }
 };
 
+// Authored rifle data uses the same open/close and round-in notes as the pump.
+static const bg_weaponNote_t bgnotes_m40_fire[] = {
+	{ M40_BOLT_OPEN_MS, WNOTE_BOLT_OPEN, 0 },
+	{ M40_BOLT_CLOSE_MS, WNOTE_BOLT_CLOSED, 0 },
+	{ 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_m40_start[] = {
+	{ M40_BOLT_OPEN_MS, WNOTE_MAG_OUT, 0 }, { 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_m40_loop[] = {
+	{ M40_ROUND_IN_MS, WNOTE_MAG_IN, 1 }, { 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_m40_end[] = {
+	{ M40_RELOAD_CLOSE_MS, WNOTE_BOLT_CLOSED, 0 }, { 0, WNOTE_NONE, 0 }
+};
+
 /* Length is the refire, so this and the addTime in PM_Weapon are one number.
    A zero-length entry means the weapon has no modelled fire animation and
    behaves exactly as it did before: FIRING until the lock runs out. */
@@ -1753,7 +1771,8 @@ static const bg_weaponAnimSeg_t bg_weaponFire[MAX_WEAPONS] = {
 	/* WP_KNIFE           */ { 0, bgnotes_none },
 	/* WP_FRAG            */ { 0, bgnotes_none },
 	/* WP_FLASH           */ { 0, bgnotes_none },
-	/* WP_SEMTEX          */ { 0, bgnotes_none }
+	/* WP_SEMTEX          */ { 0, bgnotes_none },
+	/* WP_M40A3           */ { M40_FIRE_MS, bgnotes_m40_fire }
 };
 
 int BG_WeaponFireLength( int weapon ) {
@@ -1784,6 +1803,9 @@ static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
 	/* WP_FRAG            */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 	/* WP_FLASH           */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 	/* WP_SEMTEX          */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
+	/* WP_M40A3           */ { { { M40_RELOAD_START_MS, bgnotes_m40_start },
+	                             { M40_RELOAD_LOOP_MS, bgnotes_m40_loop },
+	                             { M40_RELOAD_END_MS, bgnotes_m40_end } }, qtrue },
 };
 
 // Holster / deploy lengths. Always stamped on a weapon change - never 0, so a
@@ -1809,6 +1831,7 @@ static const int bg_weaponDropTime[MAX_WEAPONS] = {
 	BG_RAPID_DROP_TIME,	// WP_FRAG
 	BG_RAPID_DROP_TIME,	// WP_FLASH
 	BG_RAPID_DROP_TIME,	// WP_SEMTEX
+	M40_DROP_MS,
 };
 
 static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
@@ -1830,6 +1853,7 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 	150,	// WP_FRAG
 	150,	// WP_FLASH
 	350,    // WP_SEMTEX pull back into held pose
+	M40_RAISE_MS,
 };
 
 int BG_WeaponMagSize( int weapon ) {
@@ -1864,14 +1888,14 @@ static const int bg_weaponSprintInTime[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	250, 250, 250,
 #endif
-	150, 150, 150, 150
+	150, 150, 150, 150, M40_SPRINT_IN_MS
 };
 static const int bg_weaponSprintOutTime[MAX_WEAPONS] = {
 	180, 180, 250, 250, 300, 300, 250, 300, 250, 350, 150,
 #ifdef MISSIONPACK
 	300, 300, 300,
 #endif
-	180, 180, 180, 180
+	180, 180, 180, 180, M40_SPRINT_OUT_MS
 };
 
 int BG_WeaponSprintInTime( int weapon ) {
@@ -2013,7 +2037,7 @@ void BG_PutSlot(playerState_t *ps, int slot, const bg_weaponInstance_t *gun) {
 		gun->weapon >= WP_NUM_WEAPONS || BG_IsActionWeapon(gun->weapon)) return;
 	BG_StoreSlots(ps);
 	ps->stats[STAT_SLOT_PRIMARY + slot] = gun->weapon;
-	ps->slotAttachments[slot] = gun->attachments & BG_ATTACHMENT_REDDOT;
+	ps->slotAttachments[slot] = gun->attachments & BG_WeaponAttachmentMask(gun->weapon);
 	ps->slotAmmo[slot] = MAX(0, MIN(gun->ammo, BG_WeaponMagSize(gun->weapon)));
 	ps->slotReserve[slot] = MAX(0, MIN(gun->reserve, BG_WeaponMaxReserve(gun->weapon)));
 	ps->slotFlags[slot] = gun->flags & (BG_GUN_FIRST_DRAW | BG_GUN_UNCHAMBERED);
@@ -2050,7 +2074,7 @@ qboolean BG_WeaponItem(const entityState_t *item, bg_weaponInstance_t *gun) {
 	if (def->giType != IT_WEAPON || BG_IsActionWeapon(def->giTag) ||
 		BG_WeaponMagSize(def->giTag) <= 0) return qfalse;
 	gun->weapon = def->giTag;
-	gun->attachments = item->generic1 & BG_ATTACHMENT_REDDOT;
+	gun->attachments = item->generic1 & BG_WeaponAttachmentMask(gun->weapon);
 	gun->flags = BG_GUN_FIRST_DRAW;
 	if (item->modelindex2) {
 		gun->ammo = item->time2 & 65535;
@@ -2139,6 +2163,7 @@ static const int bg_weaponMaxReserve[MAX_WEAPONS] = {
 	0,		// WP_FRAG           (count lives in STAT_LETHAL_COUNT)
 	0,		// WP_FLASH          (count lives in STAT_TACTICAL_COUNT)
 	0,      // WP_SEMTEX
+	M40_RESERVE,
 };
 
 int BG_WeaponMaxReserve( int weapon ) {
@@ -2170,6 +2195,15 @@ static const int bg_weaponSpread[MAX_WEAPONS] = {
 	0,		// WP_FRAG
 	0,		// WP_FLASH
 	0,      // WP_SEMTEX
+	M40_HIP_SPREAD,
+};
+
+static const float bg_weaponAdsSpreadScale[MAX_WEAPONS] = {
+	.15f, .15f, .15f, .15f, .15f, .15f, .15f, .15f, .15f, .15f, .15f,
+#ifdef MISSIONPACK
+	.15f, .15f, .15f,
+#endif
+	.15f, .15f, .15f, .15f, M40_ADS_SPREAD_SCALE
 };
 
 int BG_WeaponBaseSpread( int weapon ) {
@@ -2198,7 +2232,8 @@ float BG_SpreadScale( const playerState_t *ps ) {
 	              ps->velocity[1] * ps->velocity[1] );
 
 	if ( ps->pm_flags & PMF_ADS ) {
-		scale = 0.15f;              // aimed: reticle nearly closed
+		scale = ps->weapon >= 0 && ps->weapon < WP_NUM_WEAPONS ?
+			bg_weaponAdsSpreadScale[ps->weapon] : 0.15f;
 	} else {
 		scale = 1.0f;              // hipfire baseline
 	}
@@ -3241,6 +3276,9 @@ static void PM_Weapon( void ) {
 		break;
 	case WP_SHOTGUN:
 		addTime = 633;			// MW2 Shoot anim, 38f @60fps
+		break;
+	case WP_M40A3:
+		addTime = BG_WeaponFireLength(pm->ps->weapon);
 		break;
 	case WP_MACHINEGUN:
 		addTime = 100;

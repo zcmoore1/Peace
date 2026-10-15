@@ -1,0 +1,23 @@
+{
+  "mag_size": 5,
+  "reserve": 30,
+  "hip_spread": 700,
+  "ads_spread_scale": 0.0,
+  "raise_ms": 650,
+  "drop_ms": 500,
+  "fire_ms": 950,
+  "bolt_open_ms": 160,
+  "bolt_close_ms": 780,
+  "reload_start_ms": 500,
+  "reload_loop_ms": 450,
+  "reload_end_ms": 500,
+  "round_in_ms": 300,
+  "reload_close_ms": 320,
+  "sprint_in_ms": 220,
+  "sprint_loop_ms": 640,
+  "sprint_out_ms": 260,
+  "ads_in_ms": 300,
+  "ads_out_ms": 200,
+  "fov_scale": 0.26,
+  "fps": 60
+}

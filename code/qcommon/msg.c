@@ -1247,7 +1247,7 @@ void MSG_WriteDeltaPlayerstate( msg_t *msg, struct playerState_s *from, struct p
 		MSG_WriteBits( msg, statsbits, MAX_STATS );
 		for (i=0 ; i<MAX_STATS ; i++)
 			if (statsbits & (1<<i) ) {
-				if (i == PS_STAT_WEAPONS) MSG_WriteLong(msg, to->stats[i]);
+				if (i == PS_STAT_WEAPONS || i == PS_STAT_UNCHAMBERED) MSG_WriteLong(msg, to->stats[i]);
 				else MSG_WriteShort (msg, to->stats[i]);
 			}
 	} else {
@@ -1393,7 +1393,7 @@ void MSG_ReadDeltaPlayerstate (msg_t *msg, playerState_t *from, playerState_t *t
 			bits = MSG_ReadBits (msg, MAX_STATS);
 			for (i=0 ; i<MAX_STATS ; i++) {
 				if (bits & (1<<i) ) {
-					to->stats[i] = i == PS_STAT_WEAPONS ? MSG_ReadLong(msg) : MSG_ReadShort(msg);
+					to->stats[i] = (i == PS_STAT_WEAPONS || i == PS_STAT_UNCHAMBERED) ? MSG_ReadLong(msg) : MSG_ReadShort(msg);
 				}
 			}
 		}

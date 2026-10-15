@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-4"
+#define	GAME_VERSION		BASEGAME "-5"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -362,11 +362,10 @@ typedef enum {
 									// ammo[WP_FLASH] - no stat needed
 	STAT_USE_TARGET,				// entity being picked up, or -1
 	STAT_USE_PROGRESS,				// ms of hold accumulated toward the pickup
-	STAT_UNCHAMBERED,			// bit per weapon: this gun has fired and its
+	STAT_UNCHAMBERED = PS_STAT_UNCHAMBERED, // full-width per-weapon chamber debt
 									// action has NOT been worked since. Per weapon
 									// because you carry two and only one of them
-									// is mid-cycle. Gun bits stay in 0-13; this
-									// stat still uses a SIGNED short on the wire.
+									// is mid-cycle. Same wire width as weapon mask.
 	STAT_LADDER,				// LADDER_* flags and surface-facing yaw
 #ifdef MISSIONPACK
 	STAT_PERSISTANT_POWERUP, // keep engine-visible stat indices identical in both builds
@@ -491,6 +490,7 @@ typedef enum {
 	WP_FRAG,			// lethal equipment
 	WP_FLASH,			// tactical equipment
 	WP_SEMTEX,           // held lethal equipment; release to throw
+	WP_M40A3,            // scoped bolt-action rifle; appended to preserve class IDs
 
 	WP_NUM_WEAPONS
 } weapon_t;
@@ -510,6 +510,7 @@ typedef enum {
 // attached copies of one gun). Plain weapon IDs remain valid for bots/tools.
 #define BG_SLOT_COMMAND 128
 #define BG_ATTACHMENT_REDDOT 1
+int BG_WeaponAttachmentMask(int weapon);
 #define BG_GUN_FIRST_DRAW 1
 #define BG_GUN_UNCHAMBERED 2
 #define BG_PICKUP_RANGE 64.0f
@@ -841,7 +842,8 @@ typedef enum {
 	MOD_KAMIKAZE,
 	MOD_JUICED,
 #endif
-	MOD_GRAPPLE
+	MOD_GRAPPLE,
+	MOD_M40A3
 } meansOfDeath_t;
 
 

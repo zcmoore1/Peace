@@ -977,6 +977,11 @@ Only in One Flag CTF games
 #endif
 
 	// end of list marker
+	{
+		"weapon_m40a3", "sound/misc/w_pkup.wav",
+		{ "models/weapons2/m40a3/world.md3", NULL, NULL, NULL },
+		"icons/peace_m40a3", "M40A3", 5, IT_WEAPON, WP_M40A3, "", ""
+	},
 	{NULL}
 };
 

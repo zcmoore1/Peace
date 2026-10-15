@@ -482,6 +482,7 @@ static const char *CG_PD_StateName( int st ) {
 	case WEAPON_DROPPING:		return "DROPPING";
 	case WEAPON_LADDER:		return "LADDER";
 	case WEAPON_FIRING:			return "FIRING";
+	case WEAPON_BOLTING:         return "BOLTING";
 	case WEAPON_RELOADING:		return "RELOADING";
 	case WEAPON_SPRINT_IN:		return "SPRINT_IN";
 	case WEAPON_SPRINTING:		return "SPRINTING";
@@ -495,6 +496,7 @@ static const char *CG_PD_SeqName( int seq ) {
 	case RSEQ_START:	return "START";
 	case RSEQ_LOOP:		return "LOOP";
 	case RSEQ_END:		return "END";
+	case ASEQ_FIRE:      return "FIRE";
 	default:			return "?";
 	}
 }

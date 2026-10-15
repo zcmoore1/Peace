@@ -8,6 +8,8 @@ static FILE *input;
 static int checks, entityCount;
 static refEntity_t rendered[4];
 static const char *configOverride;
+static int scopeDraws;
+static float scopeWidth;
 
 #define CHECK(x) do { checks++; if (!(x)) { \
 	fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); exit(1); \
@@ -50,6 +52,13 @@ void trap_FS_FCloseFile(fileHandle_t handle) {
 }
 qhandle_t trap_R_RegisterModel(const char *name) { CHECK(name[0]); return 1; }
 qhandle_t trap_R_RegisterShader(const char *name) { CHECK(name[0]); return 2; }
+void trap_R_SetColor(const float *color) { (void)color; }
+void CG_FillRect(float x,float y,float w,float h,const float *color) {
+ (void)x; (void)y; (void)w; (void)h; CHECK(color[3]>=0 && color[3]<=1);
+}
+void CG_DrawPic(float x,float y,float w,float h,qhandle_t shader) {
+ (void)x; (void)y; (void)h; CHECK(shader!=0); scopeDraws++; scopeWidth=w;
+}
 void trap_R_AddRefEntityToScene(const refEntity_t *entity) {
 	CHECK(entityCount<4);
 	rendered[entityCount++]=*entity;
@@ -265,6 +274,20 @@ int main(void) {
 	TestTeleportWithoutPrediction();
 	TestAlignment();
 	TestOptic();
+	Reset();
+	CG_Sights_Register(WP_M40A3,"models/weapons2/m40a3/view.sights");
+	cg.predictedPlayerState.weapon=WP_M40A3;
+	CG_Sights_Update(&cg.predictedPlayerState);
+	Tick((int)cg_sights[WP_M40A3].inTime);
+	NEAR(cg.adsFrac,1);
+	CHECK(CG_Sights_HideCrosshair());
+	NEAR(CG_Sights_FovScale(WP_M40A3),.26f);
+	cgs.screenXScale=3; cgs.screenYScale=2.25f;
+	CG_Sights_DrawScope(); CHECK(scopeDraws==1); NEAR(scopeWidth*3,1080);
+	CHECK(CG_Sights_HideViewModel());
+	cg.adsFrac=.5f; CG_Sights_DrawScope(); CHECK(scopeDraws==1);
+	CHECK(!CG_Sights_HideViewModel());
+	cg.adsFrac=1; cg.renderingThirdPerson=qtrue; CG_Sights_DrawScope(); CHECK(scopeDraws==1);
 	printf("PASS: sight config, transitions, alignment and optic projection (%d checks).\n",checks);
 	return 0;
 }

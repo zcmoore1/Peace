@@ -37,7 +37,7 @@ static void Update(weapAnimDef_t *def,playerState_t *ps,int msec) {
  CHECK(!memcmp(ps,&before,sizeof(*ps)));
 }
 
-static void TestSprint(weapAnimDef_t *def) {
+static void TestSprint(weapAnimDef_t *def, int weapon) {
  playerState_t ps;
  animLayer_t *sprint=&cg_weapLayers[LAYER_SPRINT];
  refEntity_t sample;
@@ -46,10 +46,10 @@ static void TestSprint(weapAnimDef_t *def) {
  CHECK(def->clips[WANIM_SPRINT_IN].numFrames>1 && !def->clips[WANIM_SPRINT_IN].loop);
  CHECK(def->clips[WANIM_SPRINT_LOOP].numFrames>1 && def->clips[WANIM_SPRINT_LOOP].loop);
  CHECK(def->clips[WANIM_SPRINT_OUT].numFrames>1 && !def->clips[WANIM_SPRINT_OUT].loop);
- CHECK(fabs(CG_WeapAnim_ClipLength(def,WANIM_SPRINT_IN)-BG_WeaponSprintInTime(WP_SHOTGUN))<1);
- CHECK(fabs(CG_WeapAnim_ClipLength(def,WANIM_SPRINT_OUT)-BG_WeaponSprintOutTime(WP_SHOTGUN))<1);
+ CHECK(fabs(CG_WeapAnim_ClipLength(def,WANIM_SPRINT_IN)-BG_WeaponSprintInTime(weapon))<1);
+ CHECK(fabs(CG_WeapAnim_ClipLength(def,WANIM_SPRINT_OUT)-BG_WeaponSprintOutTime(weapon))<1);
 
- Ready(&ps,WP_SHOTGUN);
+ Ready(&ps,weapon);
  ps.weaponstate=WEAPON_SPRINT_IN; ps.weaponTime=BG_WeaponSprintInTime(ps.weapon);
  Update(def,&ps,16);
  CHECK(sprint->clip==WANIM_SPRINT_IN && sprint->weight==1 && sprint->time==0);
@@ -127,7 +127,7 @@ static void BeginSource(weapAnimDef_t *def,playerState_t *ps,int weapon,int stat
 static void TestOwnership(weapAnimDef_t *def) {
  const int states[]={WEAPON_RAISING,WEAPON_DROPPING,WEAPON_FIRING,WEAPON_BOLTING,
   WEAPON_SPRINT_IN,WEAPON_SPRINTING,WEAPON_SPRINT_OUT};
- const int weapons[]={WP_SHOTGUN,WP_MACHINEGUN,WP_RAILGUN};
+ const int weapons[]={WP_SHOTGUN,WP_MACHINEGUN,WP_RAILGUN,WP_M40A3};
  animLayer_t *retained=&cg_weapLayers[LAYER_RETAINED];
  playerState_t ps;
  refEntity_t sample;
@@ -281,11 +281,11 @@ static void TestContext(weapAnimDef_t *def) {
  }
  (void)def;
 }
-static void TestFirstDraw(weapAnimDef_t *def) {
+static void TestFirstDraw(weapAnimDef_t *def, int weapon) {
  playerState_t ps;
  refEntity_t sample;
  int t;
- Ready(&ps,WP_SHOTGUN);
+ Ready(&ps,weapon);
  ps.weaponDraw=1; ps.weaponstate=WEAPON_RAISING;
  ps.weaponTime=BG_WeaponDrawTime(&ps)/2;
  Update(def,&ps,16);
@@ -324,8 +324,12 @@ int main(void) {
   CHECK(cg_weapLayers[LAYER_MOVE].weight<1);
   CHECK(cg_weapLayers[LAYER_BASE].clip==(i ? WANIM_FIRE : WANIM_IDLE));
  }
- TestSprint(def);
+ TestSprint(def,WP_SHOTGUN);
  TestOwnership(def); TestExclusions(def); TestRelease(def); TestContext(def);
- TestFirstDraw(def);
+ TestFirstDraw(def,WP_SHOTGUN);
+ CG_WeapAnim_RegisterClips(WP_M40A3,2,"assets/baseq3/models/weapons2/m40a3/view.cfg");
+ def=&bg_weapAnimDefs[WP_M40A3];
+ TestSprint(def,WP_M40A3); TestFirstDraw(def,WP_M40A3);
+ TestOwnership(def); TestExclusions(def);
  printf("PASS: %d weapon presentation ownership checks\n",checks); return 0;
 }

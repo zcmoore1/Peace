@@ -927,6 +927,9 @@ void FireWeapon( gentity_t *ent ) {
 	case WP_RAILGUN:
 		weapon_railgun_fire( ent );
 		break;
+	case WP_M40A3:
+		Bullet_Fire( ent, 100, MOD_M40A3 );
+		break;
 	case WP_BFG:
 		BFG_Fire( ent );
 		break;

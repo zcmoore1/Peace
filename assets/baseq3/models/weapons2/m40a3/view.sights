@@ -1,0 +1,5 @@
+// Eye behind the modeled ocular; scope is integral, not a red-dot attachment.
+iron 7 -5 -2.5 0 0 0
+timing 300 200
+fov 0.26
+scope peace/m40_scope

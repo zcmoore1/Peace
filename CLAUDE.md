@@ -247,7 +247,7 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
 
 ## Adding a weapon — touches TWO lists
 
-- M40A3 is a separate, appended weapon (15 basegame / 18 missionpack). The
+- M300 Praetorian (`WP_M40A3`) is a separate, appended weapon (15 basegame / 18 missionpack). The
   Sniper preset occupies the former Scout index; custom-class indices and
   existing serialized weapon IDs are unchanged. Railgun remains selectable.
 - `assets/source/m40a3/weapon.json` is the rifle's timing source. Run

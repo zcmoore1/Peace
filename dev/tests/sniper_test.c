@@ -29,7 +29,7 @@ static void Ready(void) {
 }
 static void TestCatalog(void) {
  bg_weaponInstance_t gun; entityState_t item;
- Ready(); CHECK(!strcmp(BG_ClassWeaponName(WP_M40A3),"M40A3"));
+ Ready(); CHECK(!strcmp(BG_ClassWeaponName(WP_M40A3),"M300 Praetorian"));
  CHECK(BG_FindItemForWeapon(WP_M40A3)->giTag==WP_M40A3);
  CHECK(ps.ammo[WP_M40A3]==BG_WeaponMagSize(WP_M40A3));
  CHECK(ps.ammoReserve[WP_M40A3]==BG_WeaponMaxReserve(WP_M40A3));

@@ -28,7 +28,7 @@ static const struct { int weapon; const char *name; int attachments; } classWeap
 	{WP_RAILGUN, "Railgun", BG_ATTACHMENT_REDDOT}, {WP_ROCKET_LAUNCHER, "Rocket launcher", BG_ATTACHMENT_REDDOT},
 	{WP_GRENADE_LAUNCHER, "Grenade launcher", BG_ATTACHMENT_REDDOT}, {WP_LIGHTNING, "Lightning gun", BG_ATTACHMENT_REDDOT},
 	{WP_PLASMAGUN, "Plasma gun", BG_ATTACHMENT_REDDOT}, {WP_BFG, "BFG", BG_ATTACHMENT_REDDOT},
-	{WP_M40A3, "M40A3", 0}
+	{WP_M40A3, "M300 Praetorian", 0}
 };
 
 int BG_WeaponAttachmentMask(int weapon) {

@@ -511,6 +511,7 @@ typedef struct {
 
 	// input state sent to server
 	int			weaponSelect;
+	int             weaponSelectSlot; // intent is a slot; weaponSelect is its HUD label
 
 	// auto rotating items
 	vec3_t		autoAngles;
@@ -1133,7 +1134,7 @@ extern	vmCvar_t		cg_footsteps;
 extern	vmCvar_t		cg_addMarks;
 extern	vmCvar_t		cg_brassTime;
 extern	vmCvar_t		cg_gun_frame;
-extern	vmCvar_t		cg_sight; // 0 = iron sights, 1 = red dot when the model supports it
+extern	vmCvar_t		cg_sight; // spawn preference: 0 iron, 1 red dot; instances own sights thereafter
 extern	vmCvar_t		cg_gun_x;
 extern	vmCvar_t		cg_gun_y;
 extern	vmCvar_t		cg_gun_z;

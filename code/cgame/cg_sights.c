@@ -29,8 +29,10 @@ static const weaponSights_t *CG_Sights_Def( int weapon ) {
 }
 
 static const sightPose_t *CG_Sights_Pose( const weaponSights_t *def ) {
+	const playerState_t *ps = &cg.predictedPlayerState;
+	int slot = ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ? SLOT_SECONDARY : SLOT_PRIMARY;
 	if ( !def || !def->iron.valid ) return NULL;
-	if ( cg_sight.integer == 1 && def->redDot.valid && def->opticModel ) {
+	if ( (ps->slotAttachments[slot] & BG_ATTACHMENT_REDDOT) && def->redDot.valid && def->opticModel ) {
 		return &def->redDot;
 	}
 	return &def->iron;
@@ -149,7 +151,7 @@ void CG_Sights_Update( const playerState_t *ps ) {
 	const weaponSights_t *def;
 	float target, duration, step;
 	int elapsed = cg.time - cg.adsTime;
-	int sight = cg_sight.integer == 1 ? 1 : 0;
+	int sight = ps->slotAttachments[ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ? SLOT_SECONDARY : SLOT_PRIMARY];
 	int teleportBit = ps->eFlags & EF_TELEPORT_BIT;
 
 	if ( ps->weapon > WP_NONE && ps->weapon < WP_NUM_WEAPONS ) {

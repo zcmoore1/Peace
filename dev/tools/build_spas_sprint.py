@@ -22,6 +22,7 @@ SOURCE_CLIPS = [
     ("reload_loop", "insert.smd", False), ("reload_end", "after_reload.smd", False),
 ]
 SPRINT_NAMES = ("sprint_in", "sprint_loop", "sprint_out")
+BAKED_NAMES = SPRINT_NAMES + ("first_raise",)
 
 
 def mul(a, b):
@@ -134,7 +135,7 @@ def build(model=None, config=None):
         if fields:
             name, first, count, fps, loop = fields
             configured[name] = (int(first), int(count), float(fps), int(loop))
-    old_sprint = [a[0] for a in metadata if label(a[0]) in SPRINT_NAMES]
+    old_sprint = [a[0] for a in metadata if label(a[0]) in BAKED_NAMES]
     text = bytearray(text[:min(old_sprint)] if old_sprint else text)
     clips = []
     for name, filename, loop in SOURCE_CLIPS:
@@ -143,10 +144,17 @@ def build(model=None, config=None):
         clips.append((name, frames, rates[name], loop))
     clips.append(("drop", list(reversed(clips[1][1])), rates["drop"], False))
     clips.extend(sprint_clips(nodes, clips[0][1][0], json.loads((SOURCE / "sprint.json").read_text())))
+    recipe = json.loads((SOURCE / "first_raise.json").read_text())
+    deployment = []
+    for segment in recipe["segments"]:
+        segment_nodes, poses = skeleton(SOURCE / segment["source"])
+        assert segment_nodes == nodes
+        deployment.extend(poses[segment["start"]:segment.get("end")])
+    clips.append(("first_raise", deployment, len(deployment)*1000/recipe["duration_ms"], False))
     assert label(joints[-1][0]) == "tag_flash" and joints[-1][1] == 0
     frames, anims, rows = [], [], []
     for name, poses, fps, loop in clips:
-        if name not in SPRINT_NAMES:
+        if name not in BAKED_NAMES:
             # Preserve hand-tuned rates and comments in the existing table.
             # A changed source frame layout needs an explicit table review,
             # not a silent overwrite of the author's non-sprint clip ranges.
@@ -228,11 +236,11 @@ def build(model=None, config=None):
     lines, used = [], set()
     for line in config.splitlines():
         fields = line.split("//", 1)[0].split()
-        if fields and fields[0] in SPRINT_NAMES:
+        if fields and fields[0] in BAKED_NAMES:
             line = by_name[fields[0]]
             used.add(fields[0])
         lines.append(line)
-    lines.extend(by_name[name] for name in SPRINT_NAMES if name not in used)
+    lines.extend(by_name[name] for name in BAKED_NAMES if name not in used)
     return bytes(data), "\n".join(lines)+"\n"
 
 

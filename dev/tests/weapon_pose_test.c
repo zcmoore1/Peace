@@ -262,7 +262,7 @@ static void TestRelease(weapAnimDef_t *def) {
 static void TestContext(weapAnimDef_t *def) {
  playerState_t ps;
  int i;
- for(i=0;i<4;i++) {
+ for(i=0;i<6;i++) {
   Ready(&ps,WP_SHOTGUN); ps.weaponstate=WEAPON_RAISING;
   CG_WeapAnim_BuildPose(&ps,1,1);
   ps.pm_flags=PMF_SPRINTING; CG_WeapAnim_BuildPose(&ps,1,1);
@@ -273,11 +273,36 @@ static void TestContext(weapAnimDef_t *def) {
   case 1: ps.clientNum++; break;
   case 2: ps.persistant[PERS_SPAWN_COUNT]++; break;
   case 3: ps.eFlags^=EF_TELEPORT_BIT; break;
+  case 4: ps.stats[STAT_ACTIVE_SLOT]=SLOT_SECONDARY; break;
+  case 5: ps.slotAttachments[SLOT_PRIMARY]=BG_ATTACHMENT_REDDOT; break;
   }
   CG_WeapAnim_BuildPose(&ps,1,1);
   CHECK(!cg_retainedActive && cg_weapLayers[LAYER_RETAINED].weight==0);
  }
  (void)def;
+}
+static void TestFirstDraw(weapAnimDef_t *def) {
+ playerState_t ps;
+ refEntity_t sample;
+ int t;
+ Ready(&ps,WP_SHOTGUN);
+ ps.weaponDraw=1; ps.weaponstate=WEAPON_RAISING;
+ ps.weaponTime=BG_WeaponDrawTime(&ps)/2;
+ Update(def,&ps,16);
+ CHECK(cg_weapLayers[LAYER_MOVE].clip==WANIM_FIRST_RAISE);
+ CHECK(fabs(CG_WeapAnim_ClipLength(def,WANIM_FIRST_RAISE)-BG_WeaponFirstRaiseTime(ps.weapon))<1);
+ ps.pm_flags=PMF_SPRINTING; Update(def,&ps,1);
+ CHECK(cg_retainedActive && cg_weapLayers[LAYER_RETAINED].clip==WANIM_FIRST_RAISE);
+ ps.weaponstate=WEAPON_DROPPING; ps.weaponTime=BG_HolsterTime(&ps);
+ for(t=0;t<2000;t+=8) Update(def,&ps,8);
+ CHECK(cg_retainedActive && cg_weapLayers[LAYER_RETAINED].clip==WANIM_FIRST_RAISE);
+ CHECK(cg_weapLayers[LAYER_RETAINED].time>=CG_WeapAnim_ClipLength(def,WANIM_FIRST_RAISE));
+ CHECK(CG_WeapAnim_SampleFrame(def,&cg_weapLayers[LAYER_RETAINED],&sample));
+ CHECK(sample.frame==def->clips[WANIM_FIRST_RAISE].firstFrame+def->clips[WANIM_FIRST_RAISE].numFrames-1);
+ ps.weaponstate=WEAPON_READY; ps.weaponTime=0; ps.pm_flags=0;
+ Update(def,&ps,1); CHECK(!cg_retainedActive);
+ for(t=0;t<100;t++) Update(def,&ps,1);
+ CHECK(cg_weapLayers[LAYER_RETAINED].weight==0);
 }
 int main(void) {
  playerState_t ps;
@@ -301,5 +326,6 @@ int main(void) {
  }
  TestSprint(def);
  TestOwnership(def); TestExclusions(def); TestRelease(def); TestContext(def);
+ TestFirstDraw(def);
  printf("PASS: %d weapon presentation ownership checks\n",checks); return 0;
 }

@@ -95,6 +95,23 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   shared pmove cancels the drop and reaches the normal fire gates that think.
   There is no YY timing window or extra delay. Initial drops still stamp their
   real times; chamber debt, ammo, sprint and ladder ownership still apply.
+- **Inventory instances own attachments and ammunition.** `BG_GetSlot` /
+  `BG_PutSlot` / `BG_SelectSlot` bridge the two instances to the existing
+  `ammo[]`, `ammoReserve[]` and `STAT_UNCHAMBERED` working registers. Stowed
+  variants of the same base gun must keep separate magazines and chamber debt.
+  Do not replace a floor pickup with a full-mag grant. Death drops the held
+  slot, not the requested destination. Exact weapon+attachment matches scavenge
+  to reserve on touch (capacity-capped) and consume the item; other guns need a
+  continuous 1000ms reload hold. A short tap still reloads. S&D use is separate.
+- **Pickup does not own selection.** The reload hold latches its replacement
+  slot, while `cmd.weapon = BG_SLOT_COMMAND + slot` continues carrying the
+  latest selection. Old plain weapon IDs are supported for bots/tools. Neither
+  inventory replacement nor a delayed pickup event may overwrite Y intent.
+  First deployment is pending until the instance is drawn, then consumed on
+  start; normal holster/YY/sprint retention may interrupt it. No CAN state.
+  `first_raise` is optional clip data, with ordinary raise as the art fallback.
+  `cg_sight` seeds attachments at spawn; owned/dropped gun state drives optics
+  thereafter, including spectators and replays. See `dev/WEAPON_PICKUPS.md`.
 - **Melee is its own kind of swap.** Whatever gun is out, it goes down for the
   knife in the one universal `BG_RAPID_DROP_TIME` (50ms, the minimum swap), not
   its own holster; melee asked for part way through a heavy holster shortens it
@@ -134,8 +151,12 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 9-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, and post-throw recovery. Protocol 73 requires client, server
+  swap edge latch, and post-throw recovery. Protocol 74 requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
+- Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
+  explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
+  Dropped ET_ITEM uses `generic1` for attachments, `time2` for packed magazine
+  and reserve, `otherEntityNum2` for chamber debt, and `time` as a spawn serial.
 - `stats[]` — **15 of 16 used in baseq3; all 16 in missionpack.** Every entry round-trips as a SIGNED
   short (`MSG_WriteShort`) except `STAT_WEAPONS`. Other bitmask stats still
   have the bit-15 trap. `STAT_UNCHAMBERED` uses gun bits 0–13.

@@ -164,10 +164,10 @@ static void TestAlignment(void) {
 	playerState_t before;
 	Reset();
 	cg.adsFrac=1;
-	before=cg.predictedPlayerState;
 	for(s=0;s<2;s++) {
 		const sightPose_t *pose;
-		cg_sight.integer=s;
+		cg.predictedPlayerState.slotAttachments[SLOT_PRIMARY]=s;
+		before=cg.predictedPlayerState;
 		pose=CG_Sights_Pose(&cg_sights[WP_SHOTGUN]);
 		for(i=0;i<3;i++) {
 			refEntity_t hand;
@@ -204,7 +204,7 @@ static void TestOptic(void) {
 	refEntity_t hand;
 	modelPose_t pose;
 	Reset();
-	cg_sight.integer=1;
+	cg.predictedPlayerState.slotAttachments[SLOT_PRIMARY]=BG_ATTACHMENT_REDDOT;
 	cg.adsFrac=1;
 	memset(&hand,0,sizeof(hand));
 	AxisClear(hand.axis);
@@ -234,7 +234,7 @@ static void TestOptic(void) {
 	entityCount=0;
 	CG_Sights_AddOptic(WP_SHOTGUN,&hand);
 	CHECK(entityCount==1);
-	cg_sight.integer=0;
+	cg.predictedPlayerState.slotAttachments[SLOT_PRIMARY]=0;
 	entityCount=0;
 	CG_Sights_AddOptic(WP_SHOTGUN,&hand);
 	CHECK(entityCount==0);

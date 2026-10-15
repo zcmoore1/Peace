@@ -1184,6 +1184,11 @@ typedef struct playerState_s {
 	int			weaponAnimTime;	// ms ELAPSED into the current anim SEGMENT (counts UP). -1 = no anim playing. Notes fire on crossings of this; never derived from weaponTime.
 	int			weaponAction;	// action, button history, cancel acknowledgement, recovery (9 bits)
 	int			weaponAnimSeq;	// which reload segment is playing (reloadSeq_t)
+	int             weaponDraw;     // 0 ordinary raise, 1 first deployment
+	// Slot-owned inventory. ammo[] remains the working cache used by weapon
+	// notes; stowed variants of the same base gun keep independent magazines.
+	int             slotAmmo[2], slotReserve[2], slotAttachments[2], slotFlags[2];
+	int             pickupTarget, pickupSerial, pickupTime, pickupSlot, pickupHeld;
 
 	vec3_t		viewangles;		// for fixed views
 	int			viewheight;

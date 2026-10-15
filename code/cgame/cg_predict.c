@@ -278,6 +278,9 @@ static void CG_TouchItem( centity_t *cent ) {
 	}
 
 	item = &bg_itemlist[ cent->currentState.modelindex ];
+	// Inventory transfers are server-authoritative. Predicting a generic Q3
+	// weapon pickup would hide unmatched guns and mint ammo before the hold.
+	if (item->giType == IT_WEAPON) return;
 
 	// Special case for flags.  
 	// We don't predict touching our own flag
@@ -382,6 +385,28 @@ static void CG_TouchTriggerPrediction( void ) {
 }
 
 
+
+static const entityState_t *CG_FindWeaponPickup(void) {
+	const entityState_t *best = NULL;
+	float nearest = BG_PICKUP_RANGE * BG_PICKUP_RANGE + 1;
+	playerState_t *ps = &cg.predictedPlayerState;
+	vec3_t eye, end;
+	trace_t trace;
+	int i;
+	VectorCopy(ps->origin, eye);
+	eye[2] += ps->viewheight;
+	for (i = 0; i < cg_numTriggerEntities; i++) {
+		const entityState_t *item = &cg_triggerEntities[i]->currentState;
+		float distance = BG_WeaponPickupDistance(ps, item, cg_pmove.cmd.serverTime);
+		if (distance < 0 || distance >= nearest) continue;
+		BG_EvaluateTrajectory(&item->pos, cg_pmove.cmd.serverTime, end);
+		CG_Trace(&trace, eye, NULL, NULL, end, ps->clientNum, MASK_SOLID);
+		if (trace.startsolid || trace.fraction < 1.0f) continue;
+		best = item;
+		nearest = distance;
+	}
+	return best;
+}
 
 /*
 =================
@@ -581,6 +606,7 @@ void CG_PredictPlayerState( void ) {
 			cg_pmove.cmd.serverTime = ((cg_pmove.cmd.serverTime + pmove_msec.integer-1) / pmove_msec.integer) * pmove_msec.integer;
 		}
 
+		cg_pmove.pickupItem = CG_FindWeaponPickup();
 		Pmove (&cg_pmove);
 
 		moved = qtrue;

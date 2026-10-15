@@ -200,6 +200,7 @@ void CG_Respawn( void ) {
 
 	// select the weapon the server says we are using
 	cg.weaponSelect = cg.snap->ps.weapon;
+	cg.weaponSelectSlot = cg.snap->ps.stats[STAT_ACTIVE_SLOT];
 }
 
 extern char *eventnames[];

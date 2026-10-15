@@ -244,35 +244,21 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 		return g_weaponRespawn.integer;
 	}
 
-	// Two slots, and the slots ARE the inventory. A picked-up gun replaces
-	// whatever is in the slot you are currently on; it never just appends.
-	//
-	// This used to poke STAT_WEAPONS directly and clear the held weapon's bit
-	// when you already had two. The slots were never updated, so a slot ended up
-	// naming a weapon whose bit was gone, and every weapnext silently failed the
-	// ownership check in CG_NextWeapon_f. Walking over one floor gun killed
-	// weapon switching for the rest of the life.
-	slot = ( ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY )
-	     ? SLOT_SECONDARY : SLOT_PRIMARY;
-
-	// Already carrying it in the other slot? Nothing to do but top it up.
-	if ( ps->stats[STAT_SLOT_PRIMARY]   != wep &&
-	     ps->stats[STAT_SLOT_SECONDARY] != wep ) {
-		BG_SetSlotWeapon( ps, slot, wep );
-		ps->weapon = wep;			// you are holding what you just picked up
-	}
-
-	if ( BG_WeaponMagSize( wep ) > 0 ) {
-		ps->ammo[wep]        = BG_WeaponMagSize( wep );
-		ps->ammoReserve[wep] = BG_WeaponMaxReserve( wep );
-	} else if ( wep == WP_GRAPPLING_HOOK ) {
-		ps->ammo[wep] = -1;
+	{
+		bg_weaponInstance_t floor, held;
+		if (!BG_WeaponItem(&ent->s, &floor)) return 0;
+		slot = BG_MatchingWeaponSlot(ps, &floor);
+		if (slot < 0) return 0;
+		BG_GetSlot(ps, slot, &held);
+		// Scavenging never reloads the held magazine or changes its chamber.
+		held.reserve = MIN(BG_WeaponMaxReserve(wep), held.reserve + floor.ammo + floor.reserve);
+		BG_PutSlot(ps, slot, &held);
 	}
 
 	if ( g_gametype.integer == GT_TEAM ) {
-		return g_weaponTeamRespawn.integer;
+		return g_weaponTeamRespawn.integer ? g_weaponTeamRespawn.integer : -1;
 	}
-	return g_weaponRespawn.integer;
+	return g_weaponRespawn.integer ? g_weaponRespawn.integer : -1;
 }
 
 
@@ -380,6 +366,7 @@ void RespawnItem( gentity_t *ent ) {
 	}
 
 	ent->r.contents = CONTENTS_TRIGGER;
+	ent->s.time = level.time;
 	ent->s.eFlags &= ~EF_NODRAW;
 	ent->r.svFlags &= ~SVF_NOCLIENT;
 	trap_LinkEntity (ent);
@@ -426,6 +413,8 @@ void RespawnItem( gentity_t *ent ) {
 Touch_Item
 ===============
 */
+static void G_CompleteItemPickup(gentity_t *ent, gentity_t *other, int respawn, qboolean predict);
+
 void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 	int			respawn;
 	qboolean	predict;
@@ -434,6 +423,12 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 		return;
 	if (other->health < 1)
 		return;		// dead people can't pickup
+	if (!(ent->r.contents & CONTENTS_TRIGGER)) return;
+	if (ent->item->giType == IT_WEAPON) {
+		bg_weaponInstance_t gun;
+		if (!BG_WeaponItem(&ent->s, &gun) || BG_MatchingWeaponSlot(&other->client->ps, &gun) < 0) return;
+		if (ent->s.modelindex2 && ent->s.clientNum == other->s.number && level.time < ent->s.time + BG_PICKUP_OWNER_DELAY) return;
+	}
 
 	// the same pickup rules are used for client side and server side
 	if ( !BG_CanItemBeGrabbed( g_gametype.integer, &ent->s, &other->client->ps ) ) {
@@ -444,18 +439,11 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 
 	predict = other->client->pers.predictItemPickup;
 
-	// Weapons are NOT vacuumed up by walking over them - you hold the use key
-	// to take one (G_CheckWeaponPickup). Ammo, health and armour still work on
-	// touch. Without this, crossing a Q3 map rewrites your loadout constantly.
-	if ( ent->item->giType == IT_WEAPON ) {
-		return;
-	}
-
 	// call the item-specific pickup function
 	switch( ent->item->giType ) {
 	case IT_WEAPON:
 		respawn = Pickup_Weapon(ent, other);
-//		predict = qfalse;
+		predict = qfalse;
 		break;
 	case IT_AMMO:
 		respawn = Pickup_Ammo(ent, other);
@@ -489,6 +477,10 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 	if ( !respawn ) {
 		return;
 	}
+	G_CompleteItemPickup(ent, other, respawn, predict);
+}
+
+static void G_CompleteItemPickup(gentity_t *ent, gentity_t *other, int respawn, qboolean predict) {
 
 	// play the normal pickup sound
 	if (predict) {
@@ -569,6 +561,56 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 }
 
 
+const entityState_t *G_FindWeaponPickup(gentity_t *player) {
+	const entityState_t *best = NULL;
+	float nearest = BG_PICKUP_RANGE * BG_PICKUP_RANGE + 1;
+	int i;
+	vec3_t eye, end;
+	trace_t trace;
+	playerState_t *ps = &player->client->ps;
+	VectorCopy(ps->origin, eye);
+	eye[2] += ps->viewheight;
+	for (i = MAX_CLIENTS; i < level.num_entities; i++) {
+		gentity_t *item = &g_entities[i];
+		float distance;
+		if (!item->inuse || !(item->r.contents & CONTENTS_TRIGGER)) continue;
+		distance = BG_WeaponPickupDistance(ps, &item->s, level.time);
+		if (distance < 0 || distance >= nearest) continue;
+		BG_EvaluateTrajectory(&item->s.pos, level.time, end);
+		trap_Trace(&trace, eye, NULL, NULL, end, player->s.number, MASK_SOLID);
+		if (trace.startsolid || trace.fraction < 1.0f) continue;
+		best = &item->s;
+		nearest = distance;
+	}
+	return best;
+}
+
+void G_CommitWeaponPickup(gentity_t *player) {
+	playerState_t *ps = &player->client->ps;
+	bg_weaponInstance_t gun;
+	gentity_t *item;
+	int slot;
+	if (ps->pickupHeld != 1 || ps->pickupTime < BG_PICKUP_HOLD_TIME) return;
+	ps->pickupHeld = 2;
+	if (ps->pickupTarget < MAX_CLIENTS || ps->pickupTarget >= level.num_entities) return;
+	item = &g_entities[ps->pickupTarget];
+	if (!item->inuse || !(item->r.contents & CONTENTS_TRIGGER) ||
+		item->s.time != ps->pickupSerial || G_FindWeaponPickup(player) != &item->s ||
+		!BG_WeaponItem(&item->s, &gun)) return;
+	slot = ps->pickupSlot;
+	if (!G_DropWeapon(player, slot)) return; // no room for the outgoing instance
+	BG_PutSlot(ps, slot, &gun);
+	if (slot == ps->stats[STAT_ACTIVE_SLOT] && !BG_IsActionWeapon(ps->weapon)) {
+		ps->weapon = gun.weapon;
+		if (!(ps->stats[STAT_LADDER] & (LADDER_ATTACHED | LADDER_HOLSTER)) &&
+			ps->weaponstate != WEAPON_LADDER) BG_BeginWeaponDraw(ps);
+	}
+	G_LogPrintf("Item: %i %s\n", player->s.number, item->item->classname);
+	G_CompleteItemPickup(item, player, g_gametype.integer == GT_TEAM ?
+		g_weaponTeamRespawn.integer : g_weaponRespawn.integer, qfalse);
+	ps->pickupTarget = ENTITYNUM_NONE;
+}
+
 //======================================================================
 
 /*
@@ -641,6 +683,27 @@ gentity_t *Drop_Item( gentity_t *ent, gitem_t *item, float angle ) {
 	velocity[2] += 200 + crandom() * 50;
 	
 	return LaunchItem( item, ent->s.pos.trBase, velocity );
+}
+
+gentity_t *G_DropWeapon(gentity_t *owner, int slot) {
+	bg_weaponInstance_t gun;
+	vec3_t angles, velocity;
+	gentity_t *item;
+	BG_GetSlot(&owner->client->ps, slot, &gun);
+	if (BG_WeaponMagSize(gun.weapon) <= 0 || !G_EntitiesFree()) return NULL;
+	VectorSet(angles, 0, owner->client->ps.viewangles[YAW], 0);
+	AngleVectors(angles, velocity, NULL, NULL);
+	VectorScale(velocity, 110, velocity);
+	velocity[2] = 150;
+	item = LaunchItem(BG_FindItemForWeapon(gun.weapon), owner->client->ps.origin, velocity);
+	item->s.time = level.time;
+	item->s.clientNum = owner->s.number;
+	item->s.generic1 = gun.attachments;
+	item->s.time2 = (gun.ammo & 65535) | ((unsigned int)gun.reserve << 16);
+	item->s.otherEntityNum2 = gun.flags & BG_GUN_UNCHAMBERED;
+	item->s.apos.trType = TR_STATIONARY;
+	VectorSet(item->s.apos.trBase, 0, angles[YAW], 90);
+	return item;
 }
 
 

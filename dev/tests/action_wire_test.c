@@ -22,6 +22,12 @@ int main(void) {
   to.stats[PS_STAT_WEAPONS]=(1<<14)|(1<<17)|(1<<(MAX_WEAPONS-1));
   to.ammo[17]=2; to.ammo[MAX_WEAPONS-1]=3; to.ammoReserve[MAX_WEAPONS-1]=99;
   to.weapon=3; to.weaponstate=2; to.weaponTime=37;
+  to.weaponDraw=j&1; to.slotAmmo[0]=7; to.slotAmmo[1]=2;
+  to.slotReserve[0]=29; to.slotReserve[1]=40;
+  to.slotAttachments[0]=i&1; to.slotAttachments[1]=j&1;
+  to.slotFlags[0]=i&3; to.slotFlags[1]=j&3;
+  to.pickupTarget=1023; to.pickupSerial=2147483000; to.pickupTime=1000;
+  to.pickupSlot=j&1; to.pickupHeld=j%3;
   MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,&from,&to);
   CHECK(!msg.overflowed); MSG_BeginReading(&msg);
   MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
@@ -30,6 +36,12 @@ int main(void) {
   CHECK(decoded.stats[PS_STAT_WEAPONS]==to.stats[PS_STAT_WEAPONS]);
   CHECK(decoded.ammo[17]==2 && decoded.ammo[MAX_WEAPONS-1]==3 && decoded.ammoReserve[MAX_WEAPONS-1]==99);
   CHECK(decoded.weapon==3 && decoded.weaponstate==2 && decoded.weaponTime==37);
+  CHECK(decoded.weaponDraw==to.weaponDraw && decoded.slotAmmo[0]==7 && decoded.slotAmmo[1]==2);
+  CHECK(decoded.slotReserve[0]==29 && decoded.slotReserve[1]==40);
+  CHECK(decoded.slotFlags[0]==to.slotFlags[0] && decoded.slotFlags[1]==to.slotFlags[1]);
+  CHECK(decoded.slotAttachments[0]==to.slotAttachments[0] && decoded.slotAttachments[1]==to.slotAttachments[1]);
+  CHECK(decoded.pickupTarget==1023 && decoded.pickupSerial==to.pickupSerial && decoded.pickupTime==1000);
+  CHECK(decoded.pickupSlot==to.pickupSlot && decoded.pickupHeld==to.pickupHeld);
  }
  printf("PASS: %d action wire checks\n",checks); return 0;
 }

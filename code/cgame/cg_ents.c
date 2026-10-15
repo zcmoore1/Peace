@@ -232,6 +232,8 @@ static void CG_Item( centity_t *cent ) {
 	float			frac;
 	float			scale;
 	weaponInfo_t	*wi;
+	qboolean        droppedGun;
+	float           physicsZ;
 
 	es = &cent->currentState;
 	if ( es->modelindex >= bg_numItems ) {
@@ -244,6 +246,8 @@ static void CG_Item( centity_t *cent ) {
 	}
 
 	item = &bg_itemlist[ es->modelindex ];
+	droppedGun = item->giType == IT_WEAPON && es->modelindex2 != 0;
+	physicsZ = cent->lerpOrigin[2];
 	if ( cg_simpleItems.integer && item->giType != IT_TEAM ) {
 		memset( &ent, 0, sizeof( ent ) );
 		ent.reType = RT_SPRITE;
@@ -260,12 +264,14 @@ static void CG_Item( centity_t *cent ) {
 
 	// items bob up and down continuously
 	scale = 0.005 + cent->currentState.number * 0.00001;
-	cent->lerpOrigin[2] += 4 + cos( ( cg.time + 1000 ) *  scale ) * 4;
+	if (!droppedGun) cent->lerpOrigin[2] += 4 + cos( ( cg.time + 1000 ) * scale ) * 4;
 
 	memset (&ent, 0, sizeof(ent));
 
 	// autorotate at one of two speeds
-	if ( item->giType == IT_HEALTH ) {
+	if (droppedGun) {
+		AnglesToAxis(cent->lerpAngles, ent.axis);
+	} else if ( item->giType == IT_HEALTH ) {
 		VectorCopy( cg.autoAnglesFast, cent->lerpAngles );
 		AxisCopy( cg.autoAxisFast, ent.axis );
 	} else {
@@ -292,7 +298,14 @@ static void CG_Item( centity_t *cent ) {
 			wi->weaponMidpoint[1] * ent.axis[1][2] +
 			wi->weaponMidpoint[2] * ent.axis[2][2];
 
-		cent->lerpOrigin[2] += 8;	// an extra height boost
+		if (droppedGun) {
+			vec3_t mins, maxs;
+			float bottom = 0;
+			int k;
+			trap_R_ModelBounds(cg_items[es->modelindex].models[0], mins, maxs);
+			for (k = 0; k < 3; k++) bottom += MIN(mins[k] * ent.axis[k][2], maxs[k] * ent.axis[k][2]);
+			cent->lerpOrigin[2] = physicsZ - ITEM_RADIUS - bottom;
+		} else cent->lerpOrigin[2] += 8;
 	}
 	
 	if( item->giType == IT_WEAPON && item->giTag == WP_RAILGUN ) {
@@ -309,7 +322,7 @@ static void CG_Item( centity_t *cent ) {
 
 	// if just respawned, slowly scale up
 	msec = cg.time - cent->miscTime;
-	if ( msec >= 0 && msec < ITEM_SCALEUP_TIME ) {
+	if ( !droppedGun && msec >= 0 && msec < ITEM_SCALEUP_TIME ) {
 		frac = (float)msec / ITEM_SCALEUP_TIME;
 		VectorScale( ent.axis[0], frac, ent.axis[0] );
 		VectorScale( ent.axis[1], frac, ent.axis[1] );
@@ -327,7 +340,7 @@ static void CG_Item( centity_t *cent ) {
 	}
 
 	// increase the size of the weapons when they are presented as items
-	if ( item->giType == IT_WEAPON ) {
+	if ( item->giType == IT_WEAPON && !droppedGun ) {
 		VectorScale( ent.axis[0], 1.5, ent.axis[0] );
 		VectorScale( ent.axis[1], 1.5, ent.axis[1] );
 		VectorScale( ent.axis[2], 1.5, ent.axis[2] );

@@ -1192,6 +1192,17 @@ void ClientSpawn(gentity_t *ent) {
 	// underbarrel and equipment counts. One shared function so the server and
 	// any future loadout-change path can never disagree.
 	BG_ApplyClass( &client->ps, &client->pers.selectedLoadout );
+	{
+		int attachments;
+		// The existing sight preference seeds the spawn loadout. Thereafter
+		// attachments belong to each gun, including when looted or spectated.
+		trap_GetUserinfo(index, userinfo, sizeof(userinfo));
+		attachments = atoi(Info_ValueForKey(userinfo, "cg_sight")) == 1 ? BG_ATTACHMENT_REDDOT : 0;
+		for (i = 0; i < SLOT_COUNT; i++) {
+			client->ps.slotAttachments[i] = attachments;
+			client->ps.slotFlags[i] = BG_GUN_FIRST_DRAW;
+		}
+	}
 
 	// health will count down towards max_health
 	ent->health = client->ps.stats[STAT_HEALTH] = client->ps.stats[STAT_MAX_HEALTH] + 25;
@@ -1237,6 +1248,7 @@ void ClientSpawn(gentity_t *ent) {
 			// index here, which would now hand you the underbarrel.)
 			client->ps.weapon = client->ps.stats[STAT_SLOT_PRIMARY];
 			client->ps.stats[STAT_ACTIVE_SLOT] = SLOT_PRIMARY;
+			BG_BeginWeaponDraw(&client->ps);
 			// positively link the client, even if the command times are weird
 			VectorCopy(ent->client->ps.origin, ent->r.currentOrigin);
 

@@ -138,6 +138,8 @@ qboolean BG_SerializeClass( const bg_class_t *loadout, char *text, int size ) {
 // count, using the latest requested weapon rather than an acknowledged snapshot.
 int BG_ToggleSlotWeapon( const playerState_t *ps, int selection ) {
 	int slot, next, weapon;
+	if (selection >= BG_SLOT_COMMAND && selection < BG_SLOT_COMMAND + SLOT_COUNT)
+		return BG_SLOT_COMMAND + (selection - BG_SLOT_COMMAND + 1) % SLOT_COUNT;
 	for ( slot = 0; slot < SLOT_COUNT; slot++ )
 		if ( selection == ps->stats[STAT_SLOT_PRIMARY + slot] ) break;
 	if ( slot == SLOT_COUNT ) slot = ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ? SLOT_SECONDARY : SLOT_PRIMARY;

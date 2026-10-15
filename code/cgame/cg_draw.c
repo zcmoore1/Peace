@@ -2397,6 +2397,22 @@ showing mag / reserve) and the equipment counts. Reads ps only - it never
 decides anything, it just shows what the loadout already is.
 ===============
 */
+static void CG_DrawWeaponPickup(void) {
+	playerState_t *ps = &cg.predictedPlayerState;
+	bg_weaponInstance_t gun;
+	char prompt[128];
+	vec4_t back = {0, 0, 0, .65f}, fill = {.9f, .8f, .45f, 1};
+	if (ps->pickupTarget < MAX_CLIENTS || ps->pickupTarget >= ENTITYNUM_MAX_NORMAL ||
+		ps->pickupHeld == 2 || !BG_WeaponItem(&cg_entities[ps->pickupTarget].currentState, &gun)) return;
+	Com_sprintf(prompt, sizeof(prompt), "Hold RELOAD (1s): %s%s",
+		BG_FindItemForWeapon(gun.weapon)->pickup_name, gun.attachments & BG_ATTACHMENT_REDDOT ? " + Red Dot" : "");
+	CG_DrawSmallString(320 - CG_DrawStrlen(prompt) * SMALLCHAR_WIDTH / 2, 300, prompt, 1);
+	if (ps->pickupTime > 0) {
+		CG_FillRect(220, 320, 200, 5, back);
+		CG_FillRect(220, 320, 200 * Com_Clamp(0, 1, (float)ps->pickupTime / BG_PICKUP_HOLD_TIME), 5, fill);
+	}
+}
+
 static void CG_DrawLoadoutHud( void ) {
 	playerState_t	*ps;
 	char			line[64];
@@ -2430,12 +2446,14 @@ static void CG_DrawLoadoutHud( void ) {
 		}
 
 		// Selection is visible immediately, including a swap queued behind a throw.
-		trap_R_SetColor( (cg.weaponSelect == slotWpn) ? bright : dim );
+		trap_R_SetColor( (cg.weaponSelectSlot == i) ? bright : dim );
 
 		if ( BG_WeaponMagSize( slotWpn ) > 0 ) {
+			bg_weaponInstance_t gun;
+			BG_GetSlot(ps, i, &gun);
 			Com_sprintf( line, sizeof( line ), "%s  %i / %i",
 				( i == SLOT_PRIMARY ) ? "1" : "2",
-				ps->ammo[slotWpn], ps->ammoReserve[slotWpn] );
+				gun.ammo, gun.reserve );
 		} else {
 			Com_sprintf( line, sizeof( line ), "%s  --",
 				( i == SLOT_PRIMARY ) ? "1" : "2" );
@@ -2905,6 +2923,7 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 			CG_DrawAmmoWarning();
 			CG_DrawAmmoCount();
 			CG_DrawLoadoutHud();
+			CG_DrawWeaponPickup();
 			CG_DrawWeaponDebug();
 
 #ifdef MISSIONPACK

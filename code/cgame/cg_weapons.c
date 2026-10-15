@@ -1770,6 +1770,7 @@ void CG_NextWeapon_f( void ) {
 	ps = &cg.predictedPlayerState;
 	trap_SendConsoleCommand("_peaceWeaponSwap\n");
 	if (!(ps->weaponAction & WA_FIRED) && (ps->weaponAction & WA_TYPE_MASK) == WA_LETHAL && BG_LethalWeapon(ps) == WP_SEMTEX) {
+		cg.weaponSelectSlot = ps->stats[STAT_ACTIVE_SLOT];
 		cg.weaponSelect = BG_ActiveSlotWeapon(ps);
 		cg.weaponSelectTime = cg.time;
 		return;
@@ -1780,7 +1781,8 @@ void CG_NextWeapon_f( void ) {
 	// here, so the toggle is always primary <-> secondary.
 	// Toggle the requested selection, not the last acknowledged active slot.
 	// A second press must reverse the first even before a server snapshot lands.
-	want = BG_ToggleSlotWeapon( ps, cg.weaponSelect );
+	cg.weaponSelectSlot = BG_ToggleSlotWeapon(ps, BG_SLOT_COMMAND + cg.weaponSelectSlot) - BG_SLOT_COMMAND;
+	want = ps->stats[STAT_SLOT_PRIMARY + cg.weaponSelectSlot];
 
 	if ( want <= WP_NONE || want >= WP_NUM_WEAPONS ) {
 		return;					// empty slot - nothing to swap to
@@ -1835,6 +1837,7 @@ void CG_Weapon_f( void ) {
 	}
 
 	cg.weaponSelect = num;
+	cg.weaponSelectSlot = BG_RequestedSlot(&cg.snap->ps, num);
 }
 
 /*
@@ -1863,6 +1866,7 @@ void CG_OutOfAmmoChange( void ) {
 	if ( other > WP_NONE && other < WP_NUM_WEAPONS &&
 	     ( ps->stats[STAT_WEAPONS] & ( 1 << other ) ) ) {
 		cg.weaponSelect = other;
+		cg.weaponSelectSlot = (ps->stats[STAT_ACTIVE_SLOT] + 1) % SLOT_COUNT;
 	}
 }
 
@@ -1870,44 +1874,25 @@ void CG_OutOfAmmoChange( void ) {
 ===============
 CG_ValidateWeaponSelect
 
-cg.weaponSelect is the ONLY thing that drives cmd.weapon, so it is the single
-choke point where a bad selection can wedge the weapon state machine. It may
-only ever name one of the two slots: melee and equipment are requested with
-their own buttons and are never selected here.
-
-Clamping at this one point is what decouples the inventory from any particular
-pair of weapons - swap a slot for something off the floor and the toggle
-follows automatically, with no other code needing to know.
+Selection is a stable slot, not the gun ID that happened to occupy it in an
+older snapshot. Updating its HUD label never undoes a more recent Y press.
 ===============
 */
 void CG_ValidateWeaponSelect( void ) {
 	playerState_t	*ps;
-	int				pri, sec;
 
 	if ( !cg.snap ) {
 		return;
 	}
 	ps  = &cg.snap->ps;
 	if (cg.predictedPlayerState.weaponAction & WA_RETURNING) {
+		cg.weaponSelectSlot = cg.predictedPlayerState.stats[STAT_ACTIVE_SLOT];
 		cg.weaponSelect = BG_ActiveSlotWeapon(&cg.predictedPlayerState);
 		return;
 	}
-	pri = ps->stats[STAT_SLOT_PRIMARY];
-	sec = ps->stats[STAT_SLOT_SECONDARY];
-
-	if ( cg.weaponSelect == pri || cg.weaponSelect == sec ) {
-		return;						// already a slot
-	}
-
-	// Anything else - a stale pick, a special weapon, an empty slot - snaps
-	// back to whichever slot we are currently on.
-	if ( ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY && sec > WP_NONE ) {
-		cg.weaponSelect = sec;
-	} else if ( pri > WP_NONE ) {
-		cg.weaponSelect = pri;
-	} else if ( sec > WP_NONE ) {
-		cg.weaponSelect = sec;
-	}
+	if (cg.weaponSelectSlot < 0 || cg.weaponSelectSlot >= SLOT_COUNT)
+		cg.weaponSelectSlot = ps->stats[STAT_ACTIVE_SLOT];
+	cg.weaponSelect = ps->stats[STAT_SLOT_PRIMARY + cg.weaponSelectSlot];
 }
 
 

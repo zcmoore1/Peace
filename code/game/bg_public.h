@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-3"
+#define	GAME_VERSION		BASEGAME "-4"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -306,6 +306,9 @@ typedef struct {
 	// for fixed msec Pmove
 	int			pmove_fixed;
 	int			pmove_msec;
+	// Read-only nearby item selected by the host's world query. Shared pmove
+	// owns the hold clock; only the server may commit an inventory transfer.
+	const entityState_t *pickupItem;
 
 	// callbacks to test the world
 	// these will be different functions during game and cgame
@@ -326,6 +329,8 @@ int  BG_HolsterTime( const playerState_t *ps );	// the holster this player is do
 int  BG_WeaponFireLength( int weapon );		// 0 = no modelled fire animation
 int  BG_WeaponDropTime( int weapon );		// holster length, never 0
 int  BG_WeaponRaiseTime( int weapon );		// deploy length, never 0
+int  BG_WeaponDrawTime( const playerState_t *ps );
+int  BG_WeaponFirstRaiseTime( int weapon );
 int  BG_WeaponSprintInTime( int weapon );	// lower-into-sprint length
 int  BG_WeaponSprintOutTime( int weapon );	// raise-out-of-sprint length
 int  BG_WeaponBaseSpread( int weapon );
@@ -500,6 +505,29 @@ typedef enum {
 	SLOT_SECONDARY,
 	SLOT_COUNT
 } weaponSlot_t;
+
+// Slot intent survives replacement of its contents (and two differently
+// attached copies of one gun). Plain weapon IDs remain valid for bots/tools.
+#define BG_SLOT_COMMAND 128
+#define BG_ATTACHMENT_REDDOT 1
+#define BG_GUN_FIRST_DRAW 1
+#define BG_GUN_UNCHAMBERED 2
+#define BG_PICKUP_RANGE 64.0f
+#define BG_PICKUP_HOLD_TIME 1000
+#define BG_PICKUP_OWNER_DELAY 500
+typedef struct {
+	int weapon, attachments, ammo, reserve, flags;
+} bg_weaponInstance_t;
+int BG_RequestedSlot(const playerState_t *ps, int selection);
+void BG_GetSlot(const playerState_t *ps, int slot, bg_weaponInstance_t *gun);
+void BG_PutSlot(playerState_t *ps, int slot, const bg_weaponInstance_t *gun);
+void BG_SelectSlot(playerState_t *ps, int slot);
+void BG_BeginWeaponDraw(playerState_t *ps);
+qboolean BG_WeaponItem(const entityState_t *item, bg_weaponInstance_t *gun);
+int BG_MatchingWeaponSlot(const playerState_t *ps, const bg_weaponInstance_t *gun);
+float BG_WeaponPickupDistance(const playerState_t *ps, const entityState_t *item, int time);
+qboolean BG_UpdateWeaponPickup(playerState_t *ps, const usercmd_t *cmd,
+	const entityState_t *item, int msec);
 
 #define BG_CUSTOM_CLASS_COUNT 5
 #define BG_CLASS_NAME_SIZE    24

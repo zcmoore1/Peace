@@ -533,6 +533,23 @@ static void CG_PeaceDump_f( void ) {
 	CG_Printf( "slots    primary %i   secondary %i   active %i\n",
 		ps->stats[STAT_SLOT_PRIMARY], ps->stats[STAT_SLOT_SECONDARY],
 		ps->stats[STAT_ACTIVE_SLOT] );
+	CG_Printf("pickup   target %i   progress %i   slot %i   held %i   selection %i   firstDraw %i\n",
+		ps->pickupTarget, ps->pickupTime, ps->pickupSlot, ps->pickupHeld, cg.weaponSelectSlot, ps->weaponDraw);
+	for (i = 0; i < SLOT_COUNT; i++) {
+		bg_weaponInstance_t gun;
+		BG_GetSlot(ps, i, &gun);
+		CG_Printf("inventory %i   weapon %i   attachments %i   ammo %i / %i   flags %i\n",
+			i, gun.weapon, gun.attachments, gun.ammo, gun.reserve, gun.flags);
+	}
+	if (cg.snap) for (i = 0; i < cg.snap->numEntities; i++) {
+		const entityState_t *item = &cg.snap->entities[i];
+		bg_weaponInstance_t gun;
+		vec3_t origin;
+		if (!BG_WeaponItem(item, &gun)) continue;
+		BG_EvaluateTrajectory(&item->pos, cg.snap->serverTime, origin);
+		CG_Printf("floor    entity %i   weapon %i   attachments %i   ammo %i / %i   at %.1f %.1f %.1f\n",
+			item->number, gun.weapon, gun.attachments, gun.ammo, gun.reserve, origin[0], origin[1], origin[2]);
+	}
 	CG_Printf( "ammo     mag %i / reserve %i        owned mask 0x%04x\n",
 		ps->ammo[w], ps->ammoReserve[w], ps->stats[STAT_WEAPONS] );
 	CG_Printf( "equip    lethal %i (weapon %i)   tactical %i   semtex %i\n",

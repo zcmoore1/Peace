@@ -90,12 +90,15 @@ void PM_AddTouchEnt( int entityNum ) {
 PM_StartTorsoAnim
 ===================
 */
-static void PM_StartTorsoAnim( int anim ) {
-	if ( pm->ps->pm_type >= PM_DEAD ) {
+static void BG_StartTorsoAnim(playerState_t *ps, int anim) {
+	if ( ps->pm_type >= PM_DEAD ) {
 		return;
 	}
-	pm->ps->torsoAnim = ( ( pm->ps->torsoAnim & ANIM_TOGGLEBIT ) ^ ANIM_TOGGLEBIT )
+	ps->torsoAnim = ( ( ps->torsoAnim & ANIM_TOGGLEBIT ) ^ ANIM_TOGGLEBIT )
 		| anim;
+}
+static void PM_StartTorsoAnim(int anim) {
+	BG_StartTorsoAnim(pm->ps, anim);
 }
 static void PM_StartLegsAnim( int anim ) {
 	if ( pm->ps->pm_type >= PM_DEAD ) {
@@ -1940,6 +1943,175 @@ int BG_ActiveSlotWeapon( const playerState_t *ps ) {
 		STAT_SLOT_SECONDARY : STAT_SLOT_PRIMARY];
 }
 
+int BG_RequestedSlot(const playerState_t *ps, int selection) {
+	int slot, active = ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ? SLOT_SECONDARY : SLOT_PRIMARY;
+	if (selection >= BG_SLOT_COMMAND && selection < BG_SLOT_COMMAND + SLOT_COUNT)
+		return selection - BG_SLOT_COMMAND;
+	if (selection == ps->stats[STAT_SLOT_PRIMARY + active]) return active;
+	for (slot = 0; slot < SLOT_COUNT; slot++)
+		if (selection == ps->stats[STAT_SLOT_PRIMARY + slot]) return slot;
+	return active;
+}
+
+int BG_WeaponFirstRaiseTime(int weapon) {
+	// First deployment has room for the weapon's authored action/check cycle.
+	// A gun without that cycle simply uses its ordinary draw.
+	return BG_WeaponRaiseTime(weapon) + BG_WeaponFireLength(weapon);
+}
+
+int BG_WeaponDrawTime(const playerState_t *ps) {
+	return ps->weaponDraw ? BG_WeaponFirstRaiseTime(ps->weapon) : BG_WeaponRaiseTime(ps->weapon);
+}
+
+void BG_GetSlot(const playerState_t *ps, int slot, bg_weaponInstance_t *gun) {
+	int active = ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ? SLOT_SECONDARY : SLOT_PRIMARY;
+	memset(gun, 0, sizeof(*gun));
+	if (slot < 0 || slot >= SLOT_COUNT) return;
+	gun->weapon = ps->stats[STAT_SLOT_PRIMARY + slot];
+	gun->attachments = ps->slotAttachments[slot];
+	gun->flags = ps->slotFlags[slot];
+	gun->ammo = ps->slotAmmo[slot];
+	gun->reserve = ps->slotReserve[slot];
+	if (gun->weapon <= WP_NONE || gun->weapon >= WP_NUM_WEAPONS) return;
+	// Unique base IDs use the existing note engine's working registers. Only
+	// a stowed duplicate needs its private cache until it becomes active.
+	if (slot == active || gun->weapon != ps->stats[STAT_SLOT_PRIMARY + active]) {
+		gun->ammo = ps->ammo[gun->weapon];
+		gun->reserve = ps->ammoReserve[gun->weapon];
+		gun->flags &= ~BG_GUN_UNCHAMBERED;
+		if (ps->stats[STAT_UNCHAMBERED] & (1 << gun->weapon)) gun->flags |= BG_GUN_UNCHAMBERED;
+	}
+}
+
+static void BG_StoreSlots(playerState_t *ps) {
+	int slot;
+	bg_weaponInstance_t gun;
+	for (slot = 0; slot < SLOT_COUNT; slot++) {
+		BG_GetSlot(ps, slot, &gun);
+		ps->slotAmmo[slot] = gun.ammo;
+		ps->slotReserve[slot] = gun.reserve;
+		ps->slotFlags[slot] = gun.flags;
+	}
+}
+
+static void BG_LoadSlots(playerState_t *ps) {
+	int i, slot, weapon, active = ps->stats[STAT_ACTIVE_SLOT];
+	// Load the held slot last when two instances share a base ID.
+	for (i = 1; i >= 0; i--) {
+		slot = (active + i) % SLOT_COUNT;
+		weapon = ps->stats[STAT_SLOT_PRIMARY + slot];
+		if (weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS) continue;
+		ps->ammo[weapon] = ps->slotAmmo[slot];
+		ps->ammoReserve[weapon] = ps->slotReserve[slot];
+		ps->stats[STAT_UNCHAMBERED] &= ~(1 << weapon);
+		if (ps->slotFlags[slot] & BG_GUN_UNCHAMBERED) ps->stats[STAT_UNCHAMBERED] |= 1 << weapon;
+	}
+}
+
+void BG_PutSlot(playerState_t *ps, int slot, const bg_weaponInstance_t *gun) {
+	if (slot < 0 || slot >= SLOT_COUNT || gun->weapon <= WP_NONE ||
+		gun->weapon >= WP_NUM_WEAPONS || BG_IsActionWeapon(gun->weapon)) return;
+	BG_StoreSlots(ps);
+	ps->stats[STAT_SLOT_PRIMARY + slot] = gun->weapon;
+	ps->slotAttachments[slot] = gun->attachments & BG_ATTACHMENT_REDDOT;
+	ps->slotAmmo[slot] = MAX(0, MIN(gun->ammo, BG_WeaponMagSize(gun->weapon)));
+	ps->slotReserve[slot] = MAX(0, MIN(gun->reserve, BG_WeaponMaxReserve(gun->weapon)));
+	ps->slotFlags[slot] = gun->flags & (BG_GUN_FIRST_DRAW | BG_GUN_UNCHAMBERED);
+	BG_LoadSlots(ps);
+	BG_RebuildWeaponMask(ps);
+}
+
+void BG_SelectSlot(playerState_t *ps, int slot) {
+	if (slot < 0 || slot >= SLOT_COUNT) return;
+	BG_StoreSlots(ps);
+	ps->stats[STAT_ACTIVE_SLOT] = slot;
+	BG_LoadSlots(ps);
+}
+
+void BG_BeginWeaponDraw(playerState_t *ps) {
+	int slot = ps->stats[STAT_ACTIVE_SLOT];
+	ps->weaponDraw = !BG_IsActionWeapon(ps->weapon) &&
+		(ps->slotFlags[slot] & BG_GUN_FIRST_DRAW) != 0;
+	// Deployment is consumed when it STARTS, not when its animation ends.
+	// Holster/YY/sprint may interrupt it without replaying it on every return.
+	if (ps->weaponDraw) ps->slotFlags[slot] &= ~BG_GUN_FIRST_DRAW;
+	ps->weaponstate = WEAPON_RAISING;
+	ps->weaponTime = BG_WeaponDrawTime(ps);
+	ps->weaponAnimTime = -1;
+	ps->pm_flags &= ~PMF_PENDING_MAG;
+	BG_StartTorsoAnim(ps, TORSO_RAISE);
+}
+
+qboolean BG_WeaponItem(const entityState_t *item, bg_weaponInstance_t *gun) {
+	gitem_t *def;
+	if (!item || item->eType != ET_ITEM || (item->eFlags & EF_NODRAW) ||
+		item->modelindex < 1 || item->modelindex >= bg_numItems) return qfalse;
+	def = &bg_itemlist[item->modelindex];
+	if (def->giType != IT_WEAPON || BG_IsActionWeapon(def->giTag) ||
+		BG_WeaponMagSize(def->giTag) <= 0) return qfalse;
+	gun->weapon = def->giTag;
+	gun->attachments = item->generic1 & BG_ATTACHMENT_REDDOT;
+	gun->flags = BG_GUN_FIRST_DRAW;
+	if (item->modelindex2) {
+		gun->ammo = item->time2 & 65535;
+		gun->reserve = (unsigned int)item->time2 >> 16;
+		gun->flags |= item->otherEntityNum2 & BG_GUN_UNCHAMBERED;
+	} else {
+		gun->ammo = BG_WeaponMagSize(gun->weapon);
+		gun->reserve = BG_WeaponMaxReserve(gun->weapon);
+	}
+	return qtrue;
+}
+
+int BG_MatchingWeaponSlot(const playerState_t *ps, const bg_weaponInstance_t *gun) {
+	int slot;
+	for (slot = 0; slot < SLOT_COUNT; slot++)
+		if (ps->stats[STAT_SLOT_PRIMARY + slot] == gun->weapon &&
+			ps->slotAttachments[slot] == gun->attachments) return slot;
+	return -1;
+}
+
+float BG_WeaponPickupDistance(const playerState_t *ps, const entityState_t *item, int time) {
+	bg_weaponInstance_t gun;
+	vec3_t origin, delta;
+	float distance;
+	if (ps->stats[STAT_HEALTH] <= 0 || ps->pm_type != PM_NORMAL ||
+		!BG_WeaponItem(item, &gun) || BG_MatchingWeaponSlot(ps, &gun) >= 0) return -1;
+	if (item->modelindex2 && item->clientNum == ps->clientNum && time < item->time + BG_PICKUP_OWNER_DELAY) return -1;
+	BG_EvaluateTrajectory(&item->pos, time, origin);
+	VectorSubtract(origin, ps->origin, delta);
+	distance = VectorLengthSquared(delta);
+	return distance <= BG_PICKUP_RANGE * BG_PICKUP_RANGE ? distance : -1;
+}
+
+qboolean BG_UpdateWeaponPickup(playerState_t *ps, const usercmd_t *cmd,
+	const entityState_t *item, int msec) {
+	int target = item ? item->number : ENTITYNUM_NONE;
+	int serial = item ? item->time : 0;
+	qboolean reload = (cmd->buttons & BUTTON_RELOAD) != 0;
+	if (!reload) {
+		reload = ps->pickupHeld == 1 && ps->pickupTime < BG_PICKUP_HOLD_TIME;
+		ps->pickupHeld = 0;
+		ps->pickupTime = 0;
+	} else if (ps->pickupHeld == 2) {
+		reload = qfalse; // a completed hold cannot collect again until release
+	} else if (item) {
+		if (!ps->pickupHeld || ps->pickupTarget != target || ps->pickupSerial != serial) {
+			ps->pickupSlot = ps->stats[STAT_ACTIVE_SLOT];
+			ps->pickupTime = 0;
+		}
+		ps->pickupHeld = 1;
+		ps->pickupTime = MIN(BG_PICKUP_HOLD_TIME, ps->pickupTime + msec);
+		reload = qfalse;
+	} else if (ps->pickupHeld) {
+		ps->pickupTime = 0;
+		reload = qfalse;
+	}
+	ps->pickupTarget = target;
+	ps->pickupSerial = serial;
+	return reload;
+}
+
 int BG_LethalWeapon( const playerState_t *ps ) {
 	// Keep the action's identity through its last throw and inventory rebuilds.
 	if (ps->weapon == WP_SEMTEX || ps->ammo[WP_SEMTEX] > 0 ||
@@ -2103,12 +2275,12 @@ void BG_RebuildWeaponMask( playerState_t *ps ) {
 ===============
 BG_SetSlotWeapon
 
-Put a weapon in a slot and rebuild the mask. This is the ONLY way a gun enters
-or leaves the inventory, which is what keeps the two-slot model honest no matter
-which weapons are involved.
+Create a loaded default instance. Transfers must use BG_PutSlot with the
+actual source payload instead; they must never refill a picked-up gun.
 ===============
 */
 void BG_SetSlotWeapon( playerState_t *ps, int slot, int weapon ) {
+	bg_weaponInstance_t gun;
 	if ( slot < 0 || slot >= SLOT_COUNT ) {
 		return;
 	}
@@ -2117,14 +2289,11 @@ void BG_SetSlotWeapon( playerState_t *ps, int slot, int weapon ) {
 		return;
 	}
 
-	ps->stats[STAT_SLOT_PRIMARY + slot] = weapon;
-	BG_RebuildWeaponMask( ps );
-
-	// A gun that just arrived comes loaded.
-	if ( BG_WeaponMagSize( weapon ) > 0 && ps->ammo[weapon] <= 0 ) {
-		ps->ammo[weapon]        = BG_WeaponMagSize( weapon );
-		ps->ammoReserve[weapon] = BG_WeaponMaxReserve( weapon );
-	}
+	memset(&gun, 0, sizeof(gun));
+	gun.weapon = weapon;
+	gun.ammo = BG_WeaponMagSize(weapon);
+	gun.reserve = BG_WeaponMaxReserve(weapon);
+	BG_PutSlot(ps, slot, &gun);
 }
 
 void BG_ApplyLoadout( playerState_t *ps, int classIndex ) {
@@ -2150,6 +2319,9 @@ void BG_ApplyClass( playerState_t *ps, const bg_class_t *cl ) {
 		ps->stats[STAT_SLOT_PRIMARY + i] = w;
 		ps->ammo[w]        = BG_WeaponMagSize( w );
 		ps->ammoReserve[w] = BG_WeaponMaxReserve( w );
+		ps->slotAmmo[i] = ps->ammo[w];
+		ps->slotReserve[i] = ps->ammoReserve[w];
+		ps->slotAttachments[i] = ps->slotFlags[i] = 0;
 	}
 	ps->stats[STAT_ACTIVE_SLOT] = SLOT_PRIMARY;
 
@@ -2175,6 +2347,10 @@ void BG_ApplyClass( playerState_t *ps, const bg_class_t *cl ) {
 	ps->weaponTime = 0;
 	ps->weaponAnimTime = -1;
 	ps->weaponAction = 0;
+	ps->weaponDraw = 0;
+	ps->stats[STAT_UNCHAMBERED] = 0;
+	ps->pickupTarget = ENTITYNUM_NONE;
+	ps->pickupSerial = ps->pickupTime = ps->pickupHeld = ps->pickupSlot = 0;
 }
 
 /*
@@ -2455,7 +2631,7 @@ static void PM_UpdateWeaponAction( void ) {
 	int recovering = pm->ps->weaponAction & WA_RECOVERING;
 	qboolean swap = (pm->cmd.buttons & BUTTON_WEAPON_SWAP) != 0;
 	qboolean swapPressed = swap && !(pm->ps->weaponAction & WA_SWAP_HELD);
-	if (pm->cmd.weapon == BG_ActiveSlotWeapon(pm->ps)) returning = 0;
+	if (BG_RequestedSlot(pm->ps, pm->cmd.weapon) == pm->ps->stats[STAT_ACTIVE_SLOT]) returning = 0;
 	// A requested slot change waits for the ORIGINAL gun to finish recovery.
 	// Clear on the ready boundary so its normal holster can start this think.
 	if (recovering && pm->ps->weapon == BG_ActiveSlotWeapon(pm->ps) &&
@@ -2498,11 +2674,7 @@ static void PM_UpdateWeaponAction( void ) {
 			action = 0;
 			returning = WA_RETURNING;
 			pm->ps->weapon = BG_ActiveSlotWeapon(pm->ps);
-			pm->ps->weaponstate = WEAPON_RAISING;
-			pm->ps->weaponTime = BG_WeaponRaiseTime(pm->ps->weapon);
-			pm->ps->weaponAnimTime = -1;
-			pm->ps->pm_flags &= ~PMF_PENDING_MAG;
-			PM_StartTorsoAnim(TORSO_RAISE);
+			BG_BeginWeaponDraw(pm->ps);
 		}
 	}
 	pm->ps->weaponAction = action | (held << WA_HELD_SHIFT) | returning | recovering |
@@ -2536,12 +2708,13 @@ static int PM_DesiredWeapon( void ) {
 		(pm->ps->stats[STAT_WEAPONS] & (1 << special)) ) {
 		return special;
 	}
-	if ( pm->cmd.weapon == pm->ps->stats[STAT_SLOT_PRIMARY] ||
-		pm->cmd.weapon == pm->ps->stats[STAT_SLOT_SECONDARY] ) {
-		return pm->cmd.weapon;
-	}
-	return pm->ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ?
-		pm->ps->stats[STAT_SLOT_SECONDARY] : pm->ps->stats[STAT_SLOT_PRIMARY];
+	return pm->ps->stats[STAT_SLOT_PRIMARY + BG_RequestedSlot(pm->ps, pm->cmd.weapon)];
+}
+
+static int PM_DesiredSlot(void) {
+	if ((pm->ps->weaponAction & (WA_RETURNING | WA_RECOVERING)) ||
+		BG_IsActionWeapon(PM_DesiredWeapon())) return pm->ps->stats[STAT_ACTIVE_SLOT];
+	return BG_RequestedSlot(pm->ps, pm->cmd.weapon);
 }
 
 /*
@@ -2596,27 +2769,11 @@ static void PM_FinishWeaponChange( void ) {
 		weapon = WP_NONE;
 	}
 
-	// Each weapon's magazine lives in ps->ammo[weapon], so it persists across
-	// swaps for free - no per-slot bookkeeping.
+	// Save the old instance before loading the new slot's working registers.
+	// Quick actions keep the same slot; their ammo occupies separate entries.
+	if (!BG_IsActionWeapon(weapon)) BG_SelectSlot(pm->ps, PM_DesiredSlot());
 	pm->ps->weapon      = weapon;
-
-	// Remember which slot we are "on". Melee and equipment deliberately leave
-	// this alone, so releasing the button returns to the right gun.
-	if ( weapon == pm->ps->stats[STAT_SLOT_PRIMARY] ) {
-		pm->ps->stats[STAT_ACTIVE_SLOT] = SLOT_PRIMARY;
-	} else if ( weapon == pm->ps->stats[STAT_SLOT_SECONDARY] ) {
-		pm->ps->stats[STAT_ACTIVE_SLOT] = SLOT_SECONDARY;
-	}
-
-	pm->ps->weaponstate = WEAPON_RAISING;
-	pm->ps->weaponTime  = BG_WeaponRaiseTime( weapon );
-	pm->ps->weaponAnimTime = -1;			// whatever anim we were in is abandoned
-
-	// A fill queued by the reload we just walked away from must not land in the
-	// gun we are now holding.
-	pm->ps->pm_flags &= ~PMF_PENDING_MAG;
-
-	PM_StartTorsoAnim( TORSO_RAISE );
+	BG_BeginWeaponDraw(pm->ps);
 }
 
 // An alternate holster DESTINATION, not an alternate reload or swap. Leave the
@@ -2747,6 +2904,7 @@ static void PM_Weapon( void ) {
 	int		addTime;
 	int		oldElapsed;
 	qboolean ladderWeapon;
+	qboolean reload;
 
 	// don't allow attack until all buttons are up
 	if ( pm->ps->pm_flags & PMF_RESPAWNED ) {
@@ -2763,6 +2921,7 @@ static void PM_Weapon( void ) {
 		pm->ps->weapon = WP_NONE;
 		return;
 	}
+	reload = BG_UpdateWeaponPickup(pm->ps, &pm->cmd, pm->pickupItem, pml.msec);
 
 	// check for item using
 	if ( (pm->cmd.buttons & BUTTON_USE_HOLDABLE) &&
@@ -2812,7 +2971,8 @@ static void PM_Weapon( void ) {
 	// Ladder holsters and latched quick actions have their own destinations.
 	if ( !ladderWeapon && pm->ps->weaponstate == WEAPON_DROPPING &&
 		!BG_IsActionWeapon( pm->ps->weapon ) &&
-		PM_DesiredWeapon() == pm->ps->weapon ) {
+		PM_DesiredWeapon() == pm->ps->weapon &&
+		PM_DesiredSlot() == pm->ps->stats[STAT_ACTIVE_SLOT] ) {
 		pm->ps->weaponstate = WEAPON_READY;
 		pm->ps->weaponTime = 0;
 		pm->ps->weaponAnimTime = -1;
@@ -2825,7 +2985,7 @@ static void PM_Weapon( void ) {
 	// 1. Weapon change ALWAYS stamps a real holster first.
 	if ( !ladderWeapon && (pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING) ) {
 		int want = PM_DesiredWeapon();
-		if ( want != pm->ps->weapon ) {
+		if ( want != pm->ps->weapon || PM_DesiredSlot() != pm->ps->stats[STAT_ACTIVE_SLOT] ) {
 			PM_BeginWeaponChange( want );
 		}
 	}
@@ -2995,7 +3155,7 @@ static void PM_Weapon( void ) {
 	// check for fire
 	if ( !(pm->cmd.buttons & BUTTON_ATTACK) && PM_ActionWeapon() != pm->ps->weapon ) {
 		// Manual reload: player pressed R while not firing
-		if ( pm->cmd.buttons & BUTTON_RELOAD ) {
+		if ( reload ) {
 			int magSize = BG_WeaponMagSize( pm->ps->weapon );
 			if ( magSize > 0 &&
 			     pm->ps->ammo[pm->ps->weapon] < magSize &&

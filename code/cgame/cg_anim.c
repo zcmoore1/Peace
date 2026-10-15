@@ -37,7 +37,8 @@ Each layer has:
 #define WANIM_SPRINT_IN     7
 #define WANIM_SPRINT_LOOP   8
 #define WANIM_SPRINT_OUT    9
-#define WANIM_COUNT         10
+#define WANIM_FIRST_RAISE    10
+#define WANIM_COUNT          11
 
 #define ANIM_LAYER_COUNT    4
 #define LAYER_BASE          0
@@ -77,7 +78,11 @@ static int           cg_weapAnimWeapon = WP_NONE;   // weapon these layers belon
 static qboolean      cg_retainedActive, cg_retainedDrop, cg_previousSprint;
 static float         cg_retainedRate = 1.0f;
 static qboolean      cg_animContextValid;
-static int           cg_animClient, cg_animSpawn, cg_animTeleport;
+static int           cg_animClient, cg_animSpawn, cg_animTeleport, cg_animSlot, cg_animAttachments;
+
+static int CG_WeapAnim_DrawClip(const weapAnimDef_t *def, const playerState_t *ps) {
+	return ps->weaponDraw && def->clips[WANIM_FIRST_RAISE].numFrames > 0 ? WANIM_FIRST_RAISE : WANIM_RAISE;
+}
 
 // ---------------------------------------------------------------------------
 // Clip definitions.
@@ -240,9 +245,9 @@ static void CG_WeapAnim_UpdateRetention(const weapAnimDef_t *def, const playerSt
 		if ((source < 0 || cg_weapLayers[source].clip == WANIM_IDLE) &&
 			ps->weaponstate == WEAPON_RAISING && sprinting) {
 			animLayer_t *move = &cg_weapLayers[LAYER_MOVE];
-			move->clip = WANIM_RAISE;
-			move->time = (1.0f - (float)ps->weaponTime / BG_WeaponRaiseTime(ps->weapon)) *
-				CG_WeapAnim_ClipLength(def, WANIM_RAISE);
+			move->clip = CG_WeapAnim_DrawClip(def, ps);
+			move->time = (1.0f - (float)ps->weaponTime / BG_WeaponDrawTime(ps)) *
+				CG_WeapAnim_ClipLength(def, move->clip);
 			source = LAYER_MOVE;
 		}
 		// Sprint-to-sprint changes already preserve continuity by reversing the
@@ -261,6 +266,7 @@ static void CG_WeapAnim_UpdateRetention(const weapAnimDef_t *def, const playerSt
 			length = CG_WeapAnim_ClipLength(def, retained->clip);
 			switch (retained->clip) {
 			case WANIM_RAISE: duration = BG_WeaponRaiseTime(ps->weapon); break;
+			case WANIM_FIRST_RAISE: duration = BG_WeaponFirstRaiseTime(ps->weapon); break;
 			case WANIM_DROP: duration = BG_WeaponDropTime(ps->weapon); break;
 			case WANIM_FIRE: duration = BG_WeaponFireLength(ps->weapon); break;
 			case WANIM_SPRINT_IN:
@@ -330,7 +336,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	} else {
 		move->blendSpeed = 8.0f;
 		if ( ps->weaponstate == WEAPON_RAISING ) {
-			CG_WeapAnim_PlayLayer( move, WANIM_RAISE );
+			CG_WeapAnim_PlayLayer( move, CG_WeapAnim_DrawClip(def, ps) );
 		} else if ( ps->weaponstate == WEAPON_DROPPING ) {
 			CG_WeapAnim_PlayLayer( move, WANIM_DROP );
 		} else {
@@ -431,10 +437,10 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	// Fit the supplied draw/drop clips to the existing gameplay transitions.
 	// When another transition interrupts one, the layer ownership rule above
 	// still decides whether the previous clip holds the picture.
-	if ( (ps->weaponstate == WEAPON_RAISING && move->clip == WANIM_RAISE) ||
+	if ( (ps->weaponstate == WEAPON_RAISING && move->clip == CG_WeapAnim_DrawClip(def, ps)) ||
 	     (ps->weaponstate == WEAPON_DROPPING && move->clip == WANIM_DROP) ) {
 		int duration = ps->weaponstate == WEAPON_RAISING ?
-		               BG_WeaponRaiseTime( ps->weapon ) :
+		               BG_WeaponDrawTime( ps ) :
 		               BG_HolsterTime( ps );	// the same rule pmove stamped with
 		float fraction = 1.0f - (float)ps->weaponTime / duration;
 		if ( fraction < 0 ) fraction = 0;
@@ -530,12 +536,16 @@ qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec ) 
 	// Reset layer state on weapon change.
 	if ( ps->weapon != cg_weapAnimWeapon || (cg_animContextValid &&
 		(ps->clientNum != cg_animClient || ps->persistant[PERS_SPAWN_COUNT] != cg_animSpawn ||
-		 (ps->eFlags & EF_TELEPORT_BIT) != cg_animTeleport)) )
+		 (ps->eFlags & EF_TELEPORT_BIT) != cg_animTeleport ||
+		 ps->stats[STAT_ACTIVE_SLOT] != cg_animSlot ||
+		 ps->slotAttachments[ps->stats[STAT_ACTIVE_SLOT]] != cg_animAttachments)) )
 		CG_WeapAnim_WeaponChanged( ps->weapon );
 	cg_animContextValid = qtrue;
 	cg_animClient = ps->clientNum;
 	cg_animSpawn = ps->persistant[PERS_SPAWN_COUNT];
 	cg_animTeleport = ps->eFlags & EF_TELEPORT_BIT;
+	cg_animSlot = ps->stats[STAT_ACTIVE_SLOT];
+	cg_animAttachments = ps->slotAttachments[cg_animSlot];
 
 	def = &bg_weapAnimDefs[ps->weapon];
 
@@ -628,7 +638,7 @@ void CG_WeapAnim_RegisterClips( int weapon, qhandle_t hModel, const char *cfgPat
 	static const char *names[WANIM_COUNT] = {
 		"idle", "fire", "raise", "drop",
 		"reload_start", "reload_loop", "reload_end",
-		"sprint_in", "sprint_loop", "sprint_out"
+		"sprint_in", "sprint_loop", "sprint_out", "first_raise"
 	};
 	weapAnimDef_t *def;
 	fileHandle_t   file;

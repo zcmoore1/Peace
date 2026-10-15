@@ -85,6 +85,7 @@ static void BeginReload( int weapon, int loaded, int reserve ) {
 	testPs.stats[STAT_WEAPONS] = (1 << WP_SHOTGUN) | (1 << WP_MACHINEGUN);
 	testPs.stats[STAT_SLOT_PRIMARY] = WP_SHOTGUN;
 	testPs.stats[STAT_SLOT_SECONDARY] = WP_MACHINEGUN;
+	testPs.stats[STAT_ACTIVE_SLOT] = weapon == WP_MACHINEGUN ? SLOT_SECONDARY : SLOT_PRIMARY;
 	testPs.ammo[weapon] = loaded;
 	testPs.ammoReserve[weapon] = reserve;
 	testPs.ammo[WP_MACHINEGUN] = weapon == WP_MACHINEGUN ? loaded : 10;
@@ -449,6 +450,7 @@ static void TestUnpumpedWeaponUnchanged( int step ) {
 	   FIRING for the whole refire, no anim clock, no pump state. */
 	int elapsed;
 	ReadyToFire();
+	BG_SelectSlot(&testPs, SLOT_SECONDARY);
 	testPs.weapon = WP_MACHINEGUN;
 	testMove.cmd.weapon = WP_MACHINEGUN;
 	testPs.weaponstate = WEAPON_READY;

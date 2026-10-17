@@ -46,6 +46,15 @@ Each layer has:
 #define LAYER_SPRINT        2
 #define LAYER_RETAINED      3
 #define RETAINED_BLEND_SPEED 0.0125f // 80ms picture release; never a gameplay lock
+#define MOVE_BLEND_SPEED     0.025f  // 40ms move-layer crossfade into or out of idle
+#define MOVE_RETURN_MS       250.0f  // longest picture return after a cancelled transition
+
+// How the move layer's clip clock is driven. Every mode is picture only: the
+// gameplay lock decides readiness, and these only decide where the gun is drawn.
+#define MOVE_FIT_NONE        0
+#define MOVE_FIT_FORWARD     1   // clip runs to its end over the gameplay lock
+#define MOVE_FIT_REVERSE     2   // a draw a holster interrupted runs back to its start
+#define MOVE_FIT_RETURN      3   // a cancelled transition eases back to the ready pose
 
 typedef struct {
 	int     firstFrame;
@@ -61,10 +70,12 @@ typedef struct {
 typedef struct {
 	int     clip;           // WANIM_* index
 	float   time;           // ms within clip
-	float   startFraction;  // picture-only reversal point for sprint transitions
+	float   startFraction;  // picture-only reversal point for sprint/raise/drop transitions
 	float   weight;
 	float   targetWeight;
 	float   blendSpeed;     // weight units per ms
+	int     fit;            // MOVE_FIT_* (move layer only)
+	float   returnFrom, returnTo, returnTime, returnLength;	// MOVE_FIT_RETURN, in clip ms / real ms
 } animLayer_t;
 
 // Per-weapon animation definitions.
@@ -203,6 +214,61 @@ static qboolean CG_WeapAnim_Retainable(int clip) {
 	return clip != WANIM_IDLE && (clip < WANIM_RELOAD_START || clip > WANIM_RELOAD_END);
 }
 
+static qboolean CG_WeapAnim_IsDrawClip(int clip) {
+	return clip == WANIM_RAISE || clip == WANIM_FIRST_RAISE;
+}
+
+// A holster starts from the pose on screen, never from a clip's first frame.
+// Interrupting an unfinished draw takes the gun back down the way it came; a
+// holster asked for while a cancelled one is still returning carries on from
+// there. Only a gun at rest starts the drop clip over, faded in from idle.
+static void CG_WeapAnim_BeginHolster(const weapAnimDef_t *def, animLayer_t *move) {
+	float len = CG_WeapAnim_ClipLength(def, move->clip);
+	qboolean shown = move->weight > 0.0f && move->targetWeight > 0.0f && len > 0.0f;
+
+	if (shown && CG_WeapAnim_IsDrawClip(move->clip) && move->time < len) {
+		move->fit = MOVE_FIT_REVERSE;
+		move->startFraction = move->time / len;
+	} else if (shown && move->clip == WANIM_DROP) {
+		move->fit = MOVE_FIT_FORWARD;
+		move->startFraction = move->time / len;
+		if (move->startFraction > 1.0f) move->startFraction = 1.0f;
+	} else {
+		move->clip = WANIM_DROP;
+		move->time = 0.0f;
+		move->startFraction = 0.0f;
+		move->fit = MOVE_FIT_FORWARD;
+	}
+	move->targetWeight = 1.0f;
+}
+
+// Gameplay cancelled the transition (YY): the gun is already ready to fire.
+// The picture travels back along the clip it was showing - up the draw, or back
+// up the drop - instead of cutting to idle. It eases in and out, and takes the
+// time that stretch of clip would naturally take, capped at MOVE_RETURN_MS.
+static void CG_WeapAnim_BeginReturn(const weapAnimDef_t *def, const playerState_t *ps, animLayer_t *move) {
+	float len = CG_WeapAnim_ClipLength(def, move->clip);
+	float from = move->time, natural;
+
+	if (len <= 0.0f || move->weight <= 0.0f || move->targetWeight <= 0.0f) return;
+	if (from < 0.0f) from = 0.0f;
+	if (from > len) from = len;
+	if (move->clip == WANIM_DROP) {
+		move->returnTo = 0.0f;
+		natural = from / len * BG_WeaponDropTime(ps->weapon);
+	} else if (CG_WeapAnim_IsDrawClip(move->clip)) {
+		move->returnTo = len;
+		natural = (len - from) / len * BG_WeaponDrawTime(ps);
+	} else {
+		return;
+	}
+	if (natural < 1.0f) return;		// already at rest: an ordinary release
+	move->returnFrom = from;
+	move->returnTime = 0.0f;
+	move->returnLength = natural < MOVE_RETURN_MS ? natural : MOVE_RETURN_MS;
+	move->fit = MOVE_FIT_RETURN;
+}
+
 // Sprint does not erase an in-flight action. Carry its presentation forward;
 // a holster then owns that same clip until its destination completes. This is
 // independent of pmove's busy/note clocks and cannot confer weapon readiness.
@@ -238,7 +304,10 @@ static void CG_WeapAnim_UpdateRetention(const weapAnimDef_t *def, const playerSt
 		// weapon state. Reload clips cannot become a retained source.
 		for (i=LAYER_BASE; i<=LAYER_SPRINT; i++) {
 			animLayer_t *l = &cg_weapLayers[i];
-			if (l->weight >= .5f && l->targetWeight > 0 &&
+			// A returning cancel is easing back to rest; it is not an action to carry.
+			// A holster still fading in from idle is already the action on screen.
+			if (l->fit == MOVE_FIT_RETURN) continue;
+			if ((l->weight >= .5f || (i == LAYER_MOVE && l->weight > 0)) && l->targetWeight > 0 &&
 				CG_WeapAnim_ClipLength(def, l->clip) > 0) source = i;
 		}
 		// Initial pullout can coincide with the first rendered frame.
@@ -325,21 +394,38 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	CG_WeapAnim_PlayLayer( base, baseClip );
 
 	// -- Move layer: raise / drop transitions --
-	// Outside sprint retention, a new transition replaces the old one normally.
+	// Outside sprint retention, a new transition replaces the old one normally,
+	// but always from the pose on screen: YY must flow, never snap.
 	if ( !swapping && (ps->weaponstate == WEAPON_READY ||
 	                         ps->weaponstate == WEAPON_FIRING ||
 	                         ps->weaponstate == WEAPON_BOLTING) ) {
 		// Gameplay has released the transition (including a reversed holster).
-		// Let the current pose blend back immediately; its clip is not a lock.
-		move->targetWeight = 0.0f;
-		move->blendSpeed = 0.025f;
+		// Ready means ready: a cancelled clip only eases the picture home, and a
+		// shot takes the picture over at once. Its clip is never a lock.
+		if ( ps->weaponstate == WEAPON_READY && move->fit != MOVE_FIT_RETURN &&
+		     move->fit != MOVE_FIT_NONE ) {
+			CG_WeapAnim_BeginReturn( def, ps, move );
+		}
+		if ( ps->weaponstate != WEAPON_READY || move->fit != MOVE_FIT_RETURN ) {
+			move->fit = MOVE_FIT_NONE;
+			move->targetWeight = 0.0f;
+		}
+		move->blendSpeed = MOVE_BLEND_SPEED;
 	} else {
 		move->blendSpeed = 8.0f;
 		if ( ps->weaponstate == WEAPON_RAISING ) {
 			CG_WeapAnim_PlayLayer( move, CG_WeapAnim_DrawClip(def, ps) );
+			move->fit = MOVE_FIT_FORWARD;
 		} else if ( ps->weaponstate == WEAPON_DROPPING ) {
-			CG_WeapAnim_PlayLayer( move, WANIM_DROP );
+			if ( move->fit != MOVE_FIT_FORWARD || move->clip != WANIM_DROP ) {
+				if ( move->fit != MOVE_FIT_REVERSE ) CG_WeapAnim_BeginHolster( def, move );
+			}
+			// A gun at rest fades into the drop like it fades out of the draw.
+			if ( move->clip == WANIM_DROP ) move->blendSpeed = MOVE_BLEND_SPEED;
 		} else {
+			// A cancel still easing home must not pop when the next state arrives.
+			if ( move->fit == MOVE_FIT_RETURN ) move->blendSpeed = MOVE_BLEND_SPEED;
+			move->fit = MOVE_FIT_NONE;
 			move->targetWeight = 0.0f;
 		}
 	}
@@ -392,6 +478,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	if (cg_retainedActive) {
 		// Hidden transition clips must not leak back out during cancellation.
 		move->weight = move->targetWeight = 0;
+		move->fit = MOVE_FIT_NONE;
 		sprint->weight = sprint->targetWeight = 0;
 	}
 	// -- Advance clip times and lerp weights --
@@ -437,15 +524,36 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	// Fit the supplied draw/drop clips to the existing gameplay transitions.
 	// When another transition interrupts one, the layer ownership rule above
 	// still decides whether the previous clip holds the picture.
+	// The reversal point only changes the distance the picture travels, exactly as
+	// for sprint entry/exit; the lock it is fitted to is pmove's.
 	if ( (ps->weaponstate == WEAPON_RAISING && move->clip == CG_WeapAnim_DrawClip(def, ps)) ||
-	     (ps->weaponstate == WEAPON_DROPPING && move->clip == WANIM_DROP) ) {
+	     (ps->weaponstate == WEAPON_DROPPING && move->fit == MOVE_FIT_FORWARD && move->clip == WANIM_DROP) ||
+	     (ps->weaponstate == WEAPON_DROPPING && move->fit == MOVE_FIT_REVERSE) ) {
 		int duration = ps->weaponstate == WEAPON_RAISING ?
 		               BG_WeaponDrawTime( ps ) :
 		               BG_HolsterTime( ps );	// the same rule pmove stamped with
 		float fraction = 1.0f - (float)ps->weaponTime / duration;
 		if ( fraction < 0 ) fraction = 0;
 		if ( fraction > 1 ) fraction = 1;
+		if ( move->fit == MOVE_FIT_REVERSE ) {
+			fraction = move->startFraction * ( 1.0f - fraction );
+		} else {
+			fraction = move->startFraction + ( 1.0f - move->startFraction ) * fraction;
+		}
 		move->time = fraction * CG_WeapAnim_ClipLength( def, move->clip );
+	} else if ( move->fit == MOVE_FIT_RETURN ) {
+		float s, eased;
+		move->returnTime += (float)msec;
+		s = move->returnLength > 0.0f ? move->returnTime / move->returnLength : 1.0f;
+		if ( s > 1.0f ) s = 1.0f;
+		eased = s * s * ( 3.0f - 2.0f * s );	// smoothstep: no jolt at either end
+		move->time = move->returnFrom + ( move->returnTo - move->returnFrom ) * eased;
+		if ( s >= 1.0f ) {
+			// Home: hand back to idle with the same short crossfade a draw ends on.
+			move->fit = MOVE_FIT_NONE;
+			move->targetWeight = 0.0f;
+			move->blendSpeed = MOVE_BLEND_SPEED;
+		}
 	}
 	// Fit sprint entry/exit to the same predicted transition timers. The
 	// reversal point affects only the distance the picture travels, never the

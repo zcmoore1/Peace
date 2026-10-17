@@ -132,6 +132,7 @@ static void TestOwnership(weapAnimDef_t *def) {
  playerState_t ps;
  refEntity_t sample;
  int s,w,ladder,t,clip;
+ float time;
  /* Reuse the same authored clips with several weapon IDs and both holster
   * destinations. This intentionally catches per-weapon/per-destination rules. */
  for(w=0;w<ARRAY_LEN(weapons);w++) for(s=0;s<ARRAY_LEN(states);s++) for(ladder=0;ladder<2;ladder++) {
@@ -177,11 +178,13 @@ static void TestOwnership(weapAnimDef_t *def) {
  ps.weaponTime=BG_WeaponRaiseTime(ps.weapon); ps.pm_flags=PMF_SPRINTING;
  Update(def,&ps,1);
  CHECK(cg_retainedActive && retained->clip==WANIM_RAISE);
- /* Without sprint, interrupting a draw is an ordinary drop, not retention. */
- BeginSource(def,&ps,WP_SHOTGUN,WEAPON_RAISING);
+ /* Without sprint, interrupting a draw is not retention either: that same draw
+  * runs back down from the pose on screen, never from the drop's first frame. */
+ BeginSource(def,&ps,WP_SHOTGUN,WEAPON_RAISING); time=cg_weapLayers[LAYER_MOVE].time;
  ps.weaponstate=WEAPON_DROPPING; ps.weaponTime=BG_WeaponDropTime(ps.weapon);
  Update(def,&ps,1);
- CHECK(!cg_retainedActive && cg_weapLayers[LAYER_MOVE].clip==WANIM_DROP);
+ CHECK(!cg_retainedActive && cg_weapLayers[LAYER_MOVE].clip==WANIM_RAISE);
+ CHECK(cg_weapLayers[LAYER_MOVE].fit==MOVE_FIT_REVERSE && fabs(cg_weapLayers[LAYER_MOVE].time-time)<1);
  /* With no holster, a finished one-shot releases to normal sprint carry. */
  BeginSource(def,&ps,WP_SHOTGUN,WEAPON_BOLTING);
  ps.pm_flags=PMF_SPRINTING; ps.weaponstate=WEAPON_SPRINT_IN; Update(def,&ps,1);
@@ -304,6 +307,129 @@ static void TestFirstDraw(weapAnimDef_t *def, int weapon) {
  for(t=0;t<100;t++) Update(def,&ps,1);
  CHECK(cg_weapLayers[LAYER_RETAINED].weight==0);
 }
+/* YY is one continuous motion, driven by the REAL PM_Weapon (no hand-built
+ * states). Gameplay is READY the moment the drop is cancelled; only the picture
+ * eases home along the clip it was showing, and a shot takes it over at once. */
+void PickupWeaponStep(pmove_t *move, int msec);
+static pmove_t flow;
+static playerState_t flowPs;
+static void FlowTrace(trace_t *t,const vec3_t a,const vec3_t b,const vec3_t c,const vec3_t d,int e,int f) {
+ (void)a;(void)b;(void)c;(void)e;(void)f;
+ memset(t,0,sizeof(*t)); t->fraction=1; VectorCopy(d,t->endpos); t->entityNum=ENTITYNUM_NONE;
+}
+static void FlowBegin(void) {
+ bg_class_t cl=*BG_Class(0);
+ memset(&flowPs,0,sizeof(flowPs)); memset(&flow,0,sizeof(flow));
+ cl.slot[0]=WP_MACHINEGUN; cl.slot[1]=WP_SHOTGUN; BG_ApplyClass(&flowPs,&cl);
+ flowPs.stats[STAT_HEALTH]=100; flowPs.pm_type=PM_NORMAL;
+ flowPs.weapon=WP_MACHINEGUN; flowPs.weaponstate=WEAPON_READY;
+ flow.ps=&flowPs; flow.trace=FlowTrace; flow.cmd.weapon=BG_SLOT_COMMAND+SLOT_PRIMARY;
+ CG_WeapAnim_Reset();
+}
+/* One 8ms command, then one rendered frame of the real presentation. */
+static void FlowStep(void) {
+ playerState_t before;
+ flow.cmd.serverTime+=8; PickupWeaponStep(&flow,8);
+ before=flowPs; CG_WeapAnim_BuildPose(&flowPs,1,8);
+ CHECK(!memcmp(&before,&flowPs,sizeof(flowPs)));
+}
+static void FlowSlot(int slot) { flow.cmd.weapon=BG_SLOT_COMMAND+slot; }
+/* Ease home, never jump: every frame moves toward the rest pose by at most the
+ * whole clip over MOVE_RETURN_MS at smoothstep's 1.5x peak, and arrives in time. */
+static void FlowReturn(int clip,float home,float len) {
+ animLayer_t *move=&cg_weapLayers[LAYER_MOVE];
+ float last,step=len/MOVE_RETURN_MS*8*1.5f+.01f,steps[64],peak=0;
+ int held,n=0;
+ CHECK(flowPs.weaponstate==WEAPON_READY && flowPs.weaponTime==0);
+ CHECK(move->clip==clip && move->fit==MOVE_FIT_RETURN && move->weight==1);
+ for(held=0;move->targetWeight>0 && held<=MOVE_RETURN_MS+16;held+=8) {
+  last=move->time; FlowStep();
+  CHECK(move->clip==clip && fabs(move->time-last)<=step);
+  CHECK(fabs(home-move->time)<=fabs(home-last)+.01f);
+  if(n<64) steps[n++]=fabs(move->time-last);
+ }
+ CHECK(move->targetWeight==0 && fabs(move->time-home)<.01f && held<=MOVE_RETURN_MS+8);
+ /* Eased, not linear: it sets off and settles gently around a faster middle. */
+ for(held=0;held<n;held++) if(steps[held]>peak) peak=steps[held];
+ if(n>=8) CHECK(steps[0]<peak*.5f && steps[n-1]<peak*.5f);
+}
+/* A Y pressed while a cancel is still easing home carries on from that pose. */
+static void FlowHolsterMidReturn(weapAnimDef_t *def,int clip) {
+ animLayer_t *move=&cg_weapLayers[LAYER_MOVE];
+ float last=move->time,len=CG_WeapAnim_ClipLength(def,clip);
+ int t;
+ for(t=0;t<MOVE_RETURN_MS/3;t+=8) { FlowStep(); }
+ CHECK(move->fit==MOVE_FIT_RETURN && move->clip==clip);
+ last=move->time;
+ FlowSlot(flowPs.stats[STAT_ACTIVE_SLOT]==SLOT_PRIMARY ? SLOT_SECONDARY : SLOT_PRIMARY); FlowStep();
+ CHECK(flowPs.weaponstate==WEAPON_DROPPING && move->clip==clip && move->weight==1);
+ CHECK(fabs(move->time-last)<=8*len/BG_WeaponDropTime(flowPs.weapon)+.01f);
+}
+static void TestFlow(weapAnimDef_t *def) {
+ animLayer_t *move=&cg_weapLayers[LAYER_MOVE];
+ float raise=CG_WeapAnim_ClipLength(def,WANIM_RAISE), drop=CG_WeapAnim_ClipLength(def,WANIM_DROP), last;
+ int sixth,t;
+ for(sixth=1;sixth<=5;sixth+=2) {
+  /* YY during the SPAS draw: Y reverses the same draw, Y again eases it up. */
+  FlowBegin(); FlowSlot(SLOT_SECONDARY);
+  for(t=0;t<10000 && !(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_RAISING &&
+   flowPs.weaponTime<=BG_WeaponRaiseTime(WP_SHOTGUN)*(6-sixth)/6);t+=8) FlowStep();
+  CHECK(move->clip==WANIM_RAISE && move->weight==1); last=move->time;
+  FlowSlot(SLOT_PRIMARY);
+  for(t=0;t<48;t+=8) {
+   FlowStep(); CHECK(flowPs.weaponstate==WEAPON_DROPPING);
+   /* Back down no faster than the draw came up: 8ms of clip per 8ms frame at most. */
+   CHECK(move->clip==WANIM_RAISE && move->fit==MOVE_FIT_REVERSE && move->time<=last+.01f &&
+    last-move->time<=8*raise/BG_WeaponRaiseTime(WP_SHOTGUN)+.01f);
+   last=move->time;
+  }
+  FlowSlot(SLOT_SECONDARY); FlowStep();
+  FlowReturn(WANIM_RAISE,raise,raise);
+  /* YY cancelling the SPAS holster: the gun comes back up its own drop. */
+  for(t=0;t<200;t+=8) FlowStep();
+  CHECK(flowPs.weaponstate==WEAPON_READY && move->weight==0);
+  FlowSlot(SLOT_PRIMARY); FlowStep();
+  /* A gun at rest fades into its holster instead of popping to frame 0. */
+  CHECK(flowPs.weaponstate==WEAPON_DROPPING && move->clip==WANIM_DROP && move->weight>0 && move->weight<1);
+  while(flowPs.weaponstate==WEAPON_DROPPING &&
+   flowPs.weaponTime>BG_WeaponDropTime(WP_SHOTGUN)*(6-sixth)/6) FlowStep();
+  CHECK(flowPs.weaponstate==WEAPON_DROPPING && move->clip==WANIM_DROP && move->weight==1);
+  FlowSlot(SLOT_SECONDARY); FlowStep();
+  FlowReturn(WANIM_DROP,0,drop);
+ }
+ /* Y again while either kind of cancel is still easing home. */
+ FlowBegin(); FlowSlot(SLOT_SECONDARY);
+ for(t=0;t<10000 && !(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_RAISING &&
+  flowPs.weaponTime<=BG_WeaponRaiseTime(WP_SHOTGUN)/2);t+=8) FlowStep();
+ FlowSlot(SLOT_PRIMARY); FlowStep(); FlowSlot(SLOT_SECONDARY); FlowStep();
+ FlowHolsterMidReturn(def,WANIM_RAISE);
+ CHECK(move->fit==MOVE_FIT_REVERSE);
+ FlowBegin(); FlowSlot(SLOT_SECONDARY);
+ for(t=0;t<10000 && !(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_READY && move->weight==0);t+=8) FlowStep();
+ FlowSlot(SLOT_PRIMARY); FlowStep();
+ while(flowPs.weaponstate==WEAPON_DROPPING && flowPs.weaponTime>BG_WeaponDropTime(WP_SHOTGUN)/2) FlowStep();
+ CHECK(flowPs.weaponstate==WEAPON_DROPPING && move->clip==WANIM_DROP);
+ FlowSlot(SLOT_SECONDARY); FlowStep();
+ FlowHolsterMidReturn(def,WANIM_DROP);
+ CHECK(move->fit==MOVE_FIT_FORWARD);
+ /* Sprinting out of a cancel still easing home carries nothing: the return is
+  * not an action, and retaining the drop would send the gun back down. */
+ FlowSlot(SLOT_SECONDARY); FlowStep();
+ CHECK(flowPs.weaponstate==WEAPON_READY && move->fit==MOVE_FIT_RETURN && move->clip==WANIM_DROP);
+ flowPs.pm_flags|=PMF_SPRINTING; flowPs.weaponstate=WEAPON_SPRINT_IN;
+ flowPs.weaponTime=BG_WeaponSprintInTime(flowPs.weapon);
+ Update(def,&flowPs,8);
+ CHECK(!cg_retainedActive && cg_weapLayers[LAYER_SPRINT].clip==WANIM_SPRINT_IN);
+ /* YY then fire: the shot owns the picture on its first frame. */
+ FlowBegin(); FlowSlot(SLOT_SECONDARY);
+ for(t=0;t<10000 && !(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_RAISING &&
+  flowPs.weaponTime<=BG_WeaponRaiseTime(WP_SHOTGUN)/2);t+=8) FlowStep();
+ FlowSlot(SLOT_PRIMARY); FlowStep(); FlowSlot(SLOT_SECONDARY); FlowStep();
+ CHECK(flowPs.weaponstate==WEAPON_READY && move->fit==MOVE_FIT_RETURN);
+ flow.cmd.buttons=BUTTON_ATTACK; FlowStep();
+ CHECK(flowPs.weaponstate==WEAPON_FIRING && move->targetWeight==0 && move->fit==MOVE_FIT_NONE);
+ CHECK(cg_weapLayers[LAYER_BASE].clip==WANIM_FIRE);
+}
 static void TestReloadPerk(weapAnimDef_t *def,int weapon) {
  playerState_t ps;int seq,perk,duration;
  for(seq=0;seq<RSEQ_COUNT;seq++)for(perk=0;perk<2;perk++) {
@@ -341,6 +467,7 @@ int main(void) {
  TestOwnership(def); TestExclusions(def); TestRelease(def); TestContext(def);
  TestFirstDraw(def,WP_SHOTGUN);
  TestReloadPerk(def,WP_SHOTGUN);
+ TestFlow(def);
  CG_WeapAnim_RegisterClips(WP_M40A3,2,"assets/baseq3/models/weapons2/m40a3/view.cfg");
  def=&bg_weapAnimDefs[WP_M40A3];
  TestSprint(def,WP_M40A3); TestFirstDraw(def,WP_M40A3);

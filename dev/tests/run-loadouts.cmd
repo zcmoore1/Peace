@@ -28,7 +28,7 @@ cl %test_flags% /Feout\build\loadout-tests\wire.exe dev\tests\action_wire_test.c
 if errorlevel 1 goto fail
 out\build\loadout-tests\wire.exe
 if errorlevel 1 goto fail
-cl %test_flags% /Feout\build\loadout-tests\pose.exe dev\tests\weapon_pose_test.c code\game\bg_pmove.c %test_game% %test_common% /link /OPT:REF
+cl %test_flags% /Feout\build\loadout-tests\pose.exe dev\tests\weapon_pose_test.c dev\tests\pickup_pmove_driver.c %test_game% %test_common% /link /OPT:REF
 if errorlevel 1 goto fail
 out\build\loadout-tests\pose.exe
 if errorlevel 1 goto fail

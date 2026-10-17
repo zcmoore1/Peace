@@ -66,6 +66,15 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   cancellation used for any drop. No named-glitch branch, weapon-specific
   retention list, zero lock, or separate glide state. Reloads and quick actions
   cannot own a retained layer. Cgame must never confer gameplay readiness.
+- **YY flows; it never snaps (owner's rule).** Every raise and drop starts from
+  the pose on screen. A holster that interrupts an unfinished draw plays that
+  same draw back down, fitted to `BG_HolsterTime`; a gun at rest fades into its
+  drop. When YY cancels a transition, gameplay is `WEAPON_READY` at once — only
+  the picture eases back along the clip it was showing (smoothstep over that
+  stretch's natural time, capped at `MOVE_RETURN_MS`), then hands to idle with
+  the 40ms crossfade a draw ends on. A shot cuts the return immediately, and a
+  returning cancel is never a retained sprint source. It holds no lock and is
+  not a gameplay state. `TestFlow` drives it through the real `PM_Weapon`.
 - **Bolting is a state, not a phase of firing.** `WEAPON_FIRING` is the shot;
   `WEAPON_BOLTING` is the action being worked. "Bolting" covers bolt, pump,
   cock and lever — they differ only in cycle length and note placement, never
@@ -231,7 +240,9 @@ retiming a weapon breaks the test without telling you anything.
 modulo selection, same-update YY firing, reload/pull-out cancellation, tap/hold
 actions, all nine action bits through the actual network codec, and pose release.
 Pose checks cover source retention, ladder holsters, loop/endpoint semantics,
-reload/action exclusions, ordinary sprint reversal and frame-only crossfades.
+reload/action exclusions, ordinary sprint reversal and frame-only crossfades,
+plus YY flow (reversed draw, eased return, fire cut-in) through the real
+`PM_Weapon`, which is why the pose test links `pickup_pmove_driver.c`.
 Loadouts UI and class definitions are documented in `dev/LOADOUTS.md`.
 
 Do not statically initialize structs with inline char arrays mixed with ints:

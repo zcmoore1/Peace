@@ -21,10 +21,12 @@ typedef struct {
 	menuframework_s menu;
 	menufield_s name;
 	menulist_s primary, secondary, lethal, lethalCount, tactical, tacticalCount;
+	menulist_s perk[BG_PERK_SLOTS], attachment[SLOT_COUNT][BG_MAX_CLASS_ATTACHMENTS];
 	menutext_s save, back;
 	int customSlot;
 	char error[80];
 	const char *weapons[16];
+	const char *perkNames[BG_PERK_COUNT + 1], *attachmentNames[10];
 } classEdit_t;
 
 static classSelect_t classSelect;
@@ -32,6 +34,11 @@ static classEdit_t classEdit;
 static const char *lethals[] = { "None", "Frag grenade", "Semtex", NULL };
 static const char *tacticals[] = { "None", "Flash grenade", NULL };
 static const char *counts[] = { "1", "2", "3", NULL };
+static const char *perkLabels[] = { "PERK 1", "PERK 2", "PERK 3" };
+static const char *attachmentLabels[SLOT_COUNT][BG_MAX_CLASS_ATTACHMENTS] = {
+	{ "P. ATTACHMENT 1", "P. ATTACHMENT 2" },
+	{ "S. ATTACHMENT 1", "S. ATTACHMENT 2" }
+};
 static vec4_t classBackground = {0.045f, 0.06f, 0.08f, 1};
 static vec4_t classPanel = {0.085f, 0.11f, 0.14f, 1};
 static vec4_t classAccent = {0.55f, 0.85f, 0.65f, 1};
@@ -136,7 +143,7 @@ static void UI_ClassSelectDraw( void ) {
 	UI_DrawString(80, 236, line, UI_SMALLFONT, color_white);
 	UI_DrawString(80, 262, "MELEE       Button action - returns to your gun", UI_SMALLFONT, color_white);
 	for ( i = 0; i < BG_PERK_SLOTS; i++ ) {
-		Com_sprintf(line, sizeof(line), "PERK %i      Unassigned - effects not implemented", i + 1);
+		Com_sprintf(line, sizeof(line), "PERK %i      %s", i + 1, BG_Perk(loadout->perk[i])->name);
 		UI_DrawString(80, 294 + i * 24, line, UI_SMALLFONT, classMuted);
 	}
 	UI_DrawString(320, 398, classSelect.status, UI_CENTER | UI_SMALLFONT, classAccent);
@@ -187,16 +194,42 @@ void UI_ClassesMenu( void ) {
 }
 
 static void UI_ClassEditDraw( void ) {
-	char line[80];
 	int i;
-	UI_ClassBackdrop("CREATE A CLASS", "Save edits locally. Select the class to equip it on your next spawn.");
+	const char *hint = "Melee is always available. Changes apply on your next spawn.";
+	UI_ClassBackdrop("CREATE A CLASS", "Three perks. One attachment per gun; Second Nature allows two.");
 	Menu_Draw(&classEdit.menu);
-	UI_DrawString(80, 288, "MELEE       Button action - always available", UI_SMALLFONT, color_white);
 	for ( i = 0; i < BG_PERK_SLOTS; i++ ) {
-		Com_sprintf(line, sizeof(line), "PERK %i      Unassigned - effects not implemented", i + 1);
-		UI_DrawString(80, 314 + i * 22, line, UI_SMALLFONT, classMuted);
+		if ( classEdit.menu.cursor == classEdit.perk[i].generic.menuPosition )
+			hint = BG_Perk(classEdit.perk[i].curvalue)->description;
 	}
-	UI_DrawString(320, 398, classEdit.error, UI_CENTER | UI_SMALLFONT, color_yellow);
+	UI_DrawString(320, 398, classEdit.error[0] ? classEdit.error : hint,
+		UI_CENTER | UI_SMALLFONT, classEdit.error[0] ? color_yellow : classMuted);
+}
+static void UI_ClassAttachmentsChanged( void *ptr, int event ) {
+	playerState_t ps;
+	int i, slot, entry, limit;
+	(void)ptr;
+	if ( event != QM_ACTIVATED ) return;
+	memset(&ps, 0, sizeof(ps));
+	for ( i = 0; i < BG_PERK_SLOTS; i++ )
+		if ( classEdit.perk[i].curvalue > PERK_NONE && classEdit.perk[i].curvalue < BG_PERK_COUNT )
+			ps.perks |= 1 << (classEdit.perk[i].curvalue - 1);
+	limit = BG_AttachmentLimit(&ps);
+	for ( slot = 0; slot < SLOT_COUNT; slot++ ) {
+		int weapon = BG_ClassWeapon(slot == SLOT_PRIMARY ? classEdit.primary.curvalue : classEdit.secondary.curvalue);
+		int supported = BG_WeaponAttachmentMask(weapon);
+		for ( entry = 0; entry < BG_MAX_CLASS_ATTACHMENTS; entry++ ) {
+			menulist_s *spin = &classEdit.attachment[slot][entry];
+			if ( entry >= limit || !supported ) {
+				spin->curvalue = 0;
+				spin->generic.flags |= QMF_GRAYED;
+			} else {
+				spin->generic.flags &= ~QMF_GRAYED;
+				if ( BG_AttachmentType(spin->curvalue) & ~supported ) spin->curvalue = 0;
+			}
+		}
+	}
+	classEdit.error[0] = 0;
 }
 static void UI_ClassEquipmentChanged( void *ptr, int event ) {
 	(void)ptr;
@@ -208,6 +241,7 @@ static void UI_ClassEquipmentChanged( void *ptr, int event ) {
 }
 static void UI_ClassEditEvent( void *ptr, int event ) {
 	bg_class_t loadout;
+	int i, slot, entry;
 	char text[BG_CLASS_STRING_SIZE], name[32];
 	if ( event != QM_ACTIVATED ) return;
 	if ( ((menucommon_s *)ptr)->id == ID_CLASS_BACK ) { UI_PopMenu(); return; }
@@ -220,6 +254,19 @@ static void UI_ClassEditEvent( void *ptr, int event ) {
 	loadout.lethalCount = loadout.lethal ? classEdit.lethalCount.curvalue + 1 : 0;
 	loadout.tactical = classEdit.tactical.curvalue ? WP_FLASH : WP_NONE;
 	loadout.tacticalCount = loadout.tactical ? classEdit.tacticalCount.curvalue + 1 : 0;
+	for ( i = 0; i < BG_PERK_SLOTS; i++ ) loadout.perk[i] = classEdit.perk[i].curvalue;
+	if ( !BG_ClassPerksValid(&loadout) ) {
+		Q_strncpyz(classEdit.error, "Choose different perks, or None for an empty slot.", sizeof(classEdit.error));
+		return;
+	}
+	for ( slot = 0; slot < SLOT_COUNT; slot++ ) for ( entry = 0; entry < BG_MAX_CLASS_ATTACHMENTS; entry++ ) {
+		int bit = BG_AttachmentType(classEdit.attachment[slot][entry].curvalue);
+		if ( loadout.attachments[slot] & bit ) {
+			Q_strncpyz(classEdit.error, "Choose different attachments on each gun.", sizeof(classEdit.error));
+			return;
+		}
+		loadout.attachments[slot] |= bit;
+	}
 	if ( loadout.slot[0] == loadout.slot[1] ) {
 		Q_strncpyz(classEdit.error, "Choose different primary and secondary weapons.", sizeof(classEdit.error));
 		return;
@@ -241,7 +288,7 @@ static void UI_ClassEditEvent( void *ptr, int event ) {
 }
 void UI_CreateClassMenu( int slot ) {
 	bg_class_t loadout;
-	int i, primary = 0, secondary = 1;
+	int i, gun, entry, primary = 0, secondary = 1;
 	if ( slot < 0 || slot >= BG_CUSTOM_CLASS_COUNT ) slot = 0;
 	loadout = classSelect.classes[BG_ClassCount() + slot];
 	memset(&classEdit, 0, sizeof(classEdit));
@@ -249,6 +296,9 @@ void UI_CreateClassMenu( int slot ) {
 	classEdit.menu.fullscreen = qtrue;
 	classEdit.menu.wrapAround = qtrue;
 	classEdit.menu.draw = UI_ClassEditDraw;
+	for ( i = 0; i < BG_PERK_COUNT; i++ ) classEdit.perkNames[i] = BG_Perk(i)->name;
+	for ( i = 0; i < BG_AttachmentTypeCount() && i < ARRAY_LEN(classEdit.attachmentNames)-1; i++ )
+		classEdit.attachmentNames[i] = BG_AttachmentName(i);
 	for ( i = 0; i < BG_ClassWeaponCount(); i++ ) {
 		classEdit.weapons[i] = BG_ClassWeaponName(BG_ClassWeapon(i));
 		if ( loadout.slot[0] == BG_ClassWeapon(i) ) primary = i;
@@ -258,17 +308,34 @@ void UI_CreateClassMenu( int slot ) {
 	classEdit.name.generic.flags = QMF_SMALLFONT;
 	classEdit.name.generic.name = "NAME";
 	classEdit.name.generic.x = 288;
-	classEdit.name.generic.y = 106;
+	classEdit.name.generic.y = 100;
 	classEdit.name.field.widthInChars = BG_CLASS_NAME_SIZE - 1;
 	classEdit.name.field.maxchars = BG_CLASS_NAME_SIZE - 1;
 	Menu_AddItem(&classEdit.menu, &classEdit.name);
 	Q_strncpyz(classEdit.name.field.buffer, loadout.name, sizeof(classEdit.name.field.buffer));
-	UI_ClassSpin(&classEdit.menu, &classEdit.primary, "PRIMARY", classEdit.weapons, primary, 132);
-	UI_ClassSpin(&classEdit.menu, &classEdit.secondary, "SECONDARY", classEdit.weapons, secondary, 158);
-	UI_ClassSpin(&classEdit.menu, &classEdit.lethal, "GRENADE", lethals, loadout.lethal == WP_SEMTEX ? 2 : !!loadout.lethal, 184);
-	UI_ClassSpin(&classEdit.menu, &classEdit.lethalCount, "GRENADE COUNT", counts, loadout.lethalCount ? loadout.lethalCount - 1 : 0, 208);
-	UI_ClassSpin(&classEdit.menu, &classEdit.tactical, "TACTICAL", tacticals, !!loadout.tactical, 234);
-	UI_ClassSpin(&classEdit.menu, &classEdit.tacticalCount, "TACTICAL COUNT", counts, loadout.tacticalCount ? loadout.tacticalCount - 1 : 0, 258);
+	UI_ClassSpin(&classEdit.menu, &classEdit.primary, "PRIMARY", classEdit.weapons, primary, 120);
+	for ( gun = 0; gun < SLOT_COUNT; gun++ ) {
+		int mask = loadout.attachments[gun];
+		if ( gun == SLOT_SECONDARY ) UI_ClassSpin(&classEdit.menu, &classEdit.secondary, "SECONDARY", classEdit.weapons, secondary, 180);
+		if ( mask < 0 ) mask = (int)trap_Cvar_VariableValue("cg_sight") == 1 ? BG_ATTACHMENT_REDDOT : 0;
+		for ( entry = 0; entry < BG_MAX_CLASS_ATTACHMENTS; entry++ ) {
+			int value = 0;
+			for ( i = 1; i < BG_AttachmentTypeCount(); i++ )
+				if ( mask & BG_AttachmentType(i) ) { value = i; mask &= ~BG_AttachmentType(i); break; }
+			UI_ClassSpin(&classEdit.menu, &classEdit.attachment[gun][entry], attachmentLabels[gun][entry],
+				classEdit.attachmentNames, value, 140 + gun * 60 + entry * 20);
+		}
+	}
+	UI_ClassSpin(&classEdit.menu, &classEdit.lethal, "GRENADE", lethals, loadout.lethal == WP_SEMTEX ? 2 : !!loadout.lethal, 240);
+	UI_ClassSpin(&classEdit.menu, &classEdit.lethalCount, "GRENADE COUNT", counts, loadout.lethalCount ? loadout.lethalCount - 1 : 0, 260);
+	UI_ClassSpin(&classEdit.menu, &classEdit.tactical, "TACTICAL", tacticals, !!loadout.tactical, 280);
+	UI_ClassSpin(&classEdit.menu, &classEdit.tacticalCount, "TACTICAL COUNT", counts, loadout.tacticalCount ? loadout.tacticalCount - 1 : 0, 300);
+	for ( i = 0; i < BG_PERK_SLOTS; i++ ) {
+		UI_ClassSpin(&classEdit.menu, &classEdit.perk[i], perkLabels[i], classEdit.perkNames, loadout.perk[i], 322 + i * 22);
+		classEdit.perk[i].generic.callback = UI_ClassAttachmentsChanged;
+	}
+	classEdit.primary.generic.callback = classEdit.secondary.generic.callback = UI_ClassAttachmentsChanged;
+	UI_ClassAttachmentsChanged(NULL, QM_ACTIVATED);
 	classEdit.lethal.generic.callback = UI_ClassEquipmentChanged;
 	classEdit.tactical.generic.callback = UI_ClassEquipmentChanged;
 	UI_ClassEquipmentChanged(NULL, QM_ACTIVATED);

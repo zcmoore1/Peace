@@ -56,6 +56,15 @@ PM_AddEvent
 ===============
 */
 void PM_AddEvent( int newEvent ) {
+	// Suppress at the predicted/server event source, not at the local listener.
+	// Other clients and replay viewers therefore hear the same thing.
+	switch ( newEvent ) {
+	case EV_FOOTSTEP: case EV_FOOTSTEP_METAL:
+	case EV_FOOTSPLASH: case EV_FOOTWADE: case EV_SWIM:
+		if ( BG_HasPerk(pm->ps, PERK_SILENT_FOOTSTEPS) ) return;
+		break;
+	default: break;
+	}
 	BG_AddPredictableEventToPlayerstate( newEvent, 0, pm->ps );
 }
 
@@ -320,7 +329,7 @@ static float PM_CmdScale( usercmd_t *cmd ) {
 		+ cmd->rightmove * cmd->rightmove + cmd->upmove * cmd->upmove );
 	scale = (float)speed * max / ( 127.0 * total );
 
-	return scale;
+	return scale * BG_MovementScale( pm->ps );
 }
 
 
@@ -527,8 +536,8 @@ static void PM_WaterMove( void ) {
 	VectorCopy (wishvel, wishdir);
 	wishspeed = VectorNormalize(wishdir);
 
-	if ( wishspeed > pm->ps->speed * pm_swimScale ) {
-		wishspeed = pm->ps->speed * pm_swimScale;
+	if ( wishspeed > pm->ps->speed * BG_MovementScale( pm->ps ) * pm_swimScale ) {
+		wishspeed = pm->ps->speed * BG_MovementScale( pm->ps ) * pm_swimScale;
 	}
 
 	PM_Accelerate (wishdir, wishspeed, pm_wateraccelerate);
@@ -808,7 +817,8 @@ static void PM_LadderMove( void ) {
 	wishdir[2] = pm->cmd.forwardmove;
 	maxInput = abs( pm->cmd.forwardmove );
 	if ( abs( pm->cmd.rightmove ) > maxInput ) maxInput = abs( pm->cmd.rightmove );
-	wishspeed = VectorNormalize( wishdir ) > 0 ? BG_LADDER_SPEED * maxInput / 127.0f : 0;
+	wishspeed = VectorNormalize( wishdir ) > 0 ?
+		BG_LADDER_SPEED * BG_MovementScale( pm->ps ) * maxInput / 127.0f : 0;
 	PM_Accelerate( wishdir, wishspeed, BG_LADDER_ACCELERATE );
 	PM_SlideMove( qfalse );
 }
@@ -901,8 +911,8 @@ static void PM_WalkMove( void ) {
 
 	// clamp the speed lower if ducking
 	if ( pm->ps->pm_flags & PMF_DUCKED ) {
-		if ( wishspeed > pm->ps->speed * pm_duckScale ) {
-			wishspeed = pm->ps->speed * pm_duckScale;
+		if ( wishspeed > pm->ps->speed * BG_MovementScale( pm->ps ) * pm_duckScale ) {
+			wishspeed = pm->ps->speed * BG_MovementScale( pm->ps ) * pm_duckScale;
 		}
 	}
 
@@ -912,8 +922,8 @@ static void PM_WalkMove( void ) {
 
 		waterScale = pm->waterlevel / 3.0;
 		waterScale = 1.0 - ( 1.0 - pm_swimScale ) * waterScale;
-		if ( wishspeed > pm->ps->speed * waterScale ) {
-			wishspeed = pm->ps->speed * waterScale;
+		if ( wishspeed > pm->ps->speed * BG_MovementScale( pm->ps ) * waterScale ) {
+			wishspeed = pm->ps->speed * BG_MovementScale( pm->ps ) * waterScale;
 		}
 	}
 
@@ -1871,6 +1881,10 @@ int BG_WeaponReloadSegLength( int weapon, int seq ) {
 	return BG_WeaponReload( weapon )->seg[seq].length;
 }
 
+int BG_ReloadSegmentTime( const playerState_t *ps, int seq ) {
+	return BG_ReloadTime(ps, BG_WeaponReloadSegLength(ps->weapon, seq));
+}
+
 // Nominal single-pass length. Only a rough number for HUD/feel code - the real
 // duration of a shell-at-a-time reload depends on how many rounds go in.
 int BG_WeaponReloadTime( int weapon ) {
@@ -2338,6 +2352,9 @@ void BG_ApplyLoadout( playerState_t *ps, int classIndex ) {
 void BG_ApplyClass( playerState_t *ps, const bg_class_t *cl ) {
 	int					i, w;
 	if ( !BG_ValidateClass(cl) ) cl = BG_Class(0);
+	ps->perks = 0;
+	for ( i = 0; i < BG_PERK_SLOTS; i++ )
+		if ( cl->perk[i] != PERK_NONE ) ps->perks |= 1 << (cl->perk[i] - 1);
 
 	ps->stats[STAT_WEAPONS] = 0;
 	for ( i = 0; i < MAX_WEAPONS; i++ ) {
@@ -2356,7 +2373,8 @@ void BG_ApplyClass( playerState_t *ps, const bg_class_t *cl ) {
 		ps->ammoReserve[w] = BG_WeaponMaxReserve( w );
 		ps->slotAmmo[i] = ps->ammo[w];
 		ps->slotReserve[i] = ps->ammoReserve[w];
-		ps->slotAttachments[i] = ps->slotFlags[i] = 0;
+		ps->slotFlags[i] = 0;
+		ps->slotAttachments[i] = cl->attachments[i] < 0 ? 0 : cl->attachments[i];
 	}
 	ps->stats[STAT_ACTIVE_SLOT] = SLOT_PRIMARY;
 
@@ -2401,7 +2419,7 @@ static void PM_BeginReload( void ) {
 	pm->ps->weaponstate    = WEAPON_RELOADING;
 	pm->ps->weaponAnimSeq  = RSEQ_START;
 	pm->ps->weaponAnimTime = 0;
-	pm->ps->weaponTime     = BG_WeaponReloadSegLength( pm->ps->weapon, RSEQ_START );
+	pm->ps->weaponTime     = BG_ReloadSegmentTime( pm->ps, RSEQ_START );
 	pm->ps->pm_flags      &= ~PMF_PENDING_MAG;
 	PM_StartTorsoAnim( TORSO_GESTURE );
 	// The sound belongs to WNOTE_MAG_OUT, not to starting the reload.
@@ -2533,7 +2551,8 @@ static void PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 	n = PM_SegNotes( pm->ps->weapon, pm->ps->weaponAnimSeq );
 
 	for ( ; n->note != WNOTE_NONE; n++ ) {
-		if ( !( oldElapsed < n->time && newElapsed >= n->time ) ) {
+		int noteTime = pm->ps->weaponAnimSeq == ASEQ_FIRE ? n->time : BG_ReloadTime(pm->ps, n->time);
+		if ( !( oldElapsed < noteTime && newElapsed >= noteTime ) ) {
 			continue;
 		}
 
@@ -2606,17 +2625,17 @@ static void PM_AdvanceReloadSegments( void ) {
 	     pm->ps->weaponAnimSeq != RSEQ_END ) {
 		pm->ps->weaponAnimSeq  = RSEQ_END;
 		pm->ps->weaponAnimTime = 0;
-		pm->ps->weaponTime     = rl->seg[RSEQ_END].length;
+		pm->ps->weaponTime     = BG_ReloadSegmentTime(pm->ps, RSEQ_END);
 	}
 
 	for ( guard = 0; guard < RSEQ_COUNT + 4; guard++ ) {
-		const bg_weaponAnimSeg_t *seg = &rl->seg[ pm->ps->weaponAnimSeq ];
+		int length = BG_ReloadSegmentTime(pm->ps, pm->ps->weaponAnimSeq);
 
-		if ( seg->length > 0 ) {
-			if ( pm->ps->weaponAnimTime < seg->length ) {
+		if ( length > 0 ) {
+			if ( pm->ps->weaponAnimTime < length ) {
 				return;						// still playing
 			}
-			pm->ps->weaponAnimTime -= seg->length;	// carry the overshoot
+			pm->ps->weaponAnimTime -= length;	// carry the overshoot
 		}
 
 		switch ( pm->ps->weaponAnimSeq ) {
@@ -2643,7 +2662,7 @@ static void PM_AdvanceReloadSegments( void ) {
 
 		// Re-arm the busy lock for the segment we just entered. Each loop pass
 		// gets its own lock, so each pass is independently cancelable.
-		pm->ps->weaponTime = rl->seg[ pm->ps->weaponAnimSeq ].length;
+		pm->ps->weaponTime = BG_ReloadSegmentTime(pm->ps, pm->ps->weaponAnimSeq);
 	}
 }
 

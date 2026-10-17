@@ -1579,7 +1579,7 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	// RAISING, which drops out of this branch: the reload clip is abandoned and
 	// the new gun raises from frame 0 - no drop is played for it.
 	if ( ps->weaponstate == WEAPON_RELOADING && ps->weaponAnimTime >= 0 ) {
-		int   segLen = BG_WeaponReloadSegLength( ps->weapon, ps->weaponAnimSeq );
+		int   segLen = BG_ReloadSegmentTime( ps, ps->weaponAnimSeq );
 		float t;
 		float arc;
 

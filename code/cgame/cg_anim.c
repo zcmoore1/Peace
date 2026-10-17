@@ -420,7 +420,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	// loop wrap or a cancelled reload cannot leave the viewmodel on a stale
 	// client-side stopwatch, because there is no client-side stopwatch.
 	if ( ps->weaponstate == WEAPON_RELOADING ) {
-		int duration = BG_WeaponReloadSegLength( ps->weapon, ps->weaponAnimSeq );
+		int duration = BG_ReloadSegmentTime( ps, ps->weaponAnimSeq );
 		base->time = duration > 0 ? (float)ps->weaponAnimTime / duration *
 		             CG_WeapAnim_ClipLength( def, base->clip ) : 0.0f;
 	} else if ( ( ps->weaponstate == WEAPON_FIRING ||

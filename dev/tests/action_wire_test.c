@@ -16,8 +16,8 @@ int main(void) {
  playerState_t from,to,decoded;
  byte data[MAX_MSGLEN]; msg_t msg; int i,j;
  for(i=0;i<512;i++) for(j=0;j<512;j++) {
-  memset(&from,0,sizeof(from)); from.weaponAction=i;
-  to=from; to.weaponAction=j;
+  memset(&from,0,sizeof(from)); from.weaponAction=i; from.perks=i&((1<<PS_PERK_BITS)-1);
+  to=from; to.weaponAction=j; to.perks=j&((1<<PS_PERK_BITS)-1);
   to.ammo[3]=7; to.ammoReserve[3]=24;
   to.stats[PS_STAT_WEAPONS]=(1<<14)|(1<<17)|(1<<(MAX_WEAPONS-1));
   to.stats[PS_STAT_UNCHAMBERED]=(1<<15)|(1<<18)|(1<<(MAX_WEAPONS-1));
@@ -33,6 +33,7 @@ int main(void) {
   CHECK(!msg.overflowed); MSG_BeginReading(&msg);
   MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
   CHECK(decoded.weaponAction==j);
+  CHECK(decoded.perks==to.perks);
   CHECK(decoded.ammo[3]==7 && decoded.ammoReserve[3]==24);
   CHECK(decoded.stats[PS_STAT_WEAPONS]==to.stats[PS_STAT_WEAPONS]);
   CHECK(decoded.stats[PS_STAT_UNCHAMBERED]==to.stats[PS_STAT_UNCHAMBERED]);

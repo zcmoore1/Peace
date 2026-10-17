@@ -558,7 +558,7 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 			if ( ent->s.eType != ET_PLAYER ) {
 				break;		// not in the player model
 			}
-			if ( g_dmflags.integer & DF_NO_FALLING ) {
+			if ( (g_dmflags.integer & DF_NO_FALLING) || BG_HasPerk(&client->ps, PERK_NO_FALL_DAMAGE) ) {
 				break;
 			}
 			if ( event == EV_FALL_FAR ) {

@@ -72,6 +72,8 @@ jobs:
           out/tests/sights-test
       - name: Test saved classes, YY, quick actions, poses and network deltas
         run: |
+          sh dev/tests/run-perks.sh
+          PERK_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-perks.sh
           python3 dev/tools/build_semtex_assets.py --check
           sh dev/tests/run-loadouts.sh
           LOADOUT_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-loadouts.sh

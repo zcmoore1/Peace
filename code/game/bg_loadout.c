@@ -16,6 +16,81 @@ static const struct { const char *name; int primary, secondary, lethal, tactical
 static bg_class_t bg_classes[ARRAY_LEN(presets)];
 static qboolean classesReady;
 
+static const struct { int mask; const char *name; } attachmentTypes[] = {
+	{ 0, "None" }, { BG_ATTACHMENT_REDDOT, "Red dot" }
+};
+int BG_AttachmentTypeCount( void ) { return ARRAY_LEN(attachmentTypes); }
+int BG_AttachmentType( int index ) {
+	return index >= 0 && index < BG_AttachmentTypeCount() ? attachmentTypes[index].mask : 0;
+}
+const char *BG_AttachmentName( int index ) {
+	return index >= 0 && index < BG_AttachmentTypeCount() ? attachmentTypes[index].name : "None";
+}
+
+static const bg_perkDef_t perks[BG_PERK_COUNT] = {
+	{ "None", "Leave this perk slot empty.", 100, 1, 100 },
+	{ "Quick Reload", "Half reload time. Swap and bolt speeds are unchanged.", 50, 1, 100 },
+	{ "9 Lives", "Landing cannot damage you. Other damage is unchanged.", 100, 1, 100 },
+	{ "Inaudible", "Silent running and wading footsteps for everyone.", 100, 1, 100 },
+	{ "Second Nature", "Two attachments per gun. Only red dots are available so far.", 100, 2, 100 },
+	{ "Expeditious", "10% faster movement. Jump height and weapon speeds unchanged.", 100, 1, 110 }
+};
+typedef char perkMaskFitsWire[(BG_PERK_COUNT - 1 <= PS_PERK_BITS) ? 1 : -1];
+
+const bg_perkDef_t *BG_Perk( int perk ) {
+	if ( perk < PERK_NONE || perk >= BG_PERK_COUNT ) perk = PERK_NONE;
+	return &perks[perk];
+}
+qboolean BG_HasPerk( const playerState_t *ps, int perk ) {
+	return ps && perk > PERK_NONE && perk < BG_PERK_COUNT &&
+		(ps->perks & (1 << (perk - 1))) != 0;
+}
+// Derived for each command, never accumulated into ps->speed or velocity.
+// Use the same modifier for locomotion and its crouch/water/ladder limits.
+float BG_MovementScale( const playerState_t *ps ) {
+	int perk;
+	float scale = 1.0f;
+	for ( perk = 1; perk < BG_PERK_COUNT; perk++ )
+		if ( BG_HasPerk(ps, perk) ) scale *= perks[perk].movementPercent / 100.0f;
+	return scale;
+}
+qboolean BG_ClassPerksValid( const bg_class_t *loadout ) {
+	int slot, seen = 0;
+	if ( !loadout ) return qfalse;
+	for ( slot = 0; slot < BG_PERK_SLOTS; slot++ ) {
+		int perk = loadout->perk[slot], bit;
+		if ( perk < PERK_NONE || perk >= BG_PERK_COUNT ) return qfalse;
+		if ( perk == PERK_NONE ) continue;
+		bit = 1 << (perk - 1);
+		if ( seen & bit ) return qfalse;
+		seen |= bit;
+	}
+	return qtrue;
+}
+int BG_AttachmentLimit( const playerState_t *ps ) {
+	int perk, limit = perks[PERK_NONE].attachmentLimit;
+	for ( perk = 1; perk < BG_PERK_COUNT; perk++ )
+		if ( BG_HasPerk(ps, perk) && perks[perk].attachmentLimit > limit ) limit = perks[perk].attachmentLimit;
+	return limit;
+}
+int BG_AttachmentCount( int mask ) {
+	unsigned int bits = (unsigned int)mask;
+	int count = 0;
+	while ( bits ) { count++; bits &= bits - 1; }
+	return count;
+}
+
+// Retiming is a pure lookup, never a clock accumulator. Apply it equally to
+// authored notes and segment endpoints; positive timestamps round up to 1 ms.
+// Fire/bolt, swap, equipment and pickup clocks never use this rule.
+int BG_ReloadTime( const playerState_t *ps, int authoredTime ) {
+	int perk, time = authoredTime;
+	if ( time <= 0 ) return 0;
+	for ( perk = 1; perk < BG_PERK_COUNT; perk++ )
+		if ( BG_HasPerk(ps, perk) ) time = (time * perks[perk].reloadPercent + 99) / 100;
+	return time;
+}
+
 // Quick actions reuse weapon states, but never become either inventory slot.
 // Gameplay and presentation share this classification, including recovery.
 qboolean BG_IsActionWeapon( int weapon ) {
@@ -50,6 +125,7 @@ const bg_class_t *BG_Class( int index ) {
 			bg_classes[i].lethalCount = presets[i].lethal;
 			bg_classes[i].tactical = WP_FLASH;
 			bg_classes[i].tacticalCount = presets[i].tactical;
+			bg_classes[i].attachments[0] = bg_classes[i].attachments[1] = -1;
 		}
 		classesReady = qtrue;
 	}
@@ -87,7 +163,7 @@ static qboolean BG_ClassNameValid( const char *name ) {
 	return qfalse;
 }
 qboolean BG_ValidateClass( const bg_class_t *loadout ) {
-	int i;
+	int i, limit = perks[PERK_NONE].attachmentLimit;
 	if ( !loadout || !BG_ClassNameValid(loadout->name) ) return qfalse;
 	if ( !BG_IsClassWeapon(loadout->slot[0]) || !BG_IsClassWeapon(loadout->slot[1]) ||
 		loadout->slot[0] == loadout->slot[1] ) return qfalse;
@@ -97,7 +173,15 @@ qboolean BG_ValidateClass( const bg_class_t *loadout ) {
 		loadout->tacticalCount < 0 || loadout->tacticalCount > 3 ) return qfalse;
 	if ( (loadout->lethal == WP_NONE) != (loadout->lethalCount == 0) ||
 		(loadout->tactical == WP_NONE) != (loadout->tacticalCount == 0) ) return qfalse;
-	for ( i = 0; i < BG_PERK_SLOTS; i++ ) if ( loadout->perk[i] != 0 ) return qfalse;
+	if ( !BG_ClassPerksValid(loadout) ) return qfalse;
+	for ( i = 0; i < BG_PERK_SLOTS; i++ )
+		if ( perks[loadout->perk[i]].attachmentLimit > limit ) limit = perks[loadout->perk[i]].attachmentLimit;
+	for ( i = 0; i < SLOT_COUNT; i++ ) {
+		int mask = loadout->attachments[i];
+		if ( mask == -1 ) continue; // old saved classes still use cg_sight
+		if ( mask < 0 || (mask & ~BG_WeaponAttachmentMask(loadout->slot[i])) ||
+			BG_AttachmentCount(mask) > limit ) return qfalse;
+	}
 	return qtrue;
 }
 
@@ -118,12 +202,18 @@ qboolean BG_ParseClass( const char *text, bg_class_t *loadout ) {
 	int version, i;
 	if ( !text || strlen(text) >= BG_CLASS_STRING_SIZE ) return qfalse;
 	memset(&result, 0, sizeof(result));
-	if ( !BG_ClassNumber(&text, &version) || version != 1 ||
+	if ( !BG_ClassNumber(&text, &version) || (version != 1 && version != 2) ||
 		!BG_ClassNumber(&text, &result.slot[0]) || !BG_ClassNumber(&text, &result.slot[1]) ||
 		!BG_ClassNumber(&text, &result.lethal) || !BG_ClassNumber(&text, &result.lethalCount) ||
 		!BG_ClassNumber(&text, &result.tactical) || !BG_ClassNumber(&text, &result.tacticalCount) ) return qfalse;
 	for ( i = 0; i < BG_PERK_SLOTS; i++ )
 		if ( !BG_ClassNumber(&text, &result.perk[i]) ) return qfalse;
+	for ( i = 0; i < SLOT_COUNT; i++ ) {
+		result.attachments[i] = -1;
+		if ( version == 2 && !BG_ClassNumber(&text, &result.attachments[i]) ) return qfalse;
+		// Version 2 encodes the legacy preference as 256, outside its 8-bit mask.
+		if ( result.attachments[i] == BG_ATTACHMENTS_LEGACY ) result.attachments[i] = -1;
+	}
 	if ( strlen(text) >= sizeof(result.name) ) return qfalse;
 	Q_strncpyz(result.name, text, sizeof(result.name));
 	if ( !BG_ValidateClass(&result) ) return qfalse;
@@ -133,10 +223,12 @@ qboolean BG_ParseClass( const char *text, bg_class_t *loadout ) {
 qboolean BG_SerializeClass( const bg_class_t *loadout, char *text, int size ) {
 	char result[BG_CLASS_STRING_SIZE];
 	if ( !BG_ValidateClass(loadout) ) return qfalse;
-	Com_sprintf(result, sizeof(result), "1|%i|%i|%i|%i|%i|%i|%i|%i|%i|%s",
+	Com_sprintf(result, sizeof(result), "2|%i|%i|%i|%i|%i|%i|%i|%i|%i|%i|%i|%s",
 		loadout->slot[0], loadout->slot[1], loadout->lethal, loadout->lethalCount,
 		loadout->tactical, loadout->tacticalCount,
-		loadout->perk[0], loadout->perk[1], loadout->perk[2], loadout->name);
+		loadout->perk[0], loadout->perk[1], loadout->perk[2],
+		loadout->attachments[0] < 0 ? BG_ATTACHMENTS_LEGACY : loadout->attachments[0],
+		loadout->attachments[1] < 0 ? BG_ATTACHMENTS_LEGACY : loadout->attachments[1], loadout->name);
 	if ( size <= (int)strlen(result) ) return qfalse;
 	Q_strncpyz(text, result, size);
 	return qtrue;

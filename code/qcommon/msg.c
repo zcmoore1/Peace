@@ -1106,6 +1106,7 @@ netField_t	playerStateFields[] =
 { PSF(weaponAnimSeq), 2 },
 { PSF(weaponAction), 9 },
 { PSF(weaponDraw), 1 },
+{ PSF(perks), PS_PERK_BITS },
 { PSF(slotAmmo[0]), -16 },
 { PSF(slotAmmo[1]), -16 },
 { PSF(slotReserve[0]), 16 },

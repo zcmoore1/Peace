@@ -304,6 +304,19 @@ static void TestFirstDraw(weapAnimDef_t *def, int weapon) {
  for(t=0;t<100;t++) Update(def,&ps,1);
  CHECK(cg_weapLayers[LAYER_RETAINED].weight==0);
 }
+static void TestReloadPerk(weapAnimDef_t *def,int weapon) {
+ playerState_t ps;int seq,perk,duration;
+ for(seq=0;seq<RSEQ_COUNT;seq++)for(perk=0;perk<2;perk++) {
+  Ready(&ps,weapon);ps.perks=perk ? 1<<(PERK_QUICK_RELOAD-1) : 0;
+  duration=BG_ReloadSegmentTime(&ps,seq);if(!duration)continue;
+  ps.weaponstate=WEAPON_RELOADING;ps.weaponAnimSeq=seq;ps.weaponAnimTime=duration/2;
+  Update(def,&ps,16);
+  CHECK(cg_weapLayers[LAYER_BASE].clip==WANIM_RELOAD_START+seq);
+  CHECK(fabs(cg_weapLayers[LAYER_BASE].time-
+    (float)(duration/2)/duration*CG_WeapAnim_ClipLength(def,WANIM_RELOAD_START+seq))<.01f);
+  CHECK(!cg_retainedActive);
+ }
+}
 int main(void) {
  playerState_t ps;
  const int states[]={WEAPON_READY,WEAPON_FIRING,WEAPON_BOLTING};
@@ -327,9 +340,11 @@ int main(void) {
  TestSprint(def,WP_SHOTGUN);
  TestOwnership(def); TestExclusions(def); TestRelease(def); TestContext(def);
  TestFirstDraw(def,WP_SHOTGUN);
+ TestReloadPerk(def,WP_SHOTGUN);
  CG_WeapAnim_RegisterClips(WP_M40A3,2,"assets/baseq3/models/weapons2/m40a3/view.cfg");
  def=&bg_weapAnimDefs[WP_M40A3];
  TestSprint(def,WP_M40A3); TestFirstDraw(def,WP_M40A3);
+ TestReloadPerk(def,WP_M40A3);
  TestOwnership(def); TestExclusions(def);
  printf("PASS: %d weapon presentation ownership checks\n",checks); return 0;
 }

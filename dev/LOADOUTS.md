@@ -12,13 +12,47 @@ to the main menu.
 2. Set the name, primary, secondary, grenade and tactical equipment. Both weapon
    slots use the existing gun catalog and must contain different guns. Equipment
    can be None, Frag or Semtex for lethal, and Flash for tactical, with 1–3 charges.
+   Highlight PERK 1, PERK 2 or PERK 3 and use left/right to cycle the perk roster.
 3. **SAVE CLASS**, then **SELECT CLASS**. Selection applies on the next spawn;
    selecting or editing a class never refills the current life's ammo.
 
 Melee is always a button action. It is not selectable as a primary/secondary.
-The three perk slots are reserved and displayed as unassigned. There are no perk
-effects or invented perk roster in this change. Nonzero perk IDs are rejected
-until a supported roster is defined.
+Each of the three perk slots can select **None**, **Quick Reload**, **9 Lives**,
+**Inaudible**, **Second Nature**, or **Expeditious**. Perks must
+be distinct; choose any three of the five, or leave slots empty. Existing presets
+are unchanged.
+
+- Quick Reload halves authored reload segments and their notetrack timestamps
+  together. The predicted animation and server ammo events stay aligned. It does
+  not speed up firing/bolting, swapping, first draw, equipment or pickup holds.
+- 9 Lives prevents server-applied landing damage. It does not change
+  gravity, landing movement, camera feedback, or protection from other damage.
+- Inaudible suppresses running, metal, wading and swimming footstep
+  events at their shared source, for all listeners including replay viewers.
+  It is not a mute-all perk: shots, reloads, jump sounds, heavier landing impacts
+  and entering/leaving water still behave normally.
+- Second Nature unlocks a second optional attachment slot **on each gun**.
+  Without it the class editor allows one. The current optional attachment
+  roster contains only Red dot, so a distinct two-attachment combination is
+  not yet available. The M300's integral scope does not consume a slot and
+  does not support a red dot. No fictional attachment is added to fill the slot.
+- Expeditious gives **10% faster movement**, including sprinting, ADS movement,
+  crouching, swimming and ladder climbing. It changes desired movement speed,
+  not jump height, gravity, knockback or weapon timings. The catalog's
+  `movementPercent` is the tuning value. Shared movement derives the multiplier
+  per command without modifying `ps.speed`, so prediction cannot compound it.
+
+Attachment choices are now per gun in Create Class. Capacity and compatibility
+are validated on the server as part of the saved class. They apply to spawn
+loadouts, not to looted guns: pickup instances keep the attachments they carried.
+Removing Second Nature clears the extra editor slots before saving. Duplicate
+perks/attachments are rejected rather than stacked.
+
+Class serialization version 2 adds the two attachment masks; version 1 classes
+still load and inherit the old `cg_sight` preference at spawn. New editor saves
+store explicit choices, so changing `cg_sight` will not overwrite them. The active
+perk mask is a predicted/replayed playerstate field (protocol **76**, game **-6**).
+Changing class during a life takes effect only at the next spawn.
 
 Custom names allow 1–23 letters, numbers, spaces, hyphens and underscores. Back
 discards unsaved edits. Editing an already selected class updates its next-spawn
@@ -40,6 +74,10 @@ in archived cvars; this is local persistence, not cloud account synchronization.
 Copy the updated `dev/peace-gamepad.cfg` to the build's `baseq3` directory if
 using the supplied controller config. Classes can also be selected with
 `class 0`–`class 3` for presets and `class 4`–`class 8` for custom slots.
+In a match, press Escape and choose **CLASS SELECT**, or enter `class` in the
+console. Highlight the CLASS row, use left/right to choose a saved class, then
+activate **SELECT CLASS**. `class 4` directly selects the first saved custom
+class. The new loadout arrives on the next spawn (next round in S&D), not instantly.
 
 ## YY behavior
 
@@ -116,9 +154,13 @@ inventory mask. Both builds run the shared class/action regression tests.
 Run `dev/tests/run-loadouts.cmd` from the VS native tools prompt, or
 `sh dev/tests/run-loadouts.sh` on Linux. These exercise the real gameplay,
 menu callbacks, archived cvar boundary, playerstate codec and pose layers.
+`sh dev/tests/run-perks.sh` checks perk combinations, both class formats,
+reload note/cancel boundaries, footstep generation, authoritative fall damage,
+movement caps, jump invariance and repeatable prediction.
 Existing reload, sight and ladder regressions are separate CI gates.
 
 Manual checks: reopen a saved class; select it while partially empty and verify
 ammo is unchanged until respawn; YY while ready, during raise, and before/after
 reload insertion; tap and hold melee/equipment; repeat with a controller.
-`peacedump` includes the action type/fired latch/held buttons for diagnosis.
+`peacedump` includes active perks, base speed, movement scale, effective reload
+note times and the action type/fired latch/held buttons for diagnosis.

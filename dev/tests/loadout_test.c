@@ -79,7 +79,7 @@ static void TestClasses(void) {
  memset(&ps,0,sizeof(ps)); BG_ApplyClass(&ps,&cl);
  CHECK(!(ps.stats[STAT_WEAPONS]&((1<<WP_FRAG)|(1<<WP_FLASH))));
  CHECK(!BG_SerializeClass(&cl,small,sizeof(small)));
- cl.perk[1]=1; CHECK(!BG_ValidateClass(&cl));
+ cl.perk[1]=BG_PERK_COUNT; CHECK(!BG_ValidateClass(&cl));
  cl=*BG_Class(0); cl.slot[0]=WP_KNIFE; CHECK(!BG_ValidateClass(&cl));
  cl=*BG_Class(0); cl.lethalCount=4; CHECK(!BG_ValidateClass(&cl));
  cl=*BG_Class(0); cl.tacticalCount=0; CHECK(!BG_ValidateClass(&cl));

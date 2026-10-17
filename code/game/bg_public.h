@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-5"
+#define	GAME_VERSION		BASEGAME "-6"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -325,6 +325,8 @@ int  BG_WeaponMaxReserve( int weapon );
 int  BG_WeaponReloadTime( int weapon );		// nominal single-pass length (start+loop+end)
 const bg_weaponReload_t *BG_WeaponReload( int weapon );
 int  BG_WeaponReloadSegLength( int weapon, int seq );
+int  BG_ReloadTime( const playerState_t *ps, int authoredTime );
+int  BG_ReloadSegmentTime( const playerState_t *ps, int seq );
 int  BG_HolsterTime( const playerState_t *ps );	// the holster this player is doing right now
 int  BG_WeaponFireLength( int weapon );		// 0 = no modelled fire animation
 int  BG_WeaponDropTime( int weapon );		// holster length, never 0
@@ -510,6 +512,11 @@ typedef enum {
 // attached copies of one gun). Plain weapon IDs remain valid for bots/tools.
 #define BG_SLOT_COMMAND 128
 #define BG_ATTACHMENT_REDDOT 1
+#define BG_MAX_CLASS_ATTACHMENTS 2
+#define BG_ATTACHMENTS_LEGACY 256 // version-2 class encoding of cg_sight fallback
+int BG_AttachmentTypeCount( void );
+int BG_AttachmentType( int index );
+const char *BG_AttachmentName( int index );
 int BG_WeaponAttachmentMask(int weapon);
 #define BG_GUN_FIRST_DRAW 1
 #define BG_GUN_UNCHAMBERED 2
@@ -535,8 +542,22 @@ qboolean BG_UpdateWeaponPickup(playerState_t *ps, const usercmd_t *cmd,
 #define BG_CLASS_STRING_SIZE 160
 #define BG_PERK_SLOTS         3
 
-// A class has two guns, separate equipment and three reserved perk slots.
-// Only perk ID 0 (unassigned) is supported until a gameplay roster is defined.
+// Stable saved-class IDs. Nonzero IDs occupy bit (ID - 1) in ps->perks.
+typedef enum {
+	PERK_NONE, PERK_QUICK_RELOAD, PERK_NO_FALL_DAMAGE, PERK_SILENT_FOOTSTEPS,
+	PERK_SECOND_NATURE, PERK_EXPEDITIOUS, BG_PERK_COUNT
+} bg_perk_t;
+typedef struct {
+	const char *name, *description;
+	int reloadPercent, attachmentLimit, movementPercent;
+} bg_perkDef_t;
+const bg_perkDef_t *BG_Perk( int perk );
+qboolean BG_HasPerk( const playerState_t *ps, int perk );
+float BG_MovementScale( const playerState_t *ps );
+int BG_AttachmentLimit( const playerState_t *ps );
+int BG_AttachmentCount( int mask );
+
+// A class has two guns, separate equipment and three distinct optional perks.
 // Melee is always a button action, never one of the two gun slots.
 typedef struct {
 	char        name[BG_CLASS_NAME_SIZE];
@@ -546,7 +567,9 @@ typedef struct {
 	int			tactical;			// weapon_t thrown by BUTTON_TACTICAL
 	int			tacticalCount;
 	int         perk[BG_PERK_SLOTS];
+	int         attachments[SLOT_COUNT]; // -1 = legacy cg_sight preference
 } bg_class_t;
+qboolean BG_ClassPerksValid( const bg_class_t *loadout );
 
 int					BG_ClassCount( void );
 const bg_class_t	*BG_Class( int index );

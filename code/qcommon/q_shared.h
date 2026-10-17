@@ -1139,6 +1139,8 @@ typedef struct {
 // playerState_t is a full superset of entityState_t as it is used by players,
 // so if a playerState_t is transmitted, the entityState_t can be fully derived
 // from it.
+#define PS_PERK_BITS 5
+
 typedef struct playerState_s {
 	int			commandTime;	// cmd->serverTime of last executed command
 	int			pm_type;
@@ -1186,6 +1188,7 @@ typedef struct playerState_s {
 	int			weaponAction;	// action, button history, cancel acknowledgement, recovery (9 bits)
 	int			weaponAnimSeq;	// which reload segment is playing (reloadSeq_t)
 	int             weaponDraw;     // 0 ordinary raise, 1 first deployment
+	int             perks;          // spawn-owned perk mask, predicted and replayed
 	// Slot-owned inventory. ammo[] remains the working cache used by weapon
 	// notes; stowed variants of the same base gun keep independent magazines.
 	int             slotAmmo[2], slotReserve[2], slotAttachments[2], slotFlags[2];

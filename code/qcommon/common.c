@@ -32,7 +32,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #endif
 
 int demo_protocols[] =
-{ 0 }; // Peace protocol 72 only; old playerstate demos cannot be decoded safely.
+{ 0 }; // Current Peace protocol only; old playerstate layouts cannot be decoded safely.
 
 #define MAX_NUM_ARGVS	50
 

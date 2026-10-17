@@ -151,12 +151,26 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 9-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, and post-throw recovery. Protocol 75 requires client, server
+  swap edge latch, and post-throw recovery. Protocol 76 requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
   Dropped ET_ITEM uses `generic1` for attachments, `time2` for packed magazine
   and reserve, `otherEntityNum2` for chamber debt, and `time` as a spawn serial.
+- `perks` is a five-bit spawn-owned playerstate field. All three class perk
+  slots share the roster in `bg_loadout.c`; duplicate nonzero IDs are invalid.
+  Quick Reload retimes authored notes, segment endpoints and presentation via
+  `BG_ReloadTime`/`BG_ReloadSegmentTime`, never by changing clock progression or
+  note/holster/fill ordering. Fire/bolt, swap and pickup timings stay unchanged.
+  Inaudible filters shared footstep events only; falling damage events still
+  reach the server, which separately applies 9 Lives (no fall damage).
+  Expeditious scales each command's movement and crouch/water/ladder limits
+  through `BG_MovementScale`; never mutate `ps.speed`, jump impulse or timers.
+  Second Nature raises the per-gun class attachment limit to two. Only Red dot
+  is implemented so far; the capacity rule must not invent other attachments.
+  Pickup instances keep their own attachments regardless of the looter's perks.
+  Class format 2 stores attachment masks; format 1 retains `cg_sight` fallback.
+  Run `dev/tests/run-perks.sh` and the loadout suite after perk changes.
 - `stats[]` — **15 of 16 used in baseq3; all 16 in missionpack.** Every entry round-trips as a SIGNED
   short (`MSG_WriteShort`) except `STAT_WEAPONS` and `STAT_UNCHAMBERED`.
   Both weapon masks are full-width so guns at IDs 15+ keep chamber debt through

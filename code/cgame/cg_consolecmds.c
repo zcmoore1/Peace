@@ -511,11 +511,17 @@ static void CG_PeaceDump_f( void ) {
 	rl = BG_WeaponReload( w );
 
 	CG_Printf( "---------------- peacedump ----------------\n" );
+	CG_Printf( "perks    mask %i", ps->perks );
+	for ( i = 1; i < BG_PERK_COUNT; i++ )
+		if ( BG_HasPerk(ps, i) ) CG_Printf( "   %s", BG_Perk(i)->name );
+	CG_Printf( "\n" );
 	CG_Printf( "replay   %i   viewer %i   camera %i   snapshot %i\n",
 		!!CG_Killcam_Active(), cg.clientNum, ps->clientNum, cg.snap ? cg.snap->serverTime : 0 );
 	CG_Printf( "position %.1f %.1f %.1f   ground %i   health %i\n",
 		ps->origin[0], ps->origin[1], ps->origin[2], ps->groundEntityNum,
 		ps->stats[STAT_HEALTH] );
+	CG_Printf( "movement base %i   perkScale %.3f   velocity %.1f %.1f %.1f\n",
+		ps->speed, BG_MovementScale(ps), ps->velocity[0], ps->velocity[1], ps->velocity[2] );
 	if ( cgs.gametype == GT_SND ) {
 		CG_Printf( "snd      %s\n", CG_ConfigString(CS_SND) );
 		CG_Printf( "sites    %s\n", CG_ConfigString(CS_SND_SITES) );
@@ -572,13 +578,13 @@ static void CG_PeaceDump_f( void ) {
 		LADDER_FACING( ps->stats[STAT_LADDER] ), BG_LADDER_DROP_TIME );
 
 	for ( i = 0; i < RSEQ_COUNT; i++ ) {
-		CG_Printf( "reload   %-5s len %4i  notes:", CG_PD_SeqName( i ), rl->seg[i].length );
+		CG_Printf( "reload   %-5s len %4i  notes:", CG_PD_SeqName( i ), BG_ReloadSegmentTime(ps, i) );
 		n = rl->seg[i].notes;
 		if ( !n || n->note == WNOTE_NONE ) {
 			CG_Printf( " (none)" );
 		} else {
 			for ( ; n->note != WNOTE_NONE; n++ ) {
-				CG_Printf( " [%i:%s%s]", n->time,
+				CG_Printf( " [%i:%s%s]", BG_ReloadTime(ps, n->time),
 					( n->note == WNOTE_MAG_OUT )    ? "MAG_OUT"     :
 					( n->note == WNOTE_MAG_IN )     ? "MAG_IN"      :
 					( n->note == WNOTE_BOLT_CLOSED )? "BOLT_CLOSED" : "?",

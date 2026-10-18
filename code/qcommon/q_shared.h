@@ -1188,6 +1188,7 @@ typedef struct playerState_s {
 	int			weaponAction;	// action, button history, cancel acknowledgement, recovery (9 bits)
 	int			weaponAnimSeq;	// which reload segment is playing (reloadSeq_t)
 	int             weaponDraw;     // 0 ordinary raise, 1 first deployment
+	int             weaponReleaseTime; // server time the gun is handed back after a quick action
 	int             perks;          // spawn-owned perk mask, predicted and replayed
 	// Slot-owned inventory. ammo[] remains the working cache used by weapon
 	// notes; stowed variants of the same base gun keep independent magazines.

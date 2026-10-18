@@ -31,6 +31,7 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_weapons.c
     ${SOURCE_DIR}/cgame/cg_sights.c
     ${SOURCE_DIR}/cgame/cg_anim.c
+    ${SOURCE_DIR}/cgame/cg_weappicture.c
     ${SOURCE_DIR}/cgame/cg_killcam.c
 )
 

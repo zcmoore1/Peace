@@ -755,7 +755,7 @@ void ClientThink_real( gentity_t *ent ) {
 	gclient_t	*client;
 	pmove_t		pm;
 	int			oldEventSequence;
-	int			msec;
+	int			msec, oldRelease;
 	usercmd_t	*ucmd;
 
 	client = ent->client;
@@ -933,6 +933,7 @@ void ClientThink_real( gentity_t *ent ) {
 	pm.pmove_msec = pmove_msec.integer;
 
 	VectorCopy( client->ps.origin, client->oldOrigin );
+	oldRelease = client->ps.weaponReleaseTime;
 
 #ifdef MISSIONPACK
 		if (level.intermissionQueued != 0 && g_singlePlayer.integer) {
@@ -951,6 +952,7 @@ void ClientThink_real( gentity_t *ent ) {
 #else
 		Pmove (&pm);
 #endif
+	BG_ServerReleaseWeapon( &client->ps, oldRelease, level.time );
 
 	// save results of pmove
 	if ( ent->client->ps.eventSequence != oldEventSequence ) {

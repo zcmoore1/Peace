@@ -28,10 +28,12 @@ static void Cancel(int gun) {
  move.cmd.buttons|=BUTTON_WEAPON_SWAP; Step(1);
  CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_RAISING);
  CHECK(ps.weaponTime==BG_WeaponRaiseTime(gun));
- CHECK(ps.ammo[WP_SEMTEX]==rounds && !(ps.weaponAction&WA_TYPE_MASK));
+ /* Same recovery as a knife or a thrown grenade: the latch holds until the
+  * gun is fully drawn, and blocks sprint the whole time. */
+ CHECK(ps.ammo[WP_SEMTEX]==rounds && (ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==(WA_LETHAL|WA_FIRED));
  Run(BG_WeaponRaiseTime(gun)+1);
  CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_READY);
- CHECK(ps.ammo[WP_SEMTEX]==rounds);
+ CHECK(ps.ammo[WP_SEMTEX]==rounds && !(ps.weaponAction&WA_TYPE_MASK));
  move.cmd.buttons=0; Step(1);
 }
 static void TestSemtex(void) {

@@ -2401,6 +2401,7 @@ void BG_ApplyClass( playerState_t *ps, const bg_class_t *cl ) {
 	ps->weaponAnimTime = -1;
 	ps->weaponAction = 0;
 	ps->weaponDraw = 0;
+	ps->weaponReleaseTime = 0;
 	ps->stats[STAT_UNCHAMBERED] = 0;
 	ps->pickupTarget = ENTITYNUM_NONE;
 	ps->pickupSerial = ps->pickupTime = ps->pickupHeld = ps->pickupSlot = 0;
@@ -2678,6 +2679,8 @@ static int PM_ActionWeapon( void ) {
 // Latch a press through holster/deploy. Releasing the button cannot lose a tap,
 // and holding it cannot turn a quick action into a permanently selected weapon.
 static void PM_UpdateWeaponAction( void ) {
+	const int quick = WA_TYPE_MASK | WA_RETURNING | WA_RECOVERING;
+	int before = pm->ps->weaponAction & quick;
 	int held = (pm->cmd.buttons >> 15) & 7;
 	int pressed = held & ~((pm->ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT);
 	int action = pm->ps->weaponAction & (WA_TYPE_MASK | WA_FIRED);
@@ -2724,8 +2727,9 @@ static void PM_UpdateWeaponAction( void ) {
 		if (swapPressed && !(action & WA_FIRED) && (action & WA_TYPE_MASK) == WA_LETHAL &&
 			BG_LethalWeapon(pm->ps) == WP_SEMTEX) {
 			// Equipment never changes the active slot. Do not refund a throw
-			// already emitted. Use the same gun raise as the melee return.
-			action = 0;
+			// already emitted. Use the same gun raise as the melee return, and
+			// the same recovery: the latch holds until that gun is fully drawn.
+			action = WA_LETHAL | WA_FIRED;
 			returning = WA_RETURNING;
 			pm->ps->weapon = BG_ActiveSlotWeapon(pm->ps);
 			BG_BeginWeaponDraw(pm->ps);
@@ -2734,6 +2738,31 @@ static void PM_UpdateWeaponAction( void ) {
 	pm->ps->weaponAction = action | (held << WA_HELD_SHIFT) | returning | recovering |
 		(swap ? WA_SWAP_HELD : 0);
 	if ( action & WA_TYPE_MASK ) pm->ps->pm_flags &= ~(PMF_ADS | PMF_SPRINTING);
+	// The gun is back from a quick action. Shared prediction hands it back on
+	// this command; the server, which resolved the swing or the throw, confirms
+	// the hand-off on its own clock (BG_ServerReleaseWeapon). Until then the
+	// weapon does not answer its inputs - see the top of PM_Weapon.
+	if ( before && !(pm->ps->weaponAction & quick) && !BG_IsActionWeapon( pm->ps->weapon ) &&
+		( pm->ps->weaponstate == WEAPON_READY ||
+		  ( pm->ps->weaponstate == WEAPON_RAISING && pm->ps->weaponTime <= 0 ) ) ) {
+		pm->ps->weaponReleaseTime = pm->cmd.serverTime;
+	}
+}
+
+/*
+===============
+BG_ServerReleaseWeapon
+
+Quick actions are resolved by the server: it is the side that lands the knife
+and spawns the grenade. When a command hands the gun back, the server gives it
+back no earlier than its own clock. The client predicts the hand-off on the
+command clock and learns the server's answer a round trip later.
+===============
+*/
+void BG_ServerReleaseWeapon( playerState_t *ps, int previousRelease, int serverTime ) {
+	if ( ps->weaponReleaseTime != previousRelease && ps->weaponReleaseTime < serverTime ) {
+		ps->weaponReleaseTime = serverTime;
+	}
 }
 
 /*
@@ -2973,6 +3002,11 @@ static void PM_Weapon( void ) {
 	// check for dead player
 	if ( pm->ps->stats[STAT_HEALTH] <= 0 ) {
 		pm->ps->weapon = WP_NONE;
+		return;
+	}
+	// Not yet handed back from a quick action: the weapon does not answer.
+	// A tap in this time is never seen; a button still held acts once it is.
+	if ( pm->cmd.serverTime < pm->ps->weaponReleaseTime ) {
 		return;
 	}
 	reload = BG_UpdateWeaponPickup(pm->ps, &pm->cmd, pm->pickupItem, pml.msec);

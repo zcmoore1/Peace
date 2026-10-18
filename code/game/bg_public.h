@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-6"
+#define	GAME_VERSION		BASEGAME "-7"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -531,6 +531,7 @@ void BG_GetSlot(const playerState_t *ps, int slot, bg_weaponInstance_t *gun);
 void BG_PutSlot(playerState_t *ps, int slot, const bg_weaponInstance_t *gun);
 void BG_SelectSlot(playerState_t *ps, int slot);
 void BG_BeginWeaponDraw(playerState_t *ps);
+void BG_ServerReleaseWeapon( playerState_t *ps, int previousRelease, int serverTime );
 qboolean BG_WeaponItem(const entityState_t *item, bg_weaponInstance_t *gun);
 int BG_MatchingWeaponSlot(const playerState_t *ps, const bg_weaponInstance_t *gun);
 float BG_WeaponPickupDistance(const playerState_t *ps, const entityState_t *item, int time);

@@ -830,7 +830,11 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 		CG_AddParticles ();
 		CG_AddLocalEntities();
 	}
-	CG_AddViewWeapon( &cg.predictedPlayerState );
+	{
+		// The gun picture may run on past a correction; aim and camera never do.
+		playerState_t picture = *CG_WeapPicture_State( &cg.predictedPlayerState );
+		CG_AddViewWeapon( &picture );
+	}
 
 	// add buffered sounds
 	CG_PlayBufferedSounds();

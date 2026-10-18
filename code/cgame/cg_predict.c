@@ -434,12 +434,19 @@ We detect prediction errors and allow them to be decayed off over several frames
 to ease the jerk.
 =================
 */
+// An ordinary function for the picture's command reads (a syscall is not
+// passed around as a pointer in the QVM).
+static qboolean CG_PictureCmd( int cmdNumber, usercmd_t *cmd ) {
+	return trap_GetUserCmd( cmdNumber, cmd );
+}
+
 void CG_PredictPlayerState( void ) {
 	int			cmdNum, current;
 	playerState_t	oldPlayerState;
 	qboolean	moved;
 	usercmd_t	oldestCmd;
 	usercmd_t	latestCmd;
+	playerState_t	replayBefore;
 
 	cg.hyperspace = qfalse;	// will be set if touching a trigger_teleport
 
@@ -454,12 +461,14 @@ void CG_PredictPlayerState( void ) {
 
 	// demo playback just copies the moves
 	if ( cg.demoPlayback || CG_Killcam_Active() || (cg.snap->ps.pm_flags & PMF_FOLLOW) ) {
+		CG_WeapPicture_Reset();
 		CG_InterpolatePlayerState( qfalse );
 		return;
 	}
 
 	// non-predicting local movement will grab the latest angles
 	if ( cg_nopredict.integer || cg_synchronousClients.integer ) {
+		CG_WeapPicture_Reset();
 		CG_InterpolatePlayerState( qtrue );
 		return;
 	}
@@ -511,6 +520,8 @@ void CG_PredictPlayerState( void ) {
 		cg.predictedPlayerState = cg.snap->ps;
 		cg.physicsTime = cg.snap->serverTime;
 	}
+
+	CG_WeapPicture_BeginReplay( &cg.predictedPlayerState );
 
 	if ( pmove_msec.integer < 8 ) {
 		trap_Cvar_Set("pmove_msec", "8");
@@ -607,7 +618,9 @@ void CG_PredictPlayerState( void ) {
 		}
 
 		cg_pmove.pickupItem = CG_FindWeaponPickup();
+		replayBefore = cg.predictedPlayerState;
 		Pmove (&cg_pmove);
+		CG_WeapPicture_ReplayStep( &replayBefore, &cg.predictedPlayerState, cg_pmove.pickupItem );
 
 		moved = qtrue;
 
@@ -628,6 +641,9 @@ void CG_PredictPlayerState( void ) {
 		}
 		return;
 	}
+
+	// The viewmodel may keep playing a gun action prediction just took back.
+	CG_WeapPicture_Update( &cg.predictedPlayerState, &cg_pmove, current - CMD_BACKUP + 1, current, CG_PictureCmd );
 
 	// adjust for the movement of the groundentity
 	CG_AdjustPositionForMover( cg.predictedPlayerState.origin, 

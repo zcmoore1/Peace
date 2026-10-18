@@ -244,7 +244,7 @@ PROTOCOL
 ==============================================================
 */
 
-#define	PROTOCOL_VERSION	76
+#define	PROTOCOL_VERSION	77
 #define PROTOCOL_LEGACY_VERSION	68
 // 1.31 - 67
 

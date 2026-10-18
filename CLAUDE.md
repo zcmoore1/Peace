@@ -146,6 +146,25 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   purpose. The ZOOMload trick is a client/server desync — the reload animation
   starts client-side and the server never agrees one is happening — not a rule
   being relaxed. Do not reproduce it by loosening the gate.
+- **Quick actions are resolved by the server (owner's rule).** When the
+  quick-action latch clears with the gun drawn (knife, frag, flash, Semtex
+  throw or pre-release cancel), shared pmove stamps `weaponReleaseTime` with
+  that command's time; the server's `BG_ServerReleaseWeapon` then raises it to
+  `level.time`, and `PM_Weapon` answers no input while `cmd.serverTime` is
+  before it: a tap there is never seen, a held button acts once the gun is
+  back. The client learns the server's stamp a round trip later, so it predicts
+  the gun back early by about RTT (one server frame at 0 ping). That gap is the
+  MW2 fake reload, fake knife and wild scope. Never special-case them, never
+  shrink the gap with a client-side guess, and never stamp on anything but the
+  latch clearing.
+- **The gun never un-plays an action it showed (owner's rule).**
+  `cg_weappicture.c` draws the viewmodel from its own run of the client's
+  commands through the real `Pmove` once prediction is corrected away from a
+  reload, shot or pump of the held gun. It follows prediction again when that
+  run comes to rest or prediction starts a real action. A correction that only
+  removes a swap is followed at once, so a lone knife is never a fake knife.
+  Aim, camera and HUD always read the predicted state. Run
+  `dev/tests/run-fakereload.sh`; `dev/FAKE_RELOAD.md` has the measured windows.
 
 ## Capacity limits
 
@@ -160,10 +179,13 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 9-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, and post-throw recovery. Protocol 76 requires client, server
+  swap edge latch, and post-throw recovery. Protocol 77 requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
+  `weaponReleaseTime` (32 bits, protocol 77) is the server-clock hand-off of
+  the gun after a quick action; the killcam replay rebases it like
+  `commandTime`.
   Dropped ET_ITEM uses `generic1` for attachments, `time2` for packed magazine
   and reserve, `otherEntityNum2` for chamber debt, and `time` as a spawn serial.
 - `perks` is a five-bit spawn-owned playerstate field. All three class perk
@@ -244,6 +266,12 @@ reload/action exclusions, ordinary sprint reversal and frame-only crossfades,
 plus YY flow (reversed draw, eased return, fire cut-in) through the real
 `PM_Weapon`, which is why the pose test links `pickup_pmove_driver.c`.
 Loadouts UI and class definitions are documented in `dev/LOADOUTS.md`.
+
+`dev/tests/run-fakereload.cmd` (or `.sh`) models ioquake3's client/server
+clocks (snapshot drift, sv_fps frames, ping) with the real `Pmove` on both
+sides and the real `cg_anim` + `cg_weappicture.c` on the client. It checks the
+fake reload, tap vs hold, aiming/shooting/real reload during it, the lone knife
+and the wild scope chain at 0/50/100/200 ms.
 
 Do not statically initialize structs with inline char arrays mixed with ints:
 q3asm splits byte literals and word data into different segments. Use word-only

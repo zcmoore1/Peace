@@ -9,8 +9,10 @@ No code names either trick.
    The fire cycle is abandoned; the gun still owes its action.
 2. **The reload takes the action over.** Its start segment carries
    `WNOTE_ACTION_RESET` on the reload's own clock. If the gun still owes its
-   action, the note clears that debt and releases the busy lock - exactly what
-   the fire cycle's close note does. A gun that owes nothing is untouched.
+   action, the note releases the busy lock, and - only while the gun is still
+   reloading - clears that debt. A gun that owes nothing is untouched.
+   So a Y on that think swaps instantly (the fastest NAC) but the gun comes
+   back owing its whole pump or bolt, as in MW2.
 
 The NAC and the Fayde fall out of the existing ordering in `PM_Weapon`: a swap
 always stamps a real holster, a note can release the lock on the same think,

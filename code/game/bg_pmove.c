@@ -2572,8 +2572,16 @@ static void PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 			// gun that actually owed one has just become ready to fire - its busy
 			// lock goes, exactly like the close note's. A gun that owed nothing
 			// is untouched, so an ordinary reload gains nothing here.
+			//
+			// Settling the debt is the RELOAD's work, so it happens only while
+			// the reload is still the gun's action. If a holster was stamped this
+			// same think (step 1), the gun is already going down: the lock still
+			// goes, so that holster finishes at once, but the pump stays owed and
+			// plays in full on the way back - MW2's fastest NAC.
 			if ( pm->ps->stats[STAT_UNCHAMBERED] & ( 1 << pm->ps->weapon ) ) {
-				pm->ps->stats[STAT_UNCHAMBERED] &= ~( 1 << pm->ps->weapon );
+				if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
+					pm->ps->stats[STAT_UNCHAMBERED] &= ~( 1 << pm->ps->weapon );
+				}
 				pm->ps->weaponTime = 0;
 				PM_AddEvent( EV_WEAPON_NOTETRACK );
 			}

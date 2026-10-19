@@ -97,9 +97,12 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 - **A reload takes the action over (owner's MW2 rule).** Each worked action's
   reload START carries `WNOTE_ACTION_RESET` on its own clock, before the gun's
   close and its first round. If the gun still owes its pump or bolt, the note
-  clears the debt and releases the lock, like the close note: Y on that think
-  is the fastest NAC (shoot, reload, swap); YY a think or more later leaves a
-  gun ready to fire with no pump — the Fayde; YY before it pumps again. A gun
+  releases the lock, like the close note, and — only while the gun is still
+  RELOADING — clears the debt. So Y on that think is the fastest NAC (shoot,
+  reload, swap: the holster finishes at once) but the gun still owes its pump
+  and plays it in full on return (owner-confirmed MW2); YY a think or more
+  later leaves a gun ready to fire with no pump — the Fayde; YY before it pumps
+  again. (The M NAC, a return with the pump still workable, is future work.) A gun
   that owed nothing is untouched, so an ordinary reload gains nothing there.
   Where the reset sits is per-gun data and sets how fast the Fayde is.
 - **Clip frame ranges are data.** They live in the `.cfg` beside the model and

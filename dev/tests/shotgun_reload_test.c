@@ -570,13 +570,28 @@ static void TestShootReload( int step ) {
 		ShootGun( w ); RunFor( GunNote( bg_weaponFire[w].notes, WNOTE_BOLT_OPEN ), 1 );
 		CHECK( testPs.weaponstate == WEAPON_BOLTING ); ReloadAtOnce();
 
-		/* The fastest NAC: Y on the think the reload resets the action. */
+		/* The fastest NAC: Y on the think the reload resets the action. The
+		   swap is instant, but the reload never got to settle the action, so
+		   coming back costs the whole pump or bolt from the top. */
 		ShootGun( w ); ReloadAtOnce();
 		RunFor( reset - 1, 1 );
 		CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << w) );
 		testMove.cmd.weapon = otherGun; Step( 1 );
 		CHECK( testPs.weapon == otherGun && testPs.weaponstate == WEAPON_RAISING );
-		CHECK( !( testPs.stats[STAT_UNCHAMBERED] & (1 << w) ) );
+		CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << w) );
+		{
+			int t;
+			testMove.cmd.weapon = w;
+			for ( t = 0; t < 10000 && !( testPs.weapon == w && testPs.weaponstate == WEAPON_READY ); t++ ) Step( 1 );
+			Step( 1 );	/* the first think at rest finds the debt and works it from the top */
+			CHECK( testPs.weapon == w && testPs.weaponstate == WEAPON_BOLTING && testPs.weaponAnimTime == 0 );
+			shots = 0; testMove.cmd.buttons = BUTTON_ATTACK;
+			RunFor( BG_WeaponFireLength( w ) - 1, 1 );
+			CHECK( shots == 0 );
+			Step( 1 );
+			CHECK( shots == 1 );
+			testMove.cmd.buttons = 0;
+		}
 
 		/* One think earlier it is an ordinary swap: the window is a window. */
 		ShootGun( w ); ReloadAtOnce();

@@ -374,10 +374,58 @@ static void TestMovementScale(void) {
  move.cmd.forwardmove=0; ps.pm_flags=PMF_SPRINTING;
  CHECK(PM_CmdScale(&move.cmd)==0 && ps.speed==320);
 }
+/* Full Pmove reaches the respawn gate; PM_Weapon alone cannot cover it. */
+static void RespawnTrace(trace_t *tr, const vec3_t start, const vec3_t mins,
+ const vec3_t maxs, const vec3_t end, int pass, int mask) {
+ (void)start; (void)mins; (void)maxs; (void)pass; (void)mask;
+ memset(tr,0,sizeof(*tr)); tr->fraction=1;
+ VectorCopy(end,tr->endpos); tr->entityNum=ENTITYNUM_NONE;
+}
+static int RespawnContents(const vec3_t point, int pass) {
+ (void)point; (void)pass; return 0;
+}
+static void RespawnMove(int buttons, int type) {
+ move.cmd.buttons=buttons; move.cmd.serverTime=ps.commandTime+8;
+ ps.pm_type=type; Pmove(&move);
+}
+static void TestHeldThroughRespawn(void) {
+ const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL,BUTTON_LETHAL};
+ const int specials[]={WP_KNIFE,WP_FRAG,WP_FLASH,WP_SEMTEX};
+ const int actions[]={WA_MELEE,WA_LETHAL,WA_TACTICAL,WA_LETHAL};
+ int i,mode,t,count,holdMs;
+ for(i=0;i<ARRAY_LEN(buttons);i++) for(mode=0;mode<3;mode++) {
+  Ready(WP_MACHINEGUN,WP_SHOTGUN);
+  if(specials[i]==WP_SEMTEX) {
+   bg_class_t cl=*BG_Class(0);
+   cl.slot[0]=WP_MACHINEGUN; cl.slot[1]=WP_SHOTGUN; cl.lethal=WP_SEMTEX;
+   BG_ApplyClass(&ps,&cl);
+  }
+  move.trace=RespawnTrace; move.pointcontents=RespawnContents;
+  move.tracemask=MASK_PLAYERSOLID; ps.speed=320; ps.gravity=800;
+  ps.pm_flags|=PMF_RESPAWNED; count=ps.ammo[specials[i]];
+  /* Ordinary spawn, frozen countdown, and attack delaying the spawn gate. */
+  if(mode==1) RespawnMove(buttons[i],PM_FREEZE);
+  if(mode==2) {
+   RespawnMove(buttons[i]|BUTTON_ATTACK,PM_NORMAL);
+   CHECK(ps.pm_flags&PMF_RESPAWNED);
+  }
+  RespawnMove(buttons[i],PM_NORMAL);
+  CHECK(!(ps.pm_flags&PMF_RESPAWNED));
+  CHECK(!(ps.weaponAction&WA_TYPE_MASK));
+  holdMs=BG_WeaponDropTime(WP_MACHINEGUN)+BG_WeaponRaiseTime(specials[i])+
+   BG_QUICK_ACTION_HOLD+BG_RAPID_DROP_TIME+BG_WeaponRaiseTime(WP_MACHINEGUN);
+  for(t=0;t<holdMs;t+=8) RespawnMove(buttons[i],PM_NORMAL);
+  CHECK(!(ps.weaponAction&WA_TYPE_MASK));
+  CHECK(ps.weapon==WP_MACHINEGUN && ps.ammo[specials[i]]==count);
+  /* Release and press again: this is a new action, not a permanently blocked button. */
+  RespawnMove(0,PM_NORMAL); RespawnMove(buttons[i],PM_NORMAL);
+  CHECK((ps.weaponAction&WA_TYPE_MASK)==actions[i]);
+ }
+}
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
  TestMeleeHolster(); TestRecovery();
- TestMovementScale();
+ TestMovementScale(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;
 }

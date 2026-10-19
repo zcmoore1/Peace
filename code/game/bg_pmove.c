@@ -2693,12 +2693,17 @@ static int PM_ActionWeapon( void ) {
 	}
 }
 
+// Melee, lethal and tactical in weaponAction's three held-button bits.
+static int PM_HeldActionButtons( void ) {
+	return (pm->cmd.buttons >> 15) & 7;
+}
+
 // Latch a press through holster/deploy. Releasing the button cannot lose a tap,
 // and holding it cannot turn a quick action into a permanently selected weapon.
 static void PM_UpdateWeaponAction( void ) {
 	const int quick = WA_TYPE_MASK | WA_RETURNING | WA_RECOVERING;
 	int before = pm->ps->weaponAction & quick;
-	int held = (pm->cmd.buttons >> 15) & 7;
+	int held = PM_HeldActionButtons();
 	int pressed = held & ~((pm->ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT);
 	int action = pm->ps->weaponAction & (WA_TYPE_MASK | WA_FIRED);
 	int returning = pm->ps->weaponAction & WA_RETURNING;
@@ -3598,6 +3603,13 @@ void PmoveSingle (pmove_t *pmove) {
 	// clear the respawned flag if attack and use are cleared
 	if ( pm->ps->stats[STAT_HEALTH] > 0 && 
 		!( pm->cmd.buttons & (BUTTON_ATTACK | BUTTON_USE_HOLDABLE) ) ) {
+		if ( pm->ps->pm_flags & PMF_RESPAWNED ) {
+			// A spawn clears the action latch, not the player's physical buttons.
+			// Seed their held state so carrying a button through death/countdown
+			// cannot become a new knife or grenade press in the next life.
+			pm->ps->weaponAction = (pm->ps->weaponAction & ~WA_HELD_MASK) |
+				(PM_HeldActionButtons() << WA_HELD_SHIFT);
+		}
 		pm->ps->pm_flags &= ~PMF_RESPAWNED;
 	}
 

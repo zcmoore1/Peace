@@ -157,6 +157,11 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   purpose. The ZOOMload trick is a client/server desync — the reload animation
   starts client-side and the server never agrees one is happening — not a rule
   being relaxed. Do not reproduce it by loosening the gate.
+- **A button held through respawn is not a new press.** When `PMF_RESPAWNED`
+  clears, seed the melee/lethal/tactical held mask from the current command.
+  Preserve the other action bits; a release and new press still work normally.
+  The loadout suite drives full `Pmove` for ordinary/frozen spawns and an
+  attack-held spawn gate, including Semtex.
 - **Quick actions are resolved by the server (owner's rule).** When the
   quick-action latch clears with the gun drawn (knife, frag, flash, Semtex
   throw or pre-release cancel), shared pmove stamps `weaponReleaseTime` with

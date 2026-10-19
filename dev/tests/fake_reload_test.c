@@ -254,6 +254,15 @@ int main(void) {
 		s = Script(a); s.reloadAt = 0; s.reloadLen = 16; s.reload2At = lastFake[a][r] + 100; s.reload2Len = 600;
 		Run(rtts[r], &s);
 		CHECK(O.svReload && O.detachedMs > 0 && O.svReloadCmd - O.predReloadCmd >= 100 && O.converged);
+		/* No fake shot: the trigger is never held. A fire tap anywhere in the
+		 * window is a real shot on the same command, and a held trigger fires
+		 * when the client says it does. */
+		for (x = 0; x <= lastFake[a][r] + 100; x += 8) {
+			s = Script(a); s.fireAt = x; s.fireLen = 16; Run(rtts[r], &s);
+			CHECK(O.predShot && O.svShot && O.svShotCmd == O.predShotCmd && !O.detachedMs && O.converged);
+		}
+		s = Script(a); s.fireAt = 0; s.fireLen = 1000; Run(rtts[r], &s);
+		CHECK(O.predShot && O.svShot && O.svShotCmd == O.predShotCmd);
 		/* S4: a knife alone in the window is late or nothing - never a knife you can scope through. */
 		for (x = 0; x <= lastFake[a][r] + 100; x += 8) {
 			s = Script(a); s.knifeAt = x; s.knifeLen = 16; s.adsAt = x + 8; Run(rtts[r], &s);

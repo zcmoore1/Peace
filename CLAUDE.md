@@ -166,9 +166,10 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   quick-action latch clears with the gun drawn (knife, frag, flash, Semtex
   throw or pre-release cancel), shared pmove stamps `weaponReleaseTime` with
   that command's time; the server's `BG_ServerReleaseWeapon` then raises it to
-  `level.time`, and `PM_Weapon` answers no input while `cmd.serverTime` is
-  before it: a tap there is never seen, a held button acts once the gun is
-  back. The client learns the server's stamp a round trip later, so it predicts
+  `level.time`, and until `cmd.serverTime` reaches it the gun answers only its
+  trigger: reload, quick-action and slot-change inputs are masked from
+  `PM_Weapon` (a tap there is never seen, a held button acts once the gun is
+  back). Firing is never held, so there is no fake shot (owner's rule). The client learns the server's stamp a round trip later, so it predicts
   the gun back early by about RTT (one server frame at 0 ping). That gap is the
   MW2 fake reload, fake knife and wild scope. Never special-case them, never
   shrink the gap with a client-side guess, and never stamp on anything but the

@@ -19,8 +19,9 @@ MW2 behaviour, kept as emergent netcode. No code names any of these.
 1. **Quick actions are resolved by the server.** When the gun is back from a
    quick action, shared pmove hands it back on that command and the server
    moves the hand-off to its own clock (`BG_ServerReleaseWeapon`, called after
-   `Pmove` in `ClientThink_real`). Until then the weapon does not answer its
-   inputs (`PM_Weapon`). The client predicts the hand-off on the command clock
+   `Pmove` in `ClientThink_real`). Until then the gun answers only its trigger:
+   reload, quick-action and slot-change inputs are masked from `PM_Weapon`.
+   Firing is never held, so there is no fake shot. The client predicts the hand-off on the command clock
    and only learns the server's time from the next snapshot. ioquake3 keeps the
    client's command clock just behind the newest snapshot, so the gap is about
    one round trip plus up to one server frame.
@@ -52,9 +53,6 @@ Pressed on the very same command, the knife wins and there is no fake reload.
 
 ## The cost to ordinary play
 
-The same rule delays the first input after any quick action online:
-
-- holding fire as the gun comes back fires about one round trip late
-  (24–58 ms at 0 ms ping, ~80–100 at 50, ~120–150 at 100, ~225–255 at 200);
-- a fire tap inside the window is a fake shot (shown, never fired);
-- a slot change asked for there happens at the hand-off, not before.
+Firing is untouched: a shot right as the gun comes back is real and on time.
+A reload, knife, grenade or slot change asked for inside the window waits for
+the hand-off (a held button) or is lost (a tap), which is the trick itself.

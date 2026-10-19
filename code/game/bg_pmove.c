@@ -3026,11 +3026,6 @@ static void PM_Weapon( void ) {
 		pm->ps->weapon = WP_NONE;
 		return;
 	}
-	// Not yet handed back from a quick action: the weapon does not answer.
-	// A tap in this time is never seen; a button still held acts once it is.
-	if ( pm->cmd.serverTime < pm->ps->weaponReleaseTime ) {
-		return;
-	}
 	reload = BG_UpdateWeaponPickup(pm->ps, &pm->cmd, pm->pickupItem, pml.msec);
 
 	// check for item using
@@ -3750,7 +3745,19 @@ void PmoveSingle (pmove_t *pmove) {
 	PM_CheckADS();
 
 	// weapons
-	PM_Weapon();
+	{
+		// Until the server hands the gun back after a quick action, the gun
+		// answers only its trigger. Reload, quick actions and slot changes wait:
+		// a tap in that time is never seen, a button still held acts once it is.
+		usercmd_t cmd = pm->cmd;
+		if ( pm->cmd.serverTime < pm->ps->weaponReleaseTime ) {
+			pm->cmd.buttons &= ~( BUTTON_RELOAD | BUTTON_MELEE | BUTTON_LETHAL |
+				BUTTON_TACTICAL | BUTTON_WEAPON_SWAP );
+			pm->cmd.weapon = BG_SLOT_COMMAND + pm->ps->stats[STAT_ACTIVE_SLOT];
+		}
+		PM_Weapon();
+		pm->cmd = cmd;
+	}
 	if ( (pm->ps->stats[STAT_LADDER] & (LADDER_ATTACHED | LADDER_HOLSTER)) ||
 		pm->ps->weaponstate == WEAPON_LADDER ) {
 		pm->ps->eFlags &= ~EF_FIRING;

@@ -79,9 +79,11 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   `WEAPON_BOLTING` is the action being worked. "Bolting" covers bolt, pump,
   cock and lever — they differ only in cycle length and note placement, never
   in code. It cannot fire and CAN be holstered out of. It ends on the anim
-  clock, never on the lock. A reload is taken at once out of the blast or the
-  action (owner's rule: shoot and reload instantly); the fire cycle is simply
-  abandoned, its debt still owed.
+  clock, never on the lock. A reload is taken at once out of the shot or the
+  action, as MW2's `PM_BeginWeaponReload` accepts READY, FIRING and
+  RECHAMBERING (owner's rule: shoot and reload with no delay); the fire cycle
+  is simply abandoned, its debt still owed. An empty gun reloads itself out of
+  the action, never out of the shot.
 - **The bolt cancel is the reload cancel.** `WNOTE_BOLT_CLOSED` on the fire
   animation carries no rounds, so it clears the lock and the unchambered bit —
   the same note, in the same place, that opens the reload's window. Never write
@@ -92,19 +94,20 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   elapsed 0 — the whole cycle, exactly like a reload, which never resumes
   either. This is what makes the cancel window a window: miss it and the swap
   costs you the full bolt when you come back. Never add a partial-bolt state,
-  and never clear the bit anywhere but an action note (spawn is the one
-  exception): the fire cycle's close, or the reload's `WNOTE_ACTION_RESET`.
-- **A reload takes the action over (owner's MW2 rule).** Each worked action's
-  reload START carries `WNOTE_ACTION_RESET` on its own clock, before the gun's
-  close and its first round. If the gun still owes its pump or bolt, the note
-  releases the lock, like the close note, and — only while the gun is still
-  RELOADING — clears the debt. So Y on that think is the fastest NAC (shoot,
-  reload, swap: the holster finishes at once) but the gun still owes its pump
-  and plays it in full on return (owner-confirmed MW2); YY a think or more
-  later leaves a gun ready to fire with no pump — the Fayde; YY before it pumps
-  again. (The M NAC, a return with the pump still workable, is future work.) A gun
-  that owed nothing is untouched, so an ordinary reload gains nothing there.
-  Where the reset sits is per-gun data and sets how fast the Fayde is.
+  and never clear the bit anywhere but the fire cycle's close note or the
+  reload's delayed action (spawn is the one exception).
+- **The reload's delayed action is MW2's (owner's rule: do what MW2 does).**
+  When a reload starts on a gun that still owes its pump or bolt, the action is
+  settled after the gun's OWN action length (fire-cycle open to close, MW2's
+  `rechamberBoltTime`) on the reload clock, capped by the reload start's first
+  round or its end (`PM_ReloadSettleCrossed`; derived from the tables, never a
+  written time). It lands like a note: step 2b releases the lock, step 4 settles
+  the debt alongside the queued fill. So Y on that think is the fastest NAC —
+  the holster is spent and finishes in step 3, skipping step 4, and the gun
+  comes back owing its whole pump, as in MW2. YY a think or more later leaves a
+  ready gun with no pump — the Fayde; YY before it pumps again; an ordinary
+  reload gains nothing. Never add a state test or a placed time to this. (The M
+  NAC, a return with the pump still workable, is future work.)
 - **Clip frame ranges are data.** They live in the `.cfg` beside the model and
   are read by `CG_WeapAnim_RegisterClips`. Re-exporting a model must never mean
   editing C, and no weapon may be named in that loader.

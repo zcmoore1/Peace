@@ -512,7 +512,17 @@ static int GunNote( const bg_weaponNote_t *n, int note ) {
 	for ( ; n->note != WNOTE_NONE; n++ ) if ( n->note == note ) return n->time;
 	return -1;
 }
-static int ResetTime( int weapon ) { return GunNote( PM_SegNotes( weapon, RSEQ_START ), WNOTE_ACTION_RESET ); }
+/* MW2's rule, from the gun's own tables: its action length (open to close on
+   the fire cycle), on the reload clock, capped by the reload start's first
+   round or its end. */
+static int ResetTime( int weapon ) {
+	int open = GunNote( bg_weaponFire[weapon].notes, WNOTE_BOLT_OPEN );
+	int close = GunNote( bg_weaponFire[weapon].notes, WNOTE_BOLT_CLOSED );
+	int add = GunNote( PM_SegNotes( weapon, RSEQ_START ), WNOTE_MAG_IN );
+	int cap = Seg( weapon, RSEQ_START ), t = close - ( open > 0 ? open : 0 );
+	if ( add >= 0 && add < cap ) cap = add;
+	return t < cap ? t : cap;
+}
 static void ShootGun( int weapon ) {
 	memset( &testPs, 0, sizeof(testPs) );
 	memset( &testMove, 0, sizeof(testMove) );
@@ -643,6 +653,20 @@ static void TestShootReload( int step ) {
 		testMove.cmd.weapon = otherGun; Step( 1 );
 		CHECK( testPs.weapon == w && testPs.weaponstate == WEAPON_DROPPING );
 		CHECK( testPs.weaponTime == BG_WeaponDropTime( w ) );
+
+		/* Reload is taken out of the pump even after the action has closed. */
+		ShootGun( w ); RunFor( close + 1, 1 );
+		CHECK( testPs.weaponstate == WEAPON_BOLTING && !( testPs.stats[STAT_UNCHAMBERED] & (1 << w) ) );
+		testMove.cmd.buttons = BUTTON_RELOAD; Step( 1 ); testMove.cmd.buttons = 0;
+		CHECK( testPs.weaponstate == WEAPON_RELOADING && testPs.weaponAnimSeq == RSEQ_START );
+
+		/* The last round: an empty gun reloads itself out of the pump, not out of the shot. */
+		ShootGun( w ); testPs.ammo[w] = 0;
+		RunFor( GunNote( bg_weaponFire[w].notes, WNOTE_BOLT_OPEN ) - 1, 1 );
+		CHECK( testPs.weaponstate == WEAPON_FIRING );
+		Step( 1 );
+		if ( testPs.weaponstate == WEAPON_BOLTING ) Step( 1 );
+		CHECK( testPs.weaponstate == WEAPON_RELOADING );
 
 		/* Letting the reload run: the reset settles the action, the reload
 		   loads, and its own close still lands - ammo is conserved. */

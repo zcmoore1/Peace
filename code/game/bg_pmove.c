@@ -1695,7 +1695,6 @@ static const bg_weaponNote_t bgnotes_mag_bfg[] = {
    lands on MW2's actual cadence. If it plays sluggish, halve these. */
 static const bg_weaponNote_t bgnotes_spas_start[] = {
 	{  120, WNOTE_MAG_OUT, 0 },
-	{  120, WNOTE_ACTION_RESET, 0 },	/* the reload has the action open: no pump owed */
 	{ 0, WNOTE_NONE, 0 }
 };
 static const bg_weaponNote_t bgnotes_spas_loop[] = {
@@ -1752,9 +1751,7 @@ static const bg_weaponNote_t bgnotes_m40_fire[] = {
 	{ 0, WNOTE_NONE, 0 }
 };
 static const bg_weaponNote_t bgnotes_m40_start[] = {
-	{ M40_BOLT_OPEN_MS, WNOTE_MAG_OUT, 0 },
-	{ M40_BOLT_OPEN_MS, WNOTE_ACTION_RESET, 0 },	/* the reload has the bolt open: no bolt owed */
-	{ 0, WNOTE_NONE, 0 }
+	{ M40_BOLT_OPEN_MS, WNOTE_MAG_OUT, 0 }, { 0, WNOTE_NONE, 0 }
 };
 static const bg_weaponNote_t bgnotes_m40_loop[] = {
 	{ M40_ROUND_IN_MS, WNOTE_MAG_IN, 1 }, { 0, WNOTE_NONE, 0 }
@@ -2539,6 +2536,47 @@ static int PM_PendingMagAmount( void ) {
 
 /*
 ===============
+PM_ReloadSettleCrossed
+
+MW2's reload delayed action on a gun that still owes its pump or bolt
+(PM_SetWeaponReloadAddAmmoDelay / PM_Weapon_ReloadDelayedAction): when a reload
+starts on such a gun, the action is settled after the gun's OWN action length
+(its fire cycle from the action opening to its close - MW2's rechamberBoltTime)
+counted on the reload's clock, but never later than the reload start's first
+round or its end. Derived from the gun's tables; no time is written here.
+
+True on the think the reload clock crosses that point.
+===============
+*/
+static qboolean PM_ReloadSettleCrossed( int oldElapsed ) {
+	int weapon = pm->ps->weapon, open = 0, close = -1, add = -1, cap, t;
+	const bg_weaponNote_t *n;
+
+	if ( pm->ps->weaponAnimSeq != RSEQ_START || pm->ps->weaponAnimTime < 0 || oldElapsed < 0 ||
+	     BG_WeaponFireLength( weapon ) <= 0 ||
+	     !( pm->ps->stats[STAT_UNCHAMBERED] & ( 1 << weapon ) ) ) {
+		return qfalse;
+	}
+	for ( n = bg_weaponFire[weapon].notes; n->note != WNOTE_NONE; n++ ) {
+		if ( n->note == WNOTE_BOLT_OPEN ) open = n->time;
+		if ( n->note == WNOTE_BOLT_CLOSED ) close = n->time;
+	}
+	for ( n = PM_SegNotes( weapon, RSEQ_START ); n->note != WNOTE_NONE; n++ ) {
+		if ( n->note == WNOTE_MAG_IN && add < 0 ) add = n->time;
+	}
+	if ( close <= open ) {
+		return qfalse;
+	}
+	cap = BG_WeaponReloadSegLength( weapon, RSEQ_START );
+	if ( add >= 0 && add < cap ) cap = add;
+	t = close - open;
+	if ( t > cap ) t = cap;
+	t = BG_ReloadTime( pm->ps, t );
+	return oldElapsed < t && pm->ps->weaponAnimTime >= t;
+}
+
+/*
+===============
 PM_RunWeaponNotes
 
 Fire every note the anim clock crossed this think, for the segment currently
@@ -2565,27 +2603,6 @@ static void PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 			PM_AddEvent( EV_RELOAD );
 			break;
 
-		case WNOTE_ACTION_RESET:
-			// The reload has opened the action for itself, so the pump or bolt
-			// the last shot left owed is no longer owed: the reload's own close
-			// will chamber, and a cancelled reload leaves nothing to work. Only a
-			// gun that actually owed one has just become ready to fire - its busy
-			// lock goes, exactly like the close note's. A gun that owed nothing
-			// is untouched, so an ordinary reload gains nothing here.
-			//
-			// Settling the debt is the RELOAD's work, so it happens only while
-			// the reload is still the gun's action. If a holster was stamped this
-			// same think (step 1), the gun is already going down: the lock still
-			// goes, so that holster finishes at once, but the pump stays owed and
-			// plays in full on the way back - MW2's fastest NAC.
-			if ( pm->ps->stats[STAT_UNCHAMBERED] & ( 1 << pm->ps->weapon ) ) {
-				if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
-					pm->ps->stats[STAT_UNCHAMBERED] &= ~( 1 << pm->ps->weapon );
-				}
-				pm->ps->weaponTime = 0;
-				PM_AddEvent( EV_WEAPON_NOTETRACK );
-			}
-			break;
 
 		case WNOTE_BOLT_OPEN:
 			// The shot is over; what is left is the action working. Only moved
@@ -3130,6 +3147,13 @@ static void PM_Weapon( void ) {
 	if ( pm->ps->weaponAnimTime >= 0 ) {
 		PM_RunWeaponNotes( oldElapsed, pm->ps->weaponAnimTime );
 	}
+	// 2b. The reload's delayed action on a gun that owes its pump or bolt lands
+	//     like any note: the lock goes on that think, so a holster stamped in
+	//     step 1 is spent and finishes in step 3. What it settles waits for
+	//     step 4, with the fill.
+	if ( PM_ReloadSettleCrossed( oldElapsed ) ) {
+		pm->ps->weaponTime = 0;
+	}
 
 	// Same finish-before-fill ordering as any holster. No knowledge of reload
 	// timing: the shared note runner above is the only thing that can clear the
@@ -3175,9 +3199,16 @@ static void PM_Weapon( void ) {
 		PM_StartTorsoAnim( TORSO_STAND );
 	}
 
-	// 4. Nobody holstered out from under us, so the queued rounds go in.
+	// 4. Nobody holstered out from under us, so the reload's delayed work is
+	//    done: an owed pump or bolt is settled, and the queued rounds go in.
+	//    A holster that finished in step 3 skipped both - that is the NAC: the
+	//    swap is instant, the round is not loaded and the action is still owed.
 	//    Still RELOADING afterwards: the settle note has not arrived yet, and
 	//    the state alone is what keeps the gun from firing during the tail.
+	if ( PM_ReloadSettleCrossed( oldElapsed ) ) {
+		pm->ps->stats[STAT_UNCHAMBERED] &= ~( 1 << pm->ps->weapon );
+		PM_AddEvent( EV_WEAPON_NOTETRACK );
+	}
 	if ( pm->ps->pm_flags & PMF_PENDING_MAG ) {
 		PM_ReloadFillClip( pm->ps->weapon, PM_PendingMagAmount() );
 		pm->ps->pm_flags &= ~PMF_PENDING_MAG;
@@ -3217,15 +3248,15 @@ static void PM_Weapon( void ) {
 		pm->ps->weaponTime     = BG_WeaponFireLength( pm->ps->weapon );
 	}
 
-	// 4e. A shot has left and its action is still being worked: reload is taken
-	//     at once rather than after the pump or bolt. The fire cycle is simply
-	//     abandoned - its debt stays set until the reload's own note settles it.
-	if ( reload && pm->ps->weaponAnimSeq == ASEQ_FIRE &&
-	     ( pm->ps->weaponstate == WEAPON_FIRING || pm->ps->weaponstate == WEAPON_BOLTING ) &&
-	     ( pm->ps->stats[STAT_UNCHAMBERED] & ( 1 << pm->ps->weapon ) ) &&
-	     BG_WeaponMagSize( pm->ps->weapon ) > 0 &&
-	     pm->ps->ammo[pm->ps->weapon] < BG_WeaponMagSize( pm->ps->weapon ) &&
-	     pm->ps->ammoReserve[pm->ps->weapon] > 0 ) {
+	// 4e. Reload is taken out of the shot and out of the pump or bolt at once,
+	//     as MW2's PM_BeginWeaponReload takes it out of READY, FIRING and
+	//     RECHAMBERING. The fire cycle is simply abandoned, its debt still owed.
+	//     An empty gun reloads itself out of the pump, never out of the shot.
+	if ( ( pm->ps->weaponstate == WEAPON_FIRING || pm->ps->weaponstate == WEAPON_BOLTING ) &&
+	     !BG_IsActionWeapon( pm->ps->weapon ) && BG_WeaponMagSize( pm->ps->weapon ) > 0 &&
+	     pm->ps->ammoReserve[pm->ps->weapon] > 0 &&
+	     ( ( reload && pm->ps->ammo[pm->ps->weapon] < BG_WeaponMagSize( pm->ps->weapon ) ) ||
+	       ( pm->ps->weaponstate == WEAPON_BOLTING && pm->ps->ammo[pm->ps->weapon] <= 0 ) ) ) {
 		PM_BeginReload();
 		return;
 	}

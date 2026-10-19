@@ -79,7 +79,9 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   `WEAPON_BOLTING` is the action being worked. "Bolting" covers bolt, pump,
   cock and lever — they differ only in cycle length and note placement, never
   in code. It cannot fire and CAN be holstered out of. It ends on the anim
-  clock, never on the lock.
+  clock, never on the lock. A reload is taken at once out of the blast or the
+  action (owner's rule: shoot and reload instantly); the fire cycle is simply
+  abandoned, its debt still owed.
 - **The bolt cancel is the reload cancel.** `WNOTE_BOLT_CLOSED` on the fire
   animation carries no rounds, so it clears the lock and the unchambered bit —
   the same note, in the same place, that opens the reload's window. Never write
@@ -90,7 +92,16 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   elapsed 0 — the whole cycle, exactly like a reload, which never resumes
   either. This is what makes the cancel window a window: miss it and the swap
   costs you the full bolt when you come back. Never add a partial-bolt state,
-  and never clear the bit anywhere but the note (spawn is the one exception).
+  and never clear the bit anywhere but an action note (spawn is the one
+  exception): the fire cycle's close, or the reload's `WNOTE_ACTION_RESET`.
+- **A reload takes the action over (owner's MW2 rule).** Each worked action's
+  reload START carries `WNOTE_ACTION_RESET` on its own clock, before the gun's
+  close and its first round. If the gun still owes its pump or bolt, the note
+  clears the debt and releases the lock, like the close note: Y on that think
+  is the fastest NAC (shoot, reload, swap); YY a think or more later leaves a
+  gun ready to fire with no pump — the Fayde; YY before it pumps again. A gun
+  that owed nothing is untouched, so an ordinary reload gains nothing there.
+  Where the reset sits is per-gun data and sets how fast the Fayde is.
 - **Clip frame ranges are data.** They live in the `.cfg` beside the model and
   are read by `CG_WeapAnim_RegisterClips`. Re-exporting a model must never mean
   editing C, and no weapon may be named in that loader.
@@ -254,7 +265,9 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 
 `dev/tests/run-shotgun-reload.cmd` builds and runs `shotgun_reload_test.c`,
 which `#include`s `bg_pmove.c` and drives `PM_Weapon` directly — reload
-segments, ammo conservation, swap/sprint ordering and the fire cycle. Every
+segments, ammo conservation, swap/sprint ordering and the fire cycle, plus
+shoot-reload resets (instant reload, fastest NAC, Fayde, YY too early) on every
+gun with a worked action. Every
 timing in it is read from the shipped tables; never write a literal there, or
 retiming a weapon breaks the test without telling you anything.
 

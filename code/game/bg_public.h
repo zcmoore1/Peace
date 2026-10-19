@@ -222,7 +222,8 @@ typedef enum {
 	WNOTE_BOLT_OPEN,	// shot is away, the action starts opening
 	WNOTE_MAG_OUT,		// sound only
 	WNOTE_MAG_IN,		// gameplay: queue the clip fill and clear the busy lock
-	WNOTE_BOLT_CLOSED	// pump/bolt guns: identical meaning to MAG_IN
+	WNOTE_BOLT_CLOSED,	// pump/bolt guns: identical meaning to MAG_IN
+	WNOTE_ACTION_RESET	// reload start: an action still owed is no longer owed
 } weaponNote_t;
 
 typedef struct {

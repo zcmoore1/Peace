@@ -503,6 +503,142 @@ static void TestADSPermission( void ) {
 	CHECK( !(testPs.pm_flags & PMF_ADS) );
 }
 
+
+/* ---- shoot, reload at once: the reset point, the fastest NAC and the Fayde ----
+ * Run for every gun with a worked action (a fire cycle), named by none. All
+ * times come from that gun's own tables. */
+static int fireGun, otherGun;
+static int GunNote( const bg_weaponNote_t *n, int note ) {
+	for ( ; n->note != WNOTE_NONE; n++ ) if ( n->note == note ) return n->time;
+	return -1;
+}
+static int ResetTime( int weapon ) { return GunNote( PM_SegNotes( weapon, RSEQ_START ), WNOTE_ACTION_RESET ); }
+static void ShootGun( int weapon ) {
+	memset( &testPs, 0, sizeof(testPs) );
+	memset( &testMove, 0, sizeof(testMove) );
+	memset( &pml, 0, sizeof(pml) );
+	fireGun = weapon; otherGun = weapon == WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN;
+	testMove.ps = &testPs;
+	testMove.cmd.weapon = weapon;
+	testPs.weapon = weapon;
+	testPs.weaponstate = WEAPON_READY;
+	testPs.weaponAnimTime = -1;
+	testPs.stats[STAT_HEALTH] = 100;
+	testPs.stats[STAT_WEAPONS] = (1 << weapon) | (1 << otherGun);
+	testPs.stats[STAT_SLOT_PRIMARY] = weapon;
+	testPs.stats[STAT_SLOT_SECONDARY] = otherGun;
+	testPs.ammo[weapon] = BG_WeaponMagSize( weapon );
+	testPs.ammoReserve[weapon] = BG_WeaponMaxReserve( weapon );
+	testPs.ammo[otherGun] = BG_WeaponMagSize( otherGun );
+	pm = &testMove;
+	shots = 0;
+	testMove.cmd.buttons = BUTTON_ATTACK;
+	Step( 1 );
+	CHECK( shots == 1 && testPs.weaponstate == WEAPON_FIRING );
+	CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) );
+	testMove.cmd.buttons = 0;
+}
+/* Reload on the very next think: it starts at once, the action still owed. */
+static void ReloadAtOnce( void ) {
+	testMove.cmd.buttons = BUTTON_RELOAD;
+	Step( 1 );
+	testMove.cmd.buttons = 0;
+	CHECK( testPs.weaponstate == WEAPON_RELOADING && testPs.weaponAnimSeq == RSEQ_START );
+	CHECK( testPs.weaponAnimTime == 0 );
+	CHECK( testPs.ammo[fireGun] == BG_WeaponMagSize( fireGun ) - 1 );
+	CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << fireGun) );
+}
+static int WeaponsWithAnAction( int *list ) {
+	int w, n = 0;
+	for ( w = 1; w < WP_NUM_WEAPONS; w++ )
+		if ( BG_WeaponFireLength( w ) > 0 && BG_WeaponMagSize( w ) > 0 && !BG_IsActionWeapon( w ) ) list[n++] = w;
+	return n;
+}
+static void TestShootReload( int step ) {
+	int list[MAX_WEAPONS], n = WeaponsWithAnAction( list ), i;
+	CHECK( n > 0 );
+	for ( i = 0; i < n; i++ ) {
+		int w = list[i], reset = ResetTime( w ), close = GunNote( bg_weaponFire[w].notes, WNOTE_BOLT_CLOSED );
+		/* every worked action's reload carries the point that resets it, and it
+		   comes before both the gun's own close and its first round */
+		CHECK( reset > 0 && close > 0 );
+		CHECK( 1 + reset < close );
+		CHECK( reset < Seg( w, RSEQ_START ) + GunNote( PM_SegNotes( w, RSEQ_LOOP ), WNOTE_MAG_IN ) );
+
+		/* Reload is taken during the blast and during the pump/bolt alike. */
+		ShootGun( w ); RunFor( 1, step ); ReloadAtOnce();
+		ShootGun( w ); RunFor( GunNote( bg_weaponFire[w].notes, WNOTE_BOLT_OPEN ), 1 );
+		CHECK( testPs.weaponstate == WEAPON_BOLTING ); ReloadAtOnce();
+
+		/* The fastest NAC: Y on the think the reload resets the action. */
+		ShootGun( w ); ReloadAtOnce();
+		RunFor( reset - 1, 1 );
+		CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << w) );
+		testMove.cmd.weapon = otherGun; Step( 1 );
+		CHECK( testPs.weapon == otherGun && testPs.weaponstate == WEAPON_RAISING );
+		CHECK( !( testPs.stats[STAT_UNCHAMBERED] & (1 << w) ) );
+
+		/* One think earlier it is an ordinary swap: the window is a window. */
+		ShootGun( w ); ReloadAtOnce();
+		RunFor( reset - 2, 1 );
+		testMove.cmd.weapon = otherGun; Step( 1 );
+		CHECK( testPs.weapon == w && testPs.weaponstate == WEAPON_DROPPING );
+		CHECK( testPs.weaponTime == BG_WeaponDropTime( w ) );
+
+		/* The Fayde: one think late, YY - the gun is ready, no pump owed, and
+		   it fires long before the pump or bolt would have let it. */
+		ShootGun( w ); ReloadAtOnce();
+		RunFor( reset, 1 );
+		testMove.cmd.weapon = otherGun; Step( 1 );
+		CHECK( testPs.weaponstate == WEAPON_DROPPING );
+		testMove.cmd.weapon = w; Step( 1 );
+		CHECK( testPs.weaponstate == WEAPON_READY );
+		shots = 0; testMove.cmd.buttons = BUTTON_ATTACK; Step( 1 );
+		CHECK( shots == 1 );
+		CHECK( 1 + 1 + reset + 3 < BG_WeaponFireLength( w ) );
+
+		/* YY before the reset: the reload is gone and the action still owed,
+		   so the whole pump or bolt plays again from the top. */
+		ShootGun( w ); ReloadAtOnce();
+		RunFor( reset - 3, 1 );
+		testMove.cmd.weapon = otherGun; Step( 1 );
+		testMove.cmd.weapon = w; Step( 1 );
+		CHECK( testPs.weaponstate == WEAPON_BOLTING && testPs.weaponAnimTime == 0 );
+		shots = 0; testMove.cmd.buttons = BUTTON_ATTACK;
+		RunFor( BG_WeaponFireLength( w ) - 1, 1 );
+		CHECK( shots == 0 );
+		Step( 1 );
+		CHECK( shots == 1 );
+
+		/* Wait out the reset, then YY late: still ready, still no pump. */
+		ShootGun( w ); ReloadAtOnce();
+		RunFor( reset + Seg( w, RSEQ_START ) / 2, 1 );
+		testMove.cmd.weapon = otherGun; Step( 1 );
+		testMove.cmd.weapon = w; Step( 1 );
+		CHECK( testPs.weaponstate == WEAPON_READY );
+
+		/* An ordinary reload of a chambered gun gains nothing at that point:
+		   no lock is released, so Y there is an ordinary holster. */
+		ShootGun( w );
+		RunFor( BG_WeaponFireLength( w ) + 1, 1 );
+		CHECK( testPs.weaponstate == WEAPON_READY && !( testPs.stats[STAT_UNCHAMBERED] & (1 << w) ) );
+		testMove.cmd.buttons = BUTTON_RELOAD; Step( 1 ); testMove.cmd.buttons = 0;
+		CHECK( testPs.weaponstate == WEAPON_RELOADING );
+		RunFor( reset - 1, 1 );
+		testMove.cmd.weapon = otherGun; Step( 1 );
+		CHECK( testPs.weapon == w && testPs.weaponstate == WEAPON_DROPPING );
+		CHECK( testPs.weaponTime == BG_WeaponDropTime( w ) );
+
+		/* Letting the reload run: the reset settles the action, the reload
+		   loads, and its own close still lands - ammo is conserved. */
+		ShootGun( w ); ReloadAtOnce();
+		RunFor( Seg( w, RSEQ_START ) + Seg( w, RSEQ_LOOP ) + Seg( w, RSEQ_END ) + 2, 1 );
+		CHECK( testPs.ammo[w] == BG_WeaponMagSize( w ) );
+		CHECK( testPs.ammoReserve[w] == BG_WeaponMaxReserve( w ) - 1 );
+		CHECK( !( testPs.stats[STAT_UNCHAMBERED] & (1 << w) ) );
+	}
+}
+
 int main( void ) {
 	int i, offset;
 	const int steps[] = { 1, 8, 16, 33, 66 };
@@ -515,6 +651,7 @@ int main( void ) {
 		TestMagazineUnchanged( steps[i] );
 		TestPumpIsItsOwnState( steps[i] );
 		TestUnpumpedWeaponUnchanged( steps[i] );
+		TestShootReload( steps[i] );
 	}
 	TestADSPermission();
 	TestPumpCannotBeShortCircuited();
@@ -529,6 +666,6 @@ int main( void ) {
 		TestSwapSprintPreserved( 0, offset );
 		TestSwapSprintPreserved( 1, offset );
 	}
-	printf( "PASS: reload interruption, ammo conservation, magazine reload, swap/sprint ordering, and the fire cycle (%d checks).\n", checks );
+	printf( "PASS: reload interruption, ammo conservation, magazine reload, swap/sprint ordering, the fire cycle and shoot-reload resets (%d checks).\n", checks );
 	return 0;
 }

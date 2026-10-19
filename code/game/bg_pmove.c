@@ -1695,6 +1695,7 @@ static const bg_weaponNote_t bgnotes_mag_bfg[] = {
    lands on MW2's actual cadence. If it plays sluggish, halve these. */
 static const bg_weaponNote_t bgnotes_spas_start[] = {
 	{  120, WNOTE_MAG_OUT, 0 },
+	{  120, WNOTE_ACTION_RESET, 0 },	/* the reload has the action open: no pump owed */
 	{ 0, WNOTE_NONE, 0 }
 };
 static const bg_weaponNote_t bgnotes_spas_loop[] = {
@@ -1751,7 +1752,9 @@ static const bg_weaponNote_t bgnotes_m40_fire[] = {
 	{ 0, WNOTE_NONE, 0 }
 };
 static const bg_weaponNote_t bgnotes_m40_start[] = {
-	{ M40_BOLT_OPEN_MS, WNOTE_MAG_OUT, 0 }, { 0, WNOTE_NONE, 0 }
+	{ M40_BOLT_OPEN_MS, WNOTE_MAG_OUT, 0 },
+	{ M40_BOLT_OPEN_MS, WNOTE_ACTION_RESET, 0 },	/* the reload has the bolt open: no bolt owed */
+	{ 0, WNOTE_NONE, 0 }
 };
 static const bg_weaponNote_t bgnotes_m40_loop[] = {
 	{ M40_ROUND_IN_MS, WNOTE_MAG_IN, 1 }, { 0, WNOTE_NONE, 0 }
@@ -2562,6 +2565,20 @@ static void PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 			PM_AddEvent( EV_RELOAD );
 			break;
 
+		case WNOTE_ACTION_RESET:
+			// The reload has opened the action for itself, so the pump or bolt
+			// the last shot left owed is no longer owed: the reload's own close
+			// will chamber, and a cancelled reload leaves nothing to work. Only a
+			// gun that actually owed one has just become ready to fire - its busy
+			// lock goes, exactly like the close note's. A gun that owed nothing
+			// is untouched, so an ordinary reload gains nothing here.
+			if ( pm->ps->stats[STAT_UNCHAMBERED] & ( 1 << pm->ps->weapon ) ) {
+				pm->ps->stats[STAT_UNCHAMBERED] &= ~( 1 << pm->ps->weapon );
+				pm->ps->weaponTime = 0;
+				PM_AddEvent( EV_WEAPON_NOTETRACK );
+			}
+			break;
+
 		case WNOTE_BOLT_OPEN:
 			// The shot is over; what is left is the action working. Only moved
 			// out of FIRING so a shot that has already been cancelled is not
@@ -3190,6 +3207,19 @@ static void PM_Weapon( void ) {
 		pm->ps->weaponAnimSeq  = ASEQ_FIRE;
 		pm->ps->weaponAnimTime = 0;
 		pm->ps->weaponTime     = BG_WeaponFireLength( pm->ps->weapon );
+	}
+
+	// 4e. A shot has left and its action is still being worked: reload is taken
+	//     at once rather than after the pump or bolt. The fire cycle is simply
+	//     abandoned - its debt stays set until the reload's own note settles it.
+	if ( reload && pm->ps->weaponAnimSeq == ASEQ_FIRE &&
+	     ( pm->ps->weaponstate == WEAPON_FIRING || pm->ps->weaponstate == WEAPON_BOLTING ) &&
+	     ( pm->ps->stats[STAT_UNCHAMBERED] & ( 1 << pm->ps->weapon ) ) &&
+	     BG_WeaponMagSize( pm->ps->weapon ) > 0 &&
+	     pm->ps->ammo[pm->ps->weapon] < BG_WeaponMagSize( pm->ps->weapon ) &&
+	     pm->ps->ammoReserve[pm->ps->weapon] > 0 ) {
+		PM_BeginReload();
+		return;
 	}
 
 	// 5. Busy.

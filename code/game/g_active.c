@@ -755,8 +755,9 @@ void ClientThink_real( gentity_t *ent ) {
 	gclient_t	*client;
 	pmove_t		pm;
 	int			oldEventSequence;
-	int			msec, oldRelease;
+	int			msec;
 	usercmd_t	*ucmd;
+	qboolean	sndUsable;
 
 	client = ent->client;
 
@@ -933,7 +934,6 @@ void ClientThink_real( gentity_t *ent ) {
 	pm.pmove_msec = pmove_msec.integer;
 
 	VectorCopy( client->ps.origin, client->oldOrigin );
-	oldRelease = client->ps.weaponReleaseTime;
 
 #ifdef MISSIONPACK
 		if (level.intermissionQueued != 0 && g_singlePlayer.integer) {
@@ -952,7 +952,6 @@ void ClientThink_real( gentity_t *ent ) {
 #else
 		Pmove (&pm);
 #endif
-	BG_ServerReleaseWeapon( &client->ps, oldRelease, level.time );
 
 	// save results of pmove
 	if ( ent->client->ps.eventSequence != oldEventSequence ) {
@@ -988,8 +987,12 @@ void ClientThink_real( gentity_t *ent ) {
 		G_TouchTriggers( ent );
 	}
 
-	// Bomb use and reload-to-pickup have independent clocks and buttons.
+	// Bomb use and reload-to-pickup have independent clocks and buttons. MW2
+	// uses one thing per use/reload press, and the bomb comes first: a hold
+	// over a site or the case is never a floor-gun hold too.
+	sndUsable = G_SNDUsable(ent);
 	G_SNDUse(ent, ucmd);
+	if ( sndUsable && client->ps.pickupHeld == 3 ) client->ps.pickupHeld = 2;
 	G_CommitWeaponPickup(ent);
 
 	// NOTE: now copy the exact origin over otherwise clients can be snapped into solid
@@ -1005,6 +1008,12 @@ void ClientThink_real( gentity_t *ent ) {
 	if (ent->client->ps.eventSequence != oldEventSequence) {
 		ent->eventTime = level.time;
 	}
+
+	// MW2's use and use/reload, after the command has moved the player: a press
+	// over a floor gun is held for it, a press at a bomb site or the bomb is a
+	// use, and anything else asks the weapon for a reload on the next command.
+	BG_UpdateActivate( &client->ps, &client->activate, ucmd->buttons,
+		!sndUsable && G_FindWeaponPickup( ent ) != NULL, sndUsable );
 
 	// swap and latch button actions
 	client->oldbuttons = client->buttons;

@@ -128,7 +128,9 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   Do not replace a floor pickup with a full-mag grant. Death drops the held
   slot, not the requested destination. Exact weapon+attachment matches scavenge
   to reserve on touch (capacity-capped) and consume the item; other guns need a
-  continuous 1000ms reload hold. A short tap still reloads. S&D use is separate.
+  continuous 1000ms reload or use/reload hold. A short tap still reloads: a
+  reload tap in pmove, a use/reload tap through the server's bit (`pickupHeld`
+  3 marks a use/reload hold so pmove does not also reload). S&D use is separate.
 - **Pickup does not own selection.** The reload hold latches its replacement
   slot, while `cmd.weapon = BG_SLOT_COMMAND + slot` continues carrying the
   latest selection. Old plain weapon IDs are supported for bots/tools. Neither
@@ -161,31 +163,56 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   halves reward technique instead of only slowing play.
 - **Never ADS through a reload.** `PM_CheckADS` blocks `WEAPON_RELOADING` on
   purpose. The ZOOMload trick is a client/server desync — the reload animation
-  starts client-side and the server never agrees one is happening — not a rule
-  being relaxed. Do not reproduce it by loosening the gate.
+  starts client-side from the use/reload bit and the server never agrees one is
+  happening — not a rule being relaxed. Do not reproduce it by loosening the gate.
+- **No knife while a scoped gun is aimed (MW2).** `BG_WeaponScopeOverlay`
+  (MW2's `adsOverlayReticle`, from `weapon.json`'s `scope_overlay`, which also
+  writes the `.sights` scope line) refuses a melee press while `PMF_ADS` is set;
+  the press is lost. It is the whole wild scope: through a fake reload the
+  client is not aiming, so its knife starts, while the server is scoped and
+  refuses it. Do not add a wild-scope rule anywhere else. MW2 tests its
+  predicted ADS fraction, so its knife also waits for the scope to ease out;
+  Peace has no gameplay ADS fraction, so `PMF_ADS` stands in for it.
 - **A button held through respawn is not a new press.** When `PMF_RESPAWNED`
   clears, seed the melee/lethal/tactical held mask from the current command.
   Preserve the other action bits; a release and new press still work normally.
   The loadout suite drives full `Pmove` for ordinary/frozen spawns and an
   attack-held spawn gate, including Semtex.
-- **Quick actions are resolved by the server (owner's rule).** When the
-  quick-action latch clears with the gun drawn (knife, frag, flash, Semtex
-  throw or pre-release cancel), shared pmove stamps `weaponReleaseTime` with
-  that command's time; the server's `BG_ServerReleaseWeapon` then raises it to
-  `level.time`, and until `cmd.serverTime` reaches it the gun answers only its
-  trigger: reload, quick-action and slot-change inputs are masked from
-  `PM_Weapon` (a tap there is never seen, a held button acts once the gun is
-  back). Firing is never held, so there is no fake shot (owner's rule). The client learns the server's stamp a round trip later, so it predicts
-  the gun back early by about RTT (one server frame at 0 ping). That gap is the
-  MW2 fake reload, fake knife and wild scope. Never special-case them, never
-  shrink the gap with a client-side guess, and never stamp on anything but the
-  latch clearing.
+- **Use/reload is MW2's (owner's rule: do what MW2 does).** `+usereload`
+  (`BUTTON_USE_RELOAD`, the gamepad's X) is never a reload press in pmove, which
+  reads it only to hold for a floor gun. After each command's `Pmove`, the
+  server's `BG_UpdateActivate` (MW2's `Player_UpdateActivate`, run from
+  `ClientThink_real`) clears `PWF_USE_RELOAD` on `ps.weapFlags`, then sets it
+  again for a press that finds nothing to use, and on every command while that
+  press is held. A press over a floor gun is held for the pickup and reloads
+  only if released early; a press at a bomb site or the bomb is a use, and the
+  bomb comes first (one use per press, as MW2's use list). CoD4 also counts a
+  press made while sprinting or with a grenade out as used; Peace does not,
+  because its sprint does not give way to a reload and MW2 players do fake
+  reloads after equipment. `PM_Weapon` takes the bit as a reload press and
+  clears it — except during a quick action, from the press through the
+  recovery draw, where it is not read at all (MW2's reload check skips melee
+  and offhand) — and a gun that is reloading when the command begins drops it,
+  so a held trigger gets its shot between reloads. The client never sets the bit; it
+  gets it from a snapshot and replays its commands over it, so a tap made as
+  the gun comes back can reach the client's return after the server has already
+  dropped it: the fake reload. A tap just before a shot is taken by the server
+  first and reaches the client late: the fake bullet. `+reload` is the
+  weapon's own button, predicted exactly, with no such tricks — as in MW2,
+  where the scripts do every trick with `+usereload`. A reload request beats the
+  trigger on the same command, as MW2 checks reload before it fires. Never
+  predict the bit on the client, never hold the gun back after a quick action,
+  and never name a trick. `dev/FAKE_RELOAD.md` has the measured windows.
 - **The gun never un-plays an action it showed (owner's rule).**
   `cg_weappicture.c` draws the viewmodel from its own run of the client's
   commands through the real `Pmove` once prediction is corrected away from a
-  reload, shot or pump of the held gun. It follows prediction again when that
-  run comes to rest or prediction starts a real action. A correction that only
-  removes a swap is followed at once, so a lone knife is never a fake knife.
+  reload, shot or pump of the held gun that you were shown. That run only
+  finishes what you saw: it withholds whatever in your commands would begin
+  something new, never detaches into an action it began itself, and follows
+  prediction again when it comes to rest or prediction starts a real action. A
+  correction that only removes a swap is followed at once, so a lone knife is
+  never a fake knife. The harness checks that the picture never draws a reload
+  or knife prediction never had.
   Aim, camera and HUD always read the predicted state. Run
   `dev/tests/run-fakereload.sh`; `dev/FAKE_RELOAD.md` has the measured windows.
 
@@ -202,13 +229,12 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 9-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, and post-throw recovery. Protocol 77 requires client, server
+  swap edge latch, and post-throw recovery. Protocol 78 requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
-  `weaponReleaseTime` (32 bits, protocol 77) is the server-clock hand-off of
-  the gun after a quick action; the killcam replay rebases it like
-  `commandTime`.
+  `weapFlags` (MW2's name; 1 bit, protocol 78) carries `PWF_USE_RELOAD`, the
+  server's use/reload request. It is not a clock and is never rebased.
   Dropped ET_ITEM uses `generic1` for attachments, `time2` for packed magazine
   and reserve, `otherEntityNum2` for chamber debt, and `time` as a spawn serial.
 - `perks` is a five-bit spawn-owned playerstate field. All three class perk
@@ -294,9 +320,12 @@ Loadouts UI and class definitions are documented in `dev/LOADOUTS.md`.
 
 `dev/tests/run-fakereload.cmd` (or `.sh`) models ioquake3's client/server
 clocks (snapshot drift, sv_fps frames, ping) with the real `Pmove` on both
-sides and the real `cg_anim` + `cg_weappicture.c` on the client. It checks the
-fake reload, tap vs hold, aiming/shooting/real reload during it, the lone knife
-and the wild scope chain at 0/50/100/200 ms.
+sides, the server's use/reload step after each command, and the real `cg_anim`
++ `cg_weappicture.c` on the client. On the SPAS and the M300 it checks the fake
+reload after knife/frag/Semtex cancel, tap vs hold, aiming/shooting/real reload
+during it, `+reload` never faking, no fake shot, the lone knife, the fake bullet
+and the M300 wild scope at 0/50/100/200 ms. `FAKERELOAD_PROBE=1` prints every
+tap timing; `FAKERELOAD_SVFPS` changes the server rate.
 
 Do not statically initialize structs with inline char arrays mixed with ints:
 q3asm splits byte literals and word data into different segments. Use word-only
@@ -336,6 +365,8 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
 - `scope` in a viewmodel's `.sights` file opts into the aspect-correct ocular
   overlay. At full ADS the overlay replaces the gun picture; its animation
   layers still advance. This never changes ADS permission or note clocks.
+  The generator writes that line from `weapon.json`'s `scope_overlay`, which
+  also feeds `BG_WeaponScopeOverlay`, MW2's no-knife-while-scoped rule.
 - Supported attachment masks live in the shared class weapon catalog. The
   M40's scope is integral, so a red-dot spawn preference cannot invent a
   nonexistent attachment variant. See `dev/M40A3.md`.

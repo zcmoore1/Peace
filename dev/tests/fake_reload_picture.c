@@ -18,6 +18,7 @@ void trap_R_BlendModelPoses(modelPose_t *out, const modelPose_t *a, float wa, co
 void FakeReloadPictureInit(void) {
 	CG_WeapAnim_Init();
 	CG_WeapAnim_RegisterClips(WP_SHOTGUN, 1, "assets/baseq3/models/weapons2/spas12/view.cfg");
+	CG_WeapAnim_RegisterClips(WP_M40A3, 1, "assets/baseq3/models/weapons2/m40a3/view.cfg");
 }
 /* The base-layer clip on screen (WANIM_*), -1 for a weapon without clips. Fails on any ps write. */
 int FakeReloadPicture(playerState_t *ps, int now, int msec) {

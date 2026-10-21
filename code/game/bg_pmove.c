@@ -2126,8 +2126,12 @@ qboolean BG_UpdateWeaponPickup(playerState_t *ps, const usercmd_t *cmd,
 	const entityState_t *item, int msec) {
 	int target = item ? item->number : ENTITYNUM_NONE;
 	int serial = item ? item->time : 0;
+	// Reload and use/reload both hold to collect. Only reload is a reload press
+	// here: a use/reload tap is answered by the server (BG_UpdateActivate), so
+	// its hold is marked 3 and its early release reloads nothing in pmove.
+	qboolean held = (cmd->buttons & (BUTTON_RELOAD | BUTTON_USE_RELOAD)) != 0;
 	qboolean reload = (cmd->buttons & BUTTON_RELOAD) != 0;
-	if (!reload) {
+	if (!held) {
 		reload = ps->pickupHeld == 1 && ps->pickupTime < BG_PICKUP_HOLD_TIME;
 		ps->pickupHeld = 0;
 		ps->pickupTime = 0;
@@ -2138,7 +2142,7 @@ qboolean BG_UpdateWeaponPickup(playerState_t *ps, const usercmd_t *cmd,
 			ps->pickupSlot = ps->stats[STAT_ACTIVE_SLOT];
 			ps->pickupTime = 0;
 		}
-		ps->pickupHeld = 1;
+		ps->pickupHeld = reload ? 1 : 3;
 		ps->pickupTime = MIN(BG_PICKUP_HOLD_TIME, ps->pickupTime + msec);
 		reload = qfalse;
 	} else if (ps->pickupHeld) {
@@ -2219,6 +2223,21 @@ static const float bg_weaponAdsSpreadScale[MAX_WEAPONS] = {
 #endif
 	.15f, .15f, .15f, .15f, M40_ADS_SPREAD_SCALE
 };
+
+// Aimed through an overlay scope rather than over the sights (MW2's
+// adsOverlayReticle). The view.sights scope line comes from the same data.
+static const int bg_weaponScopeOverlay[MAX_WEAPONS] = {
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+#ifdef MISSIONPACK
+	0, 0, 0,
+#endif
+	0, 0, 0, 0, M40_SCOPE_OVERLAY
+};
+
+int BG_WeaponScopeOverlay( int weapon ) {
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
+	return bg_weaponScopeOverlay[weapon];
+}
 
 int BG_WeaponBaseSpread( int weapon ) {
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
@@ -2401,7 +2420,7 @@ void BG_ApplyClass( playerState_t *ps, const bg_class_t *cl ) {
 	ps->weaponAnimTime = -1;
 	ps->weaponAction = 0;
 	ps->weaponDraw = 0;
-	ps->weaponReleaseTime = 0;
+	ps->weapFlags = 0;
 	ps->stats[STAT_UNCHAMBERED] = 0;
 	ps->pickupTarget = ENTITYNUM_NONE;
 	ps->pickupSerial = ps->pickupTime = ps->pickupHeld = ps->pickupSlot = 0;
@@ -2726,8 +2745,6 @@ static int PM_HeldActionButtons( void ) {
 // Latch a press through holster/deploy. Releasing the button cannot lose a tap,
 // and holding it cannot turn a quick action into a permanently selected weapon.
 static void PM_UpdateWeaponAction( void ) {
-	const int quick = WA_TYPE_MASK | WA_RETURNING | WA_RECOVERING;
-	int before = pm->ps->weaponAction & quick;
 	int held = PM_HeldActionButtons();
 	int pressed = held & ~((pm->ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT);
 	int action = pm->ps->weaponAction & (WA_TYPE_MASK | WA_FIRED);
@@ -2763,7 +2780,10 @@ static void PM_UpdateWeaponAction( void ) {
 		if ( !(action & WA_TYPE_MASK) ||
 			( (action & WA_FIRED) && !BG_IsActionWeapon( pm->ps->weapon ) ) ) {
 			int nextAction = 0;
-			if ( pressed & 1 ) nextAction = WA_MELEE;
+			// MW2 starts no knife while a scoped gun is aimed at all; the press is
+			// lost. The gun in hand is aimed only if PM_CheckADS let it be.
+			if ( (pressed & 1) && !( (pm->ps->pm_flags & PMF_ADS) &&
+				BG_WeaponScopeOverlay( pm->ps->weapon ) ) ) nextAction = WA_MELEE;
 			else if ( (pressed & 2) && pm->ps->ammo[BG_LethalWeapon(pm->ps)] > 0 ) nextAction = WA_LETHAL;
 			else if ( (pressed & 4) && pm->ps->ammo[WP_FLASH] > 0 ) nextAction = WA_TACTICAL;
 			if (nextAction) {
@@ -2785,31 +2805,44 @@ static void PM_UpdateWeaponAction( void ) {
 	pm->ps->weaponAction = action | (held << WA_HELD_SHIFT) | returning | recovering |
 		(swap ? WA_SWAP_HELD : 0);
 	if ( action & WA_TYPE_MASK ) pm->ps->pm_flags &= ~(PMF_ADS | PMF_SPRINTING);
-	// The gun is back from a quick action. Shared prediction hands it back on
-	// this command; the server, which resolved the swing or the throw, confirms
-	// the hand-off on its own clock (BG_ServerReleaseWeapon). Until then the
-	// weapon does not answer its inputs - see the top of PM_Weapon.
-	if ( before && !(pm->ps->weaponAction & quick) && !BG_IsActionWeapon( pm->ps->weapon ) &&
-		( pm->ps->weaponstate == WEAPON_READY ||
-		  ( pm->ps->weaponstate == WEAPON_RAISING && pm->ps->weaponTime <= 0 ) ) ) {
-		pm->ps->weaponReleaseTime = pm->cmd.serverTime;
-	}
 }
 
 /*
 ===============
-BG_ServerReleaseWeapon
+BG_UpdateActivate
 
-Quick actions are resolved by the server: it is the side that lands the knife
-and spawns the grenade. When a command hands the gun back, the server gives it
-back no earlier than its own clock. The client predicts the hand-off on the
-command clock and learns the server's answer a round trip later.
+MW2's Player_UpdateActivate, run by the server after each command's Pmove and
+never by the client. Use and use/reload are server buttons: a press that finds
+nothing to use becomes PWF_USE_RELOAD, which the weapon reads on the next
+command as a reload press (PM_Weapon). The bit lives for that one command: it
+is cleared here every time, and set again while the button is held, because a
+press that used nothing is never "done". A press over a hold-to-use usable is
+held for it, and released early it asks for the reload instead.
+
+The client never sets the bit. It learns it from the snapshot, like any other
+field, and its own commands consume it.
 ===============
 */
-void BG_ServerReleaseWeapon( playerState_t *ps, int previousRelease, int serverTime ) {
-	if ( ps->weaponReleaseTime != previousRelease && ps->weaponReleaseTime < serverTime ) {
-		ps->weaponReleaseTime = serverTime;
+void BG_UpdateActivate( playerState_t *ps, bg_activate_t *use, int buttons,
+	qboolean holdUsable, qboolean usedAtOnce ) {
+	const int useButtons = BUTTON_USE | BUTTON_USE_RELOAD;
+	int old = use->buttons, latched;
+	if ( !use->done ) old &= ~useButtons;
+	if ( !(buttons & useButtons) ) use->done = qfalse;
+	latched = buttons & ~old;
+	ps->weapFlags &= ~PWF_USE_RELOAD;
+	if ( use->hold && (old & BUTTON_USE_RELOAD) && !(buttons & BUTTON_USE_RELOAD) ) {
+		ps->weapFlags |= PWF_USE_RELOAD;
+	} else {
+		qboolean used = qfalse;
+		if ( latched & useButtons ) {
+			use->hold = holdUsable;
+			used = holdUsable || usedAtOnce;
+		}
+		if ( use->hold || used ) use->done = qtrue;
+		else if ( latched & BUTTON_USE_RELOAD ) ps->weapFlags |= PWF_USE_RELOAD;
 	}
+	use->buttons = buttons;
 }
 
 /*
@@ -3052,6 +3085,19 @@ static void PM_Weapon( void ) {
 		return;
 	}
 	reload = BG_UpdateWeaponPickup(pm->ps, &pm->cmd, pm->pickupItem, pml.msec);
+	// The server's use/reload request is a reload press (BG_UpdateActivate).
+	// Like MW2's reload check, a quick action does not read it at all, from the
+	// press to the end of the recovery draw; everywhere else it is taken now,
+	// and a gun that cannot reload yet simply drops it.
+	if ( (pm->ps->weapFlags & PWF_USE_RELOAD) && !(pm->ps->weaponAction & WA_TYPE_MASK) ) {
+		pm->ps->weapFlags &= ~PWF_USE_RELOAD;
+		reload = qtrue;
+	}
+	// MW2 asks a reloading gun nothing, even when its reload ends on this
+	// command: the trigger then gets its turn before the next request.
+	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
+		reload = qfalse;
+	}
 
 	// check for item using
 	if ( (pm->cmd.buttons & BUTTON_USE_HOLDABLE) &&
@@ -3309,17 +3355,20 @@ static void PM_Weapon( void ) {
 		(PM_ActionWeapon() != pm->ps->weapon || (pm->ps->weaponAction & WA_FIRED)) ) {
 		return;
 	}
+	// Manual reload. MW2 checks for a reload before it fires, so a reload
+	// press beats the trigger on the same command.
+	if ( reload && PM_ActionWeapon() != pm->ps->weapon ) {
+		int magSize = BG_WeaponMagSize( pm->ps->weapon );
+		if ( magSize > 0 &&
+		     pm->ps->ammo[pm->ps->weapon] < magSize &&
+		     pm->ps->ammoReserve[pm->ps->weapon] > 0 ) {
+			PM_BeginReload();
+			return;
+		}
+	}
 	// check for fire
 	if ( !(pm->cmd.buttons & BUTTON_ATTACK) && PM_ActionWeapon() != pm->ps->weapon ) {
-		// Manual reload: player pressed R while not firing
-		if ( reload ) {
-			int magSize = BG_WeaponMagSize( pm->ps->weapon );
-			if ( magSize > 0 &&
-			     pm->ps->ammo[pm->ps->weapon] < magSize &&
-			     pm->ps->ammoReserve[pm->ps->weapon] > 0 ) {
-				PM_BeginReload();
-			}
-		} else {
+		if ( !reload ) {
 			pm->ps->weaponTime = 0;
 			pm->ps->weaponstate = WEAPON_READY;
 		}
@@ -3784,19 +3833,7 @@ void PmoveSingle (pmove_t *pmove) {
 	PM_CheckADS();
 
 	// weapons
-	{
-		// Until the server hands the gun back after a quick action, the gun
-		// answers only its trigger. Reload, quick actions and slot changes wait:
-		// a tap in that time is never seen, a button still held acts once it is.
-		usercmd_t cmd = pm->cmd;
-		if ( pm->cmd.serverTime < pm->ps->weaponReleaseTime ) {
-			pm->cmd.buttons &= ~( BUTTON_RELOAD | BUTTON_MELEE | BUTTON_LETHAL |
-				BUTTON_TACTICAL | BUTTON_WEAPON_SWAP );
-			pm->cmd.weapon = BG_SLOT_COMMAND + pm->ps->stats[STAT_ACTIVE_SLOT];
-		}
-		PM_Weapon();
-		pm->cmd = cmd;
-	}
+	PM_Weapon();
 	if ( (pm->ps->stats[STAT_LADDER] & (LADDER_ATTACHED | LADDER_HOLSTER)) ||
 		pm->ps->weaponstate == WEAPON_LADDER ) {
 		pm->ps->eFlags &= ~EF_FIRING;

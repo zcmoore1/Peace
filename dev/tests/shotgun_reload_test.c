@@ -678,6 +678,34 @@ static void TestShootReload( int step ) {
 	}
 }
 
+/* The trigger and a reload request held together: a reload is never asked of
+   a gun that is reloading, so after each reload the trigger gets its shot -
+   the guns alternate and never lock in their reload. */
+static void TestTriggerAndReloadHeld( int step ) {
+	const int guns[] = { WP_SHOTGUN, WP_M40A3, WP_MACHINEGUN };
+	int g, bit;
+	for ( g = 0; g < 3; g++ ) for ( bit = 0; bit < 2; bit++ ) {
+		int w = guns[g], t;
+		memset( &testPs, 0, sizeof(testPs) );
+		memset( &testMove, 0, sizeof(testMove) );
+		memset( &pml, 0, sizeof(pml) );
+		testMove.ps = &testPs; testMove.cmd.weapon = w; pm = &testMove;
+		testPs.weapon = w; testPs.weaponstate = WEAPON_READY; testPs.weaponAnimTime = -1;
+		testPs.stats[STAT_HEALTH] = 100;
+		testPs.stats[STAT_WEAPONS] = 1 << w; testPs.stats[STAT_SLOT_PRIMARY] = w;
+		testPs.ammo[w] = BG_WeaponMagSize( w ) - 2;
+		testPs.ammoReserve[w] = BG_WeaponMaxReserve( w );
+		shots = 0;
+		for ( t = 0; t < 6000; t += step ) {
+			testMove.cmd.buttons = BUTTON_ATTACK | ( bit ? 0 : BUTTON_RELOAD );
+			if ( bit ) testPs.weapFlags |= PWF_USE_RELOAD;	/* use/reload held: asked every command */
+			Step( step );
+		}
+		CHECK( shots >= 3 );
+		testMove.cmd.buttons = 0; testPs.weapFlags = 0;
+	}
+}
+
 int main( void ) {
 	int i, offset;
 	const int steps[] = { 1, 8, 16, 33, 66 };
@@ -691,6 +719,7 @@ int main( void ) {
 		TestPumpIsItsOwnState( steps[i] );
 		TestUnpumpedWeaponUnchanged( steps[i] );
 		TestShootReload( steps[i] );
+		TestTriggerAndReloadHeld( steps[i] );
 	}
 	TestADSPermission();
 	TestPumpCannotBeShortCircuited();

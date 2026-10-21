@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-7"
+#define	GAME_VERSION		BASEGAME "-8"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -336,6 +336,7 @@ int  BG_WeaponFirstRaiseTime( int weapon );
 int  BG_WeaponSprintInTime( int weapon );	// lower-into-sprint length
 int  BG_WeaponSprintOutTime( int weapon );	// raise-out-of-sprint length
 int  BG_WeaponBaseSpread( int weapon );
+int  BG_WeaponScopeOverlay( int weapon );	// aimed through an overlay scope (MW2: no knife while aimed)
 float BG_SpreadScale( const playerState_t *ps );
 float BG_WeaponSpread( const playerState_t *ps );
 
@@ -531,7 +532,18 @@ void BG_GetSlot(const playerState_t *ps, int slot, bg_weaponInstance_t *gun);
 void BG_PutSlot(playerState_t *ps, int slot, const bg_weaponInstance_t *gun);
 void BG_SelectSlot(playerState_t *ps, int slot);
 void BG_BeginWeaponDraw(playerState_t *ps);
-void BG_ServerReleaseWeapon( playerState_t *ps, int previousRelease, int serverTime );
+// MW2's use/reload (+usereload). It is never a reload press in pmove (pmove
+// reads it only to hold for a floor gun): the server's use code turns a press
+// with nothing to use into PWF_USE_RELOAD on playerState_t.weapFlags, and the
+// weapon takes the bit as a reload press.
+#define PWF_USE_RELOAD 1
+typedef struct {
+	int buttons;		// the last command's buttons, as the use code saw them
+	qboolean done;		// this press has used something (MW2's useButtonDone)
+	qboolean hold;		// this press began over a hold-to-use usable (useHoldEntity)
+} bg_activate_t;
+void BG_UpdateActivate( playerState_t *ps, bg_activate_t *use, int buttons,
+	qboolean holdUsable, qboolean usedAtOnce );
 qboolean BG_WeaponItem(const entityState_t *item, bg_weaponInstance_t *gun);
 int BG_MatchingWeaponSlot(const playerState_t *ps, const bg_weaponInstance_t *gun);
 float BG_WeaponPickupDistance(const playerState_t *ps, const entityState_t *item, int time);

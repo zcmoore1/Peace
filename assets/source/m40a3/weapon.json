@@ -19,5 +19,6 @@
   "ads_in_ms": 300,
   "ads_out_ms": 200,
   "fov_scale": 0.26,
+  "scope_overlay": 1,
   "fps": 60
 }

@@ -163,6 +163,53 @@ static void TestDuplicateBase(void) {
  CHECK(ps->stats[STAT_ACTIVE_SLOT]==0 && ps->ammo[WP_SHOTGUN]==1);
  BG_GetSlot(ps,1,&b); CHECK(b.ammo==5 && b.reserve==27 && b.attachments==0);
 }
+/* MW2's use/reload: the server's use code after each command (ClientThink_real). */
+static void UseStep(int buttons) {
+ move.cmd.buttons=buttons; Step(1);
+ BG_UpdateActivate(move.ps,&clients[0].activate,buttons,G_FindWeaponPickup(&g_entities[0])!=NULL,qfalse);
+}
+static void TestUseReload(void) {
+ playerState_t *ps=Reset(); int i;
+ /* Nothing to use: the press asks the weapon for a reload on the next command.
+  * The weapon never reads the button itself. */
+ ps->ammo[WP_MACHINEGUN]=4;
+ UseStep(BUTTON_USE_RELOAD); CHECK(ps->weaponstate==WEAPON_READY && (ps->weapFlags&PWF_USE_RELOAD));
+ UseStep(BUTTON_USE_RELOAD); CHECK(ps->weaponstate==WEAPON_RELOADING && (ps->weapFlags&PWF_USE_RELOAD));
+ UseStep(0); CHECK(!(ps->weapFlags&PWF_USE_RELOAD)); /* asked while held, for one command at a time */
+ /* A quick action does not read the request, from the press to its end. */
+ ps=Reset(); ps->ammo[WP_MACHINEGUN]=4;
+ move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
+ CHECK((ps->weaponAction&WA_TYPE_MASK)==WA_MELEE);
+ ps->weapFlags=PWF_USE_RELOAD;
+ for(i=0;i<3000 && (ps->weaponAction&WA_TYPE_MASK);i++) { Step(1); CHECK(ps->weapFlags&PWF_USE_RELOAD); }
+ CHECK(i<3000 && ps->weaponstate==WEAPON_READY);
+ Step(1); CHECK(ps->weaponstate==WEAPON_RELOADING && !(ps->weapFlags&PWF_USE_RELOAD));
+ /* Asked on the knife's own command, it is taken and the knife wins. */
+ ps=Reset(); ps->ammo[WP_MACHINEGUN]=4; ps->weapFlags=PWF_USE_RELOAD;
+ move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
+ CHECK((ps->weaponAction&WA_TYPE_MASK)==WA_MELEE && !(ps->weapFlags&PWF_USE_RELOAD) &&
+  ps->weaponstate==WEAPON_DROPPING);
+ /* Anywhere else it is taken at once, and a gun that cannot reload drops it. */
+ ps=Reset(); ps->weapFlags=PWF_USE_RELOAD; Step(1);
+ CHECK(ps->weaponstate==WEAPON_READY && !(ps->weapFlags&PWF_USE_RELOAD)); /* full magazine */
+ /* Over a floor gun, a hold collects it and asks for nothing ... */
+ ps=Reset(); Floor(WP_RAILGUN,0,2,8,0); ps->ammo[WP_MACHINEGUN]=4;
+ for(i=0;i<1000;i++) { UseStep(BUTTON_USE_RELOAD); CHECK(!(ps->weapFlags&PWF_USE_RELOAD)); }
+ CHECK(pickups==1 && ps->stats[STAT_SLOT_PRIMARY]==WP_RAILGUN);
+ UseStep(0); CHECK(!(ps->weapFlags&PWF_USE_RELOAD) && ps->weaponstate!=WEAPON_RELOADING);
+ /* ... and an early release is a reload, on the server's word alone. */
+ ps=Reset(); Floor(WP_RAILGUN,0,2,8,0); ps->ammo[WP_MACHINEGUN]=4;
+ for(i=0;i<400;i++) UseStep(BUTTON_USE_RELOAD);
+ CHECK(ps->pickupHeld==3 && ps->pickupTime==400 && !(ps->weapFlags&PWF_USE_RELOAD));
+ UseStep(0); CHECK(ps->weaponstate==WEAPON_READY && (ps->weapFlags&PWF_USE_RELOAD) && !ps->pickupHeld);
+ UseStep(0); CHECK(ps->weaponstate==WEAPON_RELOADING && !(ps->weapFlags&PWF_USE_RELOAD) && pickups==0);
+ /* A use at once (a bomb site) is a use: no reload, held or released. */
+ ps=Reset(); ps->ammo[WP_MACHINEGUN]=4;
+ for(i=0;i<3;i++) { move.cmd.buttons=BUTTON_USE_RELOAD; Step(1);
+  BG_UpdateActivate(ps,&clients[0].activate,BUTTON_USE_RELOAD,qfalse,qtrue); CHECK(!(ps->weapFlags&PWF_USE_RELOAD)); }
+ move.cmd.buttons=0; Step(1); BG_UpdateActivate(ps,&clients[0].activate,0,qfalse,qfalse);
+ CHECK(!(ps->weapFlags&PWF_USE_RELOAD) && ps->weaponstate==WEAPON_READY);
+}
 static void TestContestedPickup(void) {
  playerState_t *ps=Reset(); gentity_t *item=Floor(WP_RAILGUN,0,2,8,0);
  playerState_t *other=&clients[1].ps;
@@ -177,6 +224,6 @@ static void TestContestedPickup(void) {
  CHECK(level.num_entities==MAX_CLIENTS+2);
 }
 int main(void) {
- TestDrops(); TestScavenge(); TestHold(); TestSwap(); TestDuplicateBase(); TestContestedPickup();
+ TestDrops(); TestScavenge(); TestHold(); TestSwap(); TestDuplicateBase(); TestUseReload(); TestContestedPickup();
  printf("PASS: %d death/drop/pickup/slot-intent checks\n",checks); return 0;
 }

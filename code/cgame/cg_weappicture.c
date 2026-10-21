@@ -10,6 +10,10 @@ When the correction removes an action of the gun in your hands that you were
 already shown (a reload, a shot, a pump), the gun does not un-play it. From
 that moment the picture keeps running YOUR OWN commands through the real
 Pmove, uncorrected, until that run comes to rest or a real action takes over.
+The run only finishes what you were shown: it never detaches into an action
+it began itself, and once detached it withholds whatever in your commands
+would begin something new. Anything that still begins one hands the picture
+back to prediction.
 
 A correction that only removes a swap (a knife or a grenade you never really
 got out) is followed at once: a weapon you never held is never shown on its
@@ -28,6 +32,7 @@ static playerState_t	pic;			// the picture's own run
 static qboolean		picValid, picDetached;
 static int			picShot = -1;	// command time the run's gun last began an action since rest
 static int			picDetachTime;
+static qboolean		picBegan;		// this frame's run began an action of its own
 
 // What this frame's prediction replay saw, so a correction can be judged.
 static playerState_t	replayBase;
@@ -51,6 +56,13 @@ static qboolean CG_WeapPicture_BeganAction( const playerState_t *before, const p
 	if ( after->weaponstate == before->weaponstate && after->weapon == before->weapon ) return qfalse;
 	if ( before->weaponstate == WEAPON_FIRING && after->weaponstate == WEAPON_BOLTING ) return qfalse;
 	return qtrue;
+}
+
+// A knife or a grenade asked for on this command.
+static qboolean CG_WeapPicture_BeganQuick( const playerState_t *before, const playerState_t *after ) {
+	const int mask = WA_TYPE_MASK | WA_FIRED;
+	return ( after->weaponAction & WA_TYPE_MASK ) && !( after->weaponAction & WA_FIRED ) &&
+		( after->weaponAction & mask ) != ( before->weaponAction & mask );
 }
 
 static qboolean CG_WeapPicture_AtRest( const playerState_t *ps ) {
@@ -134,6 +146,20 @@ static void CG_WeapPicture_Advance( const pmove_t *model, int first, int last,
 		move.pickupItem = CG_WeapPicture_Item( move.cmd.serverTime );
 		before = pic;
 		Pmove( &move );
+		if ( picDetached && ( CG_WeapPicture_BeganAction( &before, &pic ) ||
+			CG_WeapPicture_BeganQuick( &before, &pic ) ) ) {
+			// Finish, never begin: the same command without what began it.
+			pic = before;
+			move.ps = &pic;
+			move.cmd.buttons &= ~( BUTTON_ATTACK | BUTTON_RELOAD | BUTTON_MELEE | BUTTON_LETHAL |
+				BUTTON_TACTICAL | BUTTON_WEAPON_SWAP );
+			move.cmd.weapon = BG_SLOT_COMMAND + pic.stats[STAT_ACTIVE_SLOT];
+			Pmove( &move );
+		}
+		if ( CG_WeapPicture_BeganAction( &before, &pic ) || CG_WeapPicture_BeganQuick( &before, &pic ) ) {
+			picBegan = qtrue;
+			if ( picDetached ) return;
+		}
 		if ( CG_WeapPicture_BeganAction( &before, &pic ) ) {
 			picShot = pic.commandTime;
 		} else if ( CG_WeapPicture_AtRest( &pic ) ) {
@@ -152,6 +178,9 @@ and masks prediction used; commands [first, last] are the client's own.
 */
 void CG_WeapPicture_Update( const playerState_t *predicted, const pmove_t *model,
 	int first, int last, qboolean (*getCmd)( int, usercmd_t * ) ) {
+	playerState_t start;
+	int startShot;
+
 	if ( !picValid || predicted->pm_type != PM_NORMAL || predicted->stats[STAT_HEALTH] <= 0 ||
 		pic.clientNum != predicted->clientNum ||
 		pic.persistant[PERS_SPAWN_COUNT] != predicted->persistant[PERS_SPAWN_COUNT] ||
@@ -162,24 +191,33 @@ void CG_WeapPicture_Update( const playerState_t *predicted, const pmove_t *model
 		return;
 	}
 
+	start = pic;
+	startShot = picShot;
+	picBegan = qfalse;
 	CG_WeapPicture_Advance( model, first, last, getCmd );
 
 	if ( !picDetached ) {
 		if ( CG_WeapPicture_Same( &pic, predicted ) ) {
 			CG_WeapPicture_Follow( predicted );
-		} else if ( picShot >= 0 && !CG_WeapPicture_PredictionKept( picShot ) ) {
-			// The server never did an action you were shown: let it play out.
+		} else if ( startShot >= 0 && !CG_WeapPicture_PredictionKept( startShot ) ) {
+			// The server never did an action you were shown: let it play out,
+			// from where you saw it, beginning nothing of its own.
+			pic = start;
+			picShot = startShot;
 			picDetached = qtrue;
 			picDetachTime = predicted->commandTime;
+			picBegan = qfalse;
+			CG_WeapPicture_Advance( model, first, last, getCmd );
 		} else {
 			CG_WeapPicture_Follow( predicted );
 		}
 	}
 
 	if ( picDetached ) {
-		// Home again, a real action of your own, or a run that never settles.
+		// Home again, a real action of your own, one only the run would begin,
+		// or a run that never settles.
 		if ( ( CG_WeapPicture_AtRest( &pic ) && pic.weapon == predicted->weapon ) ||
-			predicted->weaponstate != WEAPON_READY ||
+			predicted->weaponstate != WEAPON_READY || picBegan ||
 			predicted->commandTime - picDetachTime > PICTURE_MAX_DETACH ) {
 			CG_WeapPicture_Follow( predicted );
 		}

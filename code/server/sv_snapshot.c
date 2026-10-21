@@ -571,7 +571,6 @@ static qboolean SV_BuildReplaySnapshot( clientSnapshot_t *out ) {
 	// elapsed weapon/note clocks stay untouched. No live entity or ps is edited.
 	out->ps.commandTime += offset;
 	if ( out->ps.externalEventTime ) out->ps.externalEventTime += offset;
-	if ( out->ps.weaponReleaseTime ) out->ps.weaponReleaseTime += offset;
 	for ( i = 0; i < MAX_POWERUPS; i++ ) {
 		if ( out->ps.powerups[i] && out->ps.powerups[i] < INT_MAX - offset ) out->ps.powerups[i] += offset;
 	}

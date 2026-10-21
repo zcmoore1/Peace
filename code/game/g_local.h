@@ -276,6 +276,7 @@ struct gclient_s {
 	int			buttons;
 	int			oldbuttons;
 	int			latched_buttons;
+	bg_activate_t	activate;		// MW2's use and use/reload history (BG_UpdateActivate)
 
 	vec3_t		oldOrigin;
 
@@ -440,6 +441,7 @@ void G_SNDRecordKill( gentity_t *victim, gentity_t *attacker );
 qboolean G_SNDClientThink( gentity_t *ent, usercmd_t *cmd );
 qboolean G_SNDClientEndFrame( gentity_t *ent );
 qboolean G_SNDUse( gentity_t *ent, usercmd_t *cmd );
+qboolean G_SNDUsable( gentity_t *ent );
 qboolean G_SNDCanDamage( gentity_t *ent );
 qboolean G_SNDCanRespawn( void );
 team_t G_SNDSpawnTeam( team_t team );

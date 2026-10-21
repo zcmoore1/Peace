@@ -274,6 +274,8 @@ void IN_Button18Down(void) {IN_KeyDown(&in_buttons[18]);}
 void IN_Button18Up(void) {IN_KeyUp(&in_buttons[18]);}
 void IN_Button19Down(void) {IN_KeyDown(&in_buttons[19]);}
 void IN_Button19Up(void) {IN_KeyUp(&in_buttons[19]);}
+void IN_Button21Down(void) {IN_KeyDown(&in_buttons[21]);}
+void IN_Button21Up(void) {IN_KeyUp(&in_buttons[21]);}
 // cgame reports the swap press as well as the desired slot. Equipment can
 // consume that intent without having to manufacture a different selection.
 static void IN_WeaponSwap(void) { in_buttons[20].wasPressed = qtrue; }
@@ -985,6 +987,8 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-tactical", IN_Button17Up);
 	Cmd_AddCommand ("+use", IN_Button18Down);		// BUTTON_USE = bit 18
 	Cmd_AddCommand ("-use", IN_Button18Up);
+	Cmd_AddCommand ("+usereload", IN_Button21Down);	// BUTTON_USE_RELOAD = bit 21 (MW2's use/reload)
+	Cmd_AddCommand ("-usereload", IN_Button21Up);
 	Cmd_AddCommand ("+altfire", IN_Button19Down);	// BUTTON_ALTFIRE = bit 19
 	Cmd_AddCommand ("-altfire", IN_Button19Up);
 	Cmd_AddCommand ("_peaceWeaponSwap", IN_WeaponSwap);
@@ -1065,6 +1069,25 @@ void CL_ShutdownInput(void)
 	Cmd_RemoveCommand("-speed");
 	Cmd_RemoveCommand("+attack");
 	Cmd_RemoveCommand("-attack");
+	Cmd_RemoveCommand("+reload");
+	Cmd_RemoveCommand("-reload");
+	Cmd_RemoveCommand("+sprint");
+	Cmd_RemoveCommand("-sprint");
+	Cmd_RemoveCommand("+ads");
+	Cmd_RemoveCommand("-ads");
+	Cmd_RemoveCommand("+melee");
+	Cmd_RemoveCommand("-melee");
+	Cmd_RemoveCommand("+lethal");
+	Cmd_RemoveCommand("-lethal");
+	Cmd_RemoveCommand("+tactical");
+	Cmd_RemoveCommand("-tactical");
+	Cmd_RemoveCommand("+use");
+	Cmd_RemoveCommand("-use");
+	Cmd_RemoveCommand("+usereload");
+	Cmd_RemoveCommand("-usereload");
+	Cmd_RemoveCommand("+altfire");
+	Cmd_RemoveCommand("-altfire");
+	Cmd_RemoveCommand("_peaceWeaponSwap");
 	Cmd_RemoveCommand("+button0");
 	Cmd_RemoveCommand("-button0");
 	Cmd_RemoveCommand("+button1");

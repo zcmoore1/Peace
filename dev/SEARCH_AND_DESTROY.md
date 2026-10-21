@@ -27,8 +27,10 @@ It has four starts per side and no retail map geometry.
 - One attacker carries the bomb, separately from their two-weapon loadout.
   Death, disconnect or leaving the team drops it. A living attacker picks it up
   by approaching it; defenders cannot take it. The initial carrier rotates.
-- At A, the carrier holds **Use** (default **F**, gamepad **D-pad Up**) for five
-  seconds to plant. Stand still with the weapon ready, off the ladder.
+- At A, the carrier holds **Use** (default **F**, gamepad **D-pad Up**) or
+  use/reload (gamepad **X**, as on console MW2) for five seconds to plant. Stand
+  still with the weapon ready, off the ladder. At a site or the planted case an
+  X press is a use, never a reload.
 - Defenders hold the same button near the planted case for five seconds to defuse.
   Releasing, moving, attacking, reloading, swapping, using equipment, ADS or
   sprinting interrupts progress. Progress is not saved or shared between players.

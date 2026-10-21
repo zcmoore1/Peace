@@ -375,12 +375,36 @@ static void SND_EndRound( team_t winner, sndResult_t result ) {
     }
 }
 
+// The site a carrier can plant at or the bomb a defender can defuse, in range
+// and in view; SND_MAX_SITES is the bomb.
+static int SND_UseTarget( gentity_t *ent, int *duration ) {
+    int n = ent-g_entities, i;
+    if ( g_gametype.integer != GT_SND || !SND_Alive(n) ||
+         (snd.phase != SND_LIVE && snd.phase != SND_PLANTED) || level.time >= snd.deadline ) return -1;
+    if ( snd.phase == SND_LIVE && snd.carrier == n ) {
+        for ( i = 0; i < SND_MAX_SITES; i++ ) if ( snd.sites[i] &&
+            SND_Near(ent, snd.sites[i]->r.currentOrigin, snd.sites[i]->wait) ) {
+            *duration = snd.plantMs; return i;
+        }
+    } else if ( snd.phase == SND_PLANTED && ent->client->sess.sessionTeam != snd.attacking &&
+                SND_Near(ent, snd.bombOrigin, 72) ) {
+        *duration = snd.defuseMs; return SND_MAX_SITES;
+    }
+    return -1;
+}
+
+// Something for use or use/reload to use (BG_UpdateActivate).
+qboolean G_SNDUsable( gentity_t *ent ) {
+    int duration;
+    return SND_UseTarget(ent, &duration) >= 0;
+}
+
 qboolean G_SNDUse( gentity_t *ent, usercmd_t *cmd ) {
-    int n = ent-g_entities, target = -1, duration = 0, elapsed, i;
+    int n = ent-g_entities, target, duration = 0, elapsed, i;
     playerState_t *ps = &ent->client->ps;
     if ( g_gametype.integer != GT_SND ) return qfalse;
     if ( !SND_Alive(n) || (snd.phase != SND_LIVE && snd.phase != SND_PLANTED) ||
-         level.time >= snd.deadline || !(cmd->buttons & BUTTON_USE) ||
+         level.time >= snd.deadline || !(cmd->buttons & (BUTTON_USE | BUTTON_USE_RELOAD)) ||
          (cmd->buttons & (BUTTON_ATTACK | BUTTON_RELOAD | BUTTON_SPRINT | BUTTON_ADS |
              BUTTON_MELEE | BUTTON_LETHAL | BUTTON_TACTICAL | BUTTON_ALTFIRE | BUTTON_TALK)) ||
          cmd->forwardmove || cmd->rightmove || cmd->upmove ||
@@ -389,15 +413,7 @@ qboolean G_SNDUse( gentity_t *ent, usercmd_t *cmd ) {
          VectorLengthSquared(ps->velocity) > 25*25 ) {
         SND_ClearUse(n); return qfalse;
     }
-    if ( snd.phase == SND_LIVE && snd.carrier == n ) {
-        for ( i = 0; i < SND_MAX_SITES; i++ ) if ( snd.sites[i] &&
-            SND_Near(ent, snd.sites[i]->r.currentOrigin, snd.sites[i]->wait) ) {
-            target = i; duration = snd.plantMs; break;
-        }
-    } else if ( snd.phase == SND_PLANTED && ent->client->sess.sessionTeam != snd.attacking &&
-                SND_Near(ent, snd.bombOrigin, 72) ) {
-        target = SND_MAX_SITES; duration = snd.defuseMs;
-    }
+    target = SND_UseTarget(ent, &duration);
     if ( target < 0 ) { SND_ClearUse(n); return qfalse; }
     if ( snd.holdTarget[n] != target || level.time-snd.holdSeen[n] > 200 ) {
         snd.holdTarget[n] = target; snd.holdStart[n] = level.time;

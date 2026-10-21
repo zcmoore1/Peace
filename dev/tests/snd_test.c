@@ -132,6 +132,8 @@ static void TestInterrupts(void) {
  cmd.forwardmove=0; CHECK(G_SNDUse(&g_entities[0],&cmd));
  level.time+=201; CHECK(G_SNDUse(&g_entities[0],&cmd));
  CHECK(g_clients[0].ps.stats[STAT_USE_PROGRESS]==0); /* command gap restarts */
+ cmd.buttons=BUTTON_USE_RELOAD; CHECK(G_SNDUse(&g_entities[0],&cmd)); /* use/reload uses it too */
+ CHECK(G_SNDUsable(&g_entities[0]) && !G_SNDUsable(&g_entities[1])); /* only the carrier plants */
  cmd.buttons=0; CHECK(!G_SNDUse(&g_entities[0],&cmd));
  cmd.buttons=BUTTON_USE|BUTTON_ATTACK; CHECK(!G_SNDUse(&g_entities[0],&cmd));
  cmd.buttons=BUTTON_USE; blocked=1; CHECK(!G_SNDUse(&g_entities[0],&cmd)); blocked=0;
@@ -145,6 +147,7 @@ static void TestInterrupts(void) {
  MoveToSite(1); CHECK(!G_SNDUse(&g_entities[1],&cmd)); /* wrong team */
  Hold(0,snd.plantMs);
  CHECK(!G_SNDUse(&g_entities[0],&cmd)); /* attackers cannot defuse */
+ CHECK(!G_SNDUsable(&g_entities[0]) && G_SNDUsable(&g_entities[1]));
  CHECK(G_SNDUse(&g_entities[1],&cmd));
  snd.holdStart[1]=snd.deadline-snd.defuseMs;
  snd.holdSeen[1]=snd.deadline;

@@ -1188,7 +1188,7 @@ typedef struct playerState_s {
 	int			weaponAction;	// action, button history, cancel acknowledgement, recovery (9 bits)
 	int			weaponAnimSeq;	// which reload segment is playing (reloadSeq_t)
 	int             weaponDraw;     // 0 ordinary raise, 1 first deployment
-	int             weaponReleaseTime; // server time the gun is handed back after a quick action
+	int             weapFlags;      // PWF_* (MW2's name): PWF_USE_RELOAD is the server's use/reload request
 	int             perks;          // spawn-owned perk mask, predicted and replayed
 	// Slot-owned inventory. ammo[] remains the working cache used by weapon
 	// notes; stowed variants of the same base gun keep independent magazines.
@@ -1257,7 +1257,8 @@ typedef struct playerState_s {
 #define BUTTON_USE			262144			// hold to pick up / interact (bit 18)
 #define BUTTON_ALTFIRE		524288			// underbarrel / alt weapon toggle (bit 19)
 #define BUTTON_WEAPON_SWAP   1048576         // selection intent, even when cancelling equipment
-// usercmd_t.buttons is delta-encoded with 32 bits (msg.c) - bits 20..31 spare.
+#define BUTTON_USE_RELOAD    2097152         // MW2's +usereload (bit 21): use, else reload; the server asks for the reload
+// usercmd_t.buttons is delta-encoded with 32 bits (msg.c) - bits 22..31 spare.
 
 #define	MOVE_RUN			120			// if forwardmove or rightmove are >= MOVE_RUN,
 										// then BUTTON_WALKING should be set

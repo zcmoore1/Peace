@@ -21,5 +21,6 @@
 #define M40_ADS_IN_MS 300
 #define M40_ADS_OUT_MS 200
 #define M40_FOV_SCALE 0.26f
+#define M40_SCOPE_OVERLAY 1
 #define M40_FPS 60
 #endif

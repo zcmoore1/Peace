@@ -12,8 +12,12 @@ The floor item is consumed, including when already full. This does not load
 the held magazine, clear an open action, change slots or select a weapon.
 
 For a non-matching gun within 64 units and unobstructed reach, hold the reload
-button continuously for 1000 ms. The HUD shows the item and progress. Releasing
-early resets progress and supplies the normal reload input. Moving away,
+button (`+reload`) or use/reload (`+usereload`, the gamepad's X) continuously for
+1000 ms. The HUD shows the item and progress. Releasing early resets progress
+and supplies the normal reload input: a `+reload` tap is read by the weapon at
+once, a use/reload tap is the server's, as in MW2, where a tap of X over a usable
+item reloads on release (`BG_UpdateActivate`; `pickupHeld` 3 marks that hold so
+the weapon does not also reload). Moving away,
 losing visibility or changing target resets progress; completed holds require
 release before another pickup. Bomb planting/defusing still uses its own input.
 The replaced gun is dropped with its actual contents. Two differently attached

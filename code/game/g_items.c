@@ -590,8 +590,9 @@ void G_CommitWeaponPickup(gentity_t *player) {
 	bg_weaponInstance_t gun;
 	gentity_t *item;
 	int slot;
-	if (ps->pickupHeld != 1 || ps->pickupTime < BG_PICKUP_HOLD_TIME) return;
+	if ((ps->pickupHeld != 1 && ps->pickupHeld != 3) || ps->pickupTime < BG_PICKUP_HOLD_TIME) return;
 	ps->pickupHeld = 2;
+	player->client->activate.hold = qfalse; // the hold was used: its release is not a reload
 	if (ps->pickupTarget < MAX_CLIENTS || ps->pickupTarget >= level.num_entities) return;
 	item = &g_entities[ps->pickupTarget];
 	if (!item->inuse || !(item->r.contents & CONTENTS_TRIGGER) ||

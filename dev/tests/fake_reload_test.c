@@ -450,16 +450,23 @@ static void WildScopes(void) {
 		int lastKnife = NONE, fakeTaps = 0;
 		for (t = -400; t <= -48; t += 8) {
 			script_t s = Script(a, X);
+			int shown;
 			s.reloadAt = t; s.reloadLen = 48; s.adsAt = t; Run(rtts[r], &s, anchorAt[a][r]);
 			if (!Fake()) continue;
 			fakeTaps++;
+			shown = O.reloadPicMs;
 			/* A knife pressed after the gun is back, while the fake reload plays. */
-			for (e = 0; e <= 400; e += 8) {
+			for (e = 0; e <= 1500; e += e < 400 ? 8 : 100) {
 				s.knifeAt = e; s.knifeLen = TAP; Run(rtts[r], &s, anchorAt[a][r]);
 				CHECK(O.converged);
-				if (!O.svKnife && O.knifePicMs > 0 && O.adsUnderKnifeMs > 0) {
+				/* On the command the gun is back, aim is not in yet: a real knife. */
+				if (O.svKnife) { CHECK(e < 16); continue; }
+				if (O.knifePicMs > 0 && O.adsUnderKnifeMs > 0) {
 					CHECK(!O.svReload);
 					if (lastKnife == NONE || e > lastKnife) lastKnife = e;
+				} else {
+					/* refused on both sides: the reload you saw plays out in full */
+					CHECK(!O.knifePicMs && O.reloadPicMs == shown);
 				}
 			}
 		}
@@ -511,6 +518,50 @@ static void TestSwapOnlyCorrection(void) {
 	CHECK(!(corrected.weaponAction & WA_TYPE_MASK) && CG_WeapPicture_State(&corrected) == &corrected);
 }
 
+/* A detached picture only finishes what you saw. If its own run would begin
+ * something that no input of yours began - here the empty gun reloading
+ * itself after a shot the server never fired - it hands back to prediction
+ * instead of drawing it. */
+static void TestPictureHandsBack(void) {
+	playerState_t rest, base2, shot, pred, before;
+	pmove_t pm, model;
+	script_t idle = Script(ACT_NONE, X);
+	int i, j, detached = 0, handed = 0;
+	Run(0, &idle, NONE);
+	rest = svPs; rest.ammo[GUN] = 1;
+	CHECK(GunAtRest(&rest));
+	memset(cmds, 0, sizeof(cmds));
+	for (i = 0; i < 600; i++) { cmds[i].serverTime = rest.commandTime + 8 * (i + 1); cmds[i].weapon = BG_SLOT_COMMAND; }
+	cmds[0].buttons = BUTTON_ATTACK;
+	memset(&model, 0, sizeof(model)); FakeReloadModel(&model);
+	CG_WeapPicture_Reset();
+	/* frame 1: prediction fires the last round */
+	numCmds = 1;
+	CG_WeapPicture_BeginReplay(&rest);
+	shot = rest; memset(&pm, 0, sizeof(pm)); pm.ps = &shot; pm.cmd = cmds[0]; FakeReloadPmove(&pm);
+	CG_WeapPicture_ReplayStep(&rest, &shot, NULL);
+	CG_WeapPicture_Update(&shot, &model, 0, 0, GetCmd);
+	CG_WeapPicture_Update(&shot, &model, 0, 0, GetCmd);
+	CHECK(shot.weaponstate == WEAPON_FIRING && shot.ammo[GUN] == 0 && CG_WeapPicture_State(&shot) == &shot);
+	/* then the server's snapshot: it never fired, and prediction rests */
+	base2 = rest; base2.commandTime = cmds[0].serverTime;
+	for (i = 1; i < 600 && !handed; i++) {
+		const playerState_t *pic;
+		numCmds = i + 1;
+		CG_WeapPicture_BeginReplay(&base2);
+		pred = base2;
+		for (j = 1; j <= i; j++) {
+			before = pred; memset(&pm, 0, sizeof(pm)); pm.ps = &pred; pm.cmd = cmds[j]; FakeReloadPmove(&pm);
+			CG_WeapPicture_ReplayStep(&before, &pred, NULL);
+		}
+		CG_WeapPicture_Update(&pred, &model, 0, i, GetCmd);
+		pic = CG_WeapPicture_State(&pred);
+		if (pic != &pred) { detached = 1; CHECK(pic->weaponstate != WEAPON_RELOADING); }
+		else if (detached) handed = 1;
+	}
+	CHECK(detached && handed && GunAtRest(&pred));
+}
+
 int main(void) {
 	FakeReloadPictureInit();
 	if (getenv("FAKERELOAD_SVFPS")) SV_FRAME = 1000 / atoi(getenv("FAKERELOAD_SVFPS"));
@@ -526,6 +577,7 @@ int main(void) {
 		return 0;
 	}
 	TestSwapOnlyCorrection();
+	TestPictureHandsBack();
 	FakeReloads(); FakeBullets();
 	GUN = WP_M40A3; MeasureAnchors();
 	FakeReloads(); FakeBullets(); WildScopes();

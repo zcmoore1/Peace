@@ -2842,6 +2842,10 @@ void BG_UpdateActivate( playerState_t *ps, bg_activate_t *use, int buttons,
 		if ( use->hold || used ) use->done = qtrue;
 		else if ( latched & BUTTON_USE_RELOAD ) ps->weapFlags |= PWF_USE_RELOAD;
 	}
+	// A released press holds nothing. (CoD4 keeps its hold entity until the
+	// next press, which marks the idle button "done" and lets the next held
+	// press ask for its reload only once.)
+	if ( !(buttons & useButtons) ) use->hold = qfalse;
 	use->buttons = buttons;
 }
 
@@ -3094,7 +3098,9 @@ static void PM_Weapon( void ) {
 		reload = qtrue;
 	}
 	// MW2 asks a reloading gun nothing, even when its reload ends on this
-	// command: the trigger then gets its turn before the next request.
+	// command. Peace's own rule: the trigger may fire on that command, so a
+	// held trigger and reload alternate (MW2's segmented reload, spending
+	// that command on finishing, loops start/end and never fires).
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
 		reload = qfalse;
 	}

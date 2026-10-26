@@ -477,6 +477,7 @@ gentity_t *LaunchItem( gitem_t *item, vec3_t origin, vec3_t velocity );
 gentity_t *G_DropWeapon(gentity_t *owner, int slot);
 const entityState_t *G_FindWeaponPickup(gentity_t *player);
 void G_CommitWeaponPickup(gentity_t *player);
+qboolean G_UseThink(gentity_t *player, usercmd_t *cmd);
 void SetRespawn (gentity_t *ent, float delay);
 void G_SpawnItem (gentity_t *ent, gitem_t *item);
 void FinishSpawningItem( gentity_t *ent );

@@ -8,7 +8,7 @@ vmCvar_t g_gametype, g_weaponRespawn, g_weaponTeamRespawn;
 static gclient_t clients[2];
 static pmove_t move;
 static int checks, pickups, usedTargets;
-static qboolean blocked;
+static qboolean blocked, bombUsable;
 #define CHECK(x) do { checks++; if (!(x)) { fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x); exit(1); } } while(0)
 void QDECL Com_Printf(const char *fmt,...) { (void)fmt; }
 void QDECL Com_Error(int code,const char *fmt,...) { va_list a; (void)code; va_start(a,fmt); vfprintf(stderr,fmt,a); va_end(a); exit(1); }
@@ -39,6 +39,8 @@ void trap_GetUserinfo(int client,char *buffer,int size) { (void)client; if(size>
 void Team_DroppedFlagThink(gentity_t *e) { G_FreeEntity(e); }
 void Team_CheckDroppedItem(gentity_t *e) { (void)e; }
 int Pickup_Team(gentity_t *e,gentity_t *other) { (void)e;(void)other; return 1; }
+qboolean G_SNDUsable(gentity_t *e) { (void)e; return bombUsable; }
+qboolean G_SNDUse(gentity_t *e,usercmd_t *cmd) { (void)e; return bombUsable && (cmd->buttons & (BUTTON_USE|BUTTON_USE_RELOAD)); }
 
 static playerState_t *Reset(void) {
  int i;
@@ -46,7 +48,7 @@ static playerState_t *Reset(void) {
  memset(&level,0,sizeof(level)); memset(&move,0,sizeof(move));
  level.time=1000; level.num_entities=MAX_CLIENTS; level.maxclients=2;
  g_weaponRespawn.integer=5; g_weaponTeamRespawn.integer=10;
- pickups=usedTargets=0; blocked=qfalse;
+ pickups=usedTargets=0; blocked=bombUsable=qfalse;
  for(i=0;i<2;i++) {
   gentity_t *e=&g_entities[i]; e->client=&clients[i]; e->inuse=qtrue;
   e->s.number=i; e->health=100; BG_ApplyClass(&clients[i].ps,BG_Class(0));
@@ -163,10 +165,14 @@ static void TestDuplicateBase(void) {
  CHECK(ps->stats[STAT_ACTIVE_SLOT]==0 && ps->ammo[WP_SHOTGUN]==1);
  BG_GetSlot(ps,1,&b); CHECK(b.ammo==5 && b.reserve==27 && b.attachments==0);
 }
-/* MW2's use/reload: the server's use code after each command (ClientThink_real). */
+/* MW2's use/reload: the server's use code after each command, in
+ * ClientThink_real's order: Pmove, the bomb and the floor gun, then the use. */
 static void UseStep(int buttons) {
- move.cmd.buttons=buttons; Step(1);
- BG_UpdateActivate(move.ps,&clients[0].activate,buttons,G_FindWeaponPickup(&g_entities[0])!=NULL,qfalse);
+ qboolean snd;
+ move.cmd.buttons=buttons; level.time++; move.cmd.serverTime++;
+ move.pickupItem=G_FindWeaponPickup(&g_entities[0]); PickupWeaponStep(&move,1);
+ snd=G_UseThink(&g_entities[0],&move.cmd);
+ BG_UpdateActivate(move.ps,&clients[0].activate,buttons,!snd && G_FindWeaponPickup(&g_entities[0])!=NULL,snd);
 }
 static void TestUseReload(void) {
  playerState_t *ps=Reset(); int i;
@@ -210,6 +216,49 @@ static void TestUseReload(void) {
  move.cmd.buttons=0; Step(1); BG_UpdateActivate(ps,&clients[0].activate,0,qfalse,qfalse);
  CHECK(!(ps->weapFlags&PWF_USE_RELOAD) && ps->weaponstate==WEAPON_READY);
 }
+/* One use per press, and the bomb comes first. */
+static void TestBombFirst(void) {
+ playerState_t *ps; gentity_t *item; int i;
+ /* At a site with a dropped gun in range, a hold plants: it collects nothing
+  * and its release reloads nothing. */
+ ps=Reset(); Floor(WP_RAILGUN,0,2,8,0); ps->ammo[WP_MACHINEGUN]=4; bombUsable=qtrue;
+ for(i=0;i<1500;i++) UseStep(BUTTON_USE_RELOAD);
+ CHECK(pickups==0 && ps->stats[STAT_SLOT_PRIMARY]==WP_MACHINEGUN && ps->weaponstate==WEAPON_READY);
+ UseStep(0); UseStep(0);
+ CHECK(!(ps->weapFlags&PWF_USE_RELOAD) && ps->weaponstate==WEAPON_READY);
+ /* A press begun over the gun and carried onto the site is the bomb's. */
+ ps=Reset(); Floor(WP_RAILGUN,0,2,8,0); ps->ammo[WP_MACHINEGUN]=4;
+ for(i=0;i<200;i++) UseStep(BUTTON_USE_RELOAD);
+ CHECK(ps->pickupHeld==3);
+ bombUsable=qtrue; for(i=0;i<2000;i++) UseStep(BUTTON_USE_RELOAD);
+ UseStep(0); UseStep(0);
+ CHECK(pickups==0 && !(ps->weapFlags&PWF_USE_RELOAD) && ps->weaponstate==WEAPON_READY);
+ /* A press used at the site and carried onto a gun collects nothing. */
+ ps=Reset(); ps->ammo[WP_MACHINEGUN]=4; bombUsable=qtrue;
+ for(i=0;i<300;i++) UseStep(BUTTON_USE_RELOAD);
+ bombUsable=qfalse; item=Floor(WP_RAILGUN,0,2,8,0);
+ for(i=0;i<1500;i++) UseStep(BUTTON_USE_RELOAD);
+ CHECK(pickups==0 && item->r.contents && ps->stats[STAT_SLOT_PRIMARY]==WP_MACHINEGUN);
+ UseStep(0); CHECK(!(ps->weapFlags&PWF_USE_RELOAD));
+ /* A press that used nothing still finds the gun, as MW2 asks again. */
+ ps=Reset(); ps->ammo[WP_MACHINEGUN]=BG_WeaponMagSize(WP_MACHINEGUN);
+ for(i=0;i<100;i++) UseStep(BUTTON_USE_RELOAD);
+ Floor(WP_RAILGUN,0,2,8,0);
+ for(i=0;i<1100;i++) UseStep(BUTTON_USE_RELOAD);
+ CHECK(pickups==1 && ps->stats[STAT_SLOT_PRIMARY]==WP_RAILGUN);
+ /* A tap over a gun leaves nothing held: the next hold, after a knife,
+  * still asks on every command and reloads once the gun is back. */
+ ps=Reset(); item=Floor(WP_RAILGUN,0,2,8,0); ps->ammo[WP_MACHINEGUN]=4;
+ for(i=0;i<100;i++) UseStep(BUTTON_USE_RELOAD);
+ UseStep(0); UseStep(0);
+ CHECK(ps->weaponstate==WEAPON_RELOADING && !clients[0].activate.hold);
+ for(i=0;i<4000;i++) UseStep(0);
+ G_FreeEntity(item); ps->ammo[WP_MACHINEGUN]=4;
+ UseStep(BUTTON_MELEE);
+ for(i=0;i<3000 && ps->weaponstate!=WEAPON_RELOADING;i++) UseStep(BUTTON_USE_RELOAD);
+ CHECK(ps->weaponstate==WEAPON_RELOADING && !(ps->weaponAction&WA_TYPE_MASK));
+}
+
 static void TestContestedPickup(void) {
  playerState_t *ps=Reset(); gentity_t *item=Floor(WP_RAILGUN,0,2,8,0);
  playerState_t *other=&clients[1].ps;
@@ -224,6 +273,6 @@ static void TestContestedPickup(void) {
  CHECK(level.num_entities==MAX_CLIENTS+2);
 }
 int main(void) {
- TestDrops(); TestScavenge(); TestHold(); TestSwap(); TestDuplicateBase(); TestUseReload(); TestContestedPickup();
+ TestDrops(); TestScavenge(); TestHold(); TestSwap(); TestDuplicateBase(); TestUseReload(); TestBombFirst(); TestContestedPickup();
  printf("PASS: %d death/drop/pickup/slot-intent checks\n",checks); return 0;
 }

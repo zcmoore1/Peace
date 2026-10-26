@@ -186,14 +186,19 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   again for a press that finds nothing to use, and on every command while that
   press is held. A press over a floor gun is held for the pickup and reloads
   only if released early; a press at a bomb site or the bomb is a use, and the
-  bomb comes first (one use per press, as MW2's use list). CoD4 also counts a
-  press made while sprinting or with a grenade out as used; Peace does not,
-  because its sprint does not give way to a reload and MW2 players do fake
-  reloads after equipment. `PM_Weapon` takes the bit as a reload press and
+  bomb comes first (one use per press, as MW2's use list; `G_UseThink`). CoD4
+  also counts a press made with a grenade out as used; Peace does not, because
+  MW2 players do fake reloads after equipment. Known divergence: in MW2, X and
+  R end a sprint in shared pmove and the reload comes out of the sprint drop;
+  Peace's sprint ignores reload buttons, so a request made while sprinting is
+  dropped. A released press holds nothing (CoD4 keeps its hold entity until the
+  next press). `PM_Weapon` takes the bit as a reload press and
   clears it — except during a quick action, from the press through the
   recovery draw, where it is not read at all (MW2's reload check skips melee
-  and offhand) — and a gun that is reloading when the command begins drops it,
-  so a held trigger gets its shot between reloads. The client never sets the bit; it
+  and offhand) — and a gun that is reloading when the command begins drops it
+  (MW2's rule). Peace's own rule: the trigger may fire on the command a reload
+  ends, so a held trigger and reload alternate (MW2 loops its segmented reload
+  instead). The client never sets the bit; it
   gets it from a snapshot and replays its commands over it, so a tap made as
   the gun comes back can reach the client's return after the server has already
   dropped it: the fake reload. A tap just before a shot is taken by the server
@@ -212,7 +217,9 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   prediction again when it comes to rest or prediction starts a real action. A
   correction that only removes a swap is followed at once, so a lone knife is
   never a fake knife. The harness checks that the picture never draws a reload
-  or knife prediction never had.
+  or knife prediction never had, that a knife the server refuses never cuts a
+  fake reload short, and that a run which would begin something by itself
+  hands back to prediction.
   Aim, camera and HUD always read the predicted state. Run
   `dev/tests/run-fakereload.sh`; `dev/FAKE_RELOAD.md` has the measured windows.
 

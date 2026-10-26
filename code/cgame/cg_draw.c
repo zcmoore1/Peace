@@ -2397,13 +2397,18 @@ showing mag / reserve) and the equipment counts. Reads ps only - it never
 decides anything, it just shows what the loadout already is.
 ===============
 */
+static qboolean CG_SNDUseInRange( void );
+
 static void CG_DrawWeaponPickup(void) {
 	playerState_t *ps = &cg.predictedPlayerState;
 	bg_weaponInstance_t gun;
 	char prompt[128];
 	vec4_t back = {0, 0, 0, .65f}, fill = {.9f, .8f, .45f, 1};
+	// Where the bomb is the use target, a use/reload press is the bomb's
+	// (G_UseThink): the bomb's prompt is the one shown.
 	if (ps->pickupTarget < MAX_CLIENTS || ps->pickupTarget >= ENTITYNUM_MAX_NORMAL ||
-		ps->pickupHeld == 2 || !BG_WeaponItem(&cg_entities[ps->pickupTarget].currentState, &gun)) return;
+		ps->pickupHeld == 2 || CG_SNDUseInRange() ||
+		!BG_WeaponItem(&cg_entities[ps->pickupTarget].currentState, &gun)) return;
 	Com_sprintf(prompt, sizeof(prompt), "Hold RELOAD (1s): %s%s",
 		BG_FindItemForWeapon(gun.weapon)->pickup_name, gun.attachments & BG_ATTACHMENT_REDDOT ? " + Red Dot" : "");
 	CG_DrawSmallString(320 - CG_DrawStrlen(prompt) * SMALLCHAR_WIDTH / 2, 300, prompt, 1);
@@ -2793,6 +2798,36 @@ static qboolean CG_SNDReadSite( const char *text, vec3_t origin, float *radius )
 	if ( values[3] < 1 || values[3] > 160 ) return qfalse;
 	VectorCopy(values,origin); *radius = values[3];
 	return qtrue;
+}
+
+// The site the carrier may plant at, or the case a defender may defuse, is in
+// range: the same test the plant and defuse prompts below make.
+static qboolean CG_SNDUseInRange( void ) {
+	const char *state, *sites;
+	playerState_t *ps;
+	vec3_t origin, delta;
+	float radius;
+	int n, phase, attack;
+	if ( cgs.gametype != GT_SND || !cg.snap ) return qfalse;
+	ps = &cg.snap->ps;
+	state = CG_ConfigString(CS_SND);
+	if ( !state[0] ) return qfalse;
+	sites = CG_ConfigString(CS_SND_SITES);
+	phase = atoi(Info_ValueForKey(state,"phase"));
+	attack = atoi(Info_ValueForKey(state,"attack"));
+	if ( phase == SND_LIVE && atoi(Info_ValueForKey(state,"carrier")) == cg.clientNum ) {
+		for ( n = 0; n < SND_MAX_SITES; n++ ) {
+			if ( !CG_SNDReadSite(Info_ValueForKey(sites,va("s%i",n)),origin,&radius) ) continue;
+			VectorSubtract(ps->origin,origin,delta);
+			if ( VectorLengthSquared(delta) <= radius*radius ) return qtrue;
+		}
+	} else if ( phase == SND_PLANTED && cgs.clientinfo[cg.clientNum].team != TEAM_SPECTATOR &&
+		cgs.clientinfo[cg.clientNum].team != attack ) {
+		VectorSet(origin,atoi(Info_ValueForKey(state,"x")),atoi(Info_ValueForKey(state,"y")),atoi(Info_ValueForKey(state,"z")));
+		VectorSubtract(ps->origin,origin,delta);
+		if ( VectorLengthSquared(delta) <= 72*72 ) return qtrue;
+	}
+	return qfalse;
 }
 
 static void CG_DrawSND( void ) {

@@ -108,3 +108,25 @@ every check still holds.
   about one round trip late on screen. `+reload` is instant but has no tricks.
 - Nothing else waits for the server: fire, quick actions and slot changes are
   predicted as before, and a fire tap after a quick action is always real.
+
+## Where Peace and MW2 still differ
+
+- **A knife pressed while the gun is coming back.** MW2 ignores it (its knife
+  check skips the melee and equipment quick raise, and the press is lost), so a
+  lone knife there is "nothing". Peace's recovery is the gun's whole draw, and a
+  quick action pressed during it starts the next one (CLAUDE.md, recovery rule),
+  so it is a real knife at once. The old server hand-off made it "late or
+  nothing"; MW2's use/reload does not.
+- **The IW4x wild scope script** presses knife and X on the same frame while
+  the gun is still coming back from equipment, with aim held. In Peace that knife
+  lands in the recovery draw and is a real knife (above), so the script gives no
+  trick; the order above (fake reload, then knife) does. Which order MW2 needs is
+  still open; the pack also ships a modified client.
+- **The IW4x fake shot script** (X for one frame at 57 fps, shot two frames
+  later) needs some ping in Peace: on your own host the shot lands about 53ms
+  after X, past the window.
+- **Sprint.** MW2 ends a sprint on X or R and reloads out of it; Peace's sprint
+  ignores reload buttons, so a reload asked for while sprinting is dropped.
+- **Aiming.** MW2's knife rule reads its ADS fraction, so its knife also waits
+  for the scope to ease out; Peace has no gameplay ADS fraction and uses the
+  aim state.

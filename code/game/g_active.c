@@ -987,13 +987,8 @@ void ClientThink_real( gentity_t *ent ) {
 		G_TouchTriggers( ent );
 	}
 
-	// Bomb use and reload-to-pickup have independent clocks and buttons. MW2
-	// uses one thing per use/reload press, and the bomb comes first: a hold
-	// over a site or the case is never a floor-gun hold too.
-	sndUsable = G_SNDUsable(ent);
-	G_SNDUse(ent, ucmd);
-	if ( sndUsable && client->ps.pickupHeld == 3 ) client->ps.pickupHeld = 2;
-	G_CommitWeaponPickup(ent);
+	// Bomb use and reload-to-pickup have independent clocks and buttons.
+	sndUsable = G_UseThink(ent, ucmd);
 
 	// NOTE: now copy the exact origin over otherwise clients can be snapped into solid
 	VectorCopy( ent->client->ps.origin, ent->r.currentOrigin );

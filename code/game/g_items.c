@@ -585,6 +585,25 @@ const entityState_t *G_FindWeaponPickup(gentity_t *player) {
 	return best;
 }
 
+/*
+G_UseThink
+
+The bomb and the floor gun, after a command's Pmove. MW2 uses one thing per
+use/reload press, and the bomb comes first: a press at a site or the case is
+never a floor-gun hold too, and a press already used there cannot become one.
+Returns whether the bomb was usable, for BG_UpdateActivate.
+*/
+qboolean G_UseThink(gentity_t *player, usercmd_t *cmd) {
+	gclient_t *client = player->client;
+	qboolean sndUsable = G_SNDUsable(player);
+	G_SNDUse(player, cmd);
+	if (sndUsable) client->activate.hold = qfalse;
+	if (client->ps.pickupHeld == 3 && (sndUsable || (client->activate.done && !client->activate.hold)))
+		client->ps.pickupHeld = 2;
+	G_CommitWeaponPickup(player);
+	return sndUsable;
+}
+
 void G_CommitWeaponPickup(gentity_t *player) {
 	playerState_t *ps = &player->client->ps;
 	bg_weaponInstance_t gun;

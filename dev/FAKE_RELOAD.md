@@ -64,18 +64,23 @@ scripts do every one of these with `+usereload`.
 The SPAS and the M300 in hand, 125 fps client, sv_fps 20 (MW2's rate). Times
 are from the moment the client sees the gun at rest.
 
-Fake reload: a 48ms X tap gives one when it is pressed this long before the gun
-is at rest (released by the time it is back):
+Fake reload. What matters is when X is let go: by the moment the gun is fully
+up, and as close to it as you can. The X press must also be held across the
+server's last snapshot before that moment, which falls anywhere in the last
+50ms and which you cannot see, so the window is a success rate. A 64ms tap,
+SPAS, every snapshot phase (`FAKERELOAD_PHASES=1`):
 
-| after         | 0 ms   | 50 ms   | 100 ms  | 200 ms  |
-|---------------|--------|---------|---------|---------|
-| knife         | 48     | 48–120  | 48–144  | 48–248  |
-| frag          | 48–80  | 48–104  | 48–176  | 48–272  |
-| Semtex cancel | 48–56  | 48–128  | 48–152  | 48–240  |
+| let go of X, before the gun is up | 0 ms  | 8 ms  | 16 ms | 24 ms | 32 ms | 40 ms | 48 ms | 72 ms |
+|-----------------------------------|-------|-------|-------|-------|-------|-------|-------|-------|
+| own host (0 ms ping)              | 84–100% | 68–80% | 52–64% | 36–48% | 28–32% | 16% | 0% | 0% |
+| 50 ms ping                        | 100%  | 100%  | 100%  | 100%  | 100%  | 100%  | 84–100% | 36–52% |
+| 100 ms ping and up                | 100%  | 100%  | 100%  | 100%  | 100%  | 100%  | 100%  | 100%  |
 
-Shorter and longer taps (16 to 112ms) work the same way as long as they are
-released by the time the gun is back; pressed any later, it is a real reload.
-The M300's windows are within 32ms of these.
+Let go after the gun is up (even 8ms) and it is a real reload, at any ping.
+So on your own host it is tight but nearly certain if you let go right as the
+gun comes up; with ping it is easy. The recovery is the gun's own draw (SPAS
+1.5s, M300 0.65s), so "up" is the end of that draw. The harness checks these
+edges (`Windows`).
 
 Fake bullet: a shot this long after a 16ms X tap is fake, on both guns:
 
@@ -124,6 +129,3 @@ every check still holds.
 - **Aiming.** MW2's knife rule reads its ADS fraction, so its knife also waits
   for the scope to ease out; Peace has no gameplay ADS fraction and uses the
   aim state.
-- **Firing while sprinting.** MW2's fire button ends a sprint and the shot
-  comes once the gun is up; in Peace the sprint wins and the gun does not fire
-  while the sprint button is held.

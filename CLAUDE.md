@@ -164,8 +164,9 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   bug: the NAC skips a holster, YY skips a draw, so long swap times on both
   halves reward technique instead of only slowing play.
 - **Sprint ends the MW2 way (owner's rule).** `PM_CheckSprint` uses MW2's
-  sprint-ending conditions: ladder, a quick action, a reload or use/reload
-  button, a jump, not moving forward, ducking. Any sprint that ends while its
+  sprint-ending conditions: ladder, a quick action, the trigger (the gun fires
+  once it is back up if it is still held), a reload or use/reload button, a
+  jump, not moving forward, ducking. Any sprint that ends while its
   button is held waits for the button to come up before it can start again
   (`PWF_SPRINT_RELEASE`, CoD4's `sprintButtonUpRequired`; a quick action sets it
   in `PM_UpdateWeaponAction`). Leaving the ground without a jump ends no sprint

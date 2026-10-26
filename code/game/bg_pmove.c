@@ -2996,8 +2996,9 @@ PM_CheckSprint
 Sets or clears PMF_SPRINTING each tick. Sprint requires:
   - BUTTON_SPRINT held, and not waiting for it to come up after a sprint
     ended while it was held (MW2)
-  - none of MW2's sprint-ending conditions: ladder, a quick action, a reload
-    or use/reload button, a jump, not moving forward, ducking
+  - none of MW2's sprint-ending conditions: ladder, a quick action, the
+    trigger, a reload or use/reload button, a jump, not moving forward,
+    ducking
   - on the ground
 
 Entering sprint cancels an in-progress reload (the weapon snaps to the hip
@@ -3009,13 +3010,13 @@ static void PM_CheckSprint( void ) {
 	qboolean ended, wantSprint;
 
 	// MW2's sprint-ending conditions: they end a sprint and keep one from
-	// starting. A reload press counts, use/reload's included, and so does a
-	// jump; leaving the ground without one ends no sprint in MW2, so here it
-	// only pauses it.
+	// starting. The trigger counts (the gun fires once it is back up), a
+	// reload press does, use/reload's included, and so does a jump; leaving
+	// the ground without one ends no sprint in MW2, so here it only pauses it.
 	ended = ( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) ||
 	        ( pm->ps->weaponAction & WA_TYPE_MASK ) ||
 	        BG_IsActionWeapon(pm->ps->weapon) ||
-	        ( pm->cmd.buttons & ( BUTTON_RELOAD | BUTTON_USE_RELOAD ) ) ||
+	        ( pm->cmd.buttons & ( BUTTON_ATTACK | BUTTON_RELOAD | BUTTON_USE_RELOAD ) ) ||
 	        pm->cmd.upmove > 0 ||
 	        pm->cmd.forwardmove <= 0 ||
 	        ( pm->ps->pm_flags & PMF_DUCKED );

@@ -414,6 +414,21 @@ static void TestSprintTransitions(void) {
   SprintMove(0,127,0,1); SprintMove(1,127,0,1);
   CHECK(ps.pm_flags&PMF_SPRINTING);
  }
+ /* MW2: the trigger ends a sprint too, and the gun fires once it is back up
+  * if the trigger is still held; a pull let go during the rise fires nothing. */
+ for(i=0;i<2;i++) {
+  int t;
+  Ready(WP_MACHINEGUN,WP_SHOTGUN);
+  for(t=0;t<300;t++) SprintMove(1,127,0,1);
+  CHECK(ps.weaponstate==WEAPON_SPRINTING);
+  move.cmd.buttons=BUTTON_SPRINT|BUTTON_ATTACK; move.cmd.forwardmove=127; pml.groundPlane=qtrue;
+  PM_CheckSprint(); Step(1);
+  CHECK(!(ps.pm_flags&PMF_SPRINTING) && ps.weaponstate==WEAPON_SPRINT_OUT && !fired[WP_MACHINEGUN]);
+  for(t=0;t<BG_WeaponSprintOutTime(WP_MACHINEGUN)+20;t++) {
+   move.cmd.buttons=BUTTON_SPRINT|(i ? 0 : BUTTON_ATTACK); PM_CheckSprint(); Step(1);
+  }
+  CHECK(!(ps.pm_flags&PMF_SPRINTING) && (fired[WP_MACHINEGUN]>0)==(i==0));
+ }
  /* A reload button held keeps a sprint from starting, full magazine or not. */
  for(i=0;i<2;i++) {
   Ready(WP_MACHINEGUN,WP_SHOTGUN);

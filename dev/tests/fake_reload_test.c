@@ -22,6 +22,8 @@
  * shipped tables; only the network (frame rate, ping, offsets) is set here.
  *
  * FAKERELOAD_PROBE=1 prints the outcome of every tap time instead of checking.
+ * FAKERELOAD_PHASES=1 prints the fake reload success rate against when X is
+ * let go, over every snapshot phase.
  * FAKERELOAD_TRACE="action rtt-index tap knife-delay" (FAKERELOAD_GUN=m300 for
  * the rifle) prints one reload-then-knife chain frame by frame, both sides.
  * FAKERELOAD_SVFPS sets the server frame and snapshot rate (MW2's is 20, the
@@ -84,7 +86,7 @@ static script_t S;
 static outcome_t O;
 static playerState_t svPs, clPred;
 static bg_activate_t svUse;
-static int levelTime, oneWay, startPress, base, startAmmo, curNow, recordFrom, lastPacket;
+static int levelTime, oneWay, startPress, startShift, base, startAmmo, curNow, recordFrom, lastPacket;
 static int maxPackets;	/* 0: a packet every frame (loopback, LAN); else cl_maxpackets */
 #define PENDING (-1)
 static struct { int arrive; usercmd_t cmd; } cq[MAXQ];
@@ -201,7 +203,7 @@ static void Run(int rtt, const script_t *sc, int at) {
 	memset(&O, 0, sizeof(O)); O.anchor = NONE; O.svMinAmmo = 1000; S = *sc; base = at;
 	/* From well before the gun is back, so a press that changes when it comes back is still seen. */
 	recordFrom = base != NONE ? base - 400 : 1 << 30; lastPacket = -1000;
-	oneWay = rtt / 2; startPress = 1500;
+	oneWay = rtt / 2; startPress = 1500 + startShift;
 	cqHead = cqTail = sqHead = sqTail = numCmds = 0;
 	clDelta = clServerTime = clOldServerTime = clExtrap = clHaveSnap = clNewSnap = 0;
 	pictureDetached = sawGunActionInPicture = 0;
@@ -566,12 +568,56 @@ static void TestPictureHandsBack(void) {
 	CHECK(detached && handed && GunAtRest(&pred));
 }
 
+/* How often a use/reload tap released d ms before the gun is at rest gives a
+ * fake reload, over every phase of the server's snapshots against the quick
+ * action (the player cannot see that phase, so this is the success rate). */
+static int SuccessRate(int a, int r, int d, int hold, int step) {
+	int ok = 0, n = 0, phase;
+	for (phase = 0; phase < 50; phase += step) {
+		script_t s = Script(a, X);
+		int at;
+		startShift = phase;
+		Run(rtts[r], &s, NONE); at = O.anchor;
+		s.reloadAt = -d - hold; s.reloadLen = hold;
+		Run(rtts[r], &s, at);
+		CHECK(O.converged);
+		ok += Fake(); n++;
+	}
+	startShift = 0;
+	return 100 * ok / n;
+}
+static void Phases(void) {
+	const int ds[] = { -8, 0, 8, 16, 24, 32, 40, 48, 56, 72 };
+	int a, r, i, hold = 64;
+	printf("fake reload success over snapshot phases: %dms X tap released d ms before the gun is at rest\n", hold);
+	for (a = 0; a < ACT_NONE; a++) for (r = 0; r < 4; r++) {
+		printf("  %-13s RTT %3d:", actName[a], rtts[r]);
+		for (i = 0; i < (int)(sizeof(ds) / sizeof(ds[0])); i++)
+			printf("  d%-2d %3d%%", ds[i], SuccessRate(a, r, ds[i], hold, 2));
+		putchar('\n');
+	}
+}
+/* The owner's MW2: tight on your own host but doable almost every time if you
+ * let go as the gun comes up, and easy with ping. The player cannot see the
+ * snapshot phase, so this is over all of them. */
+static void Windows(void) {
+	int a;
+	for (a = 0; a < ACT_NONE; a++) {
+		CHECK(SuccessRate(a, 0, 0, 64, 5) >= 80);
+		CHECK(SuccessRate(a, 0, 48, 64, 5) == 0);
+		CHECK(SuccessRate(a, 0, -8, 64, 5) == 0);	/* let go after it is up: a real reload */
+		CHECK(SuccessRate(a, 1, 40, 64, 5) == 100);
+		CHECK(SuccessRate(a, 2, 72, 64, 5) == 100);
+	}
+}
+
 int main(void) {
 	FakeReloadPictureInit();
 	if (getenv("FAKERELOAD_SVFPS")) SV_FRAME = 1000 / atoi(getenv("FAKERELOAD_SVFPS"));
 	if (getenv("FAKERELOAD_MAXPACKETS")) maxPackets = atoi(getenv("FAKERELOAD_MAXPACKETS"));
 	MeasureAnchors();
 	if (getenv("FAKERELOAD_PROBE")) { Probe(); return 0; }
+	if (getenv("FAKERELOAD_PHASES")) { Phases(); return 0; }
 	if (getenv("FAKERELOAD_TRACE")) {
 		int a, r, t, d; script_t sc;
 		sscanf(getenv("FAKERELOAD_TRACE"), "%d %d %d %d", &a, &r, &t, &d);
@@ -582,6 +628,7 @@ int main(void) {
 	}
 	TestSwapOnlyCorrection();
 	TestPictureHandsBack();
+	Windows();
 	FakeReloads(); FakeBullets();
 	GUN = WP_M40A3; MeasureAnchors();
 	FakeReloads(); FakeBullets(); WildScopes();

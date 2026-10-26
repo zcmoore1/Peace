@@ -163,6 +163,13 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 - **An ordinary raise is cancellable by YY.** That is the owner's rule, not a
   bug: the NAC skips a holster, YY skips a draw, so long swap times on both
   halves reward technique instead of only slowing play.
+- **Sprint ends the MW2 way (owner's rule).** `PM_CheckSprint` uses MW2's
+  sprint-ending conditions: ladder, a quick action, a reload or use/reload
+  button, a jump, not moving forward, ducking. Any sprint that ends while its
+  button is held waits for the button to come up before it can start again
+  (`PWF_SPRINT_RELEASE`, CoD4's `sprintButtonUpRequired`; a quick action sets it
+  in `PM_UpdateWeaponAction`). Leaving the ground without a jump ends no sprint
+  in MW2, so it only pauses one. Prediction carries the flag in `weapFlags`.
 - **Never ADS through a reload.** `PM_CheckADS` blocks `WEAPON_RELOADING` on
   purpose. The ZOOMload trick is a client/server desync — the reload animation
   starts client-side from the use/reload bit and the server never agrees one is
@@ -191,10 +198,9 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   bomb comes first (one use per press, as MW2's use list; `G_UseThink`). CoD4
   also counts a press made with a grenade out as used; Peace does not, because
   MW2 players do fake reloads after equipment. As in MW2 (owner's rule), X and
-  R end a sprint and keep one from starting (`PM_CheckSprint`), the reload is
-  taken straight out of the rise (step 4e), and a sprint a reload press ended
-  waits for the sprint button to come up (`PWF_SPRINT_RELEASE`, CoD4's
-  `sprintButtonUpRequired`); a fresh sprint press still cancels the reload. A
+  R end a sprint and keep one from starting (`PM_CheckSprint`), and the reload
+  is taken straight out of the rise (step 4e); a fresh sprint press still
+  cancels the reload. A
   released press holds nothing (CoD4 keeps its hold entity until the next
   press). `PM_Weapon` takes the bit as a reload press and
   clears it — except during a quick action, from the press through the

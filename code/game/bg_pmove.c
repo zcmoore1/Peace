@@ -2806,7 +2806,12 @@ static void PM_UpdateWeaponAction( void ) {
 	}
 	pm->ps->weaponAction = action | (held << WA_HELD_SHIFT) | returning | recovering |
 		(swap ? WA_SWAP_HELD : 0);
-	if ( action & WA_TYPE_MASK ) pm->ps->pm_flags &= ~(PMF_ADS | PMF_SPRINTING);
+	if ( action & WA_TYPE_MASK ) {
+		// A sprint the action ends waits for its button (PM_CheckSprint).
+		if ( ( pm->ps->pm_flags & PMF_SPRINTING ) && ( pm->cmd.buttons & BUTTON_SPRINT ) )
+			pm->ps->weapFlags |= PWF_SPRINT_RELEASE;
+		pm->ps->pm_flags &= ~(PMF_ADS | PMF_SPRINTING);
+	}
 }
 
 /*
@@ -2989,37 +2994,41 @@ static void PM_TorsoAnimation( void ) {
 PM_CheckSprint
 
 Sets or clears PMF_SPRINTING each tick. Sprint requires:
-  - BUTTON_SPRINT held
-  - no reload button held, and not waiting for BUTTON_SPRINT to come up
-    after a reload press ended the last sprint (MW2)
-  - moving forward (forwardmove > 0)
-  - on the ground and not ducking
+  - BUTTON_SPRINT held, and not waiting for it to come up after a sprint
+    ended while it was held (MW2)
+  - none of MW2's sprint-ending conditions: ladder, a quick action, a reload
+    or use/reload button, a jump, not moving forward, ducking
+  - on the ground
 
 Entering sprint cancels an in-progress reload (the weapon snaps to the hip
 before the mag can seat). ADS is cleared immediately on sprint entry.
 ==============
 */
 static void PM_CheckSprint( void ) {
-	qboolean wantSprint;
-	// MW2: a reload press, use/reload included, ends a sprint and keeps one
-	// from starting, and a sprint it ends waits for the sprint button to come
-	// up before it can start again (CoD4's sprintButtonUpRequired).
-	qboolean reloadHeld = ( pm->cmd.buttons & ( BUTTON_RELOAD | BUTTON_USE_RELOAD ) ) != 0;
+	qboolean held = ( pm->cmd.buttons & BUTTON_SPRINT ) != 0;
+	qboolean ended, wantSprint;
 
-	if ( !( pm->cmd.buttons & BUTTON_SPRINT ) ) {
+	// MW2's sprint-ending conditions: they end a sprint and keep one from
+	// starting. A reload press counts, use/reload's included, and so does a
+	// jump; leaving the ground without one ends no sprint in MW2, so here it
+	// only pauses it.
+	ended = ( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) ||
+	        ( pm->ps->weaponAction & WA_TYPE_MASK ) ||
+	        BG_IsActionWeapon(pm->ps->weapon) ||
+	        ( pm->cmd.buttons & ( BUTTON_RELOAD | BUTTON_USE_RELOAD ) ) ||
+	        pm->cmd.upmove > 0 ||
+	        pm->cmd.forwardmove <= 0 ||
+	        ( pm->ps->pm_flags & PMF_DUCKED );
+
+	// A sprint they end while its button is held waits for the button to come
+	// up before it can start again (CoD4's sprintButtonUpRequired).
+	if ( !held ) {
 		pm->ps->weapFlags &= ~PWF_SPRINT_RELEASE;
-	} else if ( reloadHeld && ( pm->ps->pm_flags & PMF_SPRINTING ) ) {
+	} else if ( ended && ( pm->ps->pm_flags & PMF_SPRINTING ) ) {
 		pm->ps->weapFlags |= PWF_SPRINT_RELEASE;
 	}
 
-	wantSprint = ( !( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) &&
-	               !( pm->ps->weaponAction & WA_TYPE_MASK ) &&
-	               !BG_IsActionWeapon(pm->ps->weapon) &&
-	               ( pm->cmd.buttons & BUTTON_SPRINT ) &&
-	               !reloadHeld && !( pm->ps->weapFlags & PWF_SPRINT_RELEASE ) &&
-	               pm->cmd.forwardmove > 0 &&
-	               pml.groundPlane &&
-	               !( pm->ps->pm_flags & PMF_DUCKED ) );
+	wantSprint = held && !ended && !( pm->ps->weapFlags & PWF_SPRINT_RELEASE ) && pml.groundPlane;
 
 	if ( wantSprint ) {
 		pm->ps->pm_flags |= PMF_SPRINTING;

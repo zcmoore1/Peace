@@ -329,6 +329,13 @@ static void SprintStep(int msec) {
  pml.groundPlane=qtrue; move.cmd.forwardmove=127;
  PM_CheckSprint(); Step(msec);
 }
+/* One think with chosen movement, sprint held unless 'held' is clear. */
+static void SprintMove(int held, int forward, int up, int ground) {
+ move.cmd.buttons=held ? BUTTON_SPRINT : 0;
+ move.cmd.forwardmove=forward; move.cmd.upmove=up; pml.groundPlane=ground;
+ PM_CheckSprint(); Step(1);
+ move.cmd.upmove=0;
+}
 static void TestSprintTransitions(void) {
  const int equipment[]={WP_KNIFE,WP_FRAG,WP_FLASH,WP_SEMTEX};
  const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL};
@@ -384,6 +391,28 @@ static void TestSprintTransitions(void) {
   CHECK(ps.weaponstate==WEAPON_RELOADING && !(ps.pm_flags&PMF_SPRINTING));
   move.cmd.buttons=0; SprintStep(1); move.cmd.buttons=BUTTON_SPRINT; SprintStep(1);
   CHECK((ps.pm_flags&PMF_SPRINTING) && ps.weaponstate==WEAPON_SPRINT_IN);
+ }
+ /* MW2: any sprint that ends while its button is held waits for the button
+  * to come up - letting go of forward, a jump, a crouch, a knife. Leaving the
+  * ground without a jump ends no sprint in MW2, so it only pauses one. */
+ for(i=0;i<5;i++) {
+  int t;
+  Ready(WP_MACHINEGUN,WP_SHOTGUN);
+  for(t=0;t<300;t++) SprintMove(1,127,0,1);
+  CHECK(ps.pm_flags&PMF_SPRINTING);
+  if(i==0) SprintMove(1,0,0,1);						/* forward let go */
+  else if(i==1) SprintMove(1,127,127,1);			/* jump */
+  else if(i==2) { ps.pm_flags|=PMF_DUCKED; SprintMove(1,127,0,1); ps.pm_flags&=~PMF_DUCKED; }
+  else if(i==3) {									/* knife, all the way back */
+   move.cmd.buttons=BUTTON_SPRINT|BUTTON_MELEE; move.cmd.forwardmove=127; pml.groundPlane=qtrue;
+   PM_CheckSprint(); Step(1);
+   for(t=0;t<9000 && (ps.weaponAction&WA_TYPE_MASK);t++) SprintMove(1,127,0,1);
+  } else SprintMove(1,127,0,0);						/* off a ledge */
+  CHECK(!(ps.pm_flags&PMF_SPRINTING));
+  for(t=0;t<100;t++) SprintMove(1,127,0,1);
+  CHECK(!(ps.pm_flags&PMF_SPRINTING) == (i<4));
+  SprintMove(0,127,0,1); SprintMove(1,127,0,1);
+  CHECK(ps.pm_flags&PMF_SPRINTING);
  }
  /* A reload button held keeps a sprint from starting, full magazine or not. */
  for(i=0;i<2;i++) {

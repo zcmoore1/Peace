@@ -124,6 +124,6 @@ every check still holds.
 - **Aiming.** MW2's knife rule reads its ADS fraction, so its knife also waits
   for the scope to ease out; Peace has no gameplay ADS fraction and uses the
   aim state.
-- **Other sprint ends.** MW2 makes every sprint that ends with the sprint
-  button held wait for the button to come up; Peace does that only for a
-  reload press.
+- **Firing while sprinting.** MW2's fire button ends a sprint and the shot
+  comes once the gun is up; in Peace the sprint wins and the gun does not fire
+  while the sprint button is held.

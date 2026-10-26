@@ -318,9 +318,27 @@ static void TestRecovery(void) {
   Ready(WP_SHOTGUN, WP_MACHINEGUN);
   move.cmd.buttons = BUTTON_LETHAL; RStep(); move.cmd.buttons = 0;
   for (t = 0; t < 9000 && !(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_RAISING); t++) RStep();
-  if (ps.ammo[BG_LethalWeapon(&ps)] > 0) {
-   move.cmd.buttons = BUTTON_TACTICAL; RStep(); move.cmd.buttons = 0;
-   CHECK((ps.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == WA_TACTICAL);
+  ps.ammo[WP_FLASH] = 1;
+  move.cmd.buttons = BUTTON_TACTICAL; RStep(); move.cmd.buttons = 0;
+  CHECK((ps.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == WA_TACTICAL);
+ }
+ /* A swap asked for during the recovery draw is an ordinary holster, which a
+  * knife still shortens; and once YY has cancelled the draw the gun is back,
+  * so a knife on the very next command is a knife. */
+ {
+  int t, yy;
+  for (yy = 0; yy < 2; yy++) {
+   Ready(WP_SHOTGUN, WP_MACHINEGUN);
+   move.cmd.buttons = BUTTON_LETHAL; RStep(); move.cmd.buttons = 0;
+   for (t = 0; t < 9000 && !(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_RAISING); t++) RStep();
+   for (t = 0; t < 200; t++) RStep();
+   move.cmd.weapon = WP_MACHINEGUN; RStep();
+   CHECK(ps.weaponstate == WEAPON_DROPPING && ps.weaponTime > BG_RAPID_DROP_TIME);
+   if (yy) { move.cmd.weapon = WP_SHOTGUN; RStep(); CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_READY); }
+   else for (t = 0; t < 100; t++) RStep();
+   move.cmd.buttons = BUTTON_MELEE; RStep(); move.cmd.buttons = 0;
+   for (t = 0; t < 4000; t++) RStep();
+   CHECK(fired[WP_KNIFE] == 1);
   }
  }
 }
@@ -407,12 +425,40 @@ static void TestSprintTransitions(void) {
    move.cmd.buttons=BUTTON_SPRINT|BUTTON_MELEE; move.cmd.forwardmove=127; pml.groundPlane=qtrue;
    PM_CheckSprint(); Step(1);
    for(t=0;t<9000 && (ps.weaponAction&WA_TYPE_MASK);t++) SprintMove(1,127,0,1);
-  } else SprintMove(1,127,0,0);						/* off a ledge */
+  } else { SprintMove(1,127,0,0); CHECK(ps.pm_flags&PMF_SPRINTING); continue; }	/* off a ledge: it goes on */
   CHECK(!(ps.pm_flags&PMF_SPRINTING));
   for(t=0;t<100;t++) SprintMove(1,127,0,1);
-  CHECK(!(ps.pm_flags&PMF_SPRINTING) == (i<4));
+  CHECK(!(ps.pm_flags&PMF_SPRINTING));
   SprintMove(0,127,0,1); SprintMove(1,127,0,1);
   CHECK(ps.pm_flags&PMF_SPRINTING);
+ }
+ /* A reload pressed in the air after walking off a ledge ends that sprint
+  * for good: landing with sprint held does not cancel the reload. */
+ for(i=0;i<2;i++) {
+  int t;
+  Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.ammo[WP_MACHINEGUN]=5;
+  for(t=0;t<300;t++) SprintMove(1,127,0,1);
+  for(t=0;t<50;t++) SprintMove(1,127,0,0);
+  CHECK(ps.pm_flags&PMF_SPRINTING);
+  move.cmd.buttons=BUTTON_SPRINT|(i ? BUTTON_USE_RELOAD : BUTTON_RELOAD); move.cmd.forwardmove=127; pml.groundPlane=qfalse;
+  PM_CheckSprint(); Step(1);
+  if(i) { ps.weapFlags|=PWF_USE_RELOAD; SprintMove(1,127,0,0); }
+  CHECK(ps.weaponstate==WEAPON_RELOADING && !(ps.pm_flags&PMF_SPRINTING));
+  for(t=0;t<4000;t++) SprintMove(1,127,0,1);
+  CHECK(!(ps.pm_flags&PMF_SPRINTING) && ps.ammo[WP_MACHINEGUN]==BG_WeaponMagSize(WP_MACHINEGUN));
+ }
+ /* A reload button held across many commands keeps a sprint from starting:
+  * pressing sprint while a held reload plays does not cancel it. */
+ for(i=0;i<2;i++) {
+  int t;
+  Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.ammo[WP_MACHINEGUN]=5;
+  move.cmd.forwardmove=127; pml.groundPlane=qtrue;
+  move.cmd.buttons=BUTTON_RELOAD; PM_CheckSprint(); Step(1);
+  CHECK(ps.weaponstate==WEAPON_RELOADING);
+  for(t=0;t<300;t++) {
+   move.cmd.buttons=BUTTON_SPRINT|(i ? BUTTON_USE_RELOAD : BUTTON_RELOAD); PM_CheckSprint(); Step(1);
+  }
+  CHECK(!(ps.pm_flags&PMF_SPRINTING) && ps.weaponstate==WEAPON_RELOADING);
  }
  /* MW2: the trigger ends a sprint too, and the gun fires once it is back up
   * if the trigger is still held; a pull let go during the rise fires nothing. */

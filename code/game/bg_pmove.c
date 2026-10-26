@@ -2745,7 +2745,9 @@ static int PM_HeldActionButtons( void ) {
 // Latch a press through holster/deploy. Releasing the button cannot lose a tap,
 // and holding it cannot turn a quick action into a permanently selected weapon.
 static void PM_UpdateWeaponAction( void ) {
-	qboolean wasQuick = ( pm->ps->weaponAction & WA_TYPE_MASK ) != 0;
+	// The gun is being drawn back from a quick action (its last command too).
+	qboolean wasQuick = ( pm->ps->weaponAction & WA_TYPE_MASK ) &&
+		pm->ps->weaponstate == WEAPON_RAISING && !BG_IsActionWeapon( pm->ps->weapon );
 	int held = PM_HeldActionButtons();
 	int pressed = held & ~((pm->ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT);
 	int action = pm->ps->weaponAction & (WA_TYPE_MASK | WA_FIRED);
@@ -2778,7 +2780,7 @@ static void PM_UpdateWeaponAction( void ) {
 		// A press during the recovery DRAW: equipment starts the next quick
 		// action, as MW2 lets a grenade come out of the gun's return. A knife is
 		// lost, as MW2's knife check skips the quick raise, the command it ends
-		// on included. While the knife or grenade is still out, presses wait.
+		// on included. While the knife or grenade is still out, presses are lost.
 		if ( !(action & WA_TYPE_MASK) ||
 			( (action & WA_FIRED) && !BG_IsActionWeapon( pm->ps->weapon ) ) ) {
 			int nextAction = 0;
@@ -2999,7 +3001,7 @@ Sets or clears PMF_SPRINTING each tick. Sprint requires:
   - none of MW2's sprint-ending conditions: ladder, a quick action, the
     trigger, a reload or use/reload button, a jump, not moving forward,
     ducking
-  - on the ground
+  - on the ground to start; a sprint carried off a ledge goes on (MW2)
 
 Entering sprint cancels an in-progress reload (the weapon snaps to the hip
 before the mag can seat). ADS is cleared immediately on sprint entry.
@@ -3011,8 +3013,9 @@ static void PM_CheckSprint( void ) {
 
 	// MW2's sprint-ending conditions: they end a sprint and keep one from
 	// starting. The trigger counts (the gun fires once it is back up), a
-	// reload press does, use/reload's included, and so does a jump; leaving
-	// the ground without one ends no sprint in MW2, so here it only pauses it.
+	// reload press does, use/reload's included, and so does a jump. MW2 has
+	// no ground test: a sprint carried off a ledge goes on in the air, and
+	// only starting one needs the ground.
 	ended = ( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) ||
 	        ( pm->ps->weaponAction & WA_TYPE_MASK ) ||
 	        BG_IsActionWeapon(pm->ps->weapon) ||
@@ -3029,7 +3032,8 @@ static void PM_CheckSprint( void ) {
 		pm->ps->weapFlags |= PWF_SPRINT_RELEASE;
 	}
 
-	wantSprint = held && !ended && !( pm->ps->weapFlags & PWF_SPRINT_RELEASE ) && pml.groundPlane;
+	wantSprint = held && !ended && !( pm->ps->weapFlags & PWF_SPRINT_RELEASE ) &&
+	             ( pml.groundPlane || ( pm->ps->pm_flags & PMF_SPRINTING ) );
 
 	if ( wantSprint ) {
 		pm->ps->pm_flags |= PMF_SPRINTING;

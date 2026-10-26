@@ -28,7 +28,8 @@ int main(void) {
   to.slotAttachments[0]=i&1; to.slotAttachments[1]=j&1;
   to.slotFlags[0]=i&3; to.slotFlags[1]=j&3;
   to.pickupTarget=1023; to.pickupSerial=2147483000; to.pickupTime=1000;
-  to.pickupSlot=j&1; to.pickupHeld=j%3;
+  to.pickupSlot=j&1; to.pickupHeld=j&3;
+  from.weapFlags=i&3; to.weapFlags=j&3;	/* PWF_USE_RELOAD and PWF_SPRINT_RELEASE */
   MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,&from,&to);
   CHECK(!msg.overflowed); MSG_BeginReading(&msg);
   MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
@@ -45,6 +46,7 @@ int main(void) {
   CHECK(decoded.slotAttachments[0]==to.slotAttachments[0] && decoded.slotAttachments[1]==to.slotAttachments[1]);
   CHECK(decoded.pickupTarget==1023 && decoded.pickupSerial==to.pickupSerial && decoded.pickupTime==1000);
   CHECK(decoded.pickupSlot==to.pickupSlot && decoded.pickupHeld==to.pickupHeld);
+  CHECK(decoded.weapFlags==to.weapFlags);
  }
  printf("PASS: %d action wire checks\n",checks); return 0;
 }

@@ -156,8 +156,9 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   and the latch is what blocks sprint. Once fired, selection asks for the gun.
   YY cancels an ordinary recovery draw like any draw; a grenade pressed during
   the draw starts the next one, as MW2 lets one come out of the gun's return,
-  but a knife pressed during it, or on the command it ends, is lost (owner's
-  rule: MW2's knife check skips the quick raise). The owner's Semtex exception queues
+  but a knife pressed while a gun is being drawn back, the draw's last command
+  included, is lost (owner's rule: MW2's knife check skips every raise). A swap
+  asked for during it is an ordinary holster, which a knife still shortens. The owner's Semtex exception queues
   slot changes until the throw and original-gun recovery finish. The requested
   slot/HUD updates immediately; the physical holster starts at that boundary.
 - **An ordinary raise is cancellable by YY.** That is the owner's rule, not a
@@ -169,8 +170,9 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   jump, not moving forward, ducking. Any sprint that ends while its
   button is held waits for the button to come up before it can start again
   (`PWF_SPRINT_RELEASE`, CoD4's `sprintButtonUpRequired`; a quick action sets it
-  in `PM_UpdateWeaponAction`). Leaving the ground without a jump ends no sprint
-  in MW2, so it only pauses one. Prediction carries the flag in `weapFlags`.
+  in `PM_UpdateWeaponAction`). MW2 has no ground test: a sprint carried off a
+  ledge goes on in the air, and only starting one needs the ground. Prediction
+  carries the flag in `weapFlags`.
 - **Never ADS through a reload.** `PM_CheckADS` blocks `WEAPON_RELOADING` on
   purpose. The ZOOMload trick is a client/server desync — the reload animation
   starts client-side from the use/reload bit and the server never agrees one is
@@ -247,11 +249,11 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 9-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, and post-throw recovery. Protocol 78 requires client, server
+  swap edge latch, and post-throw recovery. Protocol 79 requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
-  `weapFlags` (MW2's name; 2 bits, protocol 78) carries `PWF_USE_RELOAD`, the
+  `weapFlags` (MW2's name; 2 bits, protocol 79) carries `PWF_USE_RELOAD`, the
   server's use/reload request, and `PWF_SPRINT_RELEASE`. Neither is a clock,
   and neither is rebased.
   Dropped ET_ITEM uses `generic1` for attachments, `time2` for packed magazine

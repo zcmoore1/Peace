@@ -537,6 +537,7 @@ void BG_BeginWeaponDraw(playerState_t *ps);
 // with nothing to use into PWF_USE_RELOAD on playerState_t.weapFlags, and the
 // weapon takes the bit as a reload press.
 #define PWF_USE_RELOAD 1
+#define PWF_SPRINT_RELEASE 2	// a sprint a reload press ended: the sprint button must come up first
 typedef struct {
 	int buttons;		// the last command's buttons, as the use code saw them
 	qboolean done;		// this press has used something (MW2's useButtonDone)

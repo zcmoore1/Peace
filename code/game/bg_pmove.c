@@ -2745,6 +2745,7 @@ static int PM_HeldActionButtons( void ) {
 // Latch a press through holster/deploy. Releasing the button cannot lose a tap,
 // and holding it cannot turn a quick action into a permanently selected weapon.
 static void PM_UpdateWeaponAction( void ) {
+	qboolean wasQuick = ( pm->ps->weaponAction & WA_TYPE_MASK ) != 0;
 	int held = PM_HeldActionButtons();
 	int pressed = held & ~((pm->ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT);
 	int action = pm->ps->weaponAction & (WA_TYPE_MASK | WA_FIRED);
@@ -2774,15 +2775,16 @@ static void PM_UpdateWeaponAction( void ) {
 		}
 		if (pm->ps->weapon == WP_SEMTEX && (action & WA_FIRED) &&
 			pm->ps->weaponstate == WEAPON_FIRING && pm->ps->weaponTime <= 0) recovering = WA_RECOVERING;
-		// A press during the recovery DRAW starts the next quick action, exactly
-		// as it would during any other draw. The gun being in hand is what makes
-		// it a draw; while the knife or grenade is still out, presses wait.
+		// A press during the recovery DRAW: equipment starts the next quick
+		// action, as MW2 lets a grenade come out of the gun's return. A knife is
+		// lost, as MW2's knife check skips the quick raise, the command it ends
+		// on included. While the knife or grenade is still out, presses wait.
 		if ( !(action & WA_TYPE_MASK) ||
 			( (action & WA_FIRED) && !BG_IsActionWeapon( pm->ps->weapon ) ) ) {
 			int nextAction = 0;
-			// MW2 starts no knife while a scoped gun is aimed at all; the press is
-			// lost. The gun in hand is aimed only if PM_CheckADS let it be.
-			if ( (pressed & 1) && !( (pm->ps->pm_flags & PMF_ADS) &&
+			// MW2 also starts no knife while a scoped gun is aimed at all. The gun
+			// in hand is aimed only if PM_CheckADS let it be.
+			if ( (pressed & 1) && !wasQuick && !( (pm->ps->pm_flags & PMF_ADS) &&
 				BG_WeaponScopeOverlay( pm->ps->weapon ) ) ) nextAction = WA_MELEE;
 			else if ( (pressed & 2) && pm->ps->ammo[BG_LethalWeapon(pm->ps)] > 0 ) nextAction = WA_LETHAL;
 			else if ( (pressed & 4) && pm->ps->ammo[WP_FLASH] > 0 ) nextAction = WA_TACTICAL;
@@ -2988,6 +2990,8 @@ PM_CheckSprint
 
 Sets or clears PMF_SPRINTING each tick. Sprint requires:
   - BUTTON_SPRINT held
+  - no reload button held, and not waiting for BUTTON_SPRINT to come up
+    after a reload press ended the last sprint (MW2)
   - moving forward (forwardmove > 0)
   - on the ground and not ducking
 
@@ -2997,11 +3001,22 @@ before the mag can seat). ADS is cleared immediately on sprint entry.
 */
 static void PM_CheckSprint( void ) {
 	qboolean wantSprint;
+	// MW2: a reload press, use/reload included, ends a sprint and keeps one
+	// from starting, and a sprint it ends waits for the sprint button to come
+	// up before it can start again (CoD4's sprintButtonUpRequired).
+	qboolean reloadHeld = ( pm->cmd.buttons & ( BUTTON_RELOAD | BUTTON_USE_RELOAD ) ) != 0;
+
+	if ( !( pm->cmd.buttons & BUTTON_SPRINT ) ) {
+		pm->ps->weapFlags &= ~PWF_SPRINT_RELEASE;
+	} else if ( reloadHeld && ( pm->ps->pm_flags & PMF_SPRINTING ) ) {
+		pm->ps->weapFlags |= PWF_SPRINT_RELEASE;
+	}
 
 	wantSprint = ( !( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) &&
 	               !( pm->ps->weaponAction & WA_TYPE_MASK ) &&
 	               !BG_IsActionWeapon(pm->ps->weapon) &&
 	               ( pm->cmd.buttons & BUTTON_SPRINT ) &&
+	               !reloadHeld && !( pm->ps->weapFlags & PWF_SPRINT_RELEASE ) &&
 	               pm->cmd.forwardmove > 0 &&
 	               pml.groundPlane &&
 	               !( pm->ps->pm_flags & PMF_DUCKED ) );
@@ -3300,11 +3315,13 @@ static void PM_Weapon( void ) {
 		pm->ps->weaponTime     = BG_WeaponFireLength( pm->ps->weapon );
 	}
 
-	// 4e. Reload is taken out of the shot and out of the pump or bolt at once,
-	//     as MW2's PM_BeginWeaponReload takes it out of READY, FIRING and
-	//     RECHAMBERING. The fire cycle is simply abandoned, its debt still owed.
-	//     An empty gun reloads itself out of the pump, never out of the shot.
-	if ( ( pm->ps->weaponstate == WEAPON_FIRING || pm->ps->weaponstate == WEAPON_BOLTING ) &&
+	// 4e. Reload is taken out of the shot, out of the pump or bolt and out of
+	//     the rise from a sprint at once, as MW2's PM_BeginWeaponReload takes it
+	//     out of READY, FIRING, RECHAMBERING and the sprint states. The fire
+	//     cycle is simply abandoned, its debt still owed. An empty gun reloads
+	//     itself out of the pump, never out of the shot.
+	if ( ( pm->ps->weaponstate == WEAPON_FIRING || pm->ps->weaponstate == WEAPON_BOLTING ||
+	       pm->ps->weaponstate == WEAPON_SPRINT_OUT ) &&
 	     !BG_IsActionWeapon( pm->ps->weapon ) && BG_WeaponMagSize( pm->ps->weapon ) > 0 &&
 	     pm->ps->ammoReserve[pm->ps->weapon] > 0 &&
 	     ( ( reload && pm->ps->ammo[pm->ps->weapon] < BG_WeaponMagSize( pm->ps->weapon ) ) ||

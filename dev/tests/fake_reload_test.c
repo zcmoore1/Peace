@@ -392,8 +392,9 @@ static void FakeReloads(void) {
 			if (O.predShot) CHECK(O.svShot && O.svShotCmd == O.predShotCmd && !O.detachedMs && O.converged);
 			if (x >= 0) CHECK(O.predShot);
 		}
-		/* A knife alone is never a knife you can scope through: hip-fired it is
-		 * a knife, aimed through a scope it is nothing. */
+		/* A knife alone is never a knife you can scope through: while the gun is
+		 * coming back it is nothing, once it is back it is a knife hip-fired
+		 * and nothing aimed through a scope. */
 		for (x = -200; x <= 200; x += 8) {
 			s = Script(a, X); s.knifeAt = x; s.knifeLen = TAP; s.adsAt = x + 8; Run(rtts[r], &s, anchorAt[a][r]);
 			CHECK(!O.knifePicWithoutGunAction && O.converged);
@@ -402,6 +403,9 @@ static void FakeReloads(void) {
 			CHECK(!O.knifePicWithoutGunAction && O.converged && (O.svKnife || !O.detachedMs));
 			/* Once the gun is back and aimed (a command after it is back). */
 			if (x >= 16) CHECK(O.svKnife == !BG_WeaponScopeOverlay(GUN) && (O.svKnife || !O.knifePicMs));
+			/* While it is still coming back, a knife is nothing (MW2's knife
+			 * check skips the quick raise, the command it ends on included). */
+			if (x <= 0) CHECK(!O.svKnife && !O.knifePicMs);
 		}
 		printf("  %-4s fake reload after %-13s RTT %3d: a 48ms tap pressed %4d..%4dms before the gun is at rest (%d of 8ms steps)\n",
 			GUN == WP_M40A3 ? "M300" : "SPAS", actName[a], rtts[r], -firstAt[a][r], -lastAt[a][r], count[a][r]);

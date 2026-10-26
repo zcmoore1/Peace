@@ -19,9 +19,11 @@ scripts do every one of these with `+usereload`.
 - **Wild scope.** With a scoped gun (the M300), hold aim, do the fake reload,
   and knife straight after. The knife plays while you stay scoped (a fake
   knife).
-- **A knife alone** is never a knife you can scope through: hip-fired it is a
-  real knife, and aimed through a scope it is nothing (MW2 starts no knife
-  while a scoped gun is aimed).
+- **A knife alone** is never a knife you can scope through. Pressed while the
+  gun is still coming back it is nothing (late or nothing, as MW2's knife check
+  skips the quick raise). Once the gun is back it is a real knife hip-fired, and
+  nothing aimed through a scope (MW2 starts no knife while a scoped gun is
+  aimed).
 - Every window is precise on your own host and much wider with ping.
 
 ## The rules that make it
@@ -111,22 +113,17 @@ every check still holds.
 
 ## Where Peace and MW2 still differ
 
-- **A knife pressed while the gun is coming back.** MW2 ignores it (its knife
-  check skips the melee and equipment quick raise, and the press is lost), so a
-  lone knife there is "nothing". Peace's recovery is the gun's whole draw, and a
-  quick action pressed during it starts the next one (CLAUDE.md, recovery rule),
-  so it is a real knife at once. The old server hand-off made it "late or
-  nothing"; MW2's use/reload does not.
 - **The IW4x wild scope script** presses knife and X on the same frame while
-  the gun is still coming back from equipment, with aim held. In Peace that knife
-  lands in the recovery draw and is a real knife (above), so the script gives no
-  trick; the order above (fake reload, then knife) does. Which order MW2 needs is
-  still open; the pack also ships a modified client.
+  the gun is still coming back from equipment, with aim held. That knife is
+  lost in Peace, as in MW2's code, so the script gives a zoomload and no knife;
+  the order above (fake reload, then knife) gives the wild scope. Which order
+  MW2 players use is still open; the pack also ships a modified client.
 - **The IW4x fake shot script** (X for one frame at 57 fps, shot two frames
   later) needs some ping in Peace: on your own host the shot lands about 53ms
   after X, past the window.
-- **Sprint.** MW2 ends a sprint on X or R and reloads out of it; Peace's sprint
-  ignores reload buttons, so a reload asked for while sprinting is dropped.
 - **Aiming.** MW2's knife rule reads its ADS fraction, so its knife also waits
   for the scope to ease out; Peace has no gameplay ADS fraction and uses the
   aim state.
+- **Other sprint ends.** MW2 makes every sprint that ends with the sprint
+  button held wait for the button to come up; Peace does that only for a
+  reload press.

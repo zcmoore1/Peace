@@ -104,14 +104,23 @@ static void TestSemtex(void) {
    }
   }
  }
+ /* A knife pressed during the recovery draw is lost (MW2 skips the gun's
+  * return); a grenade pressed there starts the next throw. Neither may strand
+  * a stale post-throw destination or refund the first action. */
  SemtexReady(WP_SHOTGUN); Hold();
  move.cmd.buttons=0; Step(1); Run(ps.weaponTime); Run(ps.weaponTime);
  CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);
  move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
  Returned();
- CHECK(fired[WP_SEMTEX]==1 && fired[WP_KNIFE]==1 && ps.weapon==WP_SHOTGUN);
- /* Starting another action during the recovery draw must not strand a
-  * stale post-throw destination or refund the first action. */
+ CHECK(fired[WP_SEMTEX]==1 && fired[WP_KNIFE]==0 && ps.weapon==WP_SHOTGUN);
+ CHECK(ps.ammo[WP_SEMTEX]==1 && !(ps.weaponAction&WA_RECOVERING));
+ SemtexReady(WP_SHOTGUN); ps.ammo[WP_FLASH]=1; Hold();
+ move.cmd.buttons=0; Step(1); Run(ps.weaponTime); Run(ps.weaponTime);
+ CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);
+ move.cmd.buttons=BUTTON_TACTICAL; Step(1); move.cmd.buttons=0;
+ CHECK((ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==WA_TACTICAL);
+ Returned();
+ CHECK(fired[WP_SEMTEX]==1 && fired[WP_FLASH]==1 && ps.weapon==WP_SHOTGUN);
  CHECK(ps.ammo[WP_SEMTEX]==1 && !(ps.weaponAction&WA_RECOVERING));
  SemtexReady(WP_SHOTGUN); Hold();
  ps.stats[STAT_LADDER]=LADDER_ATTACHED; Step(1);

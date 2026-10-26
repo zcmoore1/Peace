@@ -293,15 +293,35 @@ static void TestRecovery(void) {
   move.cmd.weapon = WP_SHOTGUN; RStep();
   CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_READY);
  }
- /* a melee pressed during the recovery draw starts the next melee */
+ /* MW2's knife check skips the gun's return from a quick action: a knife
+  * pressed during the recovery draw, or on the command that draw ends, is
+  * lost. A grenade pressed there still starts the next throw, and a knife
+  * once the gun is back is a knife. */
  {
-  int t;
+  int t, when;
+  for (when = 0; when < 3; when++) {
+   Ready(WP_SHOTGUN, WP_MACHINEGUN);
+   move.cmd.buttons = BUTTON_LETHAL; RStep(); move.cmd.buttons = 0;
+   for (t = 0; t < 9000 && !(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_RAISING); t++) RStep();
+   CHECK(ps.weapon == WP_SHOTGUN && (ps.weaponAction & WA_TYPE_MASK));
+   if (when) {	/* to the command the latch clears on, or the one after it */
+    for (t = 0; t < 9000; t++) {
+     playerState_t save = ps;
+     RStep();
+     if (!(ps.weaponAction & WA_TYPE_MASK)) { if (when == 1) ps = save; break; }
+    }
+   }
+   move.cmd.buttons = BUTTON_MELEE; RStep(); move.cmd.buttons = 0;
+   for (t = 0; t < 3000; t++) RStep();
+   CHECK(fired[WP_KNIFE] == (when == 2));
+  }
   Ready(WP_SHOTGUN, WP_MACHINEGUN);
   move.cmd.buttons = BUTTON_LETHAL; RStep(); move.cmd.buttons = 0;
   for (t = 0; t < 9000 && !(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_RAISING); t++) RStep();
-  move.cmd.buttons = BUTTON_MELEE; RStep(); move.cmd.buttons = 0;
-  for (t = 0; t < 2000 && !fired[WP_KNIFE]; t++) RStep();
-  CHECK(fired[WP_KNIFE] == 1);
+  if (ps.ammo[BG_LethalWeapon(&ps)] > 0) {
+   move.cmd.buttons = BUTTON_TACTICAL; RStep(); move.cmd.buttons = 0;
+   CHECK((ps.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == WA_TACTICAL);
+  }
  }
 }
 
@@ -344,6 +364,34 @@ static void TestSprintTransitions(void) {
   move.cmd.buttons|=buttons[i]; SprintStep(1);
   CHECK(ps.weaponAction&WA_TYPE_MASK);
   CHECK(!(ps.pm_flags&PMF_SPRINTING));
+ }
+ /* MW2: a reload press, use/reload's included, ends a sprint and the reload
+  * comes straight out of the rise; the sprint then waits for its own button
+  * to come up, and a fresh sprint press cancels the reload as ever. */
+ for(i=0;i<2;i++) {
+  int t;
+  Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.ammo[WP_MACHINEGUN]=5;
+  move.cmd.buttons=BUTTON_SPRINT; for(t=0;t<500;t++) SprintStep(1);
+  CHECK(ps.weaponstate==WEAPON_SPRINTING && (ps.pm_flags&PMF_SPRINTING));
+  move.cmd.buttons=BUTTON_SPRINT|(i ? BUTTON_USE_RELOAD : BUTTON_RELOAD); SprintStep(1);
+  CHECK(!(ps.pm_flags&PMF_SPRINTING));
+  if(i) {	/* use/reload: the server's request arrives on the next command */
+   CHECK(ps.weaponstate==WEAPON_SPRINT_OUT);
+   ps.weapFlags|=PWF_USE_RELOAD; SprintStep(1);
+  }
+  CHECK(ps.weaponstate==WEAPON_RELOADING && ps.weaponAnimSeq==RSEQ_START);
+  move.cmd.buttons=BUTTON_SPRINT; for(t=0;t<200;t++) SprintStep(1);
+  CHECK(ps.weaponstate==WEAPON_RELOADING && !(ps.pm_flags&PMF_SPRINTING));
+  move.cmd.buttons=0; SprintStep(1); move.cmd.buttons=BUTTON_SPRINT; SprintStep(1);
+  CHECK((ps.pm_flags&PMF_SPRINTING) && ps.weaponstate==WEAPON_SPRINT_IN);
+ }
+ /* A reload button held keeps a sprint from starting, full magazine or not. */
+ for(i=0;i<2;i++) {
+  Ready(WP_MACHINEGUN,WP_SHOTGUN);
+  move.cmd.buttons=BUTTON_SPRINT|(i ? BUTTON_USE_RELOAD : BUTTON_RELOAD); SprintStep(1);
+  CHECK(!(ps.pm_flags&PMF_SPRINTING) && ps.weaponstate==WEAPON_READY);
+  move.cmd.buttons=BUTTON_SPRINT; SprintStep(1);
+  CHECK(ps.pm_flags&PMF_SPRINTING);	/* never sprinting, so nothing to release */
  }
  /* Once the action latch has cleared for return, equipment is still in hand
   * during its drop. Classification, not the latch alone, must block sprint. */

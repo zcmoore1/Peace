@@ -154,8 +154,10 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   draw. As in MW2 that draw is the normal one except **you cannot sprint
   through it**: the `weaponAction` latch lasts until the gun is fully drawn,
   and the latch is what blocks sprint. Once fired, selection asks for the gun.
-  YY cancels an ordinary recovery draw like any draw; a quick action pressed
-  during the draw starts the next one. The owner's Semtex exception queues
+  YY cancels an ordinary recovery draw like any draw; a grenade pressed during
+  the draw starts the next one, as MW2 lets one come out of the gun's return,
+  but a knife pressed during it, or on the command it ends, is lost (owner's
+  rule: MW2's knife check skips the quick raise). The owner's Semtex exception queues
   slot changes until the throw and original-gun recovery finish. The requested
   slot/HUD updates immediately; the physical holster starts at that boundary.
 - **An ordinary raise is cancellable by YY.** That is the owner's rule, not a
@@ -180,7 +182,7 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   attack-held spawn gate, including Semtex.
 - **Use/reload is MW2's (owner's rule: do what MW2 does).** `+usereload`
   (`BUTTON_USE_RELOAD`, the gamepad's X) is never a reload press in pmove, which
-  reads it only to hold for a floor gun. After each command's `Pmove`, the
+  reads it only to hold for a floor gun and to end a sprint. After each command's `Pmove`, the
   server's `BG_UpdateActivate` (MW2's `Player_UpdateActivate`, run from
   `ClientThink_real`) clears `PWF_USE_RELOAD` on `ps.weapFlags`, then sets it
   again for a press that finds nothing to use, and on every command while that
@@ -188,11 +190,13 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   only if released early; a press at a bomb site or the bomb is a use, and the
   bomb comes first (one use per press, as MW2's use list; `G_UseThink`). CoD4
   also counts a press made with a grenade out as used; Peace does not, because
-  MW2 players do fake reloads after equipment. Known divergence: in MW2, X and
-  R end a sprint in shared pmove and the reload comes out of the sprint drop;
-  Peace's sprint ignores reload buttons, so a request made while sprinting is
-  dropped. A released press holds nothing (CoD4 keeps its hold entity until the
-  next press). `PM_Weapon` takes the bit as a reload press and
+  MW2 players do fake reloads after equipment. As in MW2 (owner's rule), X and
+  R end a sprint and keep one from starting (`PM_CheckSprint`), the reload is
+  taken straight out of the rise (step 4e), and a sprint a reload press ended
+  waits for the sprint button to come up (`PWF_SPRINT_RELEASE`, CoD4's
+  `sprintButtonUpRequired`); a fresh sprint press still cancels the reload. A
+  released press holds nothing (CoD4 keeps its hold entity until the next
+  press). `PM_Weapon` takes the bit as a reload press and
   clears it — except during a quick action, from the press through the
   recovery draw, where it is not read at all (MW2's reload check skips melee
   and offhand) — and a gun that is reloading when the command begins drops it
@@ -240,8 +244,9 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   and all modules rebuilt together. Older builds/demos are incompatible.
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
-  `weapFlags` (MW2's name; 1 bit, protocol 78) carries `PWF_USE_RELOAD`, the
-  server's use/reload request. It is not a clock and is never rebased.
+  `weapFlags` (MW2's name; 2 bits, protocol 78) carries `PWF_USE_RELOAD`, the
+  server's use/reload request, and `PWF_SPRINT_RELEASE`. Neither is a clock,
+  and neither is rebased.
   Dropped ET_ITEM uses `generic1` for attachments, `time2` for packed magazine
   and reserve, `otherEntityNum2` for chamber debt, and `time` as a spawn serial.
 - `perks` is a five-bit spawn-owned playerstate field. All three class perk

@@ -496,7 +496,7 @@ static void TestMovementScale(void) {
  const int flags[]={0,PMF_SPRINTING,PMF_ADS};
  int i,j;
  float scale,normal;
- Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.speed=320;
+ Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.speed=320; pml.walking=qtrue;
  move.cmd.forwardmove=127; normal=PM_CmdScale(&move.cmd);
  for(i=0;i<ARRAY_LEN(flags);i++) {
   ps.pm_flags=flags[i]; scale=PM_CmdScale(&move.cmd);
@@ -511,6 +511,10 @@ static void TestMovementScale(void) {
  }
  move.cmd.forwardmove=0; ps.pm_flags=PMF_SPRINTING;
  CHECK(PM_CmdScale(&move.cmd)==0 && ps.speed==320);
+ /* Sprint speed is the walk's: off the ground it adds nothing (MW2). */
+ move.cmd.forwardmove=127; ps.pm_flags=0; normal=PM_CmdScale(&move.cmd);
+ pml.walking=qfalse; ps.pm_flags=PMF_SPRINTING;
+ CHECK(fabs(PM_CmdScale(&move.cmd)-normal)<.0001f);
 }
 /* Full Pmove reaches the respawn gate; PM_Weapon alone cannot cover it. */
 static void RespawnTrace(trace_t *tr, const vec3_t start, const vec3_t mins,
@@ -525,6 +529,33 @@ static int RespawnContents(const vec3_t point, int pass) {
 static void RespawnMove(int buttons, int type) {
  move.cmd.buttons=buttons; move.cmd.serverTime=ps.commandTime+8;
  ps.pm_type=type; Pmove(&move);
+}
+/* MW2 has no ground test: a sprint starts and runs in the air, but its speed
+ * is the walk's only, so the fall itself is no faster; it pays off on landing. */
+static void TestAirSprint(void) {
+ float speed[2]; int s,t;
+ for(s=0;s<2;s++) {
+  Ready(WP_MACHINEGUN,WP_SHOTGUN);
+  move.trace=RespawnTrace; move.pointcontents=RespawnContents;
+  move.tracemask=MASK_PLAYERSOLID; ps.speed=320; ps.gravity=800; ps.pm_type=PM_NORMAL;
+  ps.origin[2]=4000; ps.velocity[0]=320; ps.groundEntityNum=ENTITYNUM_NONE;
+  move.cmd.forwardmove=127; move.cmd.upmove=0;
+  for(t=0;t<400;t+=8) RespawnMove(s ? BUTTON_SPRINT : 0,PM_NORMAL);
+  CHECK(ps.groundEntityNum==ENTITYNUM_NONE && !!(ps.pm_flags&PMF_SPRINTING)==s);
+  speed[s]=sqrt(ps.velocity[0]*ps.velocity[0]+ps.velocity[1]*ps.velocity[1]);
+ }
+ CHECK(fabs(speed[1]-speed[0])<.01f);
+ /* Holding jump keeps it from starting, as MW2's jump button does. */
+ Ready(WP_MACHINEGUN,WP_SHOTGUN);
+ move.trace=RespawnTrace; move.pointcontents=RespawnContents;
+ move.tracemask=MASK_PLAYERSOLID; ps.speed=320; ps.gravity=800;
+ ps.origin[2]=4000; ps.groundEntityNum=ENTITYNUM_NONE;
+ move.cmd.forwardmove=127; move.cmd.upmove=127;
+ for(t=0;t<200;t+=8) RespawnMove(BUTTON_SPRINT,PM_NORMAL);
+ CHECK(!(ps.pm_flags&PMF_SPRINTING));
+ move.cmd.upmove=0; RespawnMove(0,PM_NORMAL); RespawnMove(BUTTON_SPRINT,PM_NORMAL);
+ CHECK(ps.pm_flags&PMF_SPRINTING);
+ move.cmd.forwardmove=0;
 }
 static void TestHeldThroughRespawn(void) {
  const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL,BUTTON_LETHAL};
@@ -563,7 +594,7 @@ static void TestHeldThroughRespawn(void) {
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
  TestMeleeHolster(); TestRecovery();
- TestMovementScale(); TestHeldThroughRespawn();
+ TestMovementScale(); TestAirSprint(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;
 }

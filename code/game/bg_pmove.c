@@ -305,10 +305,12 @@ static float PM_CmdScale( usercmd_t *cmd ) {
 	float	total;
 	float	scale;
 
-	// Sprint: forward speed boost. ADS: movement penalty.
-	// Modify this command's scale, never the authoritative base speed. Pmove
-	// subdivisions and prediction replay can evaluate this more than once.
-	if ( pm->ps->pm_flags & PMF_SPRINTING ) {
+	// Sprint: forward speed boost, on the ground only - MW2 scales its walk
+	// and not its air move, so a sprint in the air pays off on landing. ADS:
+	// movement penalty. Modify this command's scale, never the authoritative
+	// base speed. Pmove subdivisions and prediction replay can evaluate this
+	// more than once.
+	if ( ( pm->ps->pm_flags & PMF_SPRINTING ) && pml.walking ) {
 		speed = (int)( speed * 1.4f );
 	} else if ( pm->ps->pm_flags & PMF_ADS ) {
 		speed = (int)( speed * 0.5f );
@@ -3001,7 +3003,7 @@ Sets or clears PMF_SPRINTING each tick. Sprint requires:
   - none of MW2's sprint-ending conditions: ladder, a quick action, the
     trigger, a reload or use/reload button, a jump, not moving forward,
     ducking
-  - on the ground to start; a sprint carried off a ledge goes on (MW2)
+  - not in deep water; on the ground or in the air alike (MW2)
 
 Entering sprint cancels an in-progress reload (the weapon snaps to the hip
 before the mag can seat). ADS is cleared immediately on sprint entry.
@@ -3013,9 +3015,10 @@ static void PM_CheckSprint( void ) {
 
 	// MW2's sprint-ending conditions: they end a sprint and keep one from
 	// starting. The trigger counts (the gun fires once it is back up), a
-	// reload press does, use/reload's included, and so does a jump. MW2 has
-	// no ground test: a sprint carried off a ledge goes on in the air, and
-	// only starting one needs the ground.
+	// reload press does, use/reload's included, and so does holding jump.
+	// MW2 has no ground test: a sprint goes on and can start in the air (its
+	// speed waits for the ground, PM_CmdScale). MW2 has no swimming; deep water
+	// only pauses a sprint, as it always has here.
 	ended = ( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) ||
 	        ( pm->ps->weaponAction & WA_TYPE_MASK ) ||
 	        BG_IsActionWeapon(pm->ps->weapon) ||
@@ -3033,7 +3036,7 @@ static void PM_CheckSprint( void ) {
 	}
 
 	wantSprint = held && !ended && !( pm->ps->weapFlags & PWF_SPRINT_RELEASE ) &&
-	             ( pml.groundPlane || ( pm->ps->pm_flags & PMF_SPRINTING ) );
+	             pm->waterlevel <= 1;
 
 	if ( wantSprint ) {
 		pm->ps->pm_flags |= PMF_SPRINTING;

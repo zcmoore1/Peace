@@ -170,9 +170,12 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   jump, not moving forward, ducking. Any sprint that ends while its
   button is held waits for the button to come up before it can start again
   (`PWF_SPRINT_RELEASE`, CoD4's `sprintButtonUpRequired`; a quick action sets it
-  in `PM_UpdateWeaponAction`). MW2 has no ground test: a sprint carried off a
-  ledge goes on in the air, and only starting one needs the ground. Prediction
-  carries the flag in `weapFlags`.
+  in `PM_UpdateWeaponAction`). MW2 has no ground test: a sprint goes on and can
+  start in the air (once jump is let go). Its speed applies only on the ground
+  (`PM_CmdScale` with `pml.walking`, as MW2 scales its walk and not its air
+  move), so a sprint begun in the air pays off on landing. Deep water only
+  pauses a sprint (MW2 has no swimming). Prediction carries the flag in
+  `weapFlags`.
 - **Never ADS through a reload.** `PM_CheckADS` blocks `WEAPON_RELOADING` on
   purpose. The ZOOMload trick is a client/server desync — the reload animation
   starts client-side from the use/reload bit and the server never agrees one is

@@ -538,7 +538,7 @@ void BG_BeginWeaponDraw(playerState_t *ps);
 // weapon takes the bit as a reload press.
 #define PWF_USE_RELOAD 1
 #define BG_SPRINT_FORWARD_MINIMUM 105	// MW2's player_sprintForwardMinimum, of 127
-#define PWF_SPRINT_RELEASE 2	// a sprint ended with its button held: the button must come up first
+#define PWF_SPRINT_RELEASE 2	// the sprint button is still down from the sprint it started or ended
 typedef struct {
 	int buttons;		// the last command's buttons, as the use code saw them
 	qboolean done;		// this press has used something (MW2's useButtonDone)

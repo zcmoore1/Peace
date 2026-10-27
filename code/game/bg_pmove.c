@@ -2998,13 +2998,16 @@ static void PM_TorsoAnimation( void ) {
 ==============
 PM_CheckSprint
 
-Sets or clears PMF_SPRINTING each tick. Sprint requires:
-  - BUTTON_SPRINT held, and not waiting for it to come up after a sprint
-    ended while it was held (MW2)
-  - none of MW2's sprint-ending conditions: ladder, a quick action, the
-    trigger, a reload or use/reload button, the knife or equipment buttons,
-    holding jump, too little forward, ducking
-  - not in deep water; on the ground or in the air alike (MW2)
+Sets or clears PMF_SPRINTING each tick, as MW2's PM_UpdateSprint:
+  - a press of BUTTON_SPRINT starts a sprint, unless the button is still
+    down from a sprint it started or ended (MW2's sprintButtonUpRequired)
+  - a sprint latches: it goes on with the button let go or held, and a
+    fresh press ends it (PC MW2)
+  - MW2's sprint-ending conditions end one and keep one from starting:
+    ladder, a quick action, the trigger, aiming, a reload or use/reload
+    button, the knife or equipment buttons, holding jump, too little
+    forward, ducking, deep water
+  - on the ground or in the air alike (MW2)
 
 Entering sprint cancels an in-progress reload (the weapon snaps to the hip
 before the mag can seat). ADS is cleared immediately on sprint entry.
@@ -3012,42 +3015,55 @@ before the mag can seat). ADS is cleared immediately on sprint entry.
 */
 static void PM_CheckSprint( void ) {
 	qboolean held = ( pm->cmd.buttons & BUTTON_SPRINT ) != 0;
+	qboolean sprinting = ( pm->ps->pm_flags & PMF_SPRINTING ) != 0;
 	qboolean ended, wantSprint;
 
 	// MW2's sprint-ending conditions: they end a sprint and keep one from
 	// starting. The trigger counts (the gun fires once it is back up), and so
-	// do a reload press, use/reload's included, the knife and equipment
-	// buttons whether or not anything comes out, holding jump (PM_CheckJump
-	// clears a held jump's upmove, PMF_JUMP_HELD keeps it), and pushing forward
-	// less than MW2's player_sprintForwardMinimum.
+	// do the aim button, a reload press, use/reload's included, the knife and
+	// equipment buttons whether or not anything comes out, holding jump
+	// (PM_CheckJump clears a held jump's upmove, PMF_JUMP_HELD keeps it), and
+	// pushing forward less than MW2's player_sprintForwardMinimum.
 	// MW2 has no ground test: a sprint goes on and can start in the air (its
 	// speed waits for the ground, PM_CmdScale). MW2 has no swimming; deep water
-	// only pauses a sprint, as it always has here.
+	// ends a sprint like the rest.
 	ended = ( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) ||
 	        ( pm->ps->weaponAction & WA_TYPE_MASK ) ||
 	        BG_IsActionWeapon(pm->ps->weapon) ||
-	        ( pm->cmd.buttons & ( BUTTON_ATTACK | BUTTON_RELOAD | BUTTON_USE_RELOAD |
+	        ( pm->cmd.buttons & ( BUTTON_ATTACK | BUTTON_ADS | BUTTON_RELOAD | BUTTON_USE_RELOAD |
 	                              BUTTON_MELEE | BUTTON_LETHAL | BUTTON_TACTICAL ) ) ||
 	        pm->cmd.upmove > 0 || ( pm->ps->pm_flags & PMF_JUMP_HELD ) ||
 	        pm->cmd.forwardmove <= BG_SPRINT_FORWARD_MINIMUM ||
-	        ( pm->ps->pm_flags & PMF_DUCKED );
+	        ( pm->ps->pm_flags & PMF_DUCKED ) || pm->waterlevel > 1;
 
-	// A sprint they end while its button is held waits for the button to come
-	// up before it can start again (CoD4's sprintButtonUpRequired).
+	// PWF_SPRINT_RELEASE: the button has stayed down since it started this
+	// sprint or a sprint ended under it, and only letting it go clears it -
+	// MW2's previous-buttons test and its sprintButtonUpRequired in one bit.
+	// So a sprint never needs its button held, a fresh press ends it, and a
+	// sprint ended under the button waits for it to come up.
 	if ( !held ) {
 		pm->ps->weapFlags &= ~PWF_SPRINT_RELEASE;
-	} else if ( ended && ( pm->ps->pm_flags & PMF_SPRINTING ) ) {
+	} else if ( sprinting ) {
+		if ( !( pm->ps->weapFlags & PWF_SPRINT_RELEASE ) ) {
+			ended = qtrue;
+		}
 		pm->ps->weapFlags |= PWF_SPRINT_RELEASE;
 	}
 	// A jump ends a sprint but never makes its button come up first: MW2's
-	// Jump_Start clears sprintButtonUpRequired, so the sprint is back as soon
-	// as jump is let go, in the air as well.
+	// Jump_Start clears sprintButtonUpRequired, so a held button sprints again
+	// as soon as jump is let go, in the air as well.
 	if ( pml.jumped ) {
 		pm->ps->weapFlags &= ~PWF_SPRINT_RELEASE;
 	}
 
-	wantSprint = held && !ended && !( pm->ps->weapFlags & PWF_SPRINT_RELEASE ) &&
-	             pm->waterlevel <= 1;
+	if ( sprinting ) {
+		wantSprint = !ended;
+	} else {
+		wantSprint = held && !ended && !( pm->ps->weapFlags & PWF_SPRINT_RELEASE );
+		if ( wantSprint ) {
+			pm->ps->weapFlags |= PWF_SPRINT_RELEASE;
+		}
+	}
 
 	if ( wantSprint ) {
 		pm->ps->pm_flags |= PMF_SPRINTING;
@@ -3067,7 +3083,8 @@ static void PM_CheckSprint( void ) {
 PM_CheckADS
 
 Sets or clears PMF_ADS. ADS is active while BUTTON_ADS is held and
-the player is not sprinting, reloading, or in a weapon transition.
+the player is not sprinting, reloading, or in a weapon transition, and
+not holding the sprint button with an unscoped gun.
 ==============
 */
 static void PM_CheckADS( void ) {
@@ -3083,7 +3100,12 @@ static void PM_CheckADS( void ) {
 	// client and the server never agrees one is happening, so there is no
 	// reload here to aim through. It is a network artefact, not a permission,
 	// and must not be reproduced by loosening this gate.
+	//
+	// MW2: holding the sprint button keeps a gun from aiming, except a scoped
+	// one, where MW2's shared sprint key holds breath instead. A sprint never
+	// needs its button held (PM_CheckSprint), so only a held press stops aim.
 	canADS = ( ( pm->cmd.buttons & BUTTON_ADS ) &&
+	           !( ( pm->cmd.buttons & BUTTON_SPRINT ) && !BG_WeaponScopeOverlay( pm->ps->weapon ) ) &&
 	           !( pm->ps->weaponAction & WA_TYPE_MASK ) &&
 	           !BG_IsActionWeapon( pm->ps->weapon ) &&
 	           !( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) &&

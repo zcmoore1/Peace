@@ -164,21 +164,30 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 - **An ordinary raise is cancellable by YY.** That is the owner's rule, not a
   bug: the NAC skips a holster, YY skips a draw, so long swap times on both
   halves reward technique instead of only slowing play.
-- **Sprint ends the MW2 way (owner's rule).** `PM_CheckSprint` uses MW2's
-  sprint-ending conditions: ladder, a quick action, the trigger (the gun fires
-  once it is back up if it is still held), a reload or use/reload button, the
-  knife and equipment buttons (grenade or not), holding jump, forward under
+- **Sprint latches and ends the MW2 way (owner's rule).** As PC MW2's
+  `PM_UpdateSprint`: a press starts a sprint, the sprint goes on with the
+  button let go or held, and a fresh press ends it. `PM_CheckSprint` uses
+  MW2's sprint-ending conditions, which also keep one from starting: ladder, a
+  quick action, the trigger (the gun fires once it is back up if it is still
+  held), the aim button, a reload or use/reload button, the knife and equipment
+  buttons (grenade or not), holding jump, forward under
   `BG_SPRINT_FORWARD_MINIMUM` (105, MW2's `player_sprintForwardMinimum`),
-  ducking. Any sprint that ends while its button is held waits for the button
-  to come up before it can start again (`PWF_SPRINT_RELEASE`, CoD4's
-  `sprintButtonUpRequired`; a quick action sets it in `PM_UpdateWeaponAction`)
-  - except a jump: MW2's `Jump_Start` clears the wait (`pml.jumped`), so the
-  sprint is back as soon as jump is let go. MW2 has no ground test: a sprint goes on and can
+  ducking, deep water (MW2 has no swimming). `PWF_SPRINT_RELEASE` is set while
+  the button stays down from the sprint it started or ended, and only letting
+  go clears it: MW2's previous-buttons test and `sprintButtonUpRequired` in one
+  bit (a quick action sets it in `PM_UpdateWeaponAction`). So a sprint ended
+  under its button waits for it to come up - except after a jump: MW2's
+  `Jump_Start` clears the wait (`pml.jumped`), so a held button sprints again
+  as soon as jump is let go. MW2 has no ground test: a sprint goes on and can
   start in the air (once jump is let go). Its speed applies only on the ground
   (`PM_CmdScale` with `pml.walking`, as MW2 scales its walk and not its air
-  move), so a sprint begun in the air pays off on landing. Deep water only
-  pauses a sprint (MW2 has no swimming). Prediction carries the flag in
-  `weapFlags`.
+  move), so a sprint begun in the air pays off on landing. Prediction carries
+  the flag in `weapFlags`. Never make a sprint need its button held.
+- **Holding sprint stops aim, except through a scope.** `PM_CheckADS` refuses
+  aim while `BUTTON_SPRINT` is held unless `BG_WeaponScopeOverlay`: MW2's sprint
+  key is also its hold-breath key, so a scoped gun aims with it held. This
+  needs the latch above; with a hold-to-sprint button it would stop aim after
+  every shot or reload until sprint was let go.
 - **Never ADS through a reload.** `PM_CheckADS` blocks `WEAPON_RELOADING` on
   purpose. The ZOOMload trick is a client/server desync — the reload animation
   starts client-side from the use/reload bit and the server never agrees one is
@@ -338,7 +347,8 @@ retiming a weapon breaks the test without telling you anything.
 
 `dev/tests/run-loadouts.cmd` (or `.sh`) checks class validation/persistence,
 modulo selection, same-update YY firing, reload/pull-out cancellation, tap/hold
-actions, all nine action bits through the actual network codec, and pose release.
+actions, the sprint latch and its ending conditions, aim with sprint held, all
+nine action bits through the actual network codec, and pose release.
 Pose checks cover source retention, ladder holsters, loop/endpoint semantics,
 reload/action exclusions, ordinary sprint reversal and frame-only crossfades,
 plus YY flow (reversed draw, eased return, fire cut-in) through the real

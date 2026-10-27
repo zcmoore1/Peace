@@ -111,9 +111,10 @@ playing. Sprinting into a ladder uses the same ownership rule. Reload clips
 are excluded, and equipment actions/recovery block sprint.
 
 Sprint + Y and sprint + YY use the ordinary slot-toggle/drop-cancellation path.
-On cancellation the retained pose blends back to the current posture. A held
-sprint input still requests sprint, so its entry resumes without jumping back
-to frame zero; releasing sprint returns the picture toward ready. Firing owns
+On cancellation the retained pose blends back to the current posture. A swap
+does not end a sprint (a sprint latches, as in MW2), so its entry resumes
+without jumping back to frame zero; ending the sprint (a fresh sprint press,
+aim, letting go of forward) returns the picture toward ready. Firing owns
 the picture immediately once gameplay permits it. The blend never changes a
 busy timer, ammunition or chamber debt.
 

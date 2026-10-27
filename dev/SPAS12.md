@@ -92,8 +92,8 @@ cmake --build out\build\x64-Debug --clean-first
 Choose a class with SPAS-12, launch `devmap peace_ladder`, and hold ADS. Try
 `cg_sight 0` and `cg_sight 1`, a full swap, YY during the slower holster, and
 descending the ladder to the floor. `peacedump` reports state and drop time.
-Hold forward + sprint: watch the entry settle into the repeating carry, then
-release to return to hip/ADS. Also try a short sprint tap, swapping during
+Hold forward and tap sprint: watch the entry settle into the repeating carry,
+then tap sprint again (or aim) to return to hip/ADS. Also try swapping during
 entry, and swapping during the full loop. The first swap should hold the final
 entry pose; the second should keep moving throughout the holster.
 Rebuild both engine and game modules together as usual.

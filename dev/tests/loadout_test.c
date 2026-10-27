@@ -512,6 +512,75 @@ static void TestSprintTransitions(void) {
   PM_CheckSprint(); CHECK(!(ps.pm_flags&PMF_SPRINTING));
  }
 }
+/* MW2's sprint latches (PC): a press starts it, it goes on with the button let
+ * go or held, and a fresh press ends it; a press still held from that end
+ * starts nothing. Aiming ends a sprint and keeps one from starting, and
+ * holding the sprint button keeps an unscoped gun from aiming. */
+static void AimMove(int buttons) {
+ move.cmd.buttons=buttons; move.cmd.forwardmove=127; move.cmd.upmove=0; pml.groundPlane=qtrue;
+ PM_CheckSprint(); PM_CheckADS(); Step(1);
+}
+static void TestSprintLatch(void) {
+ int t,i;
+ Ready(WP_MACHINEGUN,WP_SHOTGUN);
+ SprintMove(1,127,0,1); CHECK(ps.pm_flags&PMF_SPRINTING);
+ for(t=0;t<300;t++) SprintMove(0,127,0,1);
+ CHECK((ps.pm_flags&PMF_SPRINTING) && ps.weaponstate==WEAPON_SPRINTING);
+ SprintMove(1,127,0,1); CHECK(!(ps.pm_flags&PMF_SPRINTING));
+ for(t=0;t<100;t++) SprintMove(1,127,0,1);
+ CHECK(!(ps.pm_flags&PMF_SPRINTING));
+ SprintMove(0,127,0,1); SprintMove(1,127,0,1); CHECK(ps.pm_flags&PMF_SPRINTING);
+ for(t=0;t<300;t++) SprintMove(1,127,0,1);
+ CHECK(ps.pm_flags&PMF_SPRINTING);
+ /* Ended with its button up, a sprint waits for nothing but a press. */
+ SprintMove(0,127,0,1); SprintMove(0,0,0,1); CHECK(!(ps.pm_flags&PMF_SPRINTING));
+ SprintMove(0,127,0,1); CHECK(!(ps.pm_flags&PMF_SPRINTING));
+ SprintMove(1,127,0,1); CHECK(ps.pm_flags&PMF_SPRINTING);
+ /* A jump or deep water ends a latched sprint for good; a press, in the air
+  * as well, starts the next one. */
+ for(i=0;i<2;i++) {
+  Ready(WP_MACHINEGUN,WP_SHOTGUN);
+  SprintMove(1,127,0,1); SprintMove(0,127,0,1); CHECK(ps.pm_flags&PMF_SPRINTING);
+  if(i) { move.waterlevel=2; SprintMove(0,127,0,1); move.waterlevel=0; }
+  else SprintMove(0,127,127,0);
+  CHECK(!(ps.pm_flags&PMF_SPRINTING));
+  for(t=0;t<100;t++) SprintMove(0,127,0,0);
+  CHECK(!(ps.pm_flags&PMF_SPRINTING));
+  SprintMove(1,127,0,0); CHECK(ps.pm_flags&PMF_SPRINTING);
+ }
+ /* The aim button ends a latched sprint; the gun aims once it is out. */
+ Ready(WP_MACHINEGUN,WP_SHOTGUN);
+ SprintMove(1,127,0,1); for(t=0;t<300;t++) SprintMove(0,127,0,1);
+ CHECK(ps.weaponstate==WEAPON_SPRINTING);
+ AimMove(BUTTON_ADS);
+ CHECK(!(ps.pm_flags&(PMF_SPRINTING|PMF_ADS)) && ps.weaponstate==WEAPON_SPRINT_OUT);
+ for(t=0;t<BG_WeaponSprintOutTime(WP_MACHINEGUN)+20;t++) AimMove(BUTTON_ADS);
+ CHECK(ps.pm_flags&PMF_ADS);
+ /* Sprint pressed while aiming: no sprint, and no aim while it is held. */
+ for(t=0;t<50;t++) {
+  AimMove(BUTTON_ADS|BUTTON_SPRINT);
+  CHECK(!(ps.pm_flags&(PMF_SPRINTING|PMF_ADS)));
+ }
+ AimMove(BUTTON_ADS); CHECK((ps.pm_flags&PMF_ADS) && !(ps.pm_flags&PMF_SPRINTING));
+ /* Aim let go with sprint held: never sprinting, so nothing to release. */
+ AimMove(BUTTON_ADS|BUTTON_SPRINT); AimMove(BUTTON_SPRINT);
+ CHECK(ps.pm_flags&PMF_SPRINTING);
+ /* Aim ends a sprint whose button is held from its start; that sprint then
+  * waits for the button to come up. */
+ for(t=0;t<300;t++) AimMove(BUTTON_SPRINT);
+ AimMove(BUTTON_ADS|BUTTON_SPRINT); CHECK(!(ps.pm_flags&PMF_SPRINTING));
+ for(t=0;t<100;t++) AimMove(BUTTON_SPRINT);
+ CHECK(!(ps.pm_flags&(PMF_SPRINTING|PMF_ADS)));
+ AimMove(0); AimMove(BUTTON_SPRINT); CHECK(ps.pm_flags&PMF_SPRINTING);
+ /* The scoped M300 aims with the sprint button held (MW2's breath); an
+  * unscoped gun at rest does not. */
+ for(i=0;i<2;i++) {
+  Ready(i ? WP_M40A3 : WP_MACHINEGUN,WP_SHOTGUN);
+  CHECK(ps.weaponstate==WEAPON_READY);
+  for(t=0;t<20;t++) AimMove(BUTTON_ADS|BUTTON_SPRINT);
+  CHECK(!(ps.pm_flags&PMF_SPRINTING) && !!(ps.pm_flags&PMF_ADS)==i);
+ }
+}
 static void TestMovementScale(void) {
  const int flags[]={0,PMF_SPRINTING,PMF_ADS};
  int i,j;
@@ -613,7 +682,7 @@ static void TestHeldThroughRespawn(void) {
 }
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
- TestMeleeHolster(); TestRecovery();
+ TestSprintLatch(); TestMeleeHolster(); TestRecovery();
  TestMovementScale(); TestAirSprint(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;

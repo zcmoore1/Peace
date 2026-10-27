@@ -363,6 +363,43 @@ static void TestPredictionReplay(int dt) {
     }
 }
 
+/* A ladder ends a sprint, and with sprint held it waits for the button to
+ * come up before the next one (MW2, CoD4's PM_EndSprint). */
+static void TestLadderEndsSprint(void) {
+    int t, sprinted = 0;
+    Reset(-150, 0, 24.125f); move.cmd.buttons = BUTTON_SPRINT; move.cmd.forwardmove = 127;
+    for (t = 0; t < 400 && !Attached(); t++) { Tick(8); sprinted |= !Attached() && (ps.pm_flags & PMF_SPRINTING); }
+    CHECK(sprinted && Attached());
+    CHECK(!(ps.pm_flags & PMF_SPRINTING) && (ps.weapFlags & PWF_SPRINT_RELEASE));
+    for (t = 0; t < 600; t++) { Tick(8); CHECK(!(ps.pm_flags & PMF_SPRINTING)); }
+    CHECK(!Attached() && ps.groundEntityNum != ENTITYNUM_NONE);
+    move.cmd.buttons = 0; Tick(8); move.cmd.buttons = BUTTON_SPRINT; Tick(8);
+    CHECK(ps.pm_flags & PMF_SPRINTING);
+}
+/* A jump ends a sprint but never makes its button come up first (MW2's
+ * Jump_Start clears sprintButtonUpRequired): with sprint held it is back as
+ * soon as jump is let go, in the air. Holding jump keeps one from starting,
+ * on the floor as well. */
+static void TestJumpSprint(void) {
+    int t;
+    Reset(-300, -230, 24.125f); move.cmd.angles[YAW] = ANGLE2SHORT(90);
+    move.cmd.buttons = BUTTON_SPRINT; move.cmd.forwardmove = 127;
+    for (t = 0; t < 6; t++) Tick(8);
+    CHECK((ps.pm_flags & PMF_SPRINTING) && ps.groundEntityNum != ENTITYNUM_NONE);
+    move.cmd.upmove = 127; Tick(8); Tick(8);
+    CHECK(ps.groundEntityNum == ENTITYNUM_NONE && !(ps.pm_flags & PMF_SPRINTING));
+    CHECK(!(ps.weapFlags & PWF_SPRINT_RELEASE));
+    move.cmd.upmove = 0; Tick(8); Tick(8);
+    CHECK(ps.groundEntityNum == ENTITYNUM_NONE && (ps.pm_flags & PMF_SPRINTING));
+    Reset(-300, -230, 24.125f); move.cmd.angles[YAW] = ANGLE2SHORT(90);
+    move.cmd.buttons = BUTTON_SPRINT; move.cmd.upmove = 127;
+    for (t = 0; t < 200 && !(t > 10 && ps.groundEntityNum != ENTITYNUM_NONE); t++) Tick(8);
+    CHECK(ps.groundEntityNum != ENTITYNUM_NONE && (ps.pm_flags & PMF_JUMP_HELD));
+    move.cmd.forwardmove = 127; for (t = 0; t < 5; t++) Tick(8);
+    CHECK(!(ps.pm_flags & PMF_SPRINTING));
+    move.cmd.upmove = 0; Tick(8); Tick(8);
+    CHECK(ps.pm_flags & PMF_SPRINTING);
+}
 int main(void) {
     int checksum, i;
     const int steps[] = {8, 16, 33, 66};
@@ -377,6 +414,8 @@ int main(void) {
     }
     TestWeaponOrdering();
     TestViewAndModes();
+    TestLadderEndsSprint();
+    TestJumpSprint();
     for (i = 0; i < numAllocations; i++) free(allocations[i]);
     printf("PASS: ladder BSP collision, momentum, traversal, detach, yaw, weapon ordering and prediction replay (%d checks).\n", checks);
     return 0;

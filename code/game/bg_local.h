@@ -54,6 +54,7 @@ typedef struct {
 
 	vec3_t		ladderNormal;
 	qboolean	ladderGrabbed;	// contact this think, even if we immediately jump off
+	qboolean	jumped;			// a jump left the ground this think
 } pml_t;
 
 extern	pmove_t		*pm;

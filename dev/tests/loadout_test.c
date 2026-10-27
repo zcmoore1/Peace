@@ -411,15 +411,17 @@ static void TestSprintTransitions(void) {
   CHECK((ps.pm_flags&PMF_SPRINTING) && ps.weaponstate==WEAPON_SPRINT_IN);
  }
  /* MW2: any sprint that ends while its button is held waits for the button
-  * to come up - letting go of forward, a jump, a crouch, a knife. Leaving the
-  * ground without a jump ends no sprint in MW2, so it only pauses one. */
+  * to come up - letting go of forward, jump pressed in the air, a crouch, a
+  * knife. (A jump off the floor does not wait: the ladder suite drives that
+  * through the real jump.) Leaving the ground without a jump ends no sprint
+  * in MW2: it goes on in the air. */
  for(i=0;i<5;i++) {
   int t;
   Ready(WP_MACHINEGUN,WP_SHOTGUN);
   for(t=0;t<300;t++) SprintMove(1,127,0,1);
   CHECK(ps.pm_flags&PMF_SPRINTING);
   if(i==0) SprintMove(1,0,0,1);						/* forward let go */
-  else if(i==1) SprintMove(1,127,127,1);			/* jump */
+  else if(i==1) SprintMove(1,127,127,0);			/* jump pressed in the air */
   else if(i==2) { ps.pm_flags|=PMF_DUCKED; SprintMove(1,127,0,1); ps.pm_flags&=~PMF_DUCKED; }
   else if(i==3) {									/* knife, all the way back */
    move.cmd.buttons=BUTTON_SPRINT|BUTTON_MELEE; move.cmd.forwardmove=127; pml.groundPlane=qtrue;
@@ -475,6 +477,24 @@ static void TestSprintTransitions(void) {
   }
   CHECK(!(ps.pm_flags&PMF_SPRINTING) && (fired[WP_MACHINEGUN]>0)==(i==0));
  }
+ /* The knife and equipment buttons end a sprint whether or not anything comes
+  * out, and a held one keeps a sprint from starting; so does too little
+  * forward (MW2's player_sprintForwardMinimum). */
+ for(i=0;i<3;i++) {
+  int t;
+  Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.ammo[WP_FRAG]=ps.ammo[WP_SEMTEX]=ps.ammo[WP_FLASH]=0;
+  for(t=0;t<100;t++) SprintMove(1,127,0,1);
+  CHECK(ps.pm_flags&PMF_SPRINTING);
+  move.cmd.buttons=BUTTON_SPRINT|(i==0 ? BUTTON_LETHAL : i==1 ? BUTTON_TACTICAL : BUTTON_MELEE);
+  move.cmd.forwardmove=127; pml.groundPlane=qtrue; PM_CheckSprint(); Step(1);
+  CHECK(!(ps.pm_flags&PMF_SPRINTING) && (ps.weapFlags&PWF_SPRINT_RELEASE));
+ }
+ Ready(WP_MACHINEGUN,WP_SHOTGUN);
+ move.cmd.buttons=BUTTON_SPRINT|BUTTON_MELEE; move.cmd.forwardmove=127; pml.groundPlane=qtrue;
+ PM_CheckSprint(); CHECK(!(ps.pm_flags&PMF_SPRINTING));
+ Ready(WP_MACHINEGUN,WP_SHOTGUN);
+ SprintMove(1,BG_SPRINT_FORWARD_MINIMUM,0,1); CHECK(!(ps.pm_flags&PMF_SPRINTING));
+ SprintMove(1,BG_SPRINT_FORWARD_MINIMUM+1,0,1); CHECK(ps.pm_flags&PMF_SPRINTING);
  /* A reload button held keeps a sprint from starting, full magazine or not. */
  for(i=0;i<2;i++) {
   Ready(WP_MACHINEGUN,WP_SHOTGUN);

@@ -166,11 +166,14 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   halves reward technique instead of only slowing play.
 - **Sprint ends the MW2 way (owner's rule).** `PM_CheckSprint` uses MW2's
   sprint-ending conditions: ladder, a quick action, the trigger (the gun fires
-  once it is back up if it is still held), a reload or use/reload button, a
-  jump, not moving forward, ducking. Any sprint that ends while its
-  button is held waits for the button to come up before it can start again
-  (`PWF_SPRINT_RELEASE`, CoD4's `sprintButtonUpRequired`; a quick action sets it
-  in `PM_UpdateWeaponAction`). MW2 has no ground test: a sprint goes on and can
+  once it is back up if it is still held), a reload or use/reload button, the
+  knife and equipment buttons (grenade or not), holding jump, forward under
+  `BG_SPRINT_FORWARD_MINIMUM` (105, MW2's `player_sprintForwardMinimum`),
+  ducking. Any sprint that ends while its button is held waits for the button
+  to come up before it can start again (`PWF_SPRINT_RELEASE`, CoD4's
+  `sprintButtonUpRequired`; a quick action sets it in `PM_UpdateWeaponAction`)
+  - except a jump: MW2's `Jump_Start` clears the wait (`pml.jumped`), so the
+  sprint is back as soon as jump is let go. MW2 has no ground test: a sprint goes on and can
   start in the air (once jump is let go). Its speed applies only on the ground
   (`PM_CmdScale` with `pml.walking`, as MW2 scales its walk and not its air
   move), so a sprint begun in the air pays off on landing. Deep water only

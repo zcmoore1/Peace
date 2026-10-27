@@ -399,6 +399,7 @@ static qboolean PM_CheckJump( void ) {
 
 	pml.groundPlane = qfalse;		// jumping away
 	pml.walking = qfalse;
+	pml.jumped = qtrue;
 	pm->ps->pm_flags |= PMF_JUMP_HELD;
 
 	pm->ps->groundEntityNum = ENTITYNUM_NONE;
@@ -3001,8 +3002,8 @@ Sets or clears PMF_SPRINTING each tick. Sprint requires:
   - BUTTON_SPRINT held, and not waiting for it to come up after a sprint
     ended while it was held (MW2)
   - none of MW2's sprint-ending conditions: ladder, a quick action, the
-    trigger, a reload or use/reload button, a jump, not moving forward,
-    ducking
+    trigger, a reload or use/reload button, the knife or equipment buttons,
+    holding jump, too little forward, ducking
   - not in deep water; on the ground or in the air alike (MW2)
 
 Entering sprint cancels an in-progress reload (the weapon snaps to the hip
@@ -3014,17 +3015,21 @@ static void PM_CheckSprint( void ) {
 	qboolean ended, wantSprint;
 
 	// MW2's sprint-ending conditions: they end a sprint and keep one from
-	// starting. The trigger counts (the gun fires once it is back up), a
-	// reload press does, use/reload's included, and so does holding jump.
+	// starting. The trigger counts (the gun fires once it is back up), and so
+	// do a reload press, use/reload's included, the knife and equipment
+	// buttons whether or not anything comes out, holding jump (PM_CheckJump
+	// clears a held jump's upmove, PMF_JUMP_HELD keeps it), and pushing forward
+	// less than MW2's player_sprintForwardMinimum.
 	// MW2 has no ground test: a sprint goes on and can start in the air (its
 	// speed waits for the ground, PM_CmdScale). MW2 has no swimming; deep water
 	// only pauses a sprint, as it always has here.
 	ended = ( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) ||
 	        ( pm->ps->weaponAction & WA_TYPE_MASK ) ||
 	        BG_IsActionWeapon(pm->ps->weapon) ||
-	        ( pm->cmd.buttons & ( BUTTON_ATTACK | BUTTON_RELOAD | BUTTON_USE_RELOAD ) ) ||
-	        pm->cmd.upmove > 0 ||
-	        pm->cmd.forwardmove <= 0 ||
+	        ( pm->cmd.buttons & ( BUTTON_ATTACK | BUTTON_RELOAD | BUTTON_USE_RELOAD |
+	                              BUTTON_MELEE | BUTTON_LETHAL | BUTTON_TACTICAL ) ) ||
+	        pm->cmd.upmove > 0 || ( pm->ps->pm_flags & PMF_JUMP_HELD ) ||
+	        pm->cmd.forwardmove <= BG_SPRINT_FORWARD_MINIMUM ||
 	        ( pm->ps->pm_flags & PMF_DUCKED );
 
 	// A sprint they end while its button is held waits for the button to come
@@ -3033,6 +3038,12 @@ static void PM_CheckSprint( void ) {
 		pm->ps->weapFlags &= ~PWF_SPRINT_RELEASE;
 	} else if ( ended && ( pm->ps->pm_flags & PMF_SPRINTING ) ) {
 		pm->ps->weapFlags |= PWF_SPRINT_RELEASE;
+	}
+	// A jump ends a sprint but never makes its button come up first: MW2's
+	// Jump_Start clears sprintButtonUpRequired, so the sprint is back as soon
+	// as jump is let go, in the air as well.
+	if ( pml.jumped ) {
+		pm->ps->weapFlags &= ~PWF_SPRINT_RELEASE;
 	}
 
 	wantSprint = held && !ended && !( pm->ps->weapFlags & PWF_SPRINT_RELEASE ) &&

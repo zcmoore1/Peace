@@ -87,7 +87,9 @@ source for MW2 behaviour; the owner rejects it.
 - **Bolting is a state, not a phase of firing.** `WEAPON_FIRING` is the shot;
   `WEAPON_BOLTING` is the action being worked. "Bolting" covers bolt, pump,
   cock and lever — they differ only in cycle length and note placement, never
-  in code. It cannot fire and CAN be holstered out of. It ends on the anim
+  in code. It cannot fire and CAN be holstered out of. A knife waits for
+  `WNOTE_BOLT_CLOSED` (MW2's knife refuses the rechamber's pending bolt-close
+  delay): a press before it is lost, one after it cuts the tail short. It ends on the anim
   clock, never on the lock. A reload is taken at once out of the shot or the
   action, as MW2's `PM_BeginWeaponReload` accepts READY, FIRING and
   RECHAMBERING (owner's rule: shoot and reload with no delay); the fire cycle

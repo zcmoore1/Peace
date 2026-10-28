@@ -512,6 +512,29 @@ static void TestSprintTransitions(void) {
   PM_CheckSprint(); CHECK(!(ps.pm_flags&PMF_SPRINTING));
  }
 }
+/* MW2's knife waits out the rechamber's bolt-close: a press while the action
+ * is still open is lost, and one after WNOTE_BOLT_CLOSED cuts the rest of the
+ * cycle short, leaving no debt. Pump and bolt alike. */
+static void TestKnifeInBolt(void) {
+ const int guns[]={WP_SHOTGUN,WP_M40A3};
+ int t,i;
+ for(i=0;i<ARRAY_LEN(guns);i++) {
+  int gun=guns[i];
+  Ready(gun,WP_MACHINEGUN);
+  move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0;
+  CHECK(fired[gun]==1);
+  for(t=0;t<5000 && ps.weaponstate!=WEAPON_BOLTING;t++) Step(1);
+  CHECK(ps.weaponstate==WEAPON_BOLTING && (ps.stats[STAT_UNCHAMBERED]&(1<<gun)));
+  move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0; Step(1);
+  CHECK(!(ps.weaponAction&WA_TYPE_MASK) && ps.weaponstate==WEAPON_BOLTING);
+  for(t=0;t<5000 && (ps.stats[STAT_UNCHAMBERED]&(1<<gun));t++) Step(1);
+  CHECK(ps.weaponstate==WEAPON_BOLTING);	/* the cycle's tail, after the close */
+  move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
+  CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_MELEE);
+  for(t=0;t<9000 && (ps.weaponAction&WA_TYPE_MASK);t++) Step(1);
+  CHECK(fired[WP_KNIFE]==1 && !(ps.stats[STAT_UNCHAMBERED]&(1<<gun)));
+ }
+}
 /* MW2's sprint latches (PC): a press starts it, it goes on with the button let
  * go or held, and a fresh press ends it; a press still held from that end
  * starts nothing. Aiming ends a sprint and keeps one from starting, and
@@ -722,7 +745,7 @@ static void TestHeldThroughRespawn(void) {
 }
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
- TestSprintLatch(); TestMeleeHolster(); TestRecovery();
+ TestSprintLatch(); TestKnifeInBolt(); TestMeleeHolster(); TestRecovery();
  TestMovementScale(); TestAirSprint(); TestAirControl(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;

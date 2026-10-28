@@ -2827,8 +2827,13 @@ static void PM_UpdateWeaponAction( void ) {
 			( (action & WA_FIRED) && !BG_IsActionWeapon( pm->ps->weapon ) ) ) {
 			int nextAction = 0;
 			// MW2 also starts no knife while a scoped gun is aimed at all. The gun
-			// in hand is aimed only if PM_CheckADS let it be.
-			if ( (pressed & 1) && !wasQuick && !( (pm->ps->pm_flags & PMF_ADS) &&
+			// in hand is aimed only if PM_CheckADS let it be. Nor while the action
+			// is still open: MW2's knife waits out the rechamber's bolt-close, so
+			// a press before WNOTE_BOLT_CLOSED is lost and one after it cuts the
+			// rest of the cycle short.
+			qboolean boltOpen = pm->ps->weaponstate == WEAPON_BOLTING &&
+				( pm->ps->stats[STAT_UNCHAMBERED] & ( 1 << pm->ps->weapon ) );
+			if ( (pressed & 1) && !wasQuick && !boltOpen && !( (pm->ps->pm_flags & PMF_ADS) &&
 				BG_WeaponScopeOverlay( pm->ps->weapon ) ) ) nextAction = WA_MELEE;
 			else if ( (pressed & 2) && pm->ps->ammo[BG_LethalWeapon(pm->ps)] > 0 ) nextAction = WA_LETHAL;
 			else if ( (pressed & 4) && pm->ps->ammo[WP_FLASH] > 0 ) nextAction = WA_TACTICAL;

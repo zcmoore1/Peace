@@ -47,6 +47,15 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   `pers.isDummy` survives `ClientSpawn`'s clear/restore; putting the flag in the
   transient part of `gclient_t` loses it on the very first spawn and every round.
 
+## MW2 evidence (owner's rule)
+
+"Do what MW2 does" means MW2's own code. Read it in the MW2 multiplayer
+executable (IW4x's `iw4x.exe`, unpacked; IW4x's source gives the addresses,
+struct layouts and names). CoD4's decompile is only a labeled fallback, never
+proof of what MW2 does. **Permanent rule: absolutely no copying iw4L unless
+the owner explicitly instructs it.** Do not read it, cite it or use it as a
+source for MW2 behaviour; the owner rejects it.
+
 ## Design invariants — do not violate
 
 - **The NAC is not code.** It emerges from ordering in `PM_Weapon`: a holster
@@ -183,6 +192,13 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   (`PM_CmdScale` with `pml.walking`, as MW2 scales its walk and not its air
   move), so a sprint begun in the air pays off on landing. Prediction carries
   the flag in `weapFlags`. Never make a sprint need its button held.
+- **Air control is MW2's.** `PM_AirMove` uses `PM_AirScale`, MW2's air move
+  speed: base speed over forward/right only, slowed by `pm_adsScale` while
+  aiming (MW2's air scale keeps the walking scale aiming sets) - no jump axis
+  and no sprint (Quake's held jump would cut it to 71%). `PM_Accelerate` pushes at least as
+  hard as at `pm_stopspeed` except on a ladder, as MW2's accelerate does. So
+  holding forward never slows a sprint jump, and pulling back always brakes it
+  at base speed per second.
 - **Holding sprint stops aim, except through a scope.** `PM_CheckADS` refuses
   aim while `BUTTON_SPRINT` is held unless `BG_WeaponScopeOverlay`: MW2's sprint
   key is also its hold-breath key, so a scoped gun aims with it held. This
@@ -347,7 +363,8 @@ retiming a weapon breaks the test without telling you anything.
 
 `dev/tests/run-loadouts.cmd` (or `.sh`) checks class validation/persistence,
 modulo selection, same-update YY firing, reload/pull-out cancellation, tap/hold
-actions, the sprint latch and its ending conditions, aim with sprint held, all
+actions, the sprint latch and its ending conditions, aim with sprint held, MW2
+air control (stick-only push, aim scale, stopspeed floor, ladder exempt), all
 nine action bits through the actual network codec, and pose release.
 Pose checks cover source retention, ladder holsters, loop/endpoint semantics,
 reload/action exclusions, ordinary sprint reversal and frame-only crossfades,

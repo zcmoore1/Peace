@@ -646,6 +646,46 @@ static void TestAirSprint(void) {
  CHECK(ps.pm_flags&PMF_SPRINTING);
  move.cmd.forwardmove=0;
 }
+/* MW2's air move: the stick alone sets the push - base speed, slowed while
+ * aiming, never sprint or the jump button - and pushing against your motion
+ * always takes speed away, at least as hard as at pm_stopspeed. One 50ms command
+ * in open air from horizontal speed vx; Pmove truncates velocity, so these
+ * pushes are whole. */
+static float AirStep(int forward, int up, int flags, float vx) {
+ Ready(WP_MACHINEGUN,WP_SHOTGUN);
+ move.trace=RespawnTrace; move.pointcontents=RespawnContents;
+ move.tracemask=MASK_PLAYERSOLID; ps.speed=320; ps.gravity=800; ps.pm_type=PM_NORMAL;
+ ps.origin[2]=4000; ps.velocity[0]=vx; ps.groundEntityNum=ENTITYNUM_NONE;
+ ps.pm_flags|=flags|(up ? PMF_JUMP_HELD : 0);
+ move.cmd.forwardmove=forward; move.cmd.rightmove=0; move.cmd.upmove=up; move.cmd.buttons=0;
+ move.cmd.serverTime=ps.commandTime+50; Pmove(&move);
+ move.cmd.forwardmove=move.cmd.upmove=0;
+ return ps.velocity[0];
+}
+static void TestAirControl(void) {
+ const int flags[]={0,PMF_SPRINTING,PMF_ADS};
+ const float floor=100*.05f, light=320*10/127.f;
+ int i,up;
+ for(i=0;i<ARRAY_LEN(flags);i++) for(up=0;up<2;up++) {
+  const float push=(flags[i]==PMF_ADS ? (int)(320*pm_adsScale) : 320)*.05f;
+  CHECK(push>floor);
+  CHECK(AirStep(127,up ? 127 : 0,flags[i],0)==push);
+  CHECK(AirStep(-127,up ? 127 : 0,flags[i],448)==448-push);	/* pull back off a sprint jump */
+  CHECK(AirStep(127,up ? 127 : 0,flags[i],448)==448);			/* forward: already faster */
+ }
+ CHECK(light>floor);
+ CHECK(AirStep(10,0,0,0)==floor);			/* a light stick pushes at stopspeed... */
+ CHECK(AirStep(-10,0,0,448)==448-floor);	/* ...and brakes at it */
+ /* A ladder keeps the plain rate, as MW2's ladder branch of accelerate does. */
+ {
+  vec3_t up={0,0,1}; const float wish=25, rate=wish*.05f*BG_LADDER_ACCELERATE;
+  Ready(WP_MACHINEGUN,WP_SHOTGUN); pml.frametime=.05f;
+  CHECK(wish<pm_stopspeed && rate<wish);
+  ps.stats[STAT_LADDER]|=LADDER_ATTACHED; VectorClear(ps.velocity);
+  PM_Accelerate(up,wish,BG_LADDER_ACCELERATE);
+  CHECK(fabs(ps.velocity[2]-rate)<.001f);
+ }
+}
 static void TestHeldThroughRespawn(void) {
  const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL,BUTTON_LETHAL};
  const int specials[]={WP_KNIFE,WP_FRAG,WP_FLASH,WP_SEMTEX};
@@ -683,7 +723,7 @@ static void TestHeldThroughRespawn(void) {
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
  TestSprintLatch(); TestMeleeHolster(); TestRecovery();
- TestMovementScale(); TestAirSprint(); TestHeldThroughRespawn();
+ TestMovementScale(); TestAirSprint(); TestAirControl(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;
 }

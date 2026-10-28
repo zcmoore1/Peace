@@ -35,6 +35,7 @@ pml_t		pml;
 float	pm_stopspeed = 100.0f;
 float	pm_duckScale = 0.25f;
 float	pm_swimScale = 0.50f;
+float	pm_adsScale = 0.50f;	// aiming, on the ground and in the air alike (MW2's walking scale)
 
 float	pm_accelerate = 10.0f;
 float	pm_airaccelerate = 1.0f;
@@ -260,7 +261,14 @@ static void PM_Accelerate( vec3_t wishdir, float wishspeed, float accel ) {
 	if (addspeed <= 0) {
 		return;
 	}
-	accelspeed = accel*pml.frametime*wishspeed;
+	// MW2's accelerate pushes at least as hard as at stopspeed, so a light
+	// stick still steers and still brakes. Its ladder branch does not, and
+	// neither does ours.
+	if ( wishspeed < pm_stopspeed && !( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) ) {
+		accelspeed = accel*pml.frametime*pm_stopspeed;
+	} else {
+		accelspeed = accel*pml.frametime*wishspeed;
+	}
 	if (accelspeed > addspeed) {
 		accelspeed = addspeed;
 	}
@@ -306,14 +314,14 @@ static float PM_CmdScale( usercmd_t *cmd ) {
 	float	scale;
 
 	// Sprint: forward speed boost, on the ground only - MW2 scales its walk
-	// and not its air move, so a sprint in the air pays off on landing. ADS:
-	// movement penalty. Modify this command's scale, never the authoritative
+	// and not its air move (PM_AirScale), so a sprint in the air pays off on
+	// landing. ADS: movement penalty. Modify this command's scale, never the authoritative
 	// base speed. Pmove subdivisions and prediction replay can evaluate this
 	// more than once.
 	if ( ( pm->ps->pm_flags & PMF_SPRINTING ) && pml.walking ) {
 		speed = (int)( speed * 1.4f );
 	} else if ( pm->ps->pm_flags & PMF_ADS ) {
-		speed = (int)( speed * 0.5f );
+		speed = (int)( speed * pm_adsScale );
 	}
 
 	max = abs( cmd->forwardmove );
@@ -332,6 +340,37 @@ static float PM_CmdScale( usercmd_t *cmd ) {
 	scale = (float)speed * max / ( 127.0 * total );
 
 	return scale * BG_MovementScale( pm->ps );
+}
+
+/*
+============
+PM_AirScale
+
+MW2's air move speed: the base speed, spread over the stick alone, and slowed
+while aiming (MW2's air scale keeps its walking scale, which aiming sets).
+MW2's jump is a button, not a move axis, and sprint is its walk's, so neither
+touches the air. A held jump would otherwise cut air control to 71%.
+============
+*/
+static float PM_AirScale( const usercmd_t *cmd ) {
+	int		max;
+	int		speed = pm->ps->speed;
+	float	total;
+
+	if ( pm->ps->pm_flags & PMF_ADS ) {
+		speed = (int)( speed * pm_adsScale );
+	}
+
+	max = abs( cmd->forwardmove );
+	if ( abs( cmd->rightmove ) > max ) {
+		max = abs( cmd->rightmove );
+	}
+	if ( !max ) {
+		return 0;
+	}
+
+	total = sqrt( cmd->forwardmove * cmd->forwardmove + cmd->rightmove * cmd->rightmove );
+	return (float)speed * max / ( 127.0 * total ) * BG_MovementScale( pm->ps );
 }
 
 
@@ -638,7 +677,7 @@ static void PM_AirMove( void ) {
 	smove = pm->cmd.rightmove;
 
 	cmd = pm->cmd;
-	scale = PM_CmdScale( &cmd );
+	scale = PM_AirScale( &cmd );
 
 	// set the movementDir so clients can rotate the legs for strafing
 	PM_SetMovementDir();

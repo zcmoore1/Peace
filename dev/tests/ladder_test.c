@@ -400,6 +400,67 @@ static void TestJumpSprint(void) {
     move.cmd.upmove = 0; Tick(8); Tick(8);
     CHECK(ps.pm_flags & PMF_SPRINTING);
 }
+static float FlatSpeed(void) { return sqrt(ps.velocity[0] * ps.velocity[0] + ps.velocity[1] * ps.velocity[1]); }
+/* MW2's landing, on real collision: a jump's touchdown keeps 0.67 of the
+ * velocity (PM_CrashLand), the first walking think 0.65 more and starts an
+ * 1800ms slowdown (Jump_ApplySlowdown), whose friction and next jump are
+ * scaled by BG_JumpLandFactor; a jump within BG_JUMP_WAIT of the last is
+ * refused, and the press is spent. */
+static void TestLanding(void) {
+    float air, v; int t, landed;
+    Reset(-300, -240, 24.125f); move.cmd.angles[YAW] = ANGLE2SHORT(90);
+    move.cmd.forwardmove = 127;
+    for (t = 0; t < 40; t++) Tick(8);
+    CHECK(ps.groundEntityNum != ENTITYNUM_NONE && fabs(FlatSpeed() - ps.speed) < 2);
+    move.cmd.upmove = 127; Tick(8); move.cmd.upmove = 0;
+    CHECK(ps.groundEntityNum == ENTITYNUM_NONE && ps.jumpLand == -1 &&
+          ps.jumpWait > 0 && ps.velocity[2] > 0);
+    for (t = 0; t < 200 && ps.groundEntityNum == ENTITYNUM_NONE; t++) { air = FlatSpeed(); Tick(8); }
+    CHECK(ps.groundEntityNum != ENTITYNUM_NONE && ps.jumpLand == -1);
+    CHECK(fabs(FlatSpeed() - air * 0.67f) < 2);               /* touchdown */
+    v = FlatSpeed(); Tick(8);
+    CHECK(ps.jumpLand == BG_JUMP_LAND_TIME && FlatSpeed() < v * 0.65f + 10);
+    for (t = 0; t < 60; t++) Tick(8);                          /* about half a second */
+    CHECK(FlatSpeed() < ps.speed * 0.85f && ps.origin[1] < 250);
+    move.cmd.forwardmove = 0;
+    for (t = 0; t < 300 && ps.jumpLand; t++) Tick(8);
+    CHECK(ps.jumpLand == 0 && t * 8 <= BG_JUMP_LAND_TIME - 60 * 8 + 8);
+    /* A jump right after a landing is lower, by the slowdown's factor. */
+    Reset(-300, -230, 24.125f); move.cmd.angles[YAW] = ANGLE2SHORT(90);
+    move.cmd.upmove = 127; Tick(8); move.cmd.upmove = 0;
+    for (t = 0; t < 200 && ps.groundEntityNum == ENTITYNUM_NONE; t++) Tick(8);
+    landed = ps.groundEntityNum != ENTITYNUM_NONE;
+    CHECK(landed && ps.jumpWait == 0);
+    Tick(8); CHECK(ps.jumpLand == BG_JUMP_LAND_TIME);
+    move.cmd.upmove = 127; Tick(8); move.cmd.upmove = 0;
+    CHECK(ps.groundEntityNum == ENTITYNUM_NONE &&
+          ps.velocity[2] < JUMP_VELOCITY / sqrt(BG_JumpLandFactor(BG_JUMP_LAND_TIME - 8)) + 1 &&
+          ps.velocity[2] > JUMP_VELOCITY / sqrt(2.5f) - 10);
+    /* That low hop lands inside the wait: the press there is spent, held or
+     * not, and only a fresh press after the wait jumps. */
+    for (t = 0; t < 200 && ps.groundEntityNum == ENTITYNUM_NONE; t++) Tick(8);
+    CHECK(ps.groundEntityNum != ENTITYNUM_NONE && ps.jumpWait > 0);
+    for (t = 0; t < 30; t++) { move.cmd.upmove = 127; Tick(8); CHECK(ps.groundEntityNum != ENTITYNUM_NONE); }
+    CHECK(ps.jumpWait == 0);
+    move.cmd.upmove = 0; Tick(8); move.cmd.upmove = 127; Tick(8); move.cmd.upmove = 0;
+    CHECK(ps.groundEntityNum == ENTITYNUM_NONE);
+    /* A landing a step above the take-off cuts to 0.5 and slows for 1200ms. */
+    for (t = 0; t < 2; t++) {
+        Reset(-300, -230, 24.125f); Tick(8);
+        CHECK(ps.groundEntityNum != ENTITYNUM_NONE);
+        ps.jumpLand = -1; ps.jumpOriginZ = ps.origin[2] - (t ? BG_JUMP_LAND_STEP : 0);
+        ps.velocity[0] = 200; move.cmd.forwardmove = 0; Tick(8);
+        CHECK(ps.jumpLand == (t ? BG_JUMP_LAND_HIGH : BG_JUMP_LAND_TIME));
+        CHECK(ps.velocity[0] < (t ? 0.5f : 0.65f) * 200 + 0.5f && ps.velocity[0] > (t ? 0.5f : 0.65f) * 200 - 30);
+    }
+    /* A ladder clears the jump state. */
+    Reset(-150, 0, 24.125f); move.cmd.forwardmove = 127;
+    for (t = 0; t < 400 && !Attached(); t++) Tick(8);
+    CHECK(Attached());
+    ps.jumpLand = 900; ps.jumpOriginZ = 1; Tick(8);
+    CHECK(Attached() && ps.jumpLand == 0 && ps.jumpOriginZ == 0);
+    move.cmd.forwardmove = 0;
+}
 int main(void) {
     int checksum, i;
     const int steps[] = {8, 16, 33, 66};
@@ -416,6 +477,7 @@ int main(void) {
     TestViewAndModes();
     TestLadderEndsSprint();
     TestJumpSprint();
+    TestLanding();
     for (i = 0; i < numAllocations; i++) free(allocations[i]);
     printf("PASS: ladder BSP collision, momentum, traversal, detach, yaw, weapon ordering and prediction replay (%d checks).\n", checks);
     return 0;

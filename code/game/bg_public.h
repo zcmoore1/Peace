@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-8"
+#define	GAME_VERSION		BASEGAME "-9"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -539,6 +539,17 @@ void BG_BeginWeaponDraw(playerState_t *ps);
 #define PWF_USE_RELOAD 1
 #define BG_SPRINT_FORWARD_MINIMUM 105	// MW2's player_sprintForwardMinimum, of 127
 #define PWF_SPRINT_RELEASE 2	// the sprint button is still down from the sprint it started or ended
+// MW2's sprint time (player_sprintTime 4s; a start needs player_sprintMinTime
+// 1s left). Used while sprinting, refilled 1:1 while not (playerState_t.sprintUsed).
+#define BG_SPRINT_TIME        4000
+#define BG_SPRINT_MIN_TIME    1000
+// MW2's jump and landing (Jump_Check, Jump_ApplySlowdown, PM_CrashLand).
+#define BG_JUMP_WAIT          500	// no jump within this long of the last
+#define BG_JUMP_LAND_TIME     1800	// the slowdown after an ordinary landing
+#define BG_JUMP_LAND_HIGH     1200	// ... after landing a step above the take-off
+#define BG_JUMP_LAND_STEP     18.0f
+#define BG_HARD_LAND_HEIGHT   12.0f	// a fall this high keeps 0.67 of the velocity
+float BG_JumpLandFactor( int jumpLand );
 typedef struct {
 	int buttons;		// the last command's buttons, as the use code saw them
 	qboolean done;		// this press has used something (MW2's useButtonDone)

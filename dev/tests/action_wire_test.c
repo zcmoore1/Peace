@@ -2,6 +2,7 @@
  * including a tap released while holstering, through prediction corrections. */
 #include "../../code/qcommon/q_shared.h"
 #include "../../code/qcommon/qcommon.h"
+#include "../../code/game/bg_public.h"
 
 static int checks;
 cvar_t *cl_shownet;
@@ -30,6 +31,10 @@ int main(void) {
   to.pickupTarget=1023; to.pickupSerial=2147483000; to.pickupTime=1000;
   to.pickupSlot=j&1; to.pickupHeld=j&3;
   from.weapFlags=i&3; to.weapFlags=j&3;	/* PWF_USE_RELOAD and PWF_SPRINT_RELEASE */
+  /* MW2's jump and sprint state: an airborne jump (-1), the longest landing
+   * slowdown, the full jump wait, a fractional take-off height, the meter. */
+  to.jumpLand=(j&1) ? -1 : BG_JUMP_LAND_TIME; to.jumpWait=(i&1) ? BG_JUMP_WAIT : 0;
+  to.jumpOriginZ=-123.375f; to.sprintUsed=(j&2) ? BG_SPRINT_TIME : 0;
   MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,&from,&to);
   CHECK(!msg.overflowed); MSG_BeginReading(&msg);
   MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
@@ -47,6 +52,8 @@ int main(void) {
   CHECK(decoded.pickupTarget==1023 && decoded.pickupSerial==to.pickupSerial && decoded.pickupTime==1000);
   CHECK(decoded.pickupSlot==to.pickupSlot && decoded.pickupHeld==to.pickupHeld);
   CHECK(decoded.weapFlags==to.weapFlags);
+  CHECK(decoded.jumpLand==to.jumpLand && decoded.jumpWait==to.jumpWait);
+  CHECK(decoded.jumpOriginZ==to.jumpOriginZ && decoded.sprintUsed==to.sprintUsed);
  }
  printf("PASS: %d action wire checks\n",checks); return 0;
 }

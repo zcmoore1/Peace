@@ -515,6 +515,42 @@ static void TestSprintTransitions(void) {
 /* MW2's knife waits out the rechamber's bolt-close: a press while the action
  * is still open is lost, and one after WNOTE_BOLT_CLOSED cuts the rest of the
  * cycle short, leaving no debt. Pump and bolt alike. */
+/* MW2's sprint time: BG_SPRINT_TIME used while sprinting, refilled 1:1, and a
+ * start needs more than BG_SPRINT_MIN_TIME left. Spent with the button held,
+ * the sprint also waits for the button to come up. (Each SprintMove is 1ms.) */
+static void TestSprintTime(void) {
+ int t;
+ Ready(WP_MACHINEGUN,WP_SHOTGUN);
+ for(t=0;t<BG_SPRINT_TIME+5 && (t<2 || (ps.pm_flags&PMF_SPRINTING));t++) SprintMove(1,127,0,1);
+ CHECK(!(ps.pm_flags&PMF_SPRINTING) && t>=BG_SPRINT_TIME && t<=BG_SPRINT_TIME+3);
+ CHECK(ps.weapFlags&PWF_SPRINT_RELEASE);
+ SprintMove(0,127,0,1); SprintMove(1,127,0,1); CHECK(!(ps.pm_flags&PMF_SPRINTING));
+ for(t=0;t<BG_SPRINT_MIN_TIME-4;t++) SprintMove(0,127,0,1);
+ SprintMove(1,127,0,1); CHECK(!(ps.pm_flags&PMF_SPRINTING));
+ for(t=0;t<10;t++) SprintMove(0,127,0,1);
+ SprintMove(1,127,0,1); CHECK(ps.pm_flags&PMF_SPRINTING);
+ /* What it started with is what it has: about a second and a bit. */
+ for(t=0;t<3000 && (ps.pm_flags&PMF_SPRINTING);t++) SprintMove(0,127,0,1);
+ CHECK(t>BG_SPRINT_MIN_TIME && t<BG_SPRINT_MIN_TIME+40);
+ /* A rest refills it. */
+ for(t=0;t<BG_SPRINT_TIME;t++) SprintMove(0,127,0,1);
+ CHECK(ps.sprintUsed==0);
+}
+/* MW2's start gate skips the knife and equipment states in the air after a
+ * jump: the sprint starts, the quick action ends it that think, and a held
+ * button then waits to come up. Off a ledge (no jump) nothing starts. */
+static void TestAirSprintDuringAction(void) {
+ int i;
+ for(i=0;i<2;i++) {
+  Ready(WP_MACHINEGUN,WP_SHOTGUN);
+  move.cmd.buttons=BUTTON_MELEE; move.cmd.forwardmove=127; pml.groundPlane=qtrue;
+  PM_CheckSprint(); Step(1);
+  CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_MELEE);
+  ps.jumpLand=i ? -1 : 0;
+  SprintMove(1,127,0,0);
+  CHECK(!(ps.pm_flags&PMF_SPRINTING) && !!(ps.weapFlags&PWF_SPRINT_RELEASE)==i);
+ }
+}
 /* Equipment pressed on the knife's own command wins, as MW2 checks its
  * offhands before its knife. */
 static void TestEquipmentBeatsKnife(void) {
@@ -749,6 +785,17 @@ static void TestSprintCancelsAirAim(void) {
  CHECK(ps.velocity[0]-v==320*.05f);
  move.cmd.forwardmove=0; move.cmd.buttons=0;
 }
+/* Off the ground during a landing's slowdown, the jump state is cleared. */
+static void TestLedgeClearsLanding(void) {
+ Ready(WP_MACHINEGUN,WP_SHOTGUN);
+ move.trace=RespawnTrace; move.pointcontents=RespawnContents;
+ move.tracemask=MASK_PLAYERSOLID; ps.speed=320; ps.gravity=800; ps.pm_type=PM_NORMAL;
+ ps.origin[2]=4000; ps.groundEntityNum=ENTITYNUM_NONE; ps.jumpLand=900; ps.jumpOriginZ=1;
+ RespawnMove(0,PM_NORMAL);
+ CHECK(ps.jumpLand==0 && ps.jumpOriginZ==0);
+ ps.jumpLand=-1; RespawnMove(0,PM_NORMAL);
+ CHECK(ps.jumpLand==-1);
+}
 static void TestHeldThroughRespawn(void) {
  const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL,BUTTON_LETHAL};
  const int specials[]={WP_KNIFE,WP_FRAG,WP_FLASH,WP_SEMTEX};
@@ -785,8 +832,8 @@ static void TestHeldThroughRespawn(void) {
 }
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
- TestSprintLatch(); TestKnifeInBolt(); TestEquipmentBeatsKnife(); TestMeleeHolster(); TestRecovery();
- TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestHeldThroughRespawn();
+ TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestEquipmentBeatsKnife(); TestMeleeHolster(); TestRecovery();
+ TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;
 }

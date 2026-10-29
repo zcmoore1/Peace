@@ -194,7 +194,25 @@ source for MW2 behaviour; the owner rejects it.
   start in the air (once jump is let go). Its speed applies only on the ground
   (`PM_CmdScale` with `pml.walking`, as MW2 scales its walk and not its air
   move), so a sprint begun in the air pays off on landing. Prediction carries
-  the flag in `weapFlags`. Never make a sprint need its button held.
+  the flag in `weapFlags`. Never make a sprint need its button held. MW2's
+  sprint time: `BG_SPRINT_TIME` (4s) in `ps.sprintUsed`, used while sprinting
+  and refilled 1:1 while not; spent, the sprint ends like any other, and a
+  start needs more than `BG_SPRINT_MIN_TIME` (1s) left. Peace has no Marathon
+  or Extreme Conditioning perk yet. In the air after a jump (`jumpLand` -1)
+  MW2's start gate skips the quick-action test: that sprint starts and
+  `PM_UpdateWeaponAction` ends it the same think, so its button waits.
+- **Jumps and landings are MW2's.** `ps.jumpLand` is MW2's jumping flag and
+  landing timer in one (0 none, -1 jumped and not landed, >0 ms of slowdown),
+  `ps.jumpWait` its 500ms between jumps, `ps.jumpOriginZ` the take-off height.
+  A landing from `BG_HARD_LAND_HEIGHT` (12) or more keeps 0.67 of all the
+  velocity (`PM_CrashLand`); the first walking think after a jump lands keeps
+  0.65 more and starts 1800ms of slowdown (0.5 and 1200ms if it landed 18 units
+  above the take-off). During it the ground friction and the squared speed of
+  a jump are both scaled by `BG_JumpLandFactor` (2.5 falling to 1). A jump
+  inside `BG_JUMP_WAIT` is refused and its press spent. Leaving the ground,
+  a ladder or ground too steep to walk on clears the state. All three are
+  durations or positions, never clocks, so a replay rebases none of them.
+  MW2's damaging-landing stun is not ported (Peace keeps Q3's fall damage).
 - **Air control is MW2's.** `PM_AirMove` uses `PM_AirScale`, MW2's air move
   speed: base speed over forward/right only, slowed by `pm_adsScale` while
   aiming (MW2's air scale keeps the walking scale aiming sets) - no jump axis
@@ -295,13 +313,15 @@ source for MW2 behaviour; the owner rejects it.
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 9-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, and post-throw recovery. Protocol 79 requires client, server
+  swap edge latch, and post-throw recovery. Protocol 80 requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
-  `weapFlags` (MW2's name; 2 bits, protocol 79) carries `PWF_USE_RELOAD`, the
+  `weapFlags` (MW2's name; 2 bits) carries `PWF_USE_RELOAD`, the
   server's use/reload request, and `PWF_SPRINT_RELEASE`. Neither is a clock,
-  and neither is rebased.
+  and neither is rebased. Protocol 80 adds `jumpLand` (signed 12 bits),
+  `jumpWait` (10), `jumpOriginZ` (float) and `sprintUsed` (14): durations and a
+  height, none rebased.
   Dropped ET_ITEM uses `generic1` for attachments, `time2` for packed magazine
   and reserve, `otherEntityNum2` for chamber debt, and `time` as a spawn serial.
 - `perks` is a five-bit spawn-owned playerstate field. All three class perk

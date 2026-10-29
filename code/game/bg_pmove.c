@@ -177,6 +177,25 @@ void PM_ClipVelocity( vec3_t in, vec3_t normal, vec3_t out, float overbounce ) {
 
 /*
 ==================
+BG_JumpLandFactor
+
+MW2's Jump_GetSlowdownFriction: with jumpLand ms of a landing's slowdown left,
+the ground friction is this many times its usual, and a jump this soon has its
+squared take-off speed divided by it. 2.5 at the start, 1 when it runs out.
+==================
+*/
+float BG_JumpLandFactor( int jumpLand ) {
+	if ( jumpLand <= 0 ) {
+		return 1.0f;
+	}
+	if ( jumpLand >= 1700 ) {
+		return 2.5f;
+	}
+	return 1.0f + jumpLand * 1.5f / 1700.0f;
+}
+
+/*
+==================
 PM_Friction
 
 Handles both ground friction and water friction
@@ -211,6 +230,10 @@ static void PM_Friction( void ) {
 			// if getting knocked back, no friction
 			if ( ! (pm->ps->pm_flags & PMF_TIME_KNOCKBACK) ) {
 				control = speed < pm_stopspeed ? pm_stopspeed : speed;
+				// MW2: up to 2.5x the friction while a jump's landing slows you
+				if ( pm->ps->jumpLand > 0 ) {
+					control *= BG_JumpLandFactor( pm->ps->jumpLand );
+				}
 				drop += control*pm_friction*pml.frametime;
 			}
 		}
@@ -436,13 +459,26 @@ static qboolean PM_CheckJump( void ) {
 		return qfalse;
 	}
 
+	// MW2's Jump_Check: no jump within BG_JUMP_WAIT of the last one. The press
+	// is spent, so holding on never jumps; it takes a fresh press.
+	if ( pm->ps->jumpWait > 0 ) {
+		pm->ps->pm_flags |= PMF_JUMP_HELD;
+		pm->cmd.upmove = 0;
+		return qfalse;
+	}
+
 	pml.groundPlane = qfalse;		// jumping away
 	pml.walking = qfalse;
 	pml.jumped = qtrue;
 	pm->ps->pm_flags |= PMF_JUMP_HELD;
 
 	pm->ps->groundEntityNum = ENTITYNUM_NONE;
-	pm->ps->velocity[2] = JUMP_VELOCITY;
+	// MW2's Jump_Start: a jump while a landing still slows you is lower, its
+	// squared speed divided by the same factor the landing friction uses.
+	pm->ps->velocity[2] = JUMP_VELOCITY / sqrt( BG_JumpLandFactor( pm->ps->jumpLand ) );
+	pm->ps->jumpLand = -1;
+	pm->ps->jumpWait = BG_JUMP_WAIT;
+	pm->ps->jumpOriginZ = pm->ps->origin[2];
 	PM_AddEvent( EV_JUMP );
 
 	if ( pm->cmd.forwardmove >= 0 ) {
@@ -673,6 +709,13 @@ static void PM_AirMove( void ) {
 
 	PM_Friction();
 
+	// Off the ground during a landing's slowdown (a ledge walked off): MW2
+	// clears the jump state, so the next landing is not a jump's.
+	if ( pm->ps->jumpLand > 0 ) {
+		pm->ps->jumpLand = 0;
+		pm->ps->jumpOriginZ = 0;
+	}
+
 	fmove = pm->cmd.forwardmove;
 	smove = pm->cmd.rightmove;
 
@@ -834,6 +877,10 @@ static void PM_LadderMove( void ) {
 	float speed, remaining, wishspeed;
 	int maxInput;
 
+	// A ladder clears the jump state (MW2's step-slide move on a ladder).
+	pm->ps->jumpLand = 0;
+	pm->ps->jumpOriginZ = 0;
+
 	if ( PM_CheckJump() ) {
 		pm->ps->stats[STAT_LADDER] &= ~LADDER_ATTACHED;
 		pm->ps->stats[STAT_LADDER] |= LADDER_JUMP_OFF;
@@ -908,6 +955,18 @@ static void PM_WalkMove( void ) {
 		return;
 	}
 
+	// MW2's Jump_ApplySlowdown: the first walking think after a jump lands cuts
+	// all of the velocity, harder when it landed a step above the take-off, and
+	// starts the slowdown that the friction and the next jump read.
+	if ( pm->ps->jumpLand < 0 ) {
+		float scale = 0.65f;
+		pm->ps->jumpLand = BG_JUMP_LAND_TIME;
+		if ( pm->ps->origin[2] >= pm->ps->jumpOriginZ + BG_JUMP_LAND_STEP ) {
+			pm->ps->jumpLand = BG_JUMP_LAND_HIGH;
+			scale = 0.5f;
+		}
+		VectorScale( pm->ps->velocity, scale, pm->ps->velocity );
+	}
 
 	if ( PM_CheckJump () ) {
 		// jumped away
@@ -1155,6 +1214,13 @@ static void PM_CrashLand( void ) {
 	t = (-b - sqrt( den ) ) / ( 2 * a );
 
 	delta = vel + t * acc;
+	// MW2's PM_CrashLand: a landing from BG_HARD_LAND_HEIGHT or more keeps 0.67
+	// of all the velocity - every jump's landing, before the slowdown's own
+	// cut on the next walking think. Water breaks the fall.
+	if ( pm->ps->gravity > 0 && pm->waterlevel <= 1 &&
+	     delta * delta / ( 2.0f * pm->ps->gravity ) >= BG_HARD_LAND_HEIGHT ) {
+		VectorScale( pm->ps->velocity, 0.67f, pm->ps->velocity );
+	}
 	delta = delta*delta * 0.0001;
 
 	// ducking while falling doubles damage
@@ -1361,6 +1427,9 @@ static void PM_GroundTrace( void ) {
 		pm->ps->groundEntityNum = ENTITYNUM_NONE;
 		pml.groundPlane = qtrue;
 		pml.walking = qfalse;
+		// MW2: ground too steep to walk on ends the jump; no slowdown follows.
+		pm->ps->jumpLand = 0;
+		pm->ps->jumpOriginZ = 0;
 		return;
 	}
 
@@ -3059,7 +3128,9 @@ Sets or clears PMF_SPRINTING each tick, as MW2's PM_UpdateSprint:
   - MW2's sprint-ending conditions end one and keep one from starting:
     ladder, a quick action, the trigger, aiming, a reload or use/reload
     button, the knife or equipment buttons, holding jump, too little
-    forward, ducking, deep water
+    forward, ducking, deep water, running out of sprint time
+  - MW2's sprint time: BG_SPRINT_TIME of it, used while sprinting and
+    refilled 1:1 while not; a start needs more than BG_SPRINT_MIN_TIME left
   - on the ground or in the air alike (MW2)
 
 Entering sprint cancels an in-progress reload (the weapon snaps to the hip
@@ -3069,7 +3140,18 @@ before the mag can seat). ADS is cleared immediately on sprint entry.
 static void PM_CheckSprint( void ) {
 	qboolean held = ( pm->cmd.buttons & BUTTON_SPRINT ) != 0;
 	qboolean sprinting = ( pm->ps->pm_flags & PMF_SPRINTING ) != 0;
+	qboolean quick = ( pm->ps->weaponAction & WA_TYPE_MASK ) || BG_IsActionWeapon( pm->ps->weapon );
 	qboolean ended, wantSprint;
+
+	// The sprint time: the think just moved was sprinted or rested. Spent, the
+	// sprint ends like any other and its held button waits to come up.
+	if ( sprinting ) {
+		pm->ps->sprintUsed += pml.msec;
+		if ( pm->ps->sprintUsed > BG_SPRINT_TIME ) pm->ps->sprintUsed = BG_SPRINT_TIME;
+	} else if ( pm->ps->sprintUsed > 0 ) {
+		pm->ps->sprintUsed -= pml.msec;
+		if ( pm->ps->sprintUsed < 0 ) pm->ps->sprintUsed = 0;
+	}
 
 	// MW2's sprint-ending conditions: they end a sprint and keep one from
 	// starting. The trigger counts (the gun fires once it is back up), and so
@@ -3081,13 +3163,12 @@ static void PM_CheckSprint( void ) {
 	// speed waits for the ground, PM_CmdScale). MW2 has no swimming; deep water
 	// ends a sprint like the rest.
 	ended = ( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) ||
-	        ( pm->ps->weaponAction & WA_TYPE_MASK ) ||
-	        BG_IsActionWeapon(pm->ps->weapon) ||
 	        ( pm->cmd.buttons & ( BUTTON_ATTACK | BUTTON_ADS | BUTTON_RELOAD | BUTTON_USE_RELOAD |
 	                              BUTTON_MELEE | BUTTON_LETHAL | BUTTON_TACTICAL ) ) ||
 	        pm->cmd.upmove > 0 || ( pm->ps->pm_flags & PMF_JUMP_HELD ) ||
 	        pm->cmd.forwardmove <= BG_SPRINT_FORWARD_MINIMUM ||
-	        ( pm->ps->pm_flags & PMF_DUCKED ) || pm->waterlevel > 1;
+	        ( pm->ps->pm_flags & PMF_DUCKED ) || pm->waterlevel > 1 ||
+	        pm->ps->sprintUsed >= BG_SPRINT_TIME;
 
 	// PWF_SPRINT_RELEASE: the button has stayed down since it started this
 	// sprint or a sprint ended under it, and only letting it go clears it -
@@ -3109,10 +3190,16 @@ static void PM_CheckSprint( void ) {
 		pm->ps->weapFlags &= ~PWF_SPRINT_RELEASE;
 	}
 
+	// A quick action, knife or equipment, ends a sprint and keeps one from
+	// starting - except that MW2's start gate skips that test in the air after
+	// a jump. Such a sprint lasts one think (PM_UpdateWeaponAction ends it, as
+	// MW2's end gate does the next), and its held button then waits to come up.
 	if ( sprinting ) {
-		wantSprint = !ended;
+		wantSprint = !ended && !quick;
 	} else {
-		wantSprint = held && !ended && !( pm->ps->weapFlags & PWF_SPRINT_RELEASE );
+		wantSprint = held && !ended && ( !quick || pm->ps->jumpLand < 0 ) &&
+		             !( pm->ps->weapFlags & PWF_SPRINT_RELEASE ) &&
+		             BG_SPRINT_TIME - pm->ps->sprintUsed > BG_SPRINT_MIN_TIME;
 		if ( wantSprint ) {
 			pm->ps->weapFlags |= PWF_SPRINT_RELEASE;
 		}
@@ -3691,6 +3778,22 @@ static void PM_DropTimers( void ) {
 			pm->ps->pm_time = 0;
 		} else {
 			pm->ps->pm_time -= pml.msec;
+		}
+	}
+
+	// MW2's jump timers: the landing slowdown ends when its time runs out, as
+	// does the wait before the next jump. An airborne jump (-1) waits to land.
+	if ( pm->ps->jumpLand > 0 ) {
+		pm->ps->jumpLand -= pml.msec;
+		if ( pm->ps->jumpLand <= 0 ) {
+			pm->ps->jumpLand = 0;
+			pm->ps->jumpOriginZ = 0;
+		}
+	}
+	if ( pm->ps->jumpWait > 0 ) {
+		pm->ps->jumpWait -= pml.msec;
+		if ( pm->ps->jumpWait < 0 ) {
+			pm->ps->jumpWait = 0;
 		}
 	}
 

@@ -1190,6 +1190,10 @@ typedef struct playerState_s {
 	int             weaponDraw;     // 0 ordinary raise, 1 first deployment
 	int             weapFlags;      // PWF_* (MW2's name): PWF_USE_RELOAD is the server's use/reload request
 	int             perks;          // spawn-owned perk mask, predicted and replayed
+	int             jumpLand;       // MW2's jump state: 0 none, -1 jumped and not landed, >0 ms of landing slowdown left
+	int             jumpWait;       // ms before the next jump (MW2: 500 after a jump)
+	float           jumpOriginZ;    // take-off height, for the landing slowdown's step test
+	int             sprintUsed;     // ms of MW2's sprint time used up; 0 is a full meter
 	// Slot-owned inventory. ammo[] remains the working cache used by weapon
 	// notes; stowed variants of the same base gun keep independent magazines.
 	int             slotAmmo[2], slotReserve[2], slotAttachments[2], slotFlags[2];

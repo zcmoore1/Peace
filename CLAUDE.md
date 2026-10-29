@@ -201,7 +201,11 @@ source for MW2 behaviour; the owner rejects it.
   and no sprint (Quake's held jump would cut it to 71%). `PM_Accelerate` pushes at least as
   hard as at `pm_stopspeed` except on a ladder, as MW2's accelerate does. So
   holding forward never slows a sprint jump, and pulling back always brakes it
-  at base speed per second.
+  at base speed per second. Sprint itself never touches the air, but a held
+  sprint button cancels an unscoped gun's aim every command, airborne too, so
+  a sprint press mid-jump while aimed restores full air control: MW2's "a
+  sprint trick throws off your jump". It emerges from the two rules; never add
+  it as a case.
 - **Holding sprint stops aim, except through a scope.** `PM_CheckADS` refuses
   aim while `BUTTON_SPRINT` is held unless `BG_WeaponScopeOverlay`: MW2's sprint
   key is also its hold-breath key, so a scoped gun aims with it held. This

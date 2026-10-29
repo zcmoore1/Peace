@@ -728,6 +728,27 @@ static void TestAirControl(void) {
   CHECK(fabs(ps.velocity[2]-rate)<.001f);
  }
 }
+/* Why a sprint trick mid-jump throws the jump off (MW2's own effect): aimed
+ * in, the air push is cut; a sprint press cancels an unscoped gun's aim, so
+ * from the next command the air pushes at the full base speed. */
+static void TestSprintCancelsAirAim(void) {
+ float v;
+ Ready(WP_MACHINEGUN,WP_SHOTGUN);
+ move.trace=RespawnTrace; move.pointcontents=RespawnContents;
+ move.tracemask=MASK_PLAYERSOLID; ps.speed=320; ps.gravity=800; ps.pm_type=PM_NORMAL;
+ ps.origin[2]=4000; ps.groundEntityNum=ENTITYNUM_NONE;
+ move.cmd.forwardmove=127; move.cmd.upmove=0;
+ RespawnMove(BUTTON_ADS,PM_NORMAL);
+ CHECK(ps.pm_flags&PMF_ADS);
+ v=ps.velocity[0]; move.cmd.serverTime=ps.commandTime+50; Pmove(&move);
+ CHECK((ps.pm_flags&PMF_ADS) && ps.velocity[0]-v==(int)(320*pm_adsScale)*.05f);
+ move.cmd.buttons=BUTTON_ADS|BUTTON_SPRINT;
+ move.cmd.serverTime=ps.commandTime+50; Pmove(&move);
+ CHECK(!(ps.pm_flags&(PMF_ADS|PMF_SPRINTING)));
+ v=ps.velocity[0]; move.cmd.serverTime=ps.commandTime+50; Pmove(&move);
+ CHECK(ps.velocity[0]-v==320*.05f);
+ move.cmd.forwardmove=0; move.cmd.buttons=0;
+}
 static void TestHeldThroughRespawn(void) {
  const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL,BUTTON_LETHAL};
  const int specials[]={WP_KNIFE,WP_FRAG,WP_FLASH,WP_SEMTEX};
@@ -765,7 +786,7 @@ static void TestHeldThroughRespawn(void) {
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
  TestSprintLatch(); TestKnifeInBolt(); TestEquipmentBeatsKnife(); TestMeleeHolster(); TestRecovery();
- TestMovementScale(); TestAirSprint(); TestAirControl(); TestHeldThroughRespawn();
+ TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;
 }

@@ -213,7 +213,9 @@ source for MW2 behaviour; the owner rejects it.
   every shot or reload until sprint was let go. The sprint's weapon states do
   not refuse aim (MW2's `PM_IsAdsAllowed` never tests them): the aim button ends
   the sprint first and aims that same think, while the sprint-out still holds
-  the trigger.
+  the trigger. As MW2's `CL_KeyMove`, `CL_CmdButtons` sends no sprint bit while
+  `+back` is held (a tap then waits for back to be let go), so backpedalling
+  with sprint held still aims.
 - **Never ADS through a reload.** `PM_CheckADS` blocks `WEAPON_RELOADING` on
   purpose. The ZOOMload trick is a client/server desync — the reload animation
   starts client-side from the use/reload bit and the server never agrees one is

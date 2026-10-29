@@ -544,6 +544,12 @@ void CL_CmdButtons( usercmd_t *cmd ) {
 	// less than a frame
 	//	
 	for (i = 0 ; i < 32 ; i++) {
+		// MW2's CL_KeyMove sends no sprint bit while +back is held, and keeps
+		// a sprint tap made then for when it is let go. So backpedalling with
+		// sprint held aims (PM_CheckADS refuses aim only to a held sprint bit).
+		if ( ( 1 << i ) == BUTTON_SPRINT && in_back.active ) {
+			continue;
+		}
 		if ( in_buttons[i].active || in_buttons[i].wasPressed ) {
 			cmd->buttons |= 1 << i;
 		}

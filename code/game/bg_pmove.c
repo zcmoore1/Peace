@@ -2831,12 +2831,13 @@ static void PM_UpdateWeaponAction( void ) {
 			// is still open: MW2's knife waits out the rechamber's bolt-close, so
 			// a press before WNOTE_BOLT_CLOSED is lost and one after it cuts the
 			// rest of the cycle short.
+			// Equipment pressed with the knife wins: MW2 checks its offhands first.
 			qboolean boltOpen = pm->ps->weaponstate == WEAPON_BOLTING &&
 				( pm->ps->stats[STAT_UNCHAMBERED] & ( 1 << pm->ps->weapon ) );
-			if ( (pressed & 1) && !wasQuick && !boltOpen && !( (pm->ps->pm_flags & PMF_ADS) &&
-				BG_WeaponScopeOverlay( pm->ps->weapon ) ) ) nextAction = WA_MELEE;
-			else if ( (pressed & 2) && pm->ps->ammo[BG_LethalWeapon(pm->ps)] > 0 ) nextAction = WA_LETHAL;
+			if ( (pressed & 2) && pm->ps->ammo[BG_LethalWeapon(pm->ps)] > 0 ) nextAction = WA_LETHAL;
 			else if ( (pressed & 4) && pm->ps->ammo[WP_FLASH] > 0 ) nextAction = WA_TACTICAL;
+			else if ( (pressed & 1) && !wasQuick && !boltOpen && !( (pm->ps->pm_flags & PMF_ADS) &&
+				BG_WeaponScopeOverlay( pm->ps->weapon ) ) ) nextAction = WA_MELEE;
 			if (nextAction) {
 				action = nextAction;
 				returning = recovering = 0;
@@ -2892,8 +2893,16 @@ void BG_UpdateActivate( playerState_t *ps, bg_activate_t *use, int buttons,
 	} else {
 		qboolean used = qfalse;
 		if ( latched & useButtons ) {
-			use->hold = holdUsable;
-			used = holdUsable || usedAtOnce;
+			// MW2's Player_ActivateCmd takes a press made while sprinting, or
+			// while equipment is coming out or going, and does nothing with it:
+			// no use, no hold, no reload, and none while it stays held. The
+			// gun's return after a throw (MW2's OFFHAND_END) is not refused.
+			int action = ps->weaponAction & WA_TYPE_MASK;
+			qboolean busy = (ps->pm_flags & PMF_SPRINTING) ||
+				( (action == WA_LETHAL || action == WA_TACTICAL) &&
+				  ( BG_IsActionWeapon( ps->weapon ) || !(ps->weaponAction & WA_FIRED) ) );
+			use->hold = holdUsable && !busy;
+			used = busy || holdUsable || usedAtOnce;
 		}
 		if ( use->hold || used ) use->done = qtrue;
 		else if ( latched & BUTTON_USE_RELOAD ) ps->weapFlags |= PWF_USE_RELOAD;
@@ -3127,7 +3136,7 @@ static void PM_CheckSprint( void ) {
 PM_CheckADS
 
 Sets or clears PMF_ADS. ADS is active while BUTTON_ADS is held and
-the player is not sprinting, reloading, or in a weapon transition, and
+the player is not sprinting, reloading, or in a raise or drop, and
 not holding the sprint button with an unscoped gun.
 ==============
 */
@@ -3148,6 +3157,10 @@ static void PM_CheckADS( void ) {
 	// MW2: holding the sprint button keeps a gun from aiming, except a scoped
 	// one, where MW2's shared sprint key holds breath instead. A sprint never
 	// needs its button held (PM_CheckSprint), so only a held press stops aim.
+	// The sprint's own weapon states do not: the aim button ends the sprint
+	// (PM_CheckSprint, first) and aim starts that same think while the gun
+	// comes out of the carry, as MW2's ADS check never tests them. The sprint-
+	// out still holds the trigger.
 	canADS = ( ( pm->cmd.buttons & BUTTON_ADS ) &&
 	           !( ( pm->cmd.buttons & BUTTON_SPRINT ) && !BG_WeaponScopeOverlay( pm->ps->weapon ) ) &&
 	           !( pm->ps->weaponAction & WA_TYPE_MASK ) &&
@@ -3156,9 +3169,6 @@ static void PM_CheckADS( void ) {
 	           pm->ps->weaponstate != WEAPON_LADDER &&
 	           !( pm->ps->pm_flags & PMF_SPRINTING ) &&
 	           pm->ps->weaponstate != WEAPON_RELOADING &&
-	           pm->ps->weaponstate != WEAPON_SPRINT_IN &&
-	           pm->ps->weaponstate != WEAPON_SPRINTING &&
-	           pm->ps->weaponstate != WEAPON_SPRINT_OUT &&
 	           pm->ps->weaponstate != WEAPON_DROPPING &&
 	           pm->ps->weaponstate != WEAPON_RAISING );
 

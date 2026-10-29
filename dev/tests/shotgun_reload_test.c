@@ -469,12 +469,14 @@ static void TestUnpumpedWeaponUnchanged( int step ) {
 
 
 /* ADS permission belongs to weapon state, not the animation sequence/clock.
-   Do not add a fake reload here or relax the real reload gate. */
+   Do not add a fake reload here or relax the real reload gate. The sprint's
+   weapon states allow it, as MW2's ADS check does: the sprint flag, which the
+   aim button clears first, is what refuses aim. */
 static void TestADSPermission( void ) {
 	int i;
-	const int blocked[] = { WEAPON_RELOADING, WEAPON_DROPPING, WEAPON_RAISING,
+	const int blocked[] = { WEAPON_RELOADING, WEAPON_DROPPING, WEAPON_RAISING };
+	const int allowed[] = { WEAPON_READY, WEAPON_FIRING, WEAPON_BOLTING,
 		WEAPON_SPRINT_IN, WEAPON_SPRINTING, WEAPON_SPRINT_OUT };
-	const int allowed[] = { WEAPON_READY, WEAPON_FIRING, WEAPON_BOLTING };
 	BeginReload( WP_SHOTGUN, 3, 10 );
 	testMove.cmd.buttons = BUTTON_ADS;
 	for ( i = 0; i < sizeof(blocked) / sizeof(blocked[0]); i++ ) {

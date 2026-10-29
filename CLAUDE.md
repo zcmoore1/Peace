@@ -151,7 +151,8 @@ source for MW2 behaviour; the owner rejects it.
   `first_raise` is optional clip data, with ordinary raise as the art fallback.
   `cg_sight` seeds attachments at spawn; owned/dropped gun state drives optics
   thereafter, including spectators and replays. See `dev/WEAPON_PICKUPS.md`.
-- **Melee is its own kind of swap.** Whatever gun is out, it goes down for the
+- **Melee is its own kind of swap.** Equipment pressed on the knife's own
+  command wins (MW2 checks its offhands first). Whatever gun is out, it goes down for the
   knife in the one universal `BG_RAPID_DROP_TIME` (50ms, the minimum swap), not
   its own holster; melee asked for part way through a heavy holster shortens it
   to that, never lengthens it. `BG_HolsterTime` is the single rule — gun's own
@@ -205,7 +206,10 @@ source for MW2 behaviour; the owner rejects it.
   aim while `BUTTON_SPRINT` is held unless `BG_WeaponScopeOverlay`: MW2's sprint
   key is also its hold-breath key, so a scoped gun aims with it held. This
   needs the latch above; with a hold-to-sprint button it would stop aim after
-  every shot or reload until sprint was let go.
+  every shot or reload until sprint was let go. The sprint's weapon states do
+  not refuse aim (MW2's `PM_IsAdsAllowed` never tests them): the aim button ends
+  the sprint first and aims that same think, while the sprint-out still holds
+  the trigger.
 - **Never ADS through a reload.** `PM_CheckADS` blocks `WEAPON_RELOADING` on
   purpose. The ZOOMload trick is a client/server desync — the reload animation
   starts client-side from the use/reload bit and the server never agrees one is
@@ -231,9 +235,12 @@ source for MW2 behaviour; the owner rejects it.
   again for a press that finds nothing to use, and on every command while that
   press is held. A press over a floor gun is held for the pickup and reloads
   only if released early; a press at a bomb site or the bomb is a use, and the
-  bomb comes first (one use per press, as MW2's use list; `G_UseThink`). CoD4
-  also counts a press made with a grenade out as used; Peace does not, because
-  MW2 players do fake reloads after equipment. As in MW2 (owner's rule), X and
+  bomb comes first (one use per press, as MW2's use list; `G_UseThink`). A press
+  made while sprinting, or while equipment is coming out or going (MW2's
+  OFFHAND_INIT..DETONATE), is used up as MW2's `Player_ActivateCmd` does: no
+  use, no hold, no reload, and none while held. The gun's return after a throw
+  (OFFHAND_END) is not refused, which is where the fake reload after equipment
+  is tapped. As in MW2 (owner's rule), X and
   R end a sprint and keep one from starting (`PM_CheckSprint`), and the reload
   is taken straight out of the rise (step 4e); a fresh sprint press still
   cancels the reload. A

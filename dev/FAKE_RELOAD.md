@@ -129,12 +129,20 @@ every check still holds.
 - **Aiming.** MW2's knife rule reads its ADS fraction, so its knife also waits
   for the scope to ease out; Peace has no gameplay ADS fraction and uses the
   aim state.
+These are read from MW2's own executable (`iw4x.exe`; knife check 0x577670,
+offhand check 0x579030, offhand init/end 0x578E00/0x577A10, knife end 0x578D80).
+
 - **A knife during an ordinary swap.** MW2 refuses a knife in every raise and
   drop; Peace refuses it only while a gun is drawn back from a quick action,
   and a knife asked for during an ordinary holster still cuts it short
   (CLAUDE.md, "Melee is its own kind of swap").
 - **A grenade while the knife is out** is lost in Peace; MW2 takes one in every
-  melee state.
+  melee state, and one pressed before the knife lands cancels the hit.
 - **A grenade out of the gun's return** pays the gun's own holster in Peace
   (CLAUDE.md, "Frag/flash keep the gun's holster"); MW2 throws straight out of
-  the quick raise, or uses the gun's short quick drop out of the knife.
+  the quick raise after a throw, and uses the gun's quick drop out of the knife.
+- **Quick drop and quick raise.** MW2 sends the gun away for any grenade on its
+  `quickDropTime` (250 ms on every gun in the weapon dump) and brings it back
+  after a knife or a grenade on its `quickRaiseTime` (750 ms M4/SPAS, 250 ms
+  USP/Intervention). Peace uses its rapid drop for the knife, the gun's own
+  holster for frag and flash, and the gun's normal draw for every recovery.

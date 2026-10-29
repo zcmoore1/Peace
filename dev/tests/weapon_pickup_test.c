@@ -216,6 +216,48 @@ static void TestUseReload(void) {
  move.cmd.buttons=0; Step(1); BG_UpdateActivate(ps,&clients[0].activate,0,qfalse,qfalse);
  CHECK(!(ps->weapFlags&PWF_USE_RELOAD) && ps->weaponstate==WEAPON_READY);
 }
+/* MW2's Player_ActivateCmd takes a press made while sprinting, or while
+ * equipment is coming out or going, and does nothing with it: no use, no hold,
+ * no reload, and none while it stays held. The gun's return after a throw is
+ * not refused, so a tap there still asks for the reload. */
+static void TestUseBusy(void) {
+ playerState_t *ps; int i;
+ /* A press the server sees while sprinting asks for nothing, even held on
+  * after the sprint ends. (Use/reload ends a sprint in pmove first, so in play
+  * this is a use press.) */
+ ps=Reset(); ps->ammo[WP_MACHINEGUN]=4; ps->pm_flags|=PMF_SPRINTING;
+ BG_UpdateActivate(ps,&clients[0].activate,BUTTON_USE_RELOAD,qfalse,qfalse);
+ CHECK(!(ps->weapFlags&PWF_USE_RELOAD) && clients[0].activate.done);
+ ps->pm_flags&=~PMF_SPRINTING;
+ for(i=0;i<5;i++) {
+  BG_UpdateActivate(ps,&clients[0].activate,BUTTON_USE_RELOAD,qfalse,qfalse);
+  CHECK(!(ps->weapFlags&PWF_USE_RELOAD));
+ }
+ BG_UpdateActivate(ps,&clients[0].activate,0,qfalse,qfalse);
+ BG_UpdateActivate(ps,&clients[0].activate,BUTTON_USE_RELOAD,qfalse,qfalse);
+ CHECK(ps->weapFlags&PWF_USE_RELOAD);
+ /* Held over a floor gun from during a throw, it collects nothing, even after
+  * the gun is back, until it is pressed again. */
+ ps=Reset(); Floor(WP_RAILGUN,0,2,8,0);
+ move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+ for(i=0;i<4000;i++) UseStep(BUTTON_USE_RELOAD);
+ CHECK(!(ps->weaponAction&WA_TYPE_MASK) && pickups==0 && ps->stats[STAT_SLOT_PRIMARY]==WP_MACHINEGUN);
+ UseStep(0); for(i=0;i<1500;i++) UseStep(BUTTON_USE_RELOAD);
+ CHECK(pickups==1 && ps->stats[STAT_SLOT_PRIMARY]==WP_RAILGUN);
+ /* Use/reload pressed while the grenade is out asks for nothing, held or not;
+  * pressed again once the gun is coming back, it does. */
+ ps=Reset(); ps->ammo[WP_MACHINEGUN]=4;
+ CHECK(ps->ammo[BG_LethalWeapon(ps)]>0);
+ move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+ CHECK((ps->weaponAction&WA_TYPE_MASK)==WA_LETHAL);
+ UseStep(BUTTON_USE_RELOAD); CHECK(!(ps->weapFlags&PWF_USE_RELOAD));
+ for(i=0;i<9000 && !(!BG_IsActionWeapon(ps->weapon) && (ps->weaponAction&WA_FIRED));i++) {
+  UseStep(BUTTON_USE_RELOAD); CHECK(!(ps->weapFlags&PWF_USE_RELOAD));
+ }
+ CHECK(i<9000 && ps->weaponstate==WEAPON_RAISING && (ps->weaponAction&WA_TYPE_MASK));
+ UseStep(BUTTON_USE_RELOAD); CHECK(!(ps->weapFlags&PWF_USE_RELOAD));
+ UseStep(0); UseStep(BUTTON_USE_RELOAD); CHECK(ps->weapFlags&PWF_USE_RELOAD);
+}
 /* One use per press, and the bomb comes first. */
 static void TestBombFirst(void) {
  playerState_t *ps; gentity_t *item; int i;
@@ -273,6 +315,6 @@ static void TestContestedPickup(void) {
  CHECK(level.num_entities==MAX_CLIENTS+2);
 }
 int main(void) {
- TestDrops(); TestScavenge(); TestHold(); TestSwap(); TestDuplicateBase(); TestUseReload(); TestBombFirst(); TestContestedPickup();
+ TestDrops(); TestScavenge(); TestHold(); TestSwap(); TestDuplicateBase(); TestUseReload(); TestUseBusy(); TestBombFirst(); TestContestedPickup();
  printf("PASS: %d death/drop/pickup/slot-intent checks\n",checks); return 0;
 }

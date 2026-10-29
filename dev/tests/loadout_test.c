@@ -515,6 +515,19 @@ static void TestSprintTransitions(void) {
 /* MW2's knife waits out the rechamber's bolt-close: a press while the action
  * is still open is lost, and one after WNOTE_BOLT_CLOSED cuts the rest of the
  * cycle short, leaving no debt. Pump and bolt alike. */
+/* Equipment pressed on the knife's own command wins, as MW2 checks its
+ * offhands before its knife. */
+static void TestEquipmentBeatsKnife(void) {
+ const int buttons[]={BUTTON_LETHAL,BUTTON_TACTICAL};
+ const int actions[]={WA_LETHAL,WA_TACTICAL};
+ int i;
+ for(i=0;i<ARRAY_LEN(buttons);i++) {
+  Ready(WP_MACHINEGUN,WP_SHOTGUN);
+  CHECK(ps.ammo[i ? WP_FLASH : BG_LethalWeapon(&ps)]>0);
+  move.cmd.buttons=BUTTON_MELEE|buttons[i]; Step(1); move.cmd.buttons=0;
+  CHECK((ps.weaponAction&WA_TYPE_MASK)==actions[i]);
+ }
+}
 static void TestKnifeInBolt(void) {
  const int guns[]={WP_SHOTGUN,WP_M40A3};
  int t,i;
@@ -571,14 +584,20 @@ static void TestSprintLatch(void) {
   CHECK(!(ps.pm_flags&PMF_SPRINTING));
   SprintMove(1,127,0,0); CHECK(ps.pm_flags&PMF_SPRINTING);
  }
- /* The aim button ends a latched sprint; the gun aims once it is out. */
+ /* The aim button ends a latched sprint and aims that same think, as MW2's
+  * ADS check ignores the sprint's weapon states; the sprint-out still holds
+  * the trigger until the gun is up. */
  Ready(WP_MACHINEGUN,WP_SHOTGUN);
  SprintMove(1,127,0,1); for(t=0;t<300;t++) SprintMove(0,127,0,1);
  CHECK(ps.weaponstate==WEAPON_SPRINTING);
  AimMove(BUTTON_ADS);
- CHECK(!(ps.pm_flags&(PMF_SPRINTING|PMF_ADS)) && ps.weaponstate==WEAPON_SPRINT_OUT);
- for(t=0;t<BG_WeaponSprintOutTime(WP_MACHINEGUN)+20;t++) AimMove(BUTTON_ADS);
- CHECK(ps.pm_flags&PMF_ADS);
+ CHECK(!(ps.pm_flags&PMF_SPRINTING) && (ps.pm_flags&PMF_ADS) && ps.weaponstate==WEAPON_SPRINT_OUT);
+ AimMove(BUTTON_ADS|BUTTON_ATTACK);
+ CHECK(!fired[WP_MACHINEGUN] && ps.weaponstate==WEAPON_SPRINT_OUT);
+ for(t=0;t<BG_WeaponSprintOutTime(WP_MACHINEGUN)+20 && !fired[WP_MACHINEGUN];t++)
+  AimMove(BUTTON_ADS|BUTTON_ATTACK);
+ CHECK(fired[WP_MACHINEGUN]==1 && (ps.pm_flags&PMF_ADS));
+ for(t=0;t<500;t++) AimMove(BUTTON_ADS);
  /* Sprint pressed while aiming: no sprint, and no aim while it is held. */
  for(t=0;t<50;t++) {
   AimMove(BUTTON_ADS|BUTTON_SPRINT);
@@ -745,7 +764,7 @@ static void TestHeldThroughRespawn(void) {
 }
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
- TestSprintLatch(); TestKnifeInBolt(); TestMeleeHolster(); TestRecovery();
+ TestSprintLatch(); TestKnifeInBolt(); TestEquipmentBeatsKnife(); TestMeleeHolster(); TestRecovery();
  TestMovementScale(); TestAirSprint(); TestAirControl(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;

@@ -211,11 +211,36 @@ static void TestMeleeHolster(void) {
   Ready(gun, other);
   move.cmd.weapon = other; Step(1);
   CHECK(ps.weaponTime == BG_WeaponDropTime(gun));
-  /* melee asked for part way through that holster: shortened, never lengthened */
+  /* a knife asked for during that holster, or the raise after it, is lost
+   * (MW2 refuses a knife in any raise or drop): the swap runs on at its own
+   * times, and only a press once the gun is up knifes */
   Run(1);
+  {
+   int left = ps.weaponTime;
+   move.cmd.buttons = BUTTON_MELEE; Step(1); move.cmd.buttons = 0;
+   CHECK(!(ps.weaponAction & WA_TYPE_MASK) && ps.weaponstate == WEAPON_DROPPING &&
+    ps.weaponTime < left && ps.weaponTime >= left - 1);
+  }
+  for (t = 0; t < 20000 && !(ps.weapon == other && ps.weaponstate == WEAPON_READY); t++) {
+   if (ps.weaponstate == WEAPON_RAISING && t % 7 == 0) {
+    move.cmd.buttons = BUTTON_MELEE; Step(1); move.cmd.buttons = 0;
+    CHECK(!(ps.weaponAction & WA_TYPE_MASK));
+   } else Step(1);
+  }
+  CHECK(ps.weapon == other && ps.weaponstate == WEAPON_READY && !fired[WP_KNIFE]);
+  Step(1);	/* the last refused press let go */
   move.cmd.buttons = BUTTON_MELEE; Step(1); move.cmd.buttons = 0;
-  CHECK(ps.weaponTime <= BG_RAPID_DROP_TIME);
+  CHECK((ps.weaponAction & WA_TYPE_MASK) == WA_MELEE);
   for (t = 0; t < BG_RAPID_DROP_TIME + BG_WeaponRaiseTime(WP_KNIFE) + 5 && !fired[WP_KNIFE]; t++) Step(1);
+  CHECK(fired[WP_KNIFE] == 1);
+  /* a knife pressed on the command YY returns the drop to the held gun is
+   * taken, as MW2's weapon change readies the gun before its knife */
+  Ready(gun, other);
+  move.cmd.weapon = other; Step(1); Run(1);
+  CHECK(ps.weaponstate == WEAPON_DROPPING);
+  move.cmd.weapon = gun; move.cmd.buttons = BUTTON_MELEE; Step(1); move.cmd.buttons = 0;
+  CHECK((ps.weaponAction & WA_TYPE_MASK) == WA_MELEE);
+  for (t = 0; t < BG_WeaponDropTime(gun) + BG_WeaponRaiseTime(WP_KNIFE) + 5 && !fired[WP_KNIFE]; t++) Step(1);
   CHECK(fired[WP_KNIFE] == 1);
  }
  /* a ladder holster keeps its own universal time */
@@ -322,9 +347,9 @@ static void TestRecovery(void) {
   move.cmd.buttons = BUTTON_TACTICAL; RStep(); move.cmd.buttons = 0;
   CHECK((ps.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == WA_TACTICAL);
  }
- /* A swap asked for during the recovery draw is an ordinary holster, which a
-  * knife still shortens; and once YY has cancelled the draw the gun is back,
-  * so a knife on the very next command is a knife. */
+ /* A swap asked for during the recovery draw is an ordinary holster, in which
+  * a knife is lost (MW2 refuses a knife in any drop); once YY has cancelled
+  * the draw the gun is back, so a knife on the very next command is a knife. */
  {
   int t, yy;
   for (yy = 0; yy < 2; yy++) {
@@ -338,7 +363,7 @@ static void TestRecovery(void) {
    else for (t = 0; t < 100; t++) RStep();
    move.cmd.buttons = BUTTON_MELEE; RStep(); move.cmd.buttons = 0;
    for (t = 0; t < 4000; t++) RStep();
-   CHECK(fired[WP_KNIFE] == 1);
+   CHECK(fired[WP_KNIFE] == yy);
   }
  }
 }
@@ -550,6 +575,37 @@ static void TestAirSprintDuringAction(void) {
   SprintMove(1,127,0,0);
   CHECK(!(ps.pm_flags&PMF_SPRINTING) && !!(ps.weapFlags&PWF_SPRINT_RELEASE)==i);
  }
+}
+/* Equipment cuts the knife at any point, as MW2's offhand check takes every
+ * melee state: pressed while the gun goes down for the knife or while the
+ * knife comes up, the knife never lands; pressed after it, the throw follows. */
+static void TestEquipmentCutsKnife(void) {
+ int stage,t,lethal;
+ for(stage=0;stage<3;stage++) {
+  Ready(WP_MACHINEGUN,WP_SHOTGUN); lethal=BG_LethalWeapon(&ps);
+  CHECK(ps.ammo[lethal]>0);
+  move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
+  CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_MELEE && ps.weaponstate==WEAPON_DROPPING);
+  if(stage>=1) for(t=0;t<5000 && !(ps.weapon==WP_KNIFE && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+  if(stage==2) for(t=0;t<5000 && !fired[WP_KNIFE];t++) Step(1);
+  CHECK(fired[WP_KNIFE]==(stage==2));
+  move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+  CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_LETHAL);
+  for(t=0;t<12000 && (ps.weaponAction&WA_TYPE_MASK);t++) Step(1);
+  CHECK(fired[WP_KNIFE]==(stage==2) && fired[lethal]==1);
+ }
+}
+/* A knife pressed during the knife is lost: MW2's knife check refuses its
+ * own melee states, so one press is one knife. */
+static void TestKnifeInKnife(void) {
+ int t;
+ Ready(WP_MACHINEGUN,WP_SHOTGUN);
+ move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
+ for(t=0;t<12000 && (ps.weaponAction&WA_TYPE_MASK);t++) {
+  if(t%5==0) { move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0; }
+  else Step(1);
+ }
+ CHECK(t<12000 && fired[WP_KNIFE]==1);
 }
 /* Equipment pressed on the knife's own command wins, as MW2 checks its
  * offhands before its knife. */
@@ -832,7 +888,7 @@ static void TestHeldThroughRespawn(void) {
 }
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
- TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestEquipmentBeatsKnife(); TestMeleeHolster(); TestRecovery();
+ TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
  TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;

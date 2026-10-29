@@ -2856,9 +2856,15 @@ static int PM_HeldActionButtons( void ) {
 // Latch a press through holster/deploy. Releasing the button cannot lose a tap,
 // and holding it cannot turn a quick action into a permanently selected weapon.
 static void PM_UpdateWeaponAction( void ) {
-	// The gun is being drawn back from a quick action (its last command too).
-	qboolean wasQuick = ( pm->ps->weaponAction & WA_TYPE_MASK ) &&
-		pm->ps->weaponstate == WEAPON_RAISING && !BG_IsActionWeapon( pm->ps->weapon );
+	// MW2's knife check refuses every raise and drop, a quick action's return
+	// and the command it ends on included. A drop the requested slot has come
+	// back from is not refused: YY readies the gun in this same think (below),
+	// as MW2's weapon change runs before its knife.
+	qboolean swapping = pm->ps->weaponstate == WEAPON_RAISING ||
+		( pm->ps->weaponstate == WEAPON_DROPPING &&
+		  !( !BG_IsActionWeapon( pm->ps->weapon ) &&
+		     pm->ps->weapon == BG_ActiveSlotWeapon( pm->ps ) &&
+		     BG_RequestedSlot( pm->ps, pm->cmd.weapon ) == pm->ps->stats[STAT_ACTIVE_SLOT] ) );
 	int held = PM_HeldActionButtons();
 	int pressed = held & ~((pm->ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT);
 	int action = pm->ps->weaponAction & (WA_TYPE_MASK | WA_FIRED);
@@ -2889,10 +2895,13 @@ static void PM_UpdateWeaponAction( void ) {
 		if (pm->ps->weapon == WP_SEMTEX && (action & WA_FIRED) &&
 			pm->ps->weaponstate == WEAPON_FIRING && pm->ps->weaponTime <= 0) recovering = WA_RECOVERING;
 		// A press during the recovery DRAW: equipment starts the next quick
-		// action, as MW2 lets a grenade come out of the gun's return. A knife is
-		// lost, as MW2's knife check skips the quick raise, the command it ends
-		// on included. While the knife or grenade is still out, presses are lost.
-		if ( !(action & WA_TYPE_MASK) ||
+		// action, as MW2 lets a grenade come out of the gun's return. Equipment
+		// also cuts the knife at any point, as MW2's offhand check takes every
+		// melee state: pressed before the knife lands, the knife never lands. A
+		// knife is only ever started from no quick action at all (MW2's knife
+		// check refuses the melee and offhand states and every raise and drop).
+		// While a grenade is still out, presses are lost.
+		if ( !(action & WA_TYPE_MASK) || (action & WA_TYPE_MASK) == WA_MELEE ||
 			( (action & WA_FIRED) && !BG_IsActionWeapon( pm->ps->weapon ) ) ) {
 			int nextAction = 0;
 			// MW2 also starts no knife while a scoped gun is aimed at all. The gun
@@ -2905,8 +2914,9 @@ static void PM_UpdateWeaponAction( void ) {
 				( pm->ps->stats[STAT_UNCHAMBERED] & ( 1 << pm->ps->weapon ) );
 			if ( (pressed & 2) && pm->ps->ammo[BG_LethalWeapon(pm->ps)] > 0 ) nextAction = WA_LETHAL;
 			else if ( (pressed & 4) && pm->ps->ammo[WP_FLASH] > 0 ) nextAction = WA_TACTICAL;
-			else if ( (pressed & 1) && !wasQuick && !boltOpen && !( (pm->ps->pm_flags & PMF_ADS) &&
-				BG_WeaponScopeOverlay( pm->ps->weapon ) ) ) nextAction = WA_MELEE;
+			else if ( (pressed & 1) && !(action & WA_TYPE_MASK) && !swapping && !boltOpen &&
+				!( (pm->ps->pm_flags & PMF_ADS) && BG_WeaponScopeOverlay( pm->ps->weapon ) ) )
+				nextAction = WA_MELEE;
 			if (nextAction) {
 				action = nextAction;
 				returning = recovering = 0;

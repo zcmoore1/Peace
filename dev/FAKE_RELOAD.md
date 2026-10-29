@@ -132,12 +132,6 @@ every check still holds.
 These are read from MW2's own executable (`iw4x.exe`; knife check 0x577670,
 offhand check 0x579030, offhand init/end 0x578E00/0x577A10, knife end 0x578D80).
 
-- **A knife during an ordinary swap.** MW2 refuses a knife in every raise and
-  drop; Peace refuses it only while a gun is drawn back from a quick action,
-  and a knife asked for during an ordinary holster still cuts it short
-  (CLAUDE.md, "Melee is its own kind of swap").
-- **A grenade while the knife is out** is lost in Peace; MW2 takes one in every
-  melee state, and one pressed before the knife lands cancels the hit.
 - **A grenade out of the gun's return** pays the gun's own holster in Peace
   (CLAUDE.md, "Frag/flash keep the gun's holster"); MW2 throws straight out of
   the quick raise after a throw, and uses the gun's quick drop out of the knife.

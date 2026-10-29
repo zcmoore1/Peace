@@ -152,10 +152,15 @@ source for MW2 behaviour; the owner rejects it.
   `cg_sight` seeds attachments at spawn; owned/dropped gun state drives optics
   thereafter, including spectators and replays. See `dev/WEAPON_PICKUPS.md`.
 - **Melee is its own kind of swap.** Equipment pressed on the knife's own
-  command wins (MW2 checks its offhands first). Whatever gun is out, it goes down for the
+  command wins (MW2 checks its offhands first), and equipment cuts the knife at
+  any point (MW2's offhand check takes every melee state): pressed before the
+  knife lands, it never lands. A knife is started only from no quick action,
+  and never in a raise or drop (MW2's knife check refuses states 1-5), so a
+  knife pressed during a swap, a draw or a quick action's return is lost -
+  except on the command YY returns the drop to the held gun, as MW2 readies
+  the gun before its knife. Whatever gun is out, it goes down for the
   knife in the one universal `BG_RAPID_DROP_TIME` (50ms, the minimum swap), not
-  its own holster; melee asked for part way through a heavy holster shortens it
-  to that, never lengthens it. `BG_HolsterTime` is the single rule — gun's own
+  its own holster. `BG_HolsterTime` is the single rule — gun's own
   drop, rapid, or the ladder's — used by pmove to stamp and by cgame to fit
   the drop clip, so the two cannot disagree. Frag/flash keep the gun's holster;
   Semtex uses the shared fast-destination time. Do not add a second timing rule

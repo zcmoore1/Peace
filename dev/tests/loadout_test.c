@@ -900,6 +900,54 @@ static void TestViewBob(void) {
  CHECK(ps.bobCycle==(before&255));
  move.cmd.forwardmove=0;
 }
+/* A flat floor at z=0, for full Pmove on the ground. */
+static void FloorTrace(trace_t *tr, const vec3_t start, const vec3_t mins,
+ const vec3_t maxs, const vec3_t end, int pass, int mask) {
+ float s=start[2]+mins[2], e=end[2]+mins[2];
+ (void)maxs; (void)pass; (void)mask;
+ memset(tr,0,sizeof(*tr)); tr->fraction=1; VectorCopy(end,tr->endpos); tr->entityNum=ENTITYNUM_NONE;
+ if (s<-0.01f) { tr->startsolid=qtrue; tr->allsolid=e<0; tr->fraction=0; VectorCopy(start,tr->endpos);
+  tr->entityNum=ENTITYNUM_WORLD; tr->plane.normal[2]=1; return; }
+ if (e<0) {
+  float f=(s-0.03125f)/(s-e); if (f<0) f=0;
+  tr->fraction=f; tr->endpos[0]=start[0]+f*(end[0]-start[0]);
+  tr->endpos[1]=start[1]+f*(end[1]-start[1]); tr->endpos[2]=start[2]+f*(end[2]-start[2]);
+  tr->plane.normal[2]=1; tr->entityNum=ENTITYNUM_WORLD; tr->contents=CONTENTS_SOLID;
+ }
+}
+static void FloorMove(int buttons, int up) {
+ move.cmd.buttons=buttons; move.cmd.forwardmove=127; move.cmd.upmove=up;
+ move.cmd.serverTime=ps.commandTime+8; Pmove(&move);
+ /* The airborne sprint under a quick action never outlives its think. */
+ CHECK(!((ps.pm_flags&PMF_SPRINTING) && ((ps.weaponAction&WA_TYPE_MASK) || BG_IsActionWeapon(ps.weapon))));
+}
+/* Knife, jump, let jump go in the air with sprint held - also with the use-item
+ * button, which returns from PM_Weapon before its action update runs. */
+static void TestAirSprintEndsSameThink(void) {
+ int extra,t;
+ for(extra=0;extra<2;extra++) {
+  Ready(WP_MACHINEGUN,WP_SHOTGUN);
+  move.trace=FloorTrace; move.pointcontents=RespawnContents; move.tracemask=MASK_PLAYERSOLID;
+  ps.speed=320; ps.gravity=800; ps.pm_type=PM_NORMAL; ps.origin[2]=24; ps.groundEntityNum=ENTITYNUM_WORLD;
+  for(t=0;t<20;t++) FloorMove(BUTTON_SPRINT,0);
+  FloorMove(BUTTON_SPRINT|BUTTON_MELEE,0); FloorMove(BUTTON_SPRINT,0);
+  CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_MELEE);
+  FloorMove(BUTTON_SPRINT,127); CHECK(ps.jumpLand==-1);
+  FloorMove(BUTTON_SPRINT|(extra ? BUTTON_USE_HOLDABLE : 0),0);
+  CHECK(ps.weapFlags&PWF_SPRINT_RELEASE);
+  for(t=0;t<300;t++) FloorMove(BUTTON_SPRINT,0);
+ }
+ move.cmd.forwardmove=0;
+}
+static int AllWater(const vec3_t point, int pass) { (void)point; (void)pass; return CONTENTS_WATER; }
+/* A jump that comes down in deep water ends there: no slowdown waits for the walk out. */
+static void TestWaterEndsJump(void) {
+ Ready(WP_MACHINEGUN,WP_SHOTGUN);
+ move.trace=RespawnTrace; move.pointcontents=AllWater; move.tracemask=MASK_PLAYERSOLID;
+ ps.speed=320; ps.gravity=800; ps.pm_type=PM_NORMAL; ps.origin[2]=4000; ps.groundEntityNum=ENTITYNUM_NONE;
+ ps.jumpLand=-1; ps.jumpOriginZ=5; RespawnMove(0,PM_NORMAL);
+ CHECK(ps.jumpLand==0 && ps.jumpOriginZ==0);
+}
 static void TestHeldThroughRespawn(void) {
  const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL,BUTTON_LETHAL};
  const int specials[]={WP_KNIFE,WP_FRAG,WP_FLASH,WP_SEMTEX};
@@ -937,7 +985,7 @@ static void TestHeldThroughRespawn(void) {
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
  TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
- TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestHeldThroughRespawn();
+ TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;
 }

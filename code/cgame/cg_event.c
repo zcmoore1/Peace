@@ -620,6 +620,8 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_STEP_8:
 	case EV_STEP_12:
 	case EV_STEP_16:		// smooth out step up transitions
+	case EV_STEP_DOWN_4:
+	case EV_STEP_DOWN_8:	// and MW2's step down, the other way
 		DEBUGNAME("EV_STEP");
 	{
 		float	oldStep;
@@ -643,10 +645,17 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		}
 
 		// add this amount
-		step = 4 * (event - EV_STEP_4 + 1 );
+		if ( event >= EV_STEP_DOWN_4 ) {
+			step = -4 * (event - EV_STEP_DOWN_4 + 1 );
+		} else {
+			step = 4 * (event - EV_STEP_4 + 1 );
+		}
 		cg.stepChange = oldStep + step;
 		if ( cg.stepChange > MAX_STEP_CHANGE ) {
 			cg.stepChange = MAX_STEP_CHANGE;
+		}
+		if ( cg.stepChange < -MAX_STEP_CHANGE ) {
+			cg.stepChange = -MAX_STEP_CHANGE;
 		}
 		cg.stepTime = cg.time;
 		break;

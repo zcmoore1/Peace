@@ -461,6 +461,70 @@ static void TestLanding(void) {
     CHECK(Attached() && ps.jumpLand == 0 && ps.jumpOriginZ == 0);
     move.cmd.forwardmove = 0;
 }
+/* MW2's step down (PM_StepSlideMove): from the ground, a drop of up to 9
+ * units is walked, not flown - so stairs and curbs cost no landing cut and
+ * keep a landing's slowdown. Higher drops still fly. Brushes are the engine's
+ * own temporary box models, so the clipping is Q3's. */
+typedef struct { vec3_t mn, mx; } stairBox_t;
+static stairBox_t stairBoxes[24]; static int numStairBoxes;
+static void AddStairBox(float x0, float y0, float z0, float x1, float y1, float z1) {
+    VectorSet(stairBoxes[numStairBoxes].mn, x0, y0, z0);
+    VectorSet(stairBoxes[numStairBoxes].mx, x1, y1, z1); numStairBoxes++;
+}
+static void StairTrace(trace_t *tr, const vec3_t start, const vec3_t mins, const vec3_t maxs,
+    const vec3_t end, int pass, int mask) {
+    int i; trace_t t; vec3_t lo, hi; (void)pass;
+    memset(tr, 0, sizeof(*tr)); tr->fraction = 1; VectorCopy(end, tr->endpos);
+    VectorCopy(mins, lo); VectorCopy(maxs, hi);
+    for (i = 0; i < numStairBoxes; i++) {
+        clipHandle_t h = CM_TempBoxModel(stairBoxes[i].mn, stairBoxes[i].mx, qfalse);
+        CM_BoxTrace(&t, start, end, lo, hi, h, mask, qfalse);
+        if (t.allsolid) tr->allsolid = qtrue;
+        if (t.startsolid) tr->startsolid = qtrue;
+        if (t.fraction < tr->fraction) {
+            qboolean a = tr->allsolid, st = tr->startsolid; *tr = t; tr->allsolid = a; tr->startsolid = st;
+        }
+    }
+    tr->entityNum = (tr->fraction < 1 || tr->startsolid) ? ENTITYNUM_WORLD : ENTITYNUM_NONE;
+    if (tr->fraction < 1) tr->contents = CONTENTS_SOLID;
+}
+static int StairContents(const vec3_t p, int pass) { (void)p; (void)pass; return 0; }
+static void TestStairs(void) {
+    const float risers[] = { 4, 6, 8, 16 };
+    int r, k, t, lifts, cuts;
+    for (r = 0; r < ARRAY_LEN(risers); r++) {
+        numStairBoxes = 0;
+        AddStairBox(-1000, -1000, -1000, 1000, 0, 0);
+        for (k = 1; k <= 12; k++) AddStairBox(-1000, 16 * (k - 1), -1000, 1000, 16 * k, -risers[r] * k);
+        AddStairBox(-1000, 16 * 12, -1000, 1000, 4000, -risers[r] * 12);
+        Reset(0, -200, 24.125f); move.trace = StairTrace; move.pointcontents = StairContents;
+        move.cmd.angles[YAW] = ANGLE2SHORT(90); move.cmd.forwardmove = 127;
+        for (t = 0; t < 400 && ps.origin[1] < -64; t++) Tick(8);
+        CHECK(ps.groundEntityNum != ENTITYNUM_NONE);
+        lifts = cuts = 0;
+        for (t = 0; t < 2000 && ps.origin[1] < 16 * 12 + 32; t++) {
+            int wasAir = ps.groundEntityNum == ENTITYNUM_NONE; float before = FlatSpeed();
+            Tick(8);
+            if (!wasAir && ps.groundEntityNum == ENTITYNUM_NONE) lifts++;
+            if (wasAir && ps.groundEntityNum != ENTITYNUM_NONE && FlatSpeed() < before * 0.75f) cuts++;
+        }
+        CHECK(ps.origin[1] >= 16 * 12 + 32);
+        if (risers[r] <= 8) CHECK(lifts == 0 && cuts == 0);
+        else CHECK(lifts > 0);
+    }
+    /* A landing's slowdown survives walking down a 6-unit curb. */
+    numStairBoxes = 0;
+    AddStairBox(-1000, -1000, -1000, 1000, 0, 0);
+    AddStairBox(-1000, 0, -1000, 1000, 4000, -6);
+    Reset(0, -250, 24.125f); move.trace = StairTrace; move.pointcontents = StairContents;
+    move.cmd.angles[YAW] = ANGLE2SHORT(90); move.cmd.forwardmove = 127;
+    for (t = 0; t < 20; t++) Tick(8);
+    move.cmd.upmove = 127; Tick(8); move.cmd.upmove = 0;
+    for (t = 0; t < 200 && ps.jumpLand <= 0; t++) Tick(8);
+    CHECK(ps.jumpLand > 0 && ps.origin[1] < 0);
+    for (t = 0; t < 200 && ps.origin[1] < 40; t++) { Tick(8); CHECK(ps.jumpLand > 0 || ps.origin[1] >= 40); }
+    move.cmd.forwardmove = 0;
+}
 int main(void) {
     int checksum, i;
     const int steps[] = {8, 16, 33, 66};
@@ -478,6 +542,7 @@ int main(void) {
     TestLadderEndsSprint();
     TestJumpSprint();
     TestLanding();
+    TestStairs();
     for (i = 0; i < numAllocations; i++) free(allocations[i]);
     printf("PASS: ladder BSP collision, momentum, traversal, detach, yaw, weapon ordering and prediction replay (%d checks).\n", checks);
     return 0;

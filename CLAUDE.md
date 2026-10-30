@@ -211,7 +211,9 @@ source for MW2 behaviour; the owner rejects it.
   start needs more than `BG_SPRINT_MIN_TIME` (1s) left. Peace has no Marathon
   or Extreme Conditioning perk yet. In the air after a jump (`jumpLand` -1)
   MW2's start gate skips the quick-action test: that sprint starts and
-  `PM_UpdateWeaponAction` ends it the same think, so its button waits.
+  `PM_UpdateWeaponAction` ends it the same think, so its button waits. The
+  same end is re-applied after `PM_Weapon` for thinks that never reach it
+  (a use-item press, a ladder holster), so no sprint flag survives a think.
 - **The camera bob is MW2's.** `BG_ViewBobCycle`, `BG_VerticalViewBob` and
   `BG_HorizontalViewBob` are MW2's view bob (BG_GetPlayerViewOrigin): the eye
   moves on z and along the view's right by an amplitude set by stance, sprint
@@ -230,9 +232,12 @@ source for MW2 behaviour; the owner rejects it.
   0.65 more and starts 1800ms of slowdown (0.5 and 1200ms if it landed 18 units
   above the take-off). During it the ground friction and the squared speed of
   a jump are both scaled by `BG_JumpLandFactor` (2.5 falling to 1). A jump
-  inside `BG_JUMP_WAIT` is refused and its press spent. Leaving the ground,
-  a ladder or ground too steep to walk on clears the state. All three are
-  durations or positions, never clocks, so a replay rebases none of them.
+  inside `BG_JUMP_WAIT` is refused and its press spent. A ladder, deep water
+  or ground too steep to walk on clears the state; walking off a ledge clears
+  a pending slowdown. Stairs and curbs are not ledges: `PM_StepSlideMove`
+  steps down up to `STEPSIZE_DOWN` (9) from walkable ground, as MW2's does,
+  so walking down them never lands (`EV_STEP_DOWN_4/8` smooth the eye). All
+  three are durations or positions, never clocks, so a replay rebases none.
   MW2's damaging-landing stun is not ported (Peace keeps Q3's fall damage).
 - **Air control is MW2's.** `PM_AirMove` uses `PM_AirScale`, MW2's air move
   speed: base speed over forward/right only, slowed by `pm_adsScale` while

@@ -621,6 +621,13 @@ static void PM_WaterMove( void ) {
 	float	scale;
 	float	vel;
 
+	// Water breaks the fall (PM_CrashLand): a jump that comes down in deep
+	// water ends there, so no landing slowdown waits for the walk out.
+	if ( pm->ps->jumpLand < 0 ) {
+		pm->ps->jumpLand = 0;
+		pm->ps->jumpOriginZ = 0;
+	}
+
 	if ( PM_CheckWaterJump() ) {
 		PM_WaterJumpMove();
 		return;
@@ -4214,6 +4221,14 @@ void PmoveSingle (pmove_t *pmove) {
 
 	// weapons
 	PM_Weapon();
+	// PM_CheckSprint's airborne start under a quick action ends this same think
+	// (PM_UpdateWeaponAction), also when PM_Weapon returned before it ran (the
+	// use-item press) or a ladder holster zeroed the latch with the knife out.
+	if ( ( pm->ps->pm_flags & PMF_SPRINTING ) &&
+	     ( ( pm->ps->weaponAction & WA_TYPE_MASK ) || BG_IsActionWeapon( pm->ps->weapon ) ) ) {
+		if ( pm->cmd.buttons & BUTTON_SPRINT ) pm->ps->weapFlags |= PWF_SPRINT_RELEASE;
+		pm->ps->pm_flags &= ~PMF_SPRINTING;
+	}
 	if ( (pm->ps->stats[STAT_LADDER] & (LADDER_ATTACHED | LADDER_HOLSTER)) ||
 		pm->ps->weaponstate == WEAPON_LADDER ) {
 		pm->ps->eFlags &= ~EF_FIRING;

@@ -241,6 +241,37 @@ PM_StepSlideMove
 
 ==================
 */
+/*
+==================
+PM_StepDown
+
+MW2's step down (PM_StepSlideMove): a move that began on the ground is pulled
+down onto walkable ground up to STEPSIZE_DOWN below, so stairs and curbs are
+walked down, not flown off - no landing, no landing cut, the jump state kept.
+Never onto a player.
+==================
+*/
+#define	STEPSIZE_DOWN	9
+static void PM_StepDown( const vec3_t start_o ) {
+	trace_t		trace;
+	vec3_t		down;
+	float		delta;
+
+	VectorCopy( pm->ps->origin, down );
+	down[2] -= STEPSIZE_DOWN;
+	pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, down, pm->ps->clientNum, pm->tracemask );
+	if ( trace.allsolid || trace.fraction >= 1.0f || trace.entityNum < MAX_CLIENTS ||
+	     trace.plane.normal[2] < MIN_WALK_NORMAL ) {
+		return;
+	}
+	VectorCopy( trace.endpos, pm->ps->origin );
+	PM_ClipVelocity( pm->ps->velocity, trace.plane.normal, pm->ps->velocity, OVERCLIP );
+	delta = start_o[2] - pm->ps->origin[2];
+	if ( delta > 2 ) {
+		PM_AddEvent( delta < 7 ? EV_STEP_DOWN_4 : EV_STEP_DOWN_8 );
+	}
+}
+
 void PM_StepSlideMove( qboolean gravity ) {
 	vec3_t		start_o, start_v;
 //	vec3_t		down_o, down_v;
@@ -249,12 +280,19 @@ void PM_StepSlideMove( qboolean gravity ) {
 //	vec3_t		delta, delta2;
 	vec3_t		up, down;
 	float		stepSize;
+	// MW2 steps down only from a ground entity: not from a slope too steep to
+	// walk, a ladder, or a jump (which has already left the ground).
+	qboolean	hadGround = pml.walking && !( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED );
 
 	VectorCopy (pm->ps->origin, start_o);
 	VectorCopy (pm->ps->velocity, start_v);
 
 	if ( PM_SlideMove( gravity ) == 0 ) {
-		return;		// we got exactly where we wanted to go first try	
+		// we got exactly where we wanted to go first try
+		if ( hadGround ) {
+			PM_StepDown( start_o );
+		}
+		return;
 	}
 
 	VectorCopy(start_o, down);
@@ -289,9 +327,9 @@ void PM_StepSlideMove( qboolean gravity ) {
 
 	PM_SlideMove( gravity );
 
-	// push down the final amount
+	// push down the final amount, and MW2's step down past it from the ground
 	VectorCopy (pm->ps->origin, down);
-	down[2] -= stepSize;
+	down[2] -= stepSize + ( hadGround ? STEPSIZE_DOWN : 0 );
 	pm->trace (&trace, pm->ps->origin, pm->mins, pm->maxs, down, pm->ps->clientNum, pm->tracemask);
 	if ( !trace.allsolid ) {
 		VectorCopy (trace.endpos, pm->ps->origin);
@@ -327,6 +365,8 @@ void PM_StepSlideMove( qboolean gravity ) {
 			} else {
 				PM_AddEvent( EV_STEP_16 );
 			}
+		} else if ( delta < -2 ) {
+			PM_AddEvent( delta > -7 ? EV_STEP_DOWN_4 : EV_STEP_DOWN_8 );
 		}
 		if ( pm->debugLevel ) {
 			Com_Printf("%i:stepped\n", c_pmove);

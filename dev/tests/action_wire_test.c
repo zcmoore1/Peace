@@ -16,7 +16,7 @@ void QDECL Com_Error(int level,const char *fmt,...) {
 int main(void) {
  playerState_t from,to,decoded;
  byte data[MAX_MSGLEN]; msg_t msg; int i,j;
- for(i=0;i<512;i++) for(j=0;j<512;j++) {
+ for(i=0;i<1024;i++) for(j=0;j<1024;j++) {
   memset(&from,0,sizeof(from)); from.weaponAction=i; from.perks=i&((1<<PS_PERK_BITS)-1);
   to=from; to.weaponAction=j; to.perks=j&((1<<PS_PERK_BITS)-1);
   to.ammo[3]=7; to.ammoReserve[3]=24;

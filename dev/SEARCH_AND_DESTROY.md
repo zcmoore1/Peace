@@ -147,3 +147,7 @@ For a network playtest, check plant/defuse interruption, carrier disconnect,
 death after a plant, teammate camera, class changes taking effect next round,
 and the ladder exit into Site A. Artificial lag and packet-loss feel still need
 hands-on testing; native/QVM builds and deterministic tests do not prove that.
+
+A usable site or the bomb makes the use hint `ENTITYNUM_WORLD` (live, never
+freed), as a usable trigger is MW2's hint, so standing at one ends a sea lion
+(CLAUDE.md).

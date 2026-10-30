@@ -60,7 +60,7 @@ Class serialization version 2 adds the two attachment masks; version 1 classes
 still load and inherit the old `cg_sight` preference at spawn. New editor saves
 store explicit choices, so changing `cg_sight` will not overwrite them. The active
 perk mask is a predicted/replayed playerstate field. The combined use/reload
-build uses protocol **81**, game **-10**: rebuild the executable, server and all
+build uses protocol **82**, game **-11**: rebuild the executable, server and all
 modules together. Changing class during a life takes effect only at the next spawn.
 
 Custom names allow 1–23 letters, numbers, spaces, hyphens and underscores. Leaving
@@ -137,8 +137,9 @@ set. It does not manufacture missing animations for legacy placeholder models.
 A press latches melee/lethal/tactical through normal holster and deploy timing,
 fires the action once without requiring the trigger, then returns to the selected
 gun. A held action button does not repeat. Empty equipment does nothing; a ladder
-grab clears queued actions. Frag/flash/melee keep their existing behavior.
-Semtex uses hold/release, pre-throw cancel, and post-throw queued swaps; see
+grab clears queued actions. Every knife and grenade defers a Y until the gun it
+left is fully back on its quick raise (MW2's CheckForChangeWeapon); YY cannot
+cancel that raise. Semtex adds hold/release and a pre-throw cancel; see
 `dev/SEMTEX.md` for controls, timing, art and compatibility notes.
 
 Only the selected validated definition is sent in `peace_loadout` userinfo.

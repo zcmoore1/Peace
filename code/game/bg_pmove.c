@@ -3094,6 +3094,7 @@ static void PM_UpdateWeaponAction( void ) {
 		( action & WA_FIRED ) && !BG_IsActionWeapon( pm->ps->weapon ) &&
 		pm->ps->weaponstate == WEAPON_RAISING;
 	qboolean prepare = qfalse;
+	int leftEmpty = pm->ps->weaponAction & WA_LEFT_EMPTY;
 	if (BG_RequestedSlot(pm->ps, pm->cmd.weapon) == pm->ps->stats[STAT_ACTIVE_SLOT]) returning = 0;
 	// A requested slot change waits for the ORIGINAL gun to finish recovery.
 	// Clear on the ready boundary so its normal holster can start this think.
@@ -3159,6 +3160,7 @@ static void PM_UpdateWeaponAction( void ) {
 					( pm->ps->weapon == WP_NONE || offhandEnd );
 				action = nextAction;
 				returning = recovering = 0;
+				leftEmpty = pm->ps->weapon == WP_NONE ? WA_LEFT_EMPTY : 0;
 			}
 		}
 		if (swapPressed && !(action & WA_FIRED) && (action & WA_TYPE_MASK) == WA_LETHAL &&
@@ -3166,16 +3168,24 @@ static void PM_UpdateWeaponAction( void ) {
 			// Equipment never changes the active slot. Do not refund a throw
 			// already emitted. Use the same gun raise as the melee return, and
 			// the same recovery: the latch holds until that gun is fully drawn.
+			// From an empty hand it is MW2's OffHandEnd with no gun: the hand
+			// is empty again, and the selection brings a gun as from any.
 			action = WA_LETHAL | WA_FIRED;
-			returning = WA_RETURNING;
-			pm->ps->weapon = BG_ActiveSlotWeapon(pm->ps);
+			returning = leftEmpty ? 0 : WA_RETURNING;
+			pm->ps->weapon = leftEmpty ? WP_NONE : BG_ActiveSlotWeapon(pm->ps);
 			cancelDraw = qtrue;
 		}
 	}
+	if ( !( action & WA_TYPE_MASK ) ) leftEmpty = 0;
 	pm->ps->weaponAction = action | (held << WA_HELD_SHIFT) | returning | recovering |
-		(swap ? WA_SWAP_HELD : 0);
+		(swap ? WA_SWAP_HELD : 0) | leftEmpty;
 	// Drawn once the latch says it is a return, so it is the quick raise.
-	if ( cancelDraw ) {
+	if ( cancelDraw && pm->ps->weapon == WP_NONE ) {
+		pm->ps->weaponstate = WEAPON_READY;
+		pm->ps->weaponTime = 0;
+		pm->ps->weaponAnimTime = -1;
+		pm->ps->pm_flags &= ~PMF_PENDING_MAG;
+	} else if ( cancelDraw ) {
 		BG_BeginWeaponDraw( pm->ps );
 	}
 	if ( cutDrop ) {
@@ -3263,6 +3273,10 @@ and the NAC is untouched.
 // on the ready boundary), then its ordinary holster starts.
 static int PM_DesiredWeapon( void ) {
 	int special = PM_ActionWeapon();
+	// MW2's OffHandEnd with no gun leaves none (weapon 0): a quick action
+	// that left an empty hand comes back to one.
+	if ( ( pm->ps->weaponAction & WA_LEFT_EMPTY ) &&
+	     ( pm->ps->weaponAction & ( WA_RETURNING | WA_RECOVERING | WA_FIRED ) ) ) return WP_NONE;
 	if (pm->ps->weaponAction & (WA_RETURNING | WA_RECOVERING | WA_FIRED)) return BG_ActiveSlotWeapon(pm->ps);
 	// Nothing leaves early: step 1 holds the holster until the knife or
 	// grenade's lock has run out.
@@ -3270,10 +3284,12 @@ static int PM_DesiredWeapon( void ) {
 		return special;
 	}
 	// A slot command sent before the client saw that slot's pickup names the
-	// gun just dropped, which MW2's CheckForChangeWeapon ignores: what is in
-	// hand (no gun, right after the swap) stays until the selection catches up,
-	// about a round trip, as MW2's select hand-off does.
-	if ( !BG_SlotCommandCurrent( pm->ps, pm->cmd.weapon ) ) return pm->ps->weapon;
+	// gun just dropped, so it names no gun the player has: MW2's
+	// CheckForChangeWeapon ignores it, a running drop runs on, and one that
+	// ends meanwhile leaves the hand empty (its FinishWeaponChange takes an
+	// unowned selection as weapon 0) until the selection catches up, about a
+	// round trip, as MW2's select hand-off does.
+	if ( !BG_SlotCommandCurrent( pm->ps, pm->cmd.weapon ) ) return WP_NONE;
 	return pm->ps->stats[STAT_SLOT_PRIMARY + BG_RequestedSlot(pm->ps, pm->cmd.weapon)];
 }
 
@@ -3302,20 +3318,24 @@ static void PM_BeginWeaponChange( int weapon ) {
 		return;
 	}
 
+	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
+		// Already going down. If where we are going now has a quicker holster -
+		// a ladder grabbed part way through a heavy gun's holster - finish as
+		// that one. Shortened only, never lengthened. A drop a pickup's take
+		// emptied keeps running to its end (MW2's BeginWeaponChange returns
+		// for any drop before it looks at the weapon); only a quick action
+		// asked for out of it takes its own time.
+		if ( ( pm->ps->weapon != WP_NONE || BG_IsActionWeapon( weapon ) ) &&
+		     pm->ps->weaponTime > BG_HolsterTime( pm->ps ) ) {
+			pm->ps->weaponTime = BG_HolsterTime( pm->ps );
+		}
+		return;
+	}
+
 	// No gun in hand (MW2's weapon 0, after a pickup's swap): a gun is simply
 	// drawn, there is nothing to put down (MW2 stamps no drop for it).
 	if ( pm->ps->weapon == WP_NONE && !BG_IsActionWeapon( weapon ) ) {
 		PM_FinishWeaponChange();
-		return;
-	}
-
-	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
-		// Already going down. If where we are going now has a quicker holster -
-		// a ladder grabbed part way through a heavy gun's holster - finish as
-		// that one. Shortened only, never lengthened.
-		if ( pm->ps->weaponTime > BG_HolsterTime( pm->ps ) ) {
-			pm->ps->weaponTime = BG_HolsterTime( pm->ps );
-		}
 		return;
 	}
 
@@ -3348,6 +3368,15 @@ static void PM_FinishWeaponChange( void ) {
 	// Quick actions keep the same slot; their ammo occupies separate entries.
 	if (!BG_IsActionWeapon(weapon)) BG_SelectSlot(pm->ps, PM_DesiredSlot());
 	pm->ps->weapon      = weapon;
+	// No gun to draw: the hand stays empty and ready, as a pickup's take leaves
+	// it, and no slot's first deployment is spent on it.
+	if ( weapon == WP_NONE ) {
+		pm->ps->weaponstate    = WEAPON_READY;
+		pm->ps->weaponTime     = 0;
+		pm->ps->weaponAnimTime = -1;
+		pm->ps->pm_flags      &= ~PMF_PENDING_MAG;
+		return;
+	}
 	BG_BeginWeaponDraw(pm->ps);
 }
 
@@ -3523,6 +3552,7 @@ static void PM_CheckADS( void ) {
 	// comes out of the carry, as MW2's ADS check never tests them. The sprint-
 	// out still holds the trigger.
 	canADS = ( ( pm->cmd.buttons & BUTTON_ADS ) &&
+	           pm->ps->weapon != WP_NONE &&	// an empty hand has nothing to aim
 	           !( ( pm->cmd.buttons & BUTTON_SPRINT ) && !BG_WeaponScopeOverlay( pm->ps->weapon ) ) &&
 	           !( pm->ps->weaponAction & WA_TYPE_MASK ) &&
 	           !BG_IsActionWeapon( pm->ps->weapon ) &&
@@ -3632,7 +3662,7 @@ static void PM_Weapon( void ) {
 	// Cancel the unfinished holster, without inserting a new deploy or delay.
 	// Ladder holsters and latched quick actions have their own destinations.
 	if ( !ladderWeapon && pm->ps->weaponstate == WEAPON_DROPPING &&
-		!BG_IsActionWeapon( pm->ps->weapon ) &&
+		pm->ps->weapon != WP_NONE && !BG_IsActionWeapon( pm->ps->weapon ) &&
 		PM_DesiredWeapon() == pm->ps->weapon &&
 		PM_DesiredSlot() == pm->ps->stats[STAT_ACTIVE_SLOT] ) {
 		pm->ps->weaponstate = WEAPON_READY;

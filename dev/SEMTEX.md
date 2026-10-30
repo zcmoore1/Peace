@@ -57,8 +57,9 @@ reload command, or scripted zoomload was added. Prediction continues to reconcil
 with the server; this change does **not** claim to reproduce the historical
 zoomload desync. The separate note and busy clocks are unchanged.
 
-Rebuild engine/client/server/all VMs together: protocol **72**, game version
-`baseq3-2`. Old Peace builds, stock protocols and old demos are incompatible.
+Rebuild engine/client/server/all VMs together at the current
+`PROTOCOL_VERSION`/`GAME_VERSION` (see CLAUDE.md's capacity limits). Old Peace
+builds, stock protocols and old demos are incompatible.
 Inventory now has 24 ammo entries and a 32-bit `STAT_WEAPONS`; action state uses
 nine bits. This fixes pre-existing missionpack equipment exceeding ammo[16] and
 missing positional table rows. The missionpack-only powerup stat moved to the

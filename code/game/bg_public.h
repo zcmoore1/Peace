@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-10"
+#define	GAME_VERSION		BASEGAME "-11"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -183,6 +183,7 @@ typedef enum {
 #define WA_RETURNING       64   // keep the original slot until cmd.weapon acknowledges it
 #define WA_SWAP_HELD       128  // edge latch across usercmd pmove substeps
 #define WA_RECOVERING      256  // thrown equipment returns original gun before queued selection
+#define WA_LEFT_EMPTY      512  // the quick action left no gun in hand (MW2's weapon 0): it returns to none
 
 // Ladder tuning is shared by prediction, authority and presentation. These are
 // initial feel values, not measured MW2 constants. A grab always pays a positive,

@@ -119,6 +119,12 @@ every check still holds.
 
 ## Where Peace and MW2 still differ
 
+- **A grenade out of the gun's return after a throw** pays the gun's quick
+  drop, as in MW2: OffHandInit (0x578E00) stamps quickDropTime out of
+  OFFHAND_END. Only with no use hint at all (`cursorHintEntIndex`
+  `ENTITYNUM_NONE`, MW2's 0x7ff; CheckForOffHand 0x5791B0) does it come
+  straight out with no drop - the sea lion (CLAUDE.md). Listed here because
+  this page used to say otherwise; the two now agree.
 - **The IW4x wild scope script** presses knife and X on the same frame while
   the gun is still coming back from equipment, with aim held. That knife is
   lost in Peace, as in MW2's code, so the script gives a zoomload and no knife;
@@ -133,9 +139,6 @@ every check still holds.
 These are read from MW2's own executable (`iw4x.exe`; knife check 0x577670,
 offhand check 0x579030, offhand init/end 0x578E00/0x577A10, knife end 0x578D80).
 
-- **A grenade out of the gun's return after a throw** pays the gun's quick
-  drop in Peace; MW2 throws straight out of that quick raise with no drop at
-  all. Peace keeps a real holster time on every drop (CLAUDE.md, the NAC).
 - **The knife's own timing.** MW2's knife never drops the gun: it plays on the
   gun's model (meleeTime 800ms, the hit 79ms in), then the quick raise. Peace's
   knife is its own weapon: a 50ms drop, its raise, `BG_QUICK_ACTION_HOLD`, a

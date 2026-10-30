@@ -630,8 +630,10 @@ void G_CommitWeaponPickup(gentity_t *player) {
 			// client's selection names the new gun. What the old gun was
 			// doing ends with it.
 			ps->weapon = WP_NONE;
-			ps->weaponstate = WEAPON_READY;
-			ps->weaponTime = 0;
+			if (ps->weaponstate != WEAPON_DROPPING) {	// a running drop runs on (MW2's take)
+				ps->weaponstate = WEAPON_READY;
+				ps->weaponTime = 0;
+			}
 			ps->weaponAnimTime = -1;
 			ps->pm_flags &= ~PMF_PENDING_MAG;
 		} else {

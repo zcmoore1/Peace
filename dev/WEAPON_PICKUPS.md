@@ -18,8 +18,9 @@ button (`+reload`) or use/reload (`+usereload`, the gamepad's X) continuously fo
 (`BG_PICKUP_OWNER_DELAY`, MW2's). The HUD shows the item and progress.
 Swapping the gun in hand empties the hand, as MW2's take does: the new gun is
 drawn once your selection names it, about a round trip later (each slot's
-generation bit, `BG_SlotCommand`). Collecting the gun your use hint named
-frees it and leaves you with no hint at all - MW2's sea lion (see CLAUDE.md). Releasing early resets progress
+generation bit, `BG_SlotCommand`). Collecting a dropped gun your use hint named
+frees it and leaves you with no hint at all - MW2's sea lion (see CLAUDE.md).
+A map gun is only hidden to respawn, so the hint keeps naming it. Releasing early resets progress
 and supplies the normal reload input: a `+reload` tap is read by the weapon at
 once, a use/reload tap is the server's, as in MW2, where a tap of X over a usable
 item reloads on release (`BG_UpdateActivate`; `pickupHeld` 3 marks that hold so
@@ -59,8 +60,9 @@ After pickup, the carried gun's networked attachment mask controls its sight.
 - Slot APIs save/restore the existing weapon-ID-indexed note-engine registers.
   Reload note order, finish-before-fill, YY cancellation, Semtex recovery and
   sprint-retention ownership remain shared mechanics.
-- Protocol 74 / game version `-4` requires rebuilding engine, server, native
-  modules and QVMs together. Do not mix these with previous builds.
+- The current `PROTOCOL_VERSION`/`GAME_VERSION` (see CLAUDE.md's capacity
+  limits) require rebuilding engine, server, native modules and QVMs together.
+  Do not mix these with previous builds.
 
 Run `sh dev/tests/run-pickups.sh`, also with `PICKUP_TEST_FLAGS=-DMISSIONPACK`.
 It exercises death selection, empty guns, exact-match scavenging, ammo caps,

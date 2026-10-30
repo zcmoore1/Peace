@@ -1104,7 +1104,7 @@ netField_t	playerStateFields[] =
 { PSF(weapon), 5 },
 { PSF(weaponAnimTime), -16 },
 { PSF(weaponAnimSeq), 2 },
-{ PSF(weaponAction), 9 },
+{ PSF(weaponAction), 10 },
 { PSF(weaponDraw), 1 },
 { PSF(weapFlags), 2 },
 { PSF(perks), PS_PERK_BITS },

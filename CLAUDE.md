@@ -147,11 +147,17 @@ source for MW2 behaviour; the owner rejects it.
   + `SLOT_COUNT` for the slot's generation bit) continues carrying the latest
   selection. A pickup that replaces the held slot flips that slot's
   `BG_GUN_GENERATION` and empties the hand (`WP_NONE`, MW2's
-  BG_TakePlayerWeapon); a slot command still carrying the old generation names
-  the gun just dropped and is ignored (`BG_SlotCommandCurrent`, MW2's
-  CheckForChangeWeapon), so the hand stays empty about a round trip, until
-  the client's selection catches up (MW2's select hand-off). Nothing is put
-  down from an empty hand; equipment out of it pays `BG_EMPTY_HAND_OFFHAND_TIME`. Old plain weapon IDs are supported for bots/tools. Neither
+  BG_TakePlayerWeapon) but leaves a running drop running; a slot command
+  still carrying the old generation names the gun just dropped, so it names
+  no gun (`BG_SlotCommandCurrent`, MW2's CheckForChangeWeapon): a running drop
+  runs on (YY never returns to an empty hand), one that ends meanwhile leaves
+  the hand empty and ready (`PM_FinishWeaponChange` to `WP_NONE` spends no
+  first draw), and the hand stays empty about a round trip, until the
+  client's selection catches up (MW2's select hand-off). Nothing is put down
+  from an empty hand and nothing is aimed with it; equipment out of it pays
+  `BG_EMPTY_HAND_OFFHAND_TIME`, and comes back to an empty hand
+  (`WA_LEFT_EMPTY`, MW2's OffHandEnd with weapon 0), a Semtex cancel's
+  included, so the gun then comes up on its ordinary raise. Old plain weapon IDs are supported for bots/tools. Neither
   inventory replacement nor a delayed pickup event may overwrite Y intent.
   First deployment is pending until the instance is drawn, then consumed on
   start; normal holster/YY/sprint retention may interrupt it. No CAN state.
@@ -160,7 +166,9 @@ source for MW2 behaviour; the owner rejects it.
   thereafter, including spectators and replays. See `dev/WEAPON_PICKUPS.md`.
 - **The sea lion is MW2's, and emerges (owner's rule: do what MW2 does).**
   `ps.cursorHintEntIndex` is MW2's sticky use hint, written only by the
-  server: `G_UpdateCursorHint` (end-frame) names the pickup in reach and
+  server: `G_UpdateCursorHint` (end-frame) names the pickup in reach (or
+  `ENTITYNUM_WORLD`, live and never freed, while an S&D site or the bomb is
+  usable, which ends a sea lion) and
   never clears it; with nothing in reach, sprinting, equipment out
   (`BG_OffhandOut`) or dead it writes nothing; spawn leaves 0, a live entity
   number. Only freeing what it names (`G_ClearCursorHintRefs` in
@@ -207,7 +215,10 @@ source for MW2 behaviour; the owner rejects it.
   so the picture never jumps; the fit is still `BG_HolsterTime`. Do
   not add a second timing rule in the renderer.
 - **Recovering from melee and from equipment is ONE thing, in time and
-  function.** Knife, frag, flash and a released Semtex use `BG_QUICK_ACTION_HOLD` (500ms),
+  function** - with one MW2 difference: only equipment's return is
+  OFFHAND_END, so with no use hint at all, equipment pulled during it comes
+  straight out, while the knife's return still quick-drops (the sea lion).
+  Knife, frag, flash and a released Semtex use `BG_QUICK_ACTION_HOLD` (500ms),
   go away in `BG_RAPID_DROP_TIME`, then the gun comes back on its MW2 quick
   raise (`BG_WeaponQuickRaiseTime`: 750ms for rifles, shotguns and launchers,
   250ms for the M300, as the Intervention), a Semtex cancel's return included
@@ -402,9 +413,9 @@ source for MW2 behaviour; the owner rejects it.
   (`RSEQ_START/LOOP/END` + `ASEQ_FIRE`). A fifth animation segment has to widen
   the field.
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
-- `weaponAction` — a separate 9-bit predicted/networked field: action type (2),
+- `weaponAction` — a separate 10-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, and post-throw recovery. Protocol 81 requires client, server
+  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 82 requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.

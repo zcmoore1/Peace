@@ -659,6 +659,41 @@ static void TestGrenadeKeepsHolster(void) {
  for(t=0;t<12000 && !(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
  CHECK(fired[lethal]==1 && ps.weapon==WP_MACHINEGUN && !(ps.weaponAction&WA_TYPE_MASK));
 }
+/* The same holster started by Y out of the knife's recovery draw is a running
+ * drop like any other: MW2's OffHandInit keeps DROPPING's time whatever came
+ * before it, and recovering from melee and from equipment is one thing. With
+ * more or less of it left than a quick drop, a grenade neither restarts nor
+ * lengthens it, exactly as after a frag throw. Only the knife's own drops are
+ * cut (TestEquipmentCutsKnife). */
+static void TestGrenadeKeepsRecoveryHolster(void) {
+ const int guns[]={WP_SHOTGUN,WP_MACHINEGUN,WP_M40A3};
+ const int firsts[]={BUTTON_MELEE,BUTTON_LETHAL};
+ const int presses[]={BUTTON_LETHAL,BUTTON_TACTICAL};
+ int g,f,p,more,t,left;
+ for(g=0;g<ARRAY_LEN(guns);g++) for(f=0;f<ARRAY_LEN(firsts);f++)
+ for(p=0;p<ARRAY_LEN(presses);p++) for(more=0;more<2;more++) {
+  int gun=guns[g], other=gun==WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN;
+  int drop=BG_WeaponDropTime(gun), quick=BG_WeaponQuickDropTime(gun), special;
+  if(more && drop<=quick) continue;	/* the whole drop is under a quick one */
+  left=more ? (drop+quick)/2 : (drop<quick ? drop : quick)/2;
+  Ready(gun,other);
+  move.cmd.buttons=firsts[f]; Step(1); move.cmd.buttons=0;
+  for(t=0;t<12000 && !(ps.weapon==gun && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+  Run(BG_WeaponQuickRaiseTime(gun)/2);
+  CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_RAISING &&
+   (ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==((f ? WA_LETHAL : WA_MELEE)|WA_FIRED));
+  Toggle(); Step(1);
+  CHECK(ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==drop && (ps.weaponAction&WA_FIRED));
+  while(ps.weaponTime>left) Step(1);
+  special=p ? WP_FLASH : BG_LethalWeapon(&ps);
+  CHECK(ps.weaponTime==left && ps.ammo[special]>0);
+  move.cmd.buttons=presses[p]; Step(1); move.cmd.buttons=0;
+  CHECK((ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==(p ? WA_TACTICAL : WA_LETHAL) &&
+   ps.weapon==gun && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==left-1);
+  for(t=0;t<5000 && ps.weaponstate==WEAPON_DROPPING;t++) Step(1);
+  CHECK(t==left-1 && ps.weapon==special);
+ }
+}
 /* A grenade pressed while the gun is still coming up takes the quick drop
  * from where it is (MW2's OffHandInit out of a raise): only a drop already
  * running is kept. Either gun, part way through an ordinary draw. */
@@ -736,6 +771,44 @@ static void TestKnifeInBolt(void) {
   CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_MELEE);
   for(t=0;t<9000 && (ps.weaponAction&WA_TYPE_MASK);t++) Step(1);
   CHECK(fired[WP_KNIFE]==1 && !(ps.stats[STAT_UNCHAMBERED]&(1<<gun)));
+ }
+}
+/* A knife or grenade pressed in a shot's fire lock starts at once: MW2's melee
+ * and offhand checks take FIRING, so the drop is stamped on the press, on the
+ * one BG_HolsterTime. Only MW2's weapon change refuses FIRING, so a plain Y
+ * waits out the lock. A worked action cut this way stays owed and is bolted
+ * from 0 once the gun is back, as MW2's needsRechamber. Every class gun. */
+static void TestActionOutOfShot(void) {
+ const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL,0};
+ const int specials[]={WP_KNIFE,WP_FRAG,WP_FLASH,WP_NONE};
+ int i,b,t,locked;
+ for(i=0;i<BG_ClassWeaponCount();i++) for(b=0;b<ARRAY_LEN(buttons);b++) {
+  int gun=BG_ClassWeapon(i), other=gun==WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN;
+  int owed=BG_WeaponFireLength(gun)>0;
+  Ready(gun,other);
+  move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0; Step(1);
+  CHECK(fired[gun]==1 && ps.weaponstate==WEAPON_FIRING && ps.weaponTime>1);
+  CHECK(!!(ps.stats[STAT_UNCHAMBERED]&(1<<gun))==owed);
+  if(!buttons[b]) {
+   Toggle();
+   for(t=0;t<12000 && ps.weaponstate!=WEAPON_DROPPING;t++) {
+    locked=ps.weaponstate==WEAPON_FIRING && ps.weaponTime>1;
+    Step(1);
+    CHECK(!locked || ps.weaponstate!=WEAPON_DROPPING);
+   }
+   CHECK(t>1 && ps.weapon==gun && ps.weaponTime==BG_WeaponDropTime(gun));
+   continue;
+  }
+  move.cmd.buttons=buttons[b]; Step(1); move.cmd.buttons=0;
+  CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_HolsterTime(&ps));
+  CHECK(ps.weaponTime==(b ? BG_WeaponQuickDropTime(gun) : BG_RAPID_DROP_TIME));
+  for(t=0;t<12000 && (ps.weaponAction&WA_TYPE_MASK);t++) Step(1);
+  CHECK(fired[specials[b]]==1 && ps.weapon==gun);
+  CHECK(!!(ps.stats[STAT_UNCHAMBERED]&(1<<gun))==owed);
+  Step(1);
+  CHECK(owed ? ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==0 &&
+   ps.weaponTime==BG_WeaponFireLength(gun) :
+   ps.weaponstate==(ps.ammo[gun] ? WEAPON_READY : WEAPON_RELOADING));
  }
 }
 /* MW2's sprint latches (PC): a press starts it, it goes on with the button let
@@ -1079,7 +1152,7 @@ static void TestHeldThroughRespawn(void) {
 }
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
- TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeOutOfRaise(); TestYYKnifeFromRecovery(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
+ TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestYYKnifeFromRecovery(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
  TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;

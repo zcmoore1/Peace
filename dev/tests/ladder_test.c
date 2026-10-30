@@ -485,30 +485,106 @@ static void TestLanding(void) {
  * units is walked, not flown - so stairs and curbs cost no landing cut and
  * keep a landing's slowdown. Higher drops still fly. Brushes are the engine's
  * own temporary box models, so the clipping is Q3's. */
-typedef struct { vec3_t mn, mx; } stairBox_t;
+/* A box may stand for a player (its entity number, CONTENTS_BODY), for water
+ * (pointcontents only), or carry one sloped face along y. A sloped box is
+ * traced as CM_TraceThroughBrush traces a brush: its six axial planes are
+ * the bevels, so the box clip is exact. */
+typedef struct { vec3_t mn, mx, n; float d; int ent, contents; qboolean sloped; } stairBox_t;
 static stairBox_t stairBoxes[24]; static int numStairBoxes;
 static void AddStairBox(float x0, float y0, float z0, float x1, float y1, float z1) {
-    VectorSet(stairBoxes[numStairBoxes].mn, x0, y0, z0);
-    VectorSet(stairBoxes[numStairBoxes].mx, x1, y1, z1); numStairBoxes++;
+    stairBox_t *b = &stairBoxes[numStairBoxes++];
+    CHECK(numStairBoxes <= ARRAY_LEN(stairBoxes));
+    memset(b, 0, sizeof(*b)); b->ent = ENTITYNUM_WORLD; b->contents = CONTENTS_SOLID;
+    VectorSet(b->mn, x0, y0, z0); VectorSet(b->mx, x1, y1, z1);
+}
+static void AddPlayerBox(int ent, float x0, float y0, float z0, float x1, float y1, float z1) {
+    AddStairBox(x0, y0, z0, x1, y1, z1);
+    stairBoxes[numStairBoxes - 1].ent = ent; stairBoxes[numStairBoxes - 1].contents = CONTENTS_BODY;
+}
+static void AddWaterBox(float x0, float y0, float z0, float x1, float y1, float z1) {
+    AddStairBox(x0, y0, z0, x1, y1, z1); stairBoxes[numStairBoxes - 1].contents = CONTENTS_WATER;
+}
+/* Solid below the face through (y = 0, zAtY0) whose normal is (0, ny, nz). */
+static void AddSlopeBox(float x0, float y0, float z0, float x1, float y1, float z1,
+    float ny, float nz, float zAtY0) {
+    stairBox_t *b = &stairBoxes[numStairBoxes];
+    AddStairBox(x0, y0, z0, x1, y1, z1);
+    VectorSet(b->n, 0, ny, nz); VectorNormalize(b->n);
+    b->d = b->n[2] * zAtY0; b->sloped = qtrue;
+}
+static void SlopeBoxTrace(trace_t *t, const stairBox_t *b, const vec3_t start, const vec3_t mins,
+    const vec3_t maxs, const vec3_t end) {
+    float enter = -1, leave = 1; int i, k, clip = -1; qboolean startout = qfalse, getout = qfalse;
+    memset(t, 0, sizeof(*t)); t->fraction = 1;
+    for (i = 0; i < 7; i++) {
+        vec3_t n = { 0, 0, 0 }; float d, off = 0, d1, d2, f;
+        if (i < 6) { n[i >> 1] = (i & 1) ? -1 : 1; d = (i & 1) ? -b->mn[i >> 1] : b->mx[i >> 1]; }
+        else { VectorCopy(b->n, n); d = b->d; }
+        for (k = 0; k < 3; k++) off += n[k] * (n[k] < 0 ? maxs[k] : mins[k]);
+        d1 = DotProduct(start, n) - (d - off); d2 = DotProduct(end, n) - (d - off);
+        if (d2 > 0) getout = qtrue;
+        if (d1 > 0) startout = qtrue;
+        if (d1 > 0 && (d2 >= SURFACE_CLIP_EPSILON || d2 >= d1)) return;
+        if (d1 <= 0 && d2 <= 0) continue;
+        if (d1 > d2) {
+            f = (d1 - SURFACE_CLIP_EPSILON) / (d1 - d2); if (f < 0) f = 0;
+            if (f > enter) { enter = f; clip = i; VectorCopy(n, t->plane.normal); }
+        } else {
+            f = (d1 + SURFACE_CLIP_EPSILON) / (d1 - d2); if (f > 1) f = 1;
+            if (f < leave) leave = f;
+        }
+    }
+    if (!startout) { t->startsolid = qtrue; if (!getout) { t->allsolid = qtrue; t->fraction = 0; } return; }
+    if (enter < leave && enter > -1 && clip >= 0) t->fraction = enter < 0 ? 0 : enter;
 }
 static void StairTrace(trace_t *tr, const vec3_t start, const vec3_t mins, const vec3_t maxs,
     const vec3_t end, int pass, int mask) {
-    int i; trace_t t; vec3_t lo, hi; (void)pass;
+    int i, k, ent = ENTITYNUM_NONE, contents = 0; trace_t t; vec3_t lo, hi; (void)pass;
     memset(tr, 0, sizeof(*tr)); tr->fraction = 1; VectorCopy(end, tr->endpos);
     VectorCopy(mins, lo); VectorCopy(maxs, hi);
     for (i = 0; i < numStairBoxes; i++) {
-        clipHandle_t h = CM_TempBoxModel(stairBoxes[i].mn, stairBoxes[i].mx, qfalse);
-        CM_BoxTrace(&t, start, end, lo, hi, h, mask, qfalse);
+        if (!(stairBoxes[i].contents & mask)) continue;
+        if (stairBoxes[i].sloped) {
+            SlopeBoxTrace(&t, &stairBoxes[i], start, lo, hi, end);
+            for (k = 0; k < 3; k++) t.endpos[k] = start[k] + t.fraction * (end[k] - start[k]);
+        } else {
+            clipHandle_t h = CM_TempBoxModel(stairBoxes[i].mn, stairBoxes[i].mx, qfalse);
+            CM_BoxTrace(&t, start, end, lo, hi, h, mask, qfalse);
+        }
         if (t.allsolid) tr->allsolid = qtrue;
         if (t.startsolid) tr->startsolid = qtrue;
         if (t.fraction < tr->fraction) {
             qboolean a = tr->allsolid, st = tr->startsolid; *tr = t; tr->allsolid = a; tr->startsolid = st;
+            ent = stairBoxes[i].ent; contents = stairBoxes[i].contents;
         }
     }
-    tr->entityNum = (tr->fraction < 1 || tr->startsolid) ? ENTITYNUM_WORLD : ENTITYNUM_NONE;
-    if (tr->fraction < 1) tr->contents = CONTENTS_SOLID;
+    tr->entityNum = tr->fraction < 1 ? ent : tr->startsolid ? ENTITYNUM_WORLD : ENTITYNUM_NONE;
+    if (tr->fraction < 1) tr->contents = contents;
 }
-static int StairContents(const vec3_t p, int pass) { (void)p; (void)pass; return 0; }
+static int StairContents(const vec3_t p, int pass) {
+    int i, c = 0; (void)pass;
+    for (i = 0; i < numStairBoxes; i++) {
+        const stairBox_t *b = &stairBoxes[i];
+        if (p[0] >= b->mn[0] && p[0] <= b->mx[0] && p[1] >= b->mn[1] && p[1] <= b->mx[1] &&
+            p[2] >= b->mn[2] && p[2] <= b->mx[2] && (!b->sloped || DotProduct(p, b->n) <= b->d)) c |= b->contents;
+    }
+    return c;
+}
+static void StairReset(float x, float y, float z) {
+    Reset(x, y, z); move.trace = StairTrace; move.pointcontents = StairContents;
+}
+/* Step events of one think, as cgame's eye smoothing reads them: n[0] up,
+ * n[1] EV_STEP_DOWN_4, n[2] EV_STEP_DOWN_8. */
+static void StepTick(int dt, int n[3]) {
+    int i, seq = ps.eventSequence;
+    Tick(dt);
+    CHECK(ps.eventSequence - seq <= MAX_PS_EVENTS);
+    for (i = seq; i < ps.eventSequence; i++) {
+        int ev = ps.events[i & (MAX_PS_EVENTS - 1)] & ~EV_EVENT_BITS;
+        n[0] += ev >= EV_STEP_4 && ev <= EV_STEP_16;
+        n[1] += ev == EV_STEP_DOWN_4; n[2] += ev == EV_STEP_DOWN_8;
+    }
+}
 static void TestStairs(void) {
     const float risers[] = { 4, 6, 8, 16 };
     int r, k, t, lifts, cuts;
@@ -560,18 +636,19 @@ static void TestStairs(void) {
 }
 /* MW2's air step (Jump_GetStepHeight): in the air only a jump steps up, and
  * only to its own height above the take-off. A fall never climbs the ledge. */
-static void AirStep(int jumpLand, float originAbove, float ledgeAbove) {
+static void AirStepV(int jumpLand, float originAbove, float ledgeAbove, float vz, int fmove) {
     numStairBoxes = 0;
     AddStairBox(-1000, -1000, -1000, 1000, 0, 0);
     AddStairBox(-1000, 0, -1000, 1000, 1000, 100);
     Reset(0, -15.5f, 24.125f); move.trace = StairTrace; move.pointcontents = StairContents;
     ps.origin[2] = 100 + 24 - ledgeAbove;
-    ps.groundEntityNum = ENTITYNUM_NONE; VectorSet(ps.velocity, 0, 200, 0);
+    ps.groundEntityNum = ENTITYNUM_NONE; VectorSet(ps.velocity, 0, 200, vz);
     ps.jumpLand = jumpLand; ps.jumpOriginZ = ps.origin[2] - originAbove;
-    move.cmd.angles[YAW] = ANGLE2SHORT(90); move.cmd.forwardmove = 127;
+    move.cmd.angles[YAW] = ANGLE2SHORT(90); move.cmd.forwardmove = fmove;
     Tick(8);
     move.cmd.forwardmove = 0;
 }
+static void AirStep(int jumpLand, float originAbove, float ledgeAbove) { AirStepV(jumpLand, originAbove, ledgeAbove, 0, 127); }
 static void TestAirStep(void) {
     const float jumpHeight = BG_JUMP_HEIGHT;
     int t; float z;
@@ -584,7 +661,8 @@ static void TestAirStep(void) {
     AirStep(-1, jumpHeight - 15, 10);    /* inside it: 15 of 10 */
     CHECK(ps.origin[1] > -15 && ps.origin[2] > 124);
     /* Pressed along a wall off a drop, the step's push down finds nothing:
-     * only the lift is undone, never STEPSIZE_DOWN more in one move. */
+     * never STEPSIZE_DOWN more than the lift in one move. (That only the
+     * lift is undone is TestStepRules' lip: here both slides are the same.) */
     numStairBoxes = 0;
     AddStairBox(-1000, -1000, -1000, 1000, 0, 0);
     AddStairBox(-1000, 0, -1000, 1000, 1000, -200);
@@ -600,6 +678,333 @@ static void TestAirStep(void) {
     CHECK(ps.groundEntityNum == ENTITYNUM_NONE && ps.origin[1] > 15);
     move.cmd.forwardmove = 0;
 }
+/* MW2's progress check (PM_StepSlideMove 0x4b1bbe): the step is kept only if
+ * it got farther along the move than the unstepped slide, which is otherwise
+ * pushed down instead. A lifted box meeting a header the player fits under
+ * never stops the walk: along a wall under a lintel 8 above the head,
+ * standing or crouched, or down a 30 degree ramp (a step on every move) into
+ * an opening 2 to STEPSIZE above the head. */
+static void TestStepProgress(void) {
+    const int frames[] = { 8, 33, 66 };
+    const float clear[] = { 2, STEPSIZE / 2, STEPSIZE }, ny = 0.5f, nz = 0.866f;
+    int i, c, t;
+    for (i = 0; i < ARRAY_LEN(frames); i++) {
+        for (c = 0; c < 2; c++) {
+            numStairBoxes = 0;
+            AddStairBox(-1000, -1000, -1000, 2000, 1000, 0);
+            AddStairBox(-1000, PLAYER_WIDTH + 1, -1000, 2000, 1000, 1000);
+            AddStairBox(100, -1000, -MINS_Z + (c ? CROUCH_HEIGHT : DEFAULT_HEIGHT) + 8, 2000, 1000, 1000);
+            StairReset(0, 0, 24.125f);
+            move.cmd.angles[YAW] = ANGLE2SHORT(20); move.cmd.forwardmove = 127; move.cmd.upmove = c ? -127 : 0;
+            for (t = 0; t < 3000 / frames[i]; t++) Tick(frames[i]);
+            CHECK(ps.origin[0] > 100 + PLAYER_WIDTH && ps.groundEntityNum != ENTITYNUM_NONE);
+        }
+        move.cmd.upmove = 0;
+        for (c = 0; c < ARRAY_LEN(clear); c++) {
+            /* the head where the front face meets the opening at y = 100 */
+            float head = -MINS_Z + DEFAULT_HEIGHT - ny / nz * (100 - 2 * PLAYER_WIDTH);
+            numStairBoxes = 0;
+            AddSlopeBox(-1000, -1000, -2000, 1000, 2000, 2000, ny, nz, 0);
+            AddStairBox(-1000, 100, head + clear[c], 1000, 2000, 3000);
+            StairReset(0, -100, -MINS_Z + ny / nz * (100 + PLAYER_WIDTH) + 1);
+            move.cmd.angles[YAW] = ANGLE2SHORT(90); move.cmd.forwardmove = 127;
+            for (t = 0; t < 2000 / frames[i]; t++) Tick(frames[i]);
+            CHECK(ps.origin[1] > 200 && ps.groundEntityNum != ENTITYNUM_NONE);
+        }
+    }
+    move.cmd.forwardmove = 0;
+}
+/* MW2's Jump_IsPlayerAboveMax: a jump's step never ends at its own height
+ * above the take-off, so at no frame rate does a run-up jump end on a ledge
+ * its arc does not reach. Jump_ClampVelocity: what the step gains comes off
+ * the rise left, so a step onto ground rising away (a walkable slope) keeps
+ * no more upward speed than takes it to BG_JUMP_HEIGHT. */
+static void TestJumpStepCap(void) {
+    const int frames[] = { 8, 16, 33, 66 };
+    const float over[] = { 0.25f, 1, 2 }, feet = 26;
+    int i, h, t; float d, room, peak, top;
+    for (i = 0; i < ARRAY_LEN(frames); i++) {
+        /* What the jump's own arc reaches at this frame rate (TestLanding
+         * pins it); a ledge above that is reached only by a step. */
+        numStairBoxes = 0;
+        AddStairBox(-1000, -2000, -1000, 1000, 2000, 0);
+        StairReset(0, 0, 24.125f); Tick(frames[i]);
+        move.cmd.upmove = 127; Tick(frames[i]); move.cmd.upmove = 0;
+        for (t = 0, peak = 0; t < 2000 / frames[i] && ps.groundEntityNum == ENTITYNUM_NONE; t++) {
+            Tick(frames[i]); if (ps.origin[2] - ps.jumpOriginZ > peak) peak = ps.origin[2] - ps.jumpOriginZ;
+        }
+        CHECK(peak > BG_JUMP_HEIGHT - 1 && peak < BG_JUMP_HEIGHT + 3);
+        if (peak < BG_JUMP_HEIGHT) peak = BG_JUMP_HEIGHT;
+        /* full speed at the take-off, the jump a quarter unit later each run */
+        for (h = 0; h < ARRAY_LEN(over); h++) {
+            for (d = 0; d < 160; d += 0.25f) {
+                top = 24.125f + MINS_Z + peak + over[h];
+                numStairBoxes = 0;
+                AddStairBox(-1000, -2000, -1000, 1000, 0, 0);
+                AddStairBox(-1000, 0, -1000, 1000, 1000, top);
+                StairReset(0, -d - PLAYER_WIDTH - 1, 24.125f); ps.velocity[1] = ps.speed;
+                move.cmd.angles[YAW] = ANGLE2SHORT(90); move.cmd.forwardmove = 127;
+                Tick(frames[i]); CHECK(ps.groundEntityNum != ENTITYNUM_NONE);
+                move.cmd.upmove = 127; Tick(frames[i]); move.cmd.upmove = 0;
+                CHECK(ps.jumpLand == -1);
+                for (t = 0; t < 2000 / frames[i] && ps.groundEntityNum == ENTITYNUM_NONE; t++) Tick(frames[i]);
+                CHECK(ps.groundEntityNum != ENTITYNUM_NONE && ps.origin[2] < top);
+            }
+        }
+    }
+    numStairBoxes = 0;
+    AddStairBox(-1000, -1000, -1000, 1000, 0, 0);
+    AddSlopeBox(-1000, 0, -1000, 1000, 1000, 2000, -0.6f, 0.8f, 30);
+    StairReset(0, -15.5f, 24.125f + feet);
+    ps.jumpLand = -1; ps.jumpOriginZ = 24.125f; ps.jumpWait = BG_JUMP_WAIT; ps.pm_flags |= PMF_JUMP_HELD;
+    VectorSet(ps.velocity, 0, ps.speed, sqrt(BG_JumpVelocity(&ps) * BG_JumpVelocity(&ps) - 2 * ps.gravity * feet));
+    move.cmd.angles[YAW] = ANGLE2SHORT(90); move.cmd.forwardmove = 0;
+    Tick(8);
+    room = ps.jumpOriginZ + BG_JUMP_HEIGHT - ps.origin[2];
+    CHECK(ps.origin[1] > -15 && room > 0 && ps.velocity[2] > 0);
+    CHECK(ps.velocity[2] <= sqrt(2 * ps.gravity * room) + 1);
+}
+/* MW2's step slowdown (PM_StepSlideMove 0x4b1d19): a walked step keeps
+ * 0.2 + 0.8 * (1 - height / STEPSIZE) of the speed, up a stair or down one;
+ * flat ground keeps all of it. */
+static void TestStepSlowdown(void) {
+    const int frames[] = { 8, 33 };
+    const float riser = 8;
+    int i, up, k, t; float z;
+    for (i = 0; i < ARRAY_LEN(frames); i++) {
+        for (up = 0; up < 2; up++) {
+            float r = up ? riser : -riser;
+            numStairBoxes = 0;
+            AddStairBox(-1000, -1000, -1000, 1000, 0, 0);
+            for (k = 1; k <= 6; k++) AddStairBox(-1000, 16 * (k - 1), -1000, 1000, 16 * k, r * k);
+            AddStairBox(-1000, 96, -1000, 1000, 2000, r * 6);
+            StairReset(0, -200, 24.125f);
+            move.cmd.angles[YAW] = ANGLE2SHORT(90); move.cmd.forwardmove = 127;
+            for (t = 0; t < 400 && ps.origin[1] < -100; t++) Tick(frames[i]);
+            CHECK(ps.groundEntityNum != ENTITYNUM_NONE && fabs(FlatSpeed() - ps.speed) < 1);
+            for (t = 0; t < 400; t++) {
+                z = ps.origin[2]; Tick(frames[i]);
+                if (fabs(ps.origin[2] - z) > 0.5f) break;
+                CHECK(fabs(FlatSpeed() - ps.speed) < 1);
+            }
+            CHECK(fabs(ps.origin[2] - z - r) < 0.5f && ps.groundEntityNum != ENTITYNUM_NONE);
+            CHECK(fabs(FlatSpeed() - ps.speed * (STEP_SPEED_KEEP + (1 - STEP_SPEED_KEEP) * (1 - riser / STEPSIZE))) < 1);
+        }
+    }
+    move.cmd.forwardmove = 0;
+}
+/* MW2 has neither mode, so the step's push down must hold neither to the
+ * ground: a water jump from a pool's floor leaves it as a jump does, and
+ * flight takes off from the floor with up held. */
+static void TestWaterJumpAndFlight(void) {
+    const int frames[] = { 8, 16, 33, 50 };
+    int i, t, jumped;
+    for (i = 0; i < ARRAY_LEN(frames); i++) {
+        numStairBoxes = 0;
+        AddStairBox(-1000, -1000, -1000, 16, 1000, 0);
+        AddStairBox(16, -1000, -1000, 1000, 1000, 36);
+        AddWaterBox(-1000, -1000, -1000, 16, 1000, 40);
+        StairReset(-100, 0, 24.125f); move.cmd.forwardmove = 127;
+        for (t = jumped = 0; t < 3000 / frames[i]; t++) {
+            Tick(frames[i]);
+            if (ps.pm_flags & PMF_TIME_WATERJUMP) jumped++;
+            else if (!jumped) CHECK(ps.groundEntityNum != ENTITYNUM_NONE && ps.origin[2] < 24.25f);
+        }
+        CHECK(jumped > 0);
+        CHECK(ps.origin[0] > 16 + PLAYER_WIDTH && ps.origin[2] > 36 - MINS_Z && ps.groundEntityNum != ENTITYNUM_NONE);
+        move.cmd.forwardmove = 0;
+        numStairBoxes = 0;
+        AddStairBox(-1000, -1000, -1000, 1000, 1000, 0);
+        StairReset(0, 0, 24.125f); Tick(frames[i]);
+        CHECK(ps.groundEntityNum != ENTITYNUM_NONE);
+        ps.powerups[PW_FLIGHT] = 1; move.cmd.upmove = 127;
+        Run(1000, frames[i]);
+        CHECK(ps.origin[2] > 24.125f + STEPSIZE && ps.velocity[2] > 0 && ps.groundEntityNum == ENTITYNUM_NONE);
+        move.cmd.upmove = 0;
+    }
+}
+/* MW2's PM_ProjectVelocity on the step's landing: a jump that steps onto a
+ * flat ledge while still rising lays the rise along the ground, keeping the
+ * speed's length; a falling one keeps its ground speed. */
+static void TestStepProjection(void) {
+    const float vz = 120;
+    float rise;
+    AirStepV(-1, 4, 10, vz, 0);
+    rise = vz - ps.gravity * 8 * 0.001f;    /* what the 8ms think's gravity leaves */
+    CHECK(ps.origin[1] > -15 && ps.origin[2] > 124 && ps.velocity[2] == 0);
+    CHECK(fabs(FlatSpeed() - sqrt(200 * 200 + rise * rise)) < 1);
+    AirStepV(-1, 4, 10, -vz, 0);
+    CHECK(ps.origin[1] > -15 && ps.origin[2] > 124 && fabs(ps.velocity[2]) < 1 && fabs(FlatSpeed() - 200) < 1);
+}
+/* MW2's PM_GroundTrace: another player is never ground. Dropped onto one's
+ * head the player rests there in the air (no landing), and a jump press
+ * there does not jump. */
+static void TestPlayerNotGround(void) {
+    const int frames[] = { 8, 16, 33 };
+    int i, t;
+    for (i = 0; i < ARRAY_LEN(frames); i++) {
+        numStairBoxes = 0;
+        AddStairBox(-1000, -1000, -1000, 1000, 1000, 0);
+        AddPlayerBox(1, -PLAYER_WIDTH, -PLAYER_WIDTH, 0, PLAYER_WIDTH, PLAYER_WIDTH, DEFAULT_HEIGHT - MINS_Z);
+        StairReset(0, 0, 200);
+        for (t = 0; t < 2000 / frames[i]; t++) { Tick(frames[i]); CHECK(ps.groundEntityNum == ENTITYNUM_NONE); }
+        CHECK(fabs(ps.origin[2] - (DEFAULT_HEIGHT - 2 * MINS_Z)) < 1);
+        move.cmd.upmove = 127;
+        for (t = 0; t < 500 / frames[i]; t++) {
+            Tick(frames[i]);
+            CHECK(ps.groundEntityNum == ENTITYNUM_NONE && ps.jumpLand != -1 && ps.velocity[2] <= 0);
+        }
+        move.cmd.upmove = 0;
+    }
+}
+/* MW2's Jump_PushOffLadder: a jump off a ladder keeps BG_LADDER_JUMP_SCALE of
+ * a jump's take-off speed, so it rises that squared of BG_JUMP_HEIGHT. */
+static void TestLadderJumpHeight(int dt) {
+    const float rise = BG_JUMP_HEIGHT * BG_LADDER_JUMP_SCALE * BG_LADDER_JUMP_SCALE;
+    float v, top; int t;
+    Reset(111, 0, 180);
+    v = BG_JumpVelocity(&ps) * BG_LADDER_JUMP_SCALE;
+    Tick(dt); CHECK(Attached());
+    Tick(dt);
+    move.cmd.upmove = 127; Tick(dt); move.cmd.upmove = 0;
+    CHECK(!Attached() && ps.jumpLand == -1);
+    CHECK(ps.velocity[2] <= v + 0.5f && ps.velocity[2] >= v - ps.gravity * dt * 0.001f - 1);
+    for (t = 0, top = ps.origin[2]; t < 2000 / dt && ps.velocity[2] > 0; t++) { Tick(dt); if (ps.origin[2] > top) top = ps.origin[2]; }
+    CHECK(fabs(top - ps.jumpOriginZ - rise) < 3);  /* the 8ms rounding adds what TestLanding allows */
+}
+/* MW2's Jump_Start ends any running timer (pm_time = 0): a hop right after a
+ * landing fast enough to start Q3's landing timer has no timer left, so a
+ * ceiling clips it at once instead of holding it pressed under it. */
+static void TestJumpEndsTimers(void) {
+    const int frames[] = { 8, 16 };
+    const float ceiling = -MINS_Z + DEFAULT_HEIGHT + 12;
+    int i, t, pressed;
+    for (i = 0; i < ARRAY_LEN(frames); i++) {
+        numStairBoxes = 0;
+        AddStairBox(-1000, -1000, -1000, 1000, 1000, 0);
+        StairReset(0, 0, 24.125f + BG_JUMP_HEIGHT);
+        for (t = 0; t < 200 && ps.groundEntityNum == ENTITYNUM_NONE; t++) Tick(frames[i]);
+        CHECK(ps.groundEntityNum != ENTITYNUM_NONE && (ps.pm_flags & PMF_TIME_LAND) && ps.pm_time > 0 && ps.jumpWait == 0);
+        AddStairBox(-1000, -1000, ceiling, 1000, 1000, 1000);
+        move.cmd.upmove = 127; Tick(frames[i]); move.cmd.upmove = 0;
+        CHECK(ps.groundEntityNum == ENTITYNUM_NONE && ps.jumpLand == -1);
+        CHECK(!(ps.pm_flags & PMF_ALL_TIMES) && ps.pm_time == 0);
+        for (t = pressed = 0; t < 2000 / frames[i] && ps.groundEntityNum == ENTITYNUM_NONE; t++) {
+            Tick(frames[i]);
+            pressed += ps.origin[2] + DEFAULT_HEIGHT > ceiling - 0.5f && ps.velocity[2] > 0;
+        }
+        CHECK(pressed == 0 && ps.groundEntityNum != ENTITYNUM_NONE);
+    }
+}
+/* MW2's Jump_Check: no jump from a stance that cannot stand (crouched under a
+ * ceiling too low to stand under). The press is spent: walking out from
+ * under it still holding jump never jumps; a fresh press does. */
+static void TestCrouchedJump(void) {
+    int t;
+    numStairBoxes = 0;
+    AddStairBox(-1000, -1000, -1000, 1000, 1000, 0);
+    AddStairBox(-1000, -1000, -MINS_Z + CROUCH_HEIGHT + 8, 100, 1000, 1000);
+    StairReset(0, 0, 24.125f); move.cmd.upmove = -127;
+    for (t = 0; t < 60; t++) Tick(8);
+    CHECK((ps.pm_flags & PMF_DUCKED) && ps.groundEntityNum != ENTITYNUM_NONE);
+    move.cmd.upmove = 127; Tick(8);
+    CHECK((ps.pm_flags & PMF_DUCKED) && (ps.pm_flags & PMF_JUMP_HELD));
+    CHECK(ps.groundEntityNum != ENTITYNUM_NONE && ps.jumpLand != -1 && ps.velocity[2] <= 0);
+    move.cmd.forwardmove = 127;
+    for (t = 0; t < 600 && ps.origin[0] < 100 + PLAYER_WIDTH + 32; t++) { Tick(8); CHECK(ps.groundEntityNum != ENTITYNUM_NONE); }
+    CHECK(!(ps.pm_flags & PMF_DUCKED) && ps.origin[0] >= 100 + PLAYER_WIDTH + 32);
+    move.cmd.upmove = 0; Tick(8); move.cmd.upmove = 127; Tick(8); move.cmd.upmove = move.cmd.forwardmove = 0;
+    CHECK(ps.groundEntityNum == ENTITYNUM_NONE && ps.jumpLand == -1 && ps.velocity[2] > 0);
+}
+static void WalkY(float yaw) { move.cmd.angles[YAW] = ANGLE2SHORT(yaw); move.cmd.forwardmove = 127; }
+/* MW2's step rules (PM_StepSlideMove 0x4b1810) one at a time, each against
+ * the mutation it rules out. */
+static void TestStepRules(void) {
+    const int frames[] = { 8, 33, 66 };
+    int t, i, r, n[3];
+    /* A push-down that finds nothing undoes only the lift (0x4b1ba1), never
+     * the whole stepped move: met fast, a thin lip on a cliff's edge is
+     * cleared. */
+    numStairBoxes = 0;
+    AddStairBox(-1000, -1000, -1000, 1000, 0, 0);
+    AddStairBox(-1000, 0, -1000, 1000, 4, 10);
+    AddStairBox(-1000, 4, -1000, 1000, 1000, -500);
+    StairReset(0, -15.875f, 24.125f); WalkY(90); move.cmd.forwardmove = 0;
+    Tick(8); CHECK(ps.groundEntityNum != ENTITYNUM_NONE);
+    move.cmd.forwardmove = 127; VectorSet(ps.velocity, 0, 2000, 0); Tick(50);
+    CHECK(ps.origin[1] > 4 + PLAYER_WIDTH && fabs(ps.origin[2] - 24.125f) < 0.01f);
+    /* Never onto a player: walking off a curb above one does not step down
+     * onto it, and one low enough to step onto blocks instead. */
+    numStairBoxes = 0;
+    AddStairBox(-1000, -1000, -1000, 1000, 0, 0);
+    AddPlayerBox(3, -1000, 0, -1000, 1000, 1000, -8);
+    StairReset(0, -20, 24.125f); WalkY(90);
+    for (t = 0; t < 100 && ps.origin[1] < PLAYER_WIDTH; t++) Tick(8);
+    CHECK(ps.origin[1] >= PLAYER_WIDTH && ps.groundEntityNum != 3 && ps.origin[2] > 24);
+    numStairBoxes = 0;
+    AddStairBox(-1000, -1000, -1000, 1000, 1000, 0);
+    AddPlayerBox(3, -1000, 0, -1000, 1000, 30, 10);
+    StairReset(0, -20, 24.125f); WalkY(90);
+    for (t = 0; t < 30; t++) Tick(8);
+    CHECK(ps.origin[1] < -PLAYER_WIDTH + 1 && ps.origin[2] < 25);
+    /* A ground step lands on ground as steep as STEP_LAND_NORMAL: off a curb
+     * onto a 0.5 slope, and up onto a block whose top is one. */
+    numStairBoxes = 0;
+    AddStairBox(-1000, -1000, -1000, 1000, 0, 0);
+    AddSlopeBox(-1000, 0, -1000, 1000, 1000, -2, 0.866f, 0.5f, -2);
+    StairReset(0, -20, 24.125f); WalkY(90);
+    for (t = 0; t < 100 && ps.origin[1] < PLAYER_WIDTH; t++) Tick(8);
+    CHECK(ps.origin[1] >= PLAYER_WIDTH && ps.origin[2] < 24);
+    numStairBoxes = 0;
+    AddStairBox(-1000, -1000, -1000, 1000, 1000, 0);
+    AddSlopeBox(-1000, 0, -1000, 1000, 1000, 40, -0.866f, 0.5f, 10);
+    StairReset(0, -20, 24.125f); WalkY(90);
+    for (t = 0; t < 20; t++) Tick(8);
+    CHECK(ps.origin[1] > -PLAYER_WIDTH && ps.origin[2] > 34);
+    /* A jump's step lands only on walkable ground: not onto that slope. */
+    numStairBoxes = 0;
+    AddStairBox(-1000, -1000, -1000, 1000, 0, 0);
+    AddSlopeBox(-1000, 0, -1000, 1000, 1000, 140, -0.866f, 0.5f, 100);
+    StairReset(0, -15.5f, 124 - 10); WalkY(90);
+    ps.groundEntityNum = ENTITYNUM_NONE; VectorSet(ps.velocity, 0, 200, 0);
+    ps.jumpLand = -1; ps.jumpOriginZ = ps.origin[2] - 4;
+    Tick(8);
+    CHECK(ps.origin[1] < -PLAYER_WIDTH && ps.origin[2] < 115);
+    /* Step events measure what the step added to the unstepped slide
+     * (0x4b1d4a), so a ramp is never a stair, at any frame rate. */
+    for (i = 0; i < ARRAY_LEN(frames); i++) {
+        numStairBoxes = 0;
+        AddSlopeBox(-1000, -1000, -2000, 1000, 1000, 2000, -0.75f, 1, 0);
+        StairReset(0, 0, 24.125f + 11.25f + 0.5f); WalkY(90); move.cmd.forwardmove = 0;
+        for (t = 0; t < 10 && ps.groundEntityNum == ENTITYNUM_NONE; t++) Tick(8);
+        CHECK(ps.groundEntityNum != ENTITYNUM_NONE);
+        move.cmd.forwardmove = 127; n[0] = n[1] = n[2] = 0;
+        /* ...and costs no speed: only a walked step does (|dz| over 0.5). */
+        for (t = 0; t < 1000 / frames[i]; t++) {
+            StepTick(frames[i], n);
+            if (t * frames[i] >= 500) CHECK(fabs(VectorLength(ps.velocity) - ps.speed) < 1);
+        }
+        move.cmd.angles[YAW] = ANGLE2SHORT(-90);
+        for (t = 0; t < 1000 / frames[i]; t++) {
+            StepTick(frames[i], n);
+            if (t * frames[i] >= 500) CHECK(fabs(VectorLength(ps.velocity) - ps.speed) < 1);
+        }
+        CHECK(ps.groundEntityNum != ENTITYNUM_NONE && ps.origin[1] < 100 && !n[0] && !n[1] && !n[2]);
+    }
+    /* Walking down a 4- or 8-unit stair smooths the eye down each riser with
+     * its own event, EV_STEP_DOWN_4 or EV_STEP_DOWN_8. */
+    for (r = 4; r <= 8; r += 4) {
+        numStairBoxes = 0;
+        AddStairBox(-1000, -1000, -1000, 1000, 0, 0);
+        for (t = 1; t <= 6; t++) AddStairBox(-1000, 16 * (t - 1), -1000, 1000, 16 * t, -r * t);
+        AddStairBox(-1000, 96, -1000, 1000, 2000, -r * 6);
+        StairReset(0, -60, 24.125f); WalkY(90);
+        n[0] = n[1] = n[2] = 0;
+        for (t = 0; t < 300 && ps.origin[1] < 130; t++) StepTick(8, n);
+        CHECK(!n[0] && n[r == 4 ? 1 : 2] == 6 && n[r == 4 ? 2 : 1] == 0 && ps.groundEntityNum != ENTITYNUM_NONE);
+    }
+    move.cmd.forwardmove = 0;
+}
 int main(void) {
     int checksum, i;
     const int steps[] = {8, 16, 33, 66};
@@ -609,6 +1014,7 @@ int main(void) {
         TestGrabAndHang(steps[i]);
         TestTraverseAndExit(steps[i]);
         TestJump(steps[i]);
+        TestLadderJumpHeight(steps[i]);
         TestBottomExit(steps[i]);
         TestPredictionReplay(steps[i]);
     }
@@ -619,7 +1025,16 @@ int main(void) {
     TestLanding();
     TestStairs();
     TestAirStep();
+    TestStepProgress();
+    TestJumpStepCap();
+    TestStepSlowdown();
+    TestWaterJumpAndFlight();
+    TestStepProjection();
+    TestPlayerNotGround();
+    TestJumpEndsTimers();
+    TestCrouchedJump();
+    TestStepRules();
     for (i = 0; i < numAllocations; i++) free(allocations[i]);
-    printf("PASS: ladder BSP collision, momentum, traversal, detach, yaw, weapon ordering and prediction replay (%d checks).\n", checks);
+    printf("PASS: ladder BSP collision, momentum, traversal, detach, yaw, weapon ordering, prediction replay, steps and jumps (%d checks).\n", checks);
     return 0;
 }

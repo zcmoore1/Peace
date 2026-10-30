@@ -159,7 +159,11 @@ source for MW2 behaviour; the owner rejects it.
   knife pressed during a swap, a draw or a quick action's return is lost -
   except on the command YY returns the drop to the held gun, as MW2 readies
   the gun before its knife. For the same reason Y and the knife on one
-  command is the swap: its holster starts and the knife is lost. Whatever gun is out, it goes down for the
+  command is the swap: its holster starts and the knife is lost. A knife or
+  grenade pressed during a gun's fire lock starts at once (MW2's melee and
+  offhand checks take FIRING; only a Y swap waits out the shot,
+  `PM_WeaponChangeOpen`), and a pump or bolt still owed is redone from 0 when
+  the gun is back. Whatever gun is out, it goes down for the
   knife in the one universal `BG_RAPID_DROP_TIME` (50ms, the minimum swap), not
   its own holster. `BG_HolsterTime` is the single rule — gun's own
   drop, quick drop, rapid, or the ladder's — used by pmove to stamp and by
@@ -246,21 +250,34 @@ source for MW2 behaviour; the owner rejects it.
   landing timer in one (0 none, -1 jumped and not landed, >0 ms of slowdown),
   `ps.jumpWait` its 500ms between jumps, `ps.jumpOriginZ` the take-off height.
   A landing from `BG_HARD_LAND_HEIGHT` (12) or more keeps 0.67 of all the
-  velocity (`PM_CrashLand`); the first walking think after a jump lands keeps
+  velocity (`PM_CrashLand`) and raises the landing event (sound and view dip),
+  so every jump's landing does; the first walking think after a jump lands keeps
   0.65 more and starts 1800ms of slowdown (0.5 and 1200ms if it landed 18 units
   above the take-off). During it the ground friction and the squared speed of
   a jump are both scaled by `BG_JumpLandFactor` (2.5 falling to 1). A jump
   inside `BG_JUMP_WAIT` is refused and its press spent, and so is a press made
   in the air (MW2's Jump_Check reads the command before): holding it through
-  the landing never jumps. A ladder, deep water
-  or ground too steep to walk on clears the state; walking off a ledge clears
-  a pending slowdown. Stairs and curbs are not ledges: `PM_StepSlideMove` is
-  MW2's, pushing every ground move down up to `STEPSIZE_DOWN` (9) past its
-  step, so walking down them never lands (`EV_STEP_DOWN_4/8` smooth the eye).
-  In the air only a jump steps up, and only to `BG_JUMP_HEIGHT` above
-  `jumpOriginZ` (MW2's Jump_GetStepHeight): a fall never climbs a lip, and a
-  jump never climbs a ledge it cannot clear. Peace has no mantle. All three
-  are durations or positions, never clocks, so a replay rebases none.
+  the landing never jumps. So is one crouched under a ceiling too low to
+  stand. A jump ends any running pm_time (Jump_Start), so a landing's timer
+  never stops it clipping. A ladder jump-off keeps `BG_LADDER_JUMP_SCALE`
+  (0.75) of the take-off speed (Jump_PushOffLadder). Another player is never
+  ground (MW2's PM_GroundTrace): no landing on heads, no jumping off them. A
+  ladder or ground too steep to walk on clears the state; walking off a
+  ledge clears a pending slowdown. A jump that comes down in deep water ends
+  there (`PM_WaterMove`), but a slowdown already running runs on through
+  water: MW2 has no water mover. Stairs and curbs are not ledges:
+  `PM_StepSlideMove` is MW2's whole function. Every ground move is pushed
+  down up to `STEPSIZE_DOWN` (9) past its step, so walking down them never
+  lands (`EV_STEP_DOWN_4/8` smooth the eye). A step is kept only if it got
+  farther along the move than the unstepped slide; a walked step costs speed
+  by its height (`STEP_SPEED_KEEP` for a full one); one taken while rising
+  turns the rise into speed along the ground (`PM_ProjectVelocity`). In the
+  air only a jump steps up, and only to `BG_JUMP_HEIGHT` above `jumpOriginZ`
+  (Jump_GetStepHeight, Jump_IsPlayerAboveMax, Jump_ClampVelocity): a fall
+  never climbs a lip, and a jump never climbs a ledge it cannot clear. A
+  water jump and flight leave the ground before the step move. Peace has no
+  mantle. All three are durations or positions, never clocks, so a replay
+  rebases none.
   MW2's damaging-landing stun is not ported (Peace keeps Q3's fall damage).
 - **Air control is MW2's.** `PM_AirMove` uses `PM_AirScale`, MW2's air move
   speed: base speed over forward/right only, slowed by `pm_adsScale` while

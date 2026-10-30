@@ -25,6 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	MIN_WALK_NORMAL	0.7f		// can't walk on very steep slopes
 
 #define	STEPSIZE		18
+#define	STEP_SPEED_KEEP	0.2f	// MW2: a walked step as high as STEPSIZE keeps this much speed
 
 #define	TIMER_LAND		130
 #define	TIMER_GESTURE	(34*66+50)

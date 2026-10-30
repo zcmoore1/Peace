@@ -317,15 +317,16 @@ static void FlowTrace(trace_t *t,const vec3_t a,const vec3_t b,const vec3_t c,co
  (void)a;(void)b;(void)c;(void)e;(void)f;
  memset(t,0,sizeof(*t)); t->fraction=1; VectorCopy(d,t->endpos); t->entityNum=ENTITYNUM_NONE;
 }
-static void FlowBegin(void) {
+static void FlowBeginWith(int secondary) {
  bg_class_t cl=*BG_Class(0);
  memset(&flowPs,0,sizeof(flowPs)); memset(&flow,0,sizeof(flow));
- cl.slot[0]=WP_MACHINEGUN; cl.slot[1]=WP_SHOTGUN; BG_ApplyClass(&flowPs,&cl);
+ cl.slot[0]=WP_MACHINEGUN; cl.slot[1]=secondary; BG_ApplyClass(&flowPs,&cl);
  flowPs.stats[STAT_HEALTH]=100; flowPs.pm_type=PM_NORMAL;
  flowPs.weapon=WP_MACHINEGUN; flowPs.weaponstate=WEAPON_READY;
  flow.ps=&flowPs; flow.trace=FlowTrace; flow.cmd.weapon=BG_SLOT_COMMAND+SLOT_PRIMARY;
  CG_WeapAnim_Reset();
 }
+static void FlowBegin(void) { FlowBeginWith(WP_SHOTGUN); }
 /* One 8ms command, then one rendered frame of the real presentation. */
 static void FlowStep(void) {
  playerState_t before;
@@ -476,6 +477,133 @@ static void TestKeptHolster(weapAnimDef_t *def) {
  }
  CHECK(last>=drop*.95f);
 }
+/* YY flows, never snaps (owner's rule): a lock pmove restamps LOWER inside a
+ * running holster (a ladder grab; Y back with the knife on one command, READY then
+ * the rapid drop in one think) moves the drop or reversed draw on by one frame
+ * of the old fit, then runs to the new lock's end, never ahead to its pose. */
+static void TestRestampLower(weapAnimDef_t *def,int gun) {
+ animLayer_t *move=&cg_weapLayers[LAYER_MOVE];
+ float len,step,last;
+ int reversed,knife,t;
+ for(reversed=0;reversed<2;reversed++) for(knife=0;knife<2;knife++) {
+  FlowBeginWith(gun); FlowSlot(SLOT_SECONDARY);
+  for(t=0;t<10000 && !(flowPs.weapon==gun && (reversed ? flowPs.weaponstate==WEAPON_RAISING &&
+   flowPs.weaponTime<=BG_WeaponDrawTime(&flowPs)/2 : flowPs.weaponstate==WEAPON_READY && move->weight==0));t+=8) FlowStep();
+  FlowSlot(SLOT_PRIMARY); FlowStep();
+  while(flowPs.weaponstate==WEAPON_DROPPING && flowPs.weaponTime>BG_WeaponDropTime(gun)*(reversed ? 3 : 2)/4) FlowStep();
+  CHECK(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_DROPPING && BG_HolsterTime(&flowPs)==BG_WeaponDropTime(gun));
+  CHECK(move->fit==(reversed ? MOVE_FIT_REVERSE : MOVE_FIT_FORWARD) && move->weight==1);
+  len=CG_WeapAnim_ClipLength(def,move->clip); step=8*len/BG_WeaponDropTime(gun)*1.02f+.01f; last=move->time;
+  if(knife) { FlowSlot(SLOT_SECONDARY); flow.cmd.buttons=BUTTON_MELEE; }
+  else flowPs.stats[STAT_LADDER]|=LADDER_ATTACHED;	/* PM_CheckLadder's grab, ahead of PM_Weapon */
+  FlowStep(); flow.cmd.buttons=0;
+  CHECK(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_DROPPING &&
+   BG_HolsterTime(&flowPs)==(knife ? BG_RAPID_DROP_TIME : BG_LADDER_DROP_TIME));
+  if(knife) CHECK((flowPs.weaponAction&WA_TYPE_MASK)==WA_MELEE);
+  CHECK(fabs(move->time-last)<=step && (reversed ? move->time<=last+.01f : move->time>=last-.01f));
+  while(flowPs.weaponstate==WEAPON_DROPPING && flowPs.weapon==gun) {
+   last=move->time; FlowStep();
+   if(flowPs.weaponstate==WEAPON_DROPPING && flowPs.weapon==gun)
+    CHECK(reversed ? move->time<=last+.01f : move->time>=last-.01f);
+  }
+  CHECK(reversed ? last<=len*.1f : last>=len*.9f);
+ }
+}
+/* A holster keeps its sprint source through its whole duration. A grenade
+ * pressed part way through leaves pmove running that same drop (MW2's
+ * OffHandInit keeps a running drop), so the retained picture stays at full
+ * weight until the weapon changes; it is never cut to idle mid-holster. */
+static void TestRetainedKeptHolster(void) {
+ animLayer_t *retained=&cg_weapLayers[LAYER_RETAINED];
+ int quick,t,clip;
+ for(quick=0;quick<2;quick++) {
+  FlowBegin(); FlowSlot(SLOT_SECONDARY);
+  for(t=0;t<10000 && !(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_READY &&
+   cg_weapLayers[LAYER_MOVE].weight==0);t+=8) FlowStep();
+  flowPs.pm_flags|=PMF_SPRINTING;	/* PM_CheckSprint's flag, ahead of PM_Weapon */
+  for(t=0;t<10000 && flowPs.weaponstate!=WEAPON_SPRINTING;t+=8) FlowStep();
+  FlowSlot(SLOT_PRIMARY); FlowStep();
+  CHECK(flowPs.weaponstate==WEAPON_DROPPING && CG_WeapAnim_HoldsDrop()); clip=retained->clip;
+  /* Half the gun's own holster left, or less than a quick drop (the fit hands over). */
+  while(flowPs.weaponstate==WEAPON_DROPPING && flowPs.weaponTime>(quick ?
+   BG_WeaponQuickDropTime(WP_SHOTGUN)*3/4 : BG_WeaponDropTime(WP_SHOTGUN)/2)) FlowStep();
+  CHECK(CG_WeapAnim_HoldsDrop() && retained->weight==1);
+  flowPs.pm_flags&=~PMF_SPRINTING;	/* PM_CheckSprint ends sprint for the grenade */
+  flow.cmd.buttons=BUTTON_LETHAL; FlowStep(); flow.cmd.buttons=0;
+  CHECK((flowPs.weaponAction&WA_TYPE_MASK)==WA_LETHAL && flowPs.weapon==WP_SHOTGUN);
+  while(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_DROPPING) {
+   CHECK(CG_WeapAnim_HoldsDrop() && retained->clip==clip && retained->weight==1 && retained->targetWeight==1);
+   CHECK(cg_weapLayers[LAYER_MOVE].weight==0 && cg_weapLayers[LAYER_SPRINT].weight==0);
+   FlowStep();
+  }
+  CHECK(BG_IsActionWeapon(flowPs.weapon) && !CG_WeapAnim_HoldsDrop() && retained->weight==0);
+ }
+}
+/* Every drop starts from the pose on screen (owner's rule). A spectator, killcam
+ * or demo sees one state per snapshot, so YY then Y in one snapshot reaches the
+ * picture as the same drop restamped higher at the same BG_HolsterTime: it
+ * carries on from the pose, never from frame 0, and still lands with the lock. */
+static void TestSnapshotRestamp(weapAnimDef_t *def) {
+ animLayer_t *move=&cg_weapLayers[LAYER_MOVE];
+ float drop=CG_WeapAnim_ClipLength(def,WANIM_DROP),last;
+ int t,lock,duration;
+ FlowBegin(); FlowSlot(SLOT_SECONDARY);
+ for(t=0;t<10000 && !(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_READY && move->weight==0);t+=8) FlowStep();
+ FlowSlot(SLOT_PRIMARY); FlowStep();
+ while(flowPs.weaponstate==WEAPON_DROPPING && flowPs.weaponTime>BG_WeaponDropTime(WP_SHOTGUN)/2) FlowStep();
+ CHECK(flowPs.weaponstate==WEAPON_DROPPING && move->clip==WANIM_DROP && move->fit==MOVE_FIT_FORWARD);
+ last=move->time; lock=flowPs.weaponTime; duration=BG_HolsterTime(&flowPs);
+ FlowSlot(SLOT_SECONDARY); flow.cmd.serverTime+=8; PickupWeaponStep(&flow,8);	/* no picture */
+ CHECK(flowPs.weaponstate==WEAPON_READY);
+ FlowSlot(SLOT_PRIMARY); FlowStep();
+ CHECK(flowPs.weaponstate==WEAPON_DROPPING && flowPs.weaponTime>lock && BG_HolsterTime(&flowPs)==duration);
+ CHECK(move->clip==WANIM_DROP && fabs(move->time-last)<=16*drop/duration+.01f);
+ while(flowPs.weaponstate==WEAPON_DROPPING && flowPs.weapon==WP_SHOTGUN) {
+  last=move->time; FlowStep();
+  if(flowPs.weaponstate==WEAPON_DROPPING) CHECK(move->time>=last-.01f && move->time-last<=8*drop/duration+.01f);
+ }
+ CHECK(last>=drop*.9f);
+}
+/* MW2's OffHandInit keeps a running drop's time and its animation. On a gun
+ * whose own drop is shorter than its quick drop (clips are data; any gun may get
+ * them), a grenade hands the fit to the longer quick drop at the same lock: the
+ * drop, or a late draw played back down, runs on at the gun's own rate. */
+static void TestShortDropKept(void) {
+ const int gun=WP_MACHINEGUN, drop=BG_WeaponDropTime(gun), quick=BG_WeaponQuickDropTime(gun);
+ weapAnimDef_t *def=&bg_weapAnimDefs[gun];
+ animLayer_t *move=&cg_weapLayers[LAYER_MOVE];
+ float len,rate=0,last=0;
+ int reversed,pressed,t;
+ CHECK(drop<quick);
+ CG_WeapAnim_RegisterClips(gun,1,"assets/baseq3/models/weapons2/spas12/view.cfg");
+ for(reversed=0;reversed<2;reversed++) {
+  FlowBegin(); FlowStep(); FlowSlot(SLOT_SECONDARY);
+  if(reversed) {
+   for(t=0;t<10000 && !(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_READY);t+=8) FlowStep();
+   /* Back down from above drop/quick of the draw: the longer fit needs an anchor above 1. */
+   FlowSlot(SLOT_PRIMARY);
+   for(t=0;t<10000 && !(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_RAISING &&
+    flowPs.weaponTime<=BG_WeaponDrawTime(&flowPs)*(quick-drop)/quick/2);t+=8) FlowStep();
+   FlowSlot(SLOT_SECONDARY);
+  }
+  FlowStep();
+  CHECK(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_DROPPING && BG_HolsterTime(&flowPs)==drop);
+  CHECK(move->fit==(reversed ? MOVE_FIT_REVERSE : MOVE_FIT_FORWARD));
+  len=CG_WeapAnim_ClipLength(def,move->clip);
+  if(reversed) CHECK(move->startFraction*quick>drop);
+  for(pressed=0;flowPs.weapon==gun && flowPs.weaponstate==WEAPON_DROPPING;) {
+   if(!pressed && flowPs.weaponTime<=drop/2) { flow.cmd.buttons=BUTTON_LETHAL; pressed=1; }
+   last=move->time; FlowStep(); flow.cmd.buttons=0;
+   if(flowPs.weapon!=gun || flowPs.weaponstate!=WEAPON_DROPPING) break;
+   if(!rate) rate=fabs(move->time-last);
+   CHECK(fabs(fabs(move->time-last)-rate)<=rate*.02f+.01f && (reversed ? move->time<=last+.01f : move->time>=last-.01f));
+  }
+  CHECK(pressed && (flowPs.weaponAction&WA_TYPE_MASK)==WA_LETHAL);
+  if(!reversed) CHECK(fabs(rate-8*len/drop)<=rate*.02f && last>=len*.9f);
+  rate=0;
+ }
+ CG_WeapAnim_RegisterClips(gun,0,NULL);
+}
 static void TestReloadPerk(weapAnimDef_t *def,int weapon) {
  playerState_t ps;int seq,perk,duration;
  for(seq=0;seq<RSEQ_COUNT;seq++)for(perk=0;perk<2;perk++) {
@@ -514,8 +642,11 @@ int main(void) {
  TestFirstDraw(def,WP_SHOTGUN);
  TestReloadPerk(def,WP_SHOTGUN);
  TestFlow(def); TestDropRestamp(def); TestKeptHolster(def);
+ TestRestampLower(def,WP_SHOTGUN); TestRetainedKeptHolster(); TestSnapshotRestamp(def);
+ TestShortDropKept();
  CG_WeapAnim_RegisterClips(WP_M40A3,2,"assets/baseq3/models/weapons2/m40a3/view.cfg");
  def=&bg_weapAnimDefs[WP_M40A3];
+ TestRestampLower(def,WP_M40A3);
  TestSprint(def,WP_M40A3); TestFirstDraw(def,WP_M40A3);
  TestReloadPerk(def,WP_M40A3);
  TestOwnership(def); TestExclusions(def);

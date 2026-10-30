@@ -237,17 +237,47 @@ qboolean	PM_SlideMove( qboolean gravity ) {
 
 /*
 ==================
+PM_ProjectVelocity
+
+MW2's (0x417a80): lay the velocity along a plane, keeping its length, so a
+step taken while rising carries the rise on as speed along the ground.
+==================
+*/
+static void PM_ProjectVelocity( const vec3_t in, const vec3_t normal, vec3_t out ) {
+	float	lengthSq2D = in[0] * in[0] + in[1] * in[1];
+	float	newZ, scale;
+
+	if ( fabs( normal[2] ) < 0.001f || lengthSq2D == 0.0f ) {
+		VectorCopy( in, out );
+		return;
+	}
+	newZ = -( in[0] * normal[0] + in[1] * normal[1] ) / normal[2];
+	scale = sqrt( ( in[2] * in[2] + lengthSq2D ) / ( newZ * newZ + lengthSq2D ) );
+	if ( scale < 1.0f || newZ < 0.0f || in[2] > 0.0f ) {
+		out[0] = in[0] * scale;
+		out[1] = in[1] * scale;
+		out[2] = newZ * scale;
+	} else {
+		VectorCopy( in, out );
+	}
+}
+
+/*
+==================
 PM_StepSlideMove
 
-MW2's (PM_StepSlideMove). From the ground a blocked move, or any move on a
-slope, steps up STEPSIZE and slides again; then every ground move is pushed
-down as far as STEPSIZE_DOWN past the lift, so stairs and curbs are walked
-both ways, never flown off: no landing, no landing cut, the jump state kept.
-In the air nothing steps but a jump, and only up to its own height above
-where it left the ground (Jump_GetStepHeight), so a jump never climbs a ledge
-it cannot reach. It lands on ground no steeper than STEP_LAND_NORMAL (only on
-walkable ground for a jump's step), never on a player; anything else keeps
-the unstepped move.
+MW2's (PM_StepSlideMove 0x4b1810). From the ground a blocked move, or any move
+on a slope, steps up STEPSIZE and slides again; every ground move is then
+pushed down as far as STEPSIZE_DOWN past the lift, so stairs and curbs are
+walked both ways, never flown off: no landing, no landing cut, the jump state
+kept. In the air nothing steps but a jump, and only up to its own height above
+where it left the ground (Jump_GetStepHeight). The step lands on ground no
+steeper than STEP_LAND_NORMAL (only walkable ground for a jump's step), never
+on a player, and is kept only if it got farther along the move than the
+unstepped slide, and for a jump only below its own height
+(Jump_IsPlayerAboveMax); otherwise the unstepped slide is pushed down instead.
+A jump's step takes what it gained off the rise left (Jump_ClampVelocity). A
+walked step costs speed by its height.
 ==================
 */
 #define	STEPSIZE_DOWN		9
@@ -261,8 +291,10 @@ void PM_StepSlideMove( qboolean gravity ) {
 	vec3_t		up, down;
 	float		stepSize, stepAmount, delta;
 	qboolean	bumped, jumpStep = qfalse;
-	// A ladder has no ground to step down to; a jump has cleared the plane.
-	qboolean	hadGround = pml.groundPlane && !( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED );
+	// A ladder or flight has no ground to step down to; a jump has cleared
+	// the plane.
+	qboolean	hadGround = pml.groundPlane && !( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) &&
+	                        !pm->ps->powerups[PW_FLIGHT];
 
 	VectorCopy (pm->ps->origin, start_o);
 	VectorCopy (pm->ps->velocity, start_v);
@@ -329,11 +361,45 @@ void PM_StepSlideMove( qboolean gravity ) {
 		return;
 	} else {
 		VectorCopy (trace.endpos, pm->ps->origin);
+		// Q3's walk move keeps a clipped speed's length, so what the
+		// projection leaves off the plane must not reach it.
+		PM_ProjectVelocity( pm->ps->velocity, trace.plane.normal, pm->ps->velocity );
 		PM_ClipVelocity( pm->ps->velocity, trace.plane.normal, pm->ps->velocity, OVERCLIP );
 	}
 
-	// use the step move; the eye smooths only what the step added
+	// keep the step only if it got farther along the move, and a jump's only
+	// below its own height; otherwise push the unstepped slide down instead
+	if ( ( pm->ps->origin[0] - start_o[0] ) * start_v[0] + ( pm->ps->origin[1] - start_o[1] ) * start_v[1] <=
+	     ( down_o[0] - start_o[0] ) * start_v[0] + ( down_o[1] - start_o[1] ) * start_v[1] + 0.001f ||
+	     ( jumpStep && pm->ps->origin[2] >= pm->ps->jumpOriginZ + BG_JUMP_HEIGHT ) ) {
+		VectorCopy (down_o, pm->ps->origin);
+		VectorCopy (down_v, pm->ps->velocity);
+		if ( hadGround ) {
+			VectorCopy (down_o, down);
+			down[2] -= STEPSIZE_DOWN;
+			pm->trace (&trace, down_o, pm->mins, pm->maxs, down, pm->ps->clientNum, pm->tracemask);
+			if ( trace.fraction < 1.0f ) {
+				VectorCopy (trace.endpos, pm->ps->origin);
+				PM_ClipVelocity( pm->ps->velocity, trace.plane.normal, pm->ps->velocity, OVERCLIP );
+			}
+		}
+	}
+	if ( jumpStep && pm->ps->origin[2] > down_o[2] ) {
+		float	room = pm->ps->jumpOriginZ + BG_JUMP_HEIGHT - pm->ps->origin[2];
+		float	most = room < 0.1f ? 0.0f : sqrt( 2.0f * room * pm->ps->gravity );
+		if ( pm->ps->velocity[2] > most ) {
+			pm->ps->velocity[2] = most;
+		}
+	}
+
+	// the eye smooths only what the step added to the unstepped slide
 	delta = pm->ps->origin[2] - down_o[2];
+	if ( !hadGround || pm->ps->pm_type >= PM_DEAD || fabs( delta ) <= 0.5f ) {
+		return;
+	}
+	VectorScale( pm->ps->velocity,
+		STEP_SPEED_KEEP + ( 1.0f - STEP_SPEED_KEEP ) * ( 1.0f - fabs( pm->ps->origin[2] - start_o[2] ) / stepSize ),
+		pm->ps->velocity );
 	if ( delta > 2 ) {
 		if ( delta < 7 ) {
 			PM_AddEvent( EV_STEP_4 );
@@ -351,4 +417,3 @@ void PM_StepSlideMove( qboolean gravity ) {
 		Com_Printf("%i:stepped\n", c_pmove);
 	}
 }
-

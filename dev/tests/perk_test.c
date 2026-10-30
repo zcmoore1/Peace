@@ -123,8 +123,14 @@ static void TestFootsteps(void) {
  CHECK(ps.eventSequence==seq);
  PM_AddEvent(EV_FIRE_WEAPON); CHECK(ps.eventSequence==seq+1);
  PM_AddEvent(EV_FALL_FAR); CHECK(ps.eventSequence==seq+2); /* never suppress the damage event */
- Ready(WP_MACHINEGUN,PERK_SILENT_FOOTSTEPS); ps.gravity=800; pml.previous_velocity[2]=-200;
+ /* A landing under MW2's hard height is a footstep, which Inaudible filters;
+  * from it up it is the landing event, which it does not. */
+ Ready(WP_MACHINEGUN,PERK_SILENT_FOOTSTEPS); ps.gravity=800;
+ pml.previous_velocity[2]=-sqrt(2*ps.gravity*(BG_HARD_LAND_HEIGHT-3));
  PM_CrashLand(); CHECK(ps.eventSequence==0 && ps.legsTimer==TIMER_LAND);
+ Ready(WP_MACHINEGUN,PERK_SILENT_FOOTSTEPS); ps.gravity=800;
+ pml.previous_velocity[2]=-sqrt(2*ps.gravity*(BG_HARD_LAND_HEIGHT+3));
+ PM_CrashLand(); CHECK(ps.eventSequence==1 && ps.events[0]==EV_FALL_SHORT);
 }
 static void ClearTrace(trace_t *tr,const vec3_t start,const vec3_t mins,
  const vec3_t maxs,const vec3_t end,int pass,int mask) {

@@ -200,6 +200,7 @@ typedef enum {
 #define BG_LADDER_FRICTION        5.0f
 #define BG_LADDER_ACCELERATE      10.0f
 #define BG_LADDER_JUMP_PUSH       180.0f
+#define BG_LADDER_JUMP_SCALE      0.75f	// MW2's Jump_PushOffLadder: of a jump's take-off speed
 
 // One signed-short stat: three flags + 12-bit inward-facing yaw. No extra
 // pm_flags bit or animation sequence (both fields are already full).

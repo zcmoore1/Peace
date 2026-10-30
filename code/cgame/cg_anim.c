@@ -255,18 +255,22 @@ static float CG_WeapAnim_DropFit(const animLayer_t *move, float f) {
 	return move->fit == MOVE_FIT_REVERSE ? move->startFraction * (1.0f - f) :
 		move->startFraction + (1.0f - move->startFraction) * f;
 }
-static void CG_WeapAnim_ReanchorDrop(const playerState_t *ps, animLayer_t *move) {
+static void CG_WeapAnim_ReanchorDrop(const playerState_t *ps, animLayer_t *move, int msec) {
 	int duration = BG_HolsterTime(ps);
-	int lock = ps->weaponTime < cg_dropLock ? ps->weaponTime : cg_dropLock;
+	// The old fit runs on by this frame at most: a lock pmove restamped lower
+	// (a ladder grab, a knife on the YY command) must not skip the picture.
+	int lock = ps->weaponTime > cg_dropLock - msec ? ps->weaponTime : cg_dropLock - msec;
 	float p, f;
+	if (lock > cg_dropLock) lock = cg_dropLock;
 	if (duration <= 0 || cg_dropDuration <= 0) return;
 	p = CG_WeapAnim_DropFit(move, 1.0f - (float)lock / cg_dropDuration);
 	f = 1.0f - (float)ps->weaponTime / duration;
 	if (f < 0.0f) f = 0.0f;
 	if (f > 0.99f) f = 0.99f;
+	// Unclamped: a fit made longer at the same lock anchors outside [0,1] (below
+	// for a forward drop, above for a reversed draw); the fraction drawn stays
+	// in it and runs on at the old rate.
 	move->startFraction = move->fit == MOVE_FIT_REVERSE ? p / (1.0f - f) : (p - f) / (1.0f - f);
-	if (move->startFraction < 0.0f) move->startFraction = 0.0f;
-	if (move->startFraction > 1.0f) move->startFraction = 1.0f;
 }
 
 // Gameplay cancelled the transition (YY): the gun is already ready to fire.
@@ -305,7 +309,11 @@ static void CG_WeapAnim_UpdateRetention(const weapAnimDef_t *def, const playerSt
 		ps->weaponstate == WEAPON_SPRINT_IN || ps->weaponstate == WEAPON_SPRINTING;
 	qboolean dropping = ps->weaponstate == WEAPON_DROPPING;
 	qboolean released = qfalse;
-	qboolean forbidden = (ps->weaponAction & WA_TYPE_MASK) || BG_IsActionWeapon(ps->weapon) ||
+	// A holster keeps its source through its whole duration, also once a quick
+	// action takes over where it goes (pmove keeps or shortens that same drop).
+	// A quick action still never starts a retention or becomes its source.
+	qboolean holding = cg_retainedActive && cg_retainedDrop && dropping;
+	qboolean forbidden = ((ps->weaponAction & WA_TYPE_MASK) && !holding) || BG_IsActionWeapon(ps->weapon) ||
 		ps->weaponstate == WEAPON_RELOADING ||
 		ps->weaponstate == WEAPON_LADDER || ps->stats[STAT_HEALTH] <= 0;
 	int i, source = -1;
@@ -448,7 +456,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 			     ( move->fit != MOVE_FIT_FORWARD || move->clip != WANIM_DROP ) ) {
 				CG_WeapAnim_BeginHolster( def, move );
 			} else if ( ps->weaponTime > cg_dropLock || BG_HolsterTime( ps ) != cg_dropDuration ) {
-				CG_WeapAnim_ReanchorDrop( ps, move );
+				CG_WeapAnim_ReanchorDrop( ps, move, msec );
 			}
 			cg_dropLock = ps->weaponTime;
 			cg_dropDuration = BG_HolsterTime( ps );

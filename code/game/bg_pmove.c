@@ -516,9 +516,11 @@ static qboolean PM_CheckJump( void ) {
 		return qfalse;
 	}
 
-	// MW2's Jump_Check: no jump within BG_JUMP_WAIT of the last one. The press
-	// is spent, so holding on never jumps; it takes a fresh press.
-	if ( pm->ps->jumpWait > 0 ) {
+	// MW2's Jump_Check: no jump within BG_JUMP_WAIT of the last one, and none
+	// from a stance PM_CheckDuck could not raise to standing (a ceiling too low
+	// to stand under). The press is spent, so holding on never jumps; it takes
+	// a fresh press.
+	if ( pm->ps->jumpWait > 0 || ( pm->ps->pm_flags & PMF_DUCKED ) ) {
 		pm->ps->pm_flags |= PMF_JUMP_HELD;
 		pm->cmd.upmove = 0;
 		return qfalse;
@@ -536,6 +538,10 @@ static qboolean PM_CheckJump( void ) {
 	pm->ps->jumpLand = -1;
 	pm->ps->jumpWait = BG_JUMP_WAIT;
 	pm->ps->jumpOriginZ = pm->ps->origin[2];
+	// MW2's Jump_Start ends any running timer (pm_time = 0), so a landing's or
+	// knockback's timer never keeps the jump from clipping (PM_SlideMove).
+	pm->ps->pm_flags &= ~PMF_ALL_TIMES;
+	pm->ps->pm_time = 0;
 	PM_AddEvent( EV_JUMP );
 
 	if ( pm->cmd.forwardmove >= 0 ) {
@@ -586,9 +592,13 @@ static qboolean	PM_CheckWaterJump( void ) {
 		return qfalse;
 	}
 
-	// jump out of water
+	// jump out of water, leaving the ground as a jump does (the step move
+	// would otherwise push it back down onto the pool floor)
 	VectorScale (pml.forward, 200, pm->ps->velocity);
 	pm->ps->velocity[2] = 350;
+	pml.groundPlane = qfalse;
+	pml.walking = qfalse;
+	pm->ps->groundEntityNum = ENTITYNUM_NONE;
 
 	pm->ps->pm_flags |= PMF_TIME_WATERJUMP;
 	pm->ps->pm_time = 2000;
@@ -955,6 +965,8 @@ static void PM_LadderMove( void ) {
 	if ( PM_CheckJump() ) {
 		pm->ps->stats[STAT_LADDER] &= ~LADDER_ATTACHED;
 		pm->ps->stats[STAT_LADDER] |= LADDER_JUMP_OFF;
+		// MW2's Jump_PushOffLadder: a jump off a ladder keeps 0.75 of its rise.
+		pm->ps->velocity[2] *= BG_LADDER_JUMP_SCALE;
 		VectorMA( pm->ps->velocity, BG_LADDER_JUMP_PUSH, pml.ladderNormal,
 			pm->ps->velocity );
 		PM_AirMove();
@@ -1259,6 +1271,7 @@ static void PM_CrashLand( void ) {
 	float		vel, acc;
 	float		t;
 	float		a, b, c, den;
+	qboolean	hard;
 
 	// decide which landing animation to use
 	if ( pm->ps->pm_flags & PMF_BACKWARDS_JUMP ) {
@@ -1287,9 +1300,11 @@ static void PM_CrashLand( void ) {
 	delta = vel + t * acc;
 	// MW2's PM_CrashLand: a landing from BG_HARD_LAND_HEIGHT or more keeps 0.67
 	// of all the velocity - every jump's landing, before the slowdown's own
-	// cut on the next walking think. Water breaks the fall.
-	if ( pm->ps->gravity > 0 && pm->waterlevel <= 1 &&
-	     delta * delta / ( 2.0f * pm->ps->gravity ) >= BG_HARD_LAND_HEIGHT ) {
+	// cut on the next walking think - and raises the landing event (its sound
+	// and the view's dip). Water breaks the fall.
+	hard = pm->ps->gravity > 0 && pm->waterlevel <= 1 &&
+	       delta * delta / ( 2.0f * pm->ps->gravity ) >= BG_HARD_LAND_HEIGHT;
+	if ( hard ) {
 		VectorScale( pm->ps->velocity, 0.67f, pm->ps->velocity );
 	}
 	delta = delta*delta * 0.0001;
@@ -1328,7 +1343,7 @@ static void PM_CrashLand( void ) {
 			if ( pm->ps->stats[STAT_HEALTH] > 0 ) {
 				PM_AddEvent( EV_FALL_MEDIUM );
 			}
-		} else if ( delta > 7 ) {
+		} else if ( delta > 7 || hard ) {
 			PM_AddEvent( EV_FALL_SHORT );
 		} else {
 			PM_AddEvent( PM_FootstepForSurface() );
@@ -1488,8 +1503,9 @@ static void PM_GroundTrace( void ) {
 		return;
 	}
 	
-	// slopes that are too steep will not be considered onground
-	if ( trace.plane.normal[2] < MIN_WALK_NORMAL ) {
+	// slopes that are too steep will not be considered onground, and nor is
+	// another player (MW2's PM_GroundTrace: a body is never ground)
+	if ( trace.plane.normal[2] < MIN_WALK_NORMAL || trace.entityNum < MAX_CLIENTS ) {
 		if ( pm->debugLevel ) {
 			Com_Printf("%i:steep\n", c_pmove);
 		}
@@ -3022,11 +3038,13 @@ static int PM_HeldActionButtons( void ) {
 }
 
 // Whether step 1 may begin a weapon change this think. A shot's fire lock
-// holds it; a quick action's hold does not once the latch wants something
-// else (MW2's offhand check takes MELEE_FIRE, the knife's hold after its hit).
+// holds a swap (MW2's CheckForChangeWeapon refuses FIRING), but not a knife or
+// grenade still to come: MW2's melee and offhand checks take FIRING, and its
+// offhand check MELEE_FIRE, the knife's hold after its hit, as well.
 static qboolean PM_WeaponChangeOpen( void ) {
 	return pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ||
-		( BG_IsActionWeapon( pm->ps->weapon ) && !( pm->ps->weaponAction & WA_FIRED ) );
+		( ( BG_IsActionWeapon( pm->ps->weapon ) || ( pm->ps->weaponAction & WA_TYPE_MASK ) ) &&
+		  !( pm->ps->weaponAction & WA_FIRED ) );
 }
 
 // Latch a press through holster/deploy. Releasing the button cannot lose a tap,
@@ -3105,8 +3123,11 @@ static void PM_UpdateWeaponAction( void ) {
 				// MW2's OffHandInit out of a melee state stamps the gun's whole
 				// quickDropTime: a drop running for the knife, or the knife's
 				// own after its hit, is not kept.
+				// The gun's own holster out of the knife's recovery draw is a
+				// running drop like any other, kept by step 1.
 				cutDrop = ( action & WA_TYPE_MASK ) == WA_MELEE &&
-					pm->ps->weaponstate == WEAPON_DROPPING;
+					pm->ps->weaponstate == WEAPON_DROPPING &&
+					( BG_IsActionWeapon( pm->ps->weapon ) || !( action & WA_FIRED ) );
 				action = nextAction;
 				returning = recovering = 0;
 			}

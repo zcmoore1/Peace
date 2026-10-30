@@ -41,7 +41,8 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
 - Contact removes only velocity normal to the face. Vertical/sideways momentum
   remains and friction settles it to a hang; there is no gravity while attached.
 - A jump preserves sideways motion, pushes away from the face, and restores normal
-  airborne movement. Re-grab is armed by geometric separation, not a cooldown.
+  airborne movement. It rises with `BG_LADDER_JUMP_SCALE` (0.75) of a ground
+  jump's take-off speed, as MW2's Jump_PushOffLadder. Re-grab is armed by geometric separation, not a cooldown.
 - At a walkable floor, down/neutral input releases the ladder. The ground probe
   uses the same 0.25-unit reach and slope threshold as ordinary grounding.
   Landing consumes the velocity into the floor before walking, preventing a

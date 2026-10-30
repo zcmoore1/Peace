@@ -43,14 +43,15 @@ int Pickup_Team(gentity_t *e,gentity_t *other) { (void)e;(void)other; return 1; 
 qboolean G_SNDUsable(gentity_t *e) { (void)e; return bombUsable; }
 qboolean G_SNDUse(gentity_t *e,usercmd_t *cmd) { (void)e; return bombUsable && (cmd->buttons & (BUTTON_USE|BUTTON_USE_RELOAD)); }
 
-static int staleSelection;
+static int selectionLag, seenCount;
+static playerState_t seen[256];
 static playerState_t *Reset(void) {
  int i;
  memset(g_entities,0,sizeof(g_entities)); memset(clients,0,sizeof(clients));
  memset(&level,0,sizeof(level)); memset(&move,0,sizeof(move));
  level.time=1000; level.num_entities=MAX_CLIENTS; level.maxclients=2;
  g_weaponRespawn.integer=5; g_weaponTeamRespawn.integer=10;
- pickups=usedTargets=0; blocked=bombUsable=qfalse; staleSelection=0;
+ pickups=usedTargets=0; blocked=bombUsable=qfalse; selectionLag=seenCount=0;
  for(i=0;i<2;i++) {
   gentity_t *e=&g_entities[i]; e->client=&clients[i]; e->inuse=qtrue;
   e->s.number=i; e->health=100; BG_ApplyClass(&clients[i].ps,BG_Class(0));
@@ -68,12 +69,14 @@ static gentity_t *Floor(int weapon,int attachments,int ammo,int reserve,int flag
  item=G_DropWeapon(&g_entities[1],SLOT_PRIMARY);
  CHECK(item!=NULL); G_SetOrigin(item,clients[0].ps.origin); return item;
 }
-/* The client re-sends its slot with the generation of the latest snapshot, as
- * cg_view.c does; staleSelection holds it back, as a round trip would. */
+/* The client re-sends its slot with the generation of the latest snapshot it
+ * has, as cg_view.c does: selectionLag is that snapshot's age in commands. */
 static void Step(int msec) {
  level.time+=msec; move.cmd.serverTime+=msec;
- if(!staleSelection && BG_IS_SLOT_COMMAND(move.cmd.weapon))
-  move.cmd.weapon=BG_SlotCommand(move.ps,BG_RequestedSlot(move.ps,move.cmd.weapon));
+ seen[seenCount++%256]=*move.ps;
+ if(BG_IS_SLOT_COMMAND(move.cmd.weapon))
+  move.cmd.weapon=BG_SlotCommand(&seen[(seenCount-1-MIN(selectionLag,seenCount-1))%256],
+   BG_RequestedSlot(move.ps,move.cmd.weapon));
  move.pickupItem=G_FindWeaponPickup(&g_entities[0]); PickupWeaponStep(&move,msec);
  G_CommitWeaponPickup(&g_entities[0]);
 }
@@ -356,7 +359,7 @@ static void TestCursorHint(void) {
  gentity_t *item=Floor(WP_RAILGUN,0,3,7,0), *last;
  vec3_t far;
  int t, number=item->s.number;
- CHECK(ps->cursorHintEntIndex==0);			/* every life starts at 0 */
+ CHECK(ps->cursorHintEntIndex==0);			/* the fixture's start, as ClientSpawn's memset */
  G_UpdateCursorHint(&g_entities[0]);
  CHECK(ps->cursorHintEntIndex==number && (item->flags & FL_CURSOR_HINT));
  VectorSet(far,4000,0,0); G_SetOrigin(item,far);	/* out of reach: still named */
@@ -369,6 +372,11 @@ static void TestCursorHint(void) {
  G_UpdateCursorHint(&g_entities[0]); CHECK(ps->cursorHintEntIndex==number);
  ps->pm_flags&=~PMF_SPRINTING; ps->weaponAction=WA_LETHAL;
  G_UpdateCursorHint(&g_entities[0]); CHECK(ps->cursorHintEntIndex==number);
+ /* and through the throw itself (MW2 freezes it for every offhand state) */
+ { int weapon=ps->weapon;
+   ps->weaponAction=WA_LETHAL|WA_FIRED; ps->weapon=BG_LethalWeapon(ps); ps->weaponstate=WEAPON_FIRING;
+   G_UpdateCursorHint(&g_entities[0]); CHECK(ps->cursorHintEntIndex==number);
+   ps->weapon=weapon; ps->weaponstate=WEAPON_READY; }
  ps->weaponAction=0;
  G_UpdateCursorHint(&g_entities[0]); CHECK(ps->cursorHintEntIndex==last->s.number);	/* unfrozen: the nearer gun */
  G_FreeEntity(last); CHECK(ps->cursorHintEntIndex==ENTITYNUM_NONE);
@@ -387,14 +395,238 @@ static void TestCursorHint(void) {
  CHECK(ps->cursorHintEntIndex>=MAX_CLIENTS && ps->cursorHintEntIndex!=ENTITYNUM_NONE);
  /* someone else collecting the gun you were last hinted on gives no hint */
  ps=Reset(); item=Floor(WP_RAILGUN,0,3,7,0); number=item->s.number;
- other->cursorHintEntIndex=number; item->flags|=FL_CURSOR_HINT;
- G_FreeEntity(item); CHECK(other->cursorHintEntIndex==ENTITYNUM_NONE);
+ { bg_weaponInstance_t mg={0}; mg.weapon=WP_MACHINEGUN; mg.ammo=30; BG_PutSlot(other,SLOT_PRIMARY,&mg); }
+ level.time+=BG_PICKUP_OWNER_DELAY; move.cmd.serverTime+=BG_PICKUP_OWNER_DELAY;
+ G_UpdateCursorHint(&g_entities[1]); CHECK(other->cursorHintEntIndex==number);
+ move.cmd.buttons=BUTTON_RELOAD;
+ for(t=0;t<2000 && !pickups;t++) { Step(1); G_UpdateCursorHint(&g_entities[0]); }
+ move.cmd.buttons=0;
+ CHECK(pickups==1 && !item->inuse && other->cursorHintEntIndex==ENTITYNUM_NONE);
  /* freeing what no hint ever named leaves 0 alone, entity 0 included */
  ps=Reset(); item=Floor(WP_RAILGUN,0,3,7,0);
  G_FreeEntity(item); G_FreeEntity(&g_entities[0]);
  CHECK(ps->cursorHintEntIndex==0 && other->cursorHintEntIndex==0);
 }
+/* The take window: after each pickup into the held slot the hand is empty
+ * until a selection made after it arrives, about a round trip, then the new
+ * gun comes up; a selection is never stale while a gun is in hand. */
+static void TestTakeWindow(void) {
+ static const int lags[4]={1,34,67,100}, guns[3]={WP_RAILGUN,WP_ROCKET_LAUNCHER,WP_RAILGUN};
+ int l,p,t;
+ for(l=0;l<4;l++) {
+  playerState_t *ps=Reset(); selectionLag=lags[l];
+  for(p=0;p<3;p++) {
+   int before=pickups;
+   Floor(guns[p],0,2,8,0); move.cmd.buttons=BUTTON_RELOAD;
+   for(t=0;t<2000 && pickups==before;t++) { Step(1); if(pickups==before) CHECK(BG_SlotCommandCurrent(ps,move.cmd.weapon)); }
+   move.cmd.buttons=0;
+   CHECK(pickups==before+1 && ps->weapon==WP_NONE);
+   for(t=0;t<1000 && ps->weapon==WP_NONE;t++) Step(1);
+   CHECK(t==selectionLag+1 && ps->weapon==guns[p] && ps->weaponstate==WEAPON_RAISING);
+   for(t=0;t<3000;t++) { Step(1); CHECK(BG_SlotCommandCurrent(ps,move.cmd.weapon)); }
+  }
+ }
+}
+/* MW2's take writes only the weapon: a pickup into the held slot while that gun
+ * is going down leaves the drop running to its own end. A Y back toward the
+ * slot just replaced, sent before the client saw the pickup, names no gun: it
+ * is no YY and starts nothing, the drop ends in an empty hand, and the new gun
+ * keeps its first raise for when the selection catches up. */
+static void TestTakeKeepsDrop(void) {
+ int lag,back,drop;
+ { playerState_t *ps=Reset(); move.cmd.weapon=BG_SLOT_COMMAND+1; Step(1);
+   drop=ps->weaponTime; CHECK(ps->weaponstate==WEAPON_DROPPING && drop>4); }
+ for(lag=0;lag<2;lag++) for(back=0;back<2;back++) {
+  playerState_t *ps=Reset(); int t,left;
+  selectionLag=lag ? drop+20 : 0;
+  Floor(WP_RAILGUN,0,2,8,0); move.cmd.buttons=BUTTON_RELOAD;
+  Run(BG_PICKUP_HOLD_TIME-drop/2);
+  move.cmd.weapon=BG_SLOT_COMMAND+1;
+  for(t=0;t<drop && !pickups;t++) Step(1);
+  CHECK(pickups==1 && ps->weapon==WP_NONE && ps->weaponstate==WEAPON_DROPPING);
+  left=ps->weaponTime; CHECK(left>0 && left<drop);
+  move.cmd.buttons=0;
+  if(back) move.cmd.weapon=BG_SLOT_COMMAND;
+  for(t=0;t<left;t++) {
+   CHECK(ps->weapon==WP_NONE && ps->weaponstate==WEAPON_DROPPING && ps->weaponTime==left-t);
+   Step(1);
+  }
+  if(!back) CHECK(ps->weapon==WP_SHOTGUN && ps->weaponstate==WEAPON_RAISING);
+  else if(lag) {
+   CHECK(ps->weapon==WP_NONE && ps->weaponstate==WEAPON_READY && (ps->slotFlags[0]&BG_GUN_FIRST_DRAW));
+   for(t=0;t<1000 && ps->weapon==WP_NONE;t++) Step(1);
+   CHECK(ps->weapon==WP_RAILGUN && ps->weaponstate==WEAPON_RAISING);
+   CHECK(ps->weaponTime==BG_WeaponFirstRaiseTime(WP_RAILGUN));
+  } else {
+   CHECK(ps->weapon==WP_RAILGUN && ps->weaponstate==WEAPON_RAISING);
+   CHECK(ps->weaponTime==BG_WeaponFirstRaiseTime(WP_RAILGUN));
+  }
+ }
+}
+/* A throwing knife at rest, where FireWeapon's knife came down. */
+static gentity_t *GroundKnife(float x,float y,float z) {
+ gentity_t *knife=G_Spawn(); vec3_t at;
+ knife->classname="throwingknife"; knife->s.eType=ET_MISSILE; knife->s.weapon=WP_THROWING_KNIFE;
+ knife->timestamp=level.time; knife->r.ownerNum=1;
+ VectorSet(at,x,y,z); G_SetOrigin(knife,at); return knife;
+}
+static playerState_t *KnifeThrower(int count) {
+ playerState_t *ps=Reset(); bg_class_t cl=*BG_Class(0);
+ cl.lethal=WP_THROWING_KNIFE; cl.lethalCount=count;
+ BG_ApplyClass(ps,&cl); ps->stats[STAT_HEALTH]=100;
+ clients[0].knifeMax=ps->ammo[WP_THROWING_KNIFE]; clients[0].knifeHold=ENTITYNUM_NONE;
+ return ps;
+}
+/* ClientEndFrame's hint pass, once per server frame. */
+static void EndFrame(void) { G_UpdateCursorHint(&g_entities[0]); }
+/* The server's use code alone, with no command run through the weapon. */
+static void UseOnly(int buttons) {
+ qboolean used;
+ move.cmd.buttons=buttons; level.time++;
+ used=G_UseThink(&g_entities[0],&move.cmd);
+ BG_UpdateActivate(move.ps,&clients[0].activate,buttons,!used && G_FindWeaponPickup(&g_entities[0])!=NULL,used);
+}
+/* MW2's throwing knife on the ground (its use list, Player_ActivateCmd and
+ * Touch_Item): never collected by walking over it. A use or use/reload press
+ * while the hint names it is a use, never a reload; the knife is taken on that
+ * command - or, too soon after it spawned, once it comes of age while the
+ * button stays held - and freed, which empties the hint. The hands are not
+ * touched. The player must carry knives and have room for one more. Anyone's
+ * knife will do, and a knife outranks any gun. */
+static void TestKnifePickup(void) {
+ playerState_t *ps; gentity_t *knife,*gun; int i,weapon,state; vec3_t at;
+ ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0; BG_RebuildWeaponMask(ps);
+ CHECK(!(ps->stats[STAT_WEAPONS]&(1<<WP_THROWING_KNIFE)));
+ knife=GroundKnife(10,0,0); level.time+=BG_USE_SPAWN_DELAY;
+ for(i=0;i<100;i++) { UseStep(0); EndFrame(); }
+ CHECK(knife->inuse && pickups==0 && ps->cursorHintEntIndex==knife->s.number && (knife->flags&FL_CURSOR_HINT));
+ ps->ammo[WP_MACHINEGUN]=4; weapon=ps->weapon; state=ps->weaponstate;
+ UseStep(BUTTON_USE_RELOAD);
+ CHECK(!knife->inuse && pickups==1 && ps->ammo[WP_THROWING_KNIFE]==1 && ps->cursorHintEntIndex==ENTITYNUM_NONE);
+ CHECK((ps->stats[STAT_WEAPONS]&(1<<WP_THROWING_KNIFE)) && BG_LethalWeapon(ps)==WP_THROWING_KNIFE);
+ CHECK(ps->weapon==weapon && ps->weaponstate==state && !(ps->weapFlags&PWF_USE_RELOAD));
+ for(i=0;i<50;i++) { UseStep(BUTTON_USE_RELOAD); EndFrame(); CHECK(!(ps->weapFlags&PWF_USE_RELOAD)); }
+ UseStep(0); UseStep(0); CHECK(ps->weaponstate==WEAPON_READY && pickups==1);
+ /* +activate takes it as well; the reload button alone never does */
+ ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0;
+ knife=GroundKnife(10,0,0); level.time+=BG_USE_SPAWN_DELAY; EndFrame();
+ for(i=0;i<50;i++) { UseStep(BUTTON_RELOAD); EndFrame(); }
+ UseStep(0); CHECK(knife->inuse);
+ UseStep(BUTTON_USE); CHECK(!knife->inuse && ps->ammo[WP_THROWING_KNIFE]==1);
+ /* Too young: a tap takes nothing and asks for nothing; held, it is taken on
+  * the command it comes of age. */
+ ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0; ps->ammo[WP_MACHINEGUN]=4;
+ knife=GroundKnife(10,0,0); EndFrame();
+ UseStep(BUTTON_USE_RELOAD); UseStep(0); UseStep(0);
+ CHECK(knife->inuse && ps->weaponstate==WEAPON_READY && !(ps->weapFlags&PWF_USE_RELOAD));
+ EndFrame();
+ for(i=0;i<1000 && knife->inuse;i++) { UseStep(BUTTON_USE_RELOAD); EndFrame(); }
+ CHECK(!knife->inuse && level.time-knife->timestamp==BG_USE_SPAWN_DELAY && pickups==1);
+ /* No room for another, or no knives in the class: no hint, and the press is
+  * the reload it would be anywhere. */
+ ps=KnifeThrower(1); ps->ammo[WP_MACHINEGUN]=4;
+ knife=GroundKnife(10,0,0); level.time+=BG_USE_SPAWN_DELAY; EndFrame();
+ CHECK(ps->cursorHintEntIndex==0);
+ UseStep(BUTTON_USE_RELOAD); UseStep(0);
+ CHECK(knife->inuse && ps->weaponstate==WEAPON_RELOADING && ps->ammo[WP_THROWING_KNIFE]==1);
+ ps=Reset(); ps->ammo[WP_MACHINEGUN]=4; clients[0].knifeHold=ENTITYNUM_NONE;
+ CHECK(BG_LethalWeapon(ps)!=WP_THROWING_KNIFE);
+ knife=GroundKnife(10,0,0); level.time+=BG_USE_SPAWN_DELAY; EndFrame();
+ UseStep(BUTTON_USE_RELOAD); UseStep(0);
+ CHECK(knife->inuse && ps->weaponstate==WEAPON_RELOADING && ps->cursorHintEntIndex==0 && !ps->ammo[WP_THROWING_KNIFE]);
+ /* The reach: a new knife must come within the inner radius of the feet; one
+  * the hint names keeps its place out to the eye reach. Out of reach it is
+  * still named but not usable: the press is a reload. */
+ ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0; ps->ammo[WP_MACHINEGUN]=4;
+ knife=GroundKnife(BG_KNIFE_PICKUP_RADIUS+1,0,0); level.time+=BG_USE_SPAWN_DELAY; EndFrame();
+ CHECK(ps->cursorHintEntIndex==0);
+ VectorSet(at,BG_KNIFE_PICKUP_RADIUS-1,0,0); G_SetOrigin(knife,at); EndFrame();
+ CHECK(ps->cursorHintEntIndex==knife->s.number);
+ VectorSet(at,BG_KNIFE_PICKUP_REACH-1,0,ps->viewheight); G_SetOrigin(knife,at); EndFrame();
+ CHECK(clients[0].cursorHint && ps->cursorHintEntIndex==knife->s.number);
+ VectorSet(at,BG_KNIFE_PICKUP_REACH+1,0,ps->viewheight); G_SetOrigin(knife,at); EndFrame();
+ CHECK(!clients[0].cursorHint && ps->cursorHintEntIndex==knife->s.number);
+ UseStep(BUTTON_USE_RELOAD); UseStep(0);
+ CHECK(knife->inuse && ps->weaponstate==WEAPON_RELOADING);
+ /* still moving faster than bg_maxGrenadeIndicatorSpeed, or out of sight: not yet */
+ ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0;
+ knife=GroundKnife(10,0,0); level.time+=BG_USE_SPAWN_DELAY;
+ VectorSet(knife->s.pos.trDelta,BG_KNIFE_PICKUP_STILL+1,0,0); EndFrame();
+ CHECK(ps->cursorHintEntIndex==0);
+ VectorSet(knife->s.pos.trDelta,BG_KNIFE_PICKUP_STILL,0,0); blocked=qtrue; EndFrame();
+ CHECK(ps->cursorHintEntIndex==0);
+ blocked=qfalse; EndFrame(); CHECK(ps->cursorHintEntIndex==knife->s.number);
+ /* Over a knife and a floor gun nearer the eye, the press is the knife's: the
+  * gun is not collected however long it is held, and the release asks for
+  * nothing. */
+ ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0; ps->ammo[WP_MACHINEGUN]=4;
+ gun=Floor(WP_RAILGUN,0,2,8,0); VectorSet(at,0,0,ps->viewheight); G_SetOrigin(gun,at);
+ knife=GroundKnife(60,0,0); level.time+=BG_USE_SPAWN_DELAY; EndFrame();
+ CHECK(ps->cursorHintEntIndex==knife->s.number);
+ for(i=0;i<1500;i++) { UseStep(BUTTON_USE_RELOAD); EndFrame(); }
+ CHECK(!knife->inuse && gun->r.contents && pickups==1 && ps->stats[STAT_SLOT_PRIMARY]==WP_MACHINEGUN);
+ UseStep(0); UseStep(0); CHECK(ps->weaponstate==WEAPON_READY && !(ps->weapFlags&PWF_USE_RELOAD));
+ CHECK(ps->cursorHintEntIndex==gun->s.number); /* the gun is the hint after the knife */
+ /* A press while sprinting uses nothing, held on or not; a new one does. */
+ ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0;
+ knife=GroundKnife(10,0,0); level.time+=BG_USE_SPAWN_DELAY; EndFrame();
+ ps->pm_flags|=PMF_SPRINTING; UseOnly(BUTTON_USE); EndFrame();
+ ps->pm_flags&=~PMF_SPRINTING;
+ for(i=0;i<BG_USE_SPAWN_DELAY;i++) { UseOnly(BUTTON_USE); EndFrame(); }
+ CHECK(knife->inuse);
+ UseOnly(0); UseOnly(BUTTON_USE); CHECK(!knife->inuse && ps->ammo[WP_THROWING_KNIFE]==1);
+ /* A knife freed under a held press (another player took it) is not taken,
+  * nor is whatever reuses its number. */
+ ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0;
+ knife=GroundKnife(10,0,0); EndFrame();
+ UseOnly(BUTTON_USE); G_FreeEntity(knife);
+ level.num_entities--; knife=GroundKnife(10,0,0); knife->timestamp-=BG_USE_SPAWN_DELAY;
+ for(i=0;i<BG_USE_SPAWN_DELAY;i++) UseOnly(BUTTON_USE);
+ CHECK(knife->inuse && ps->ammo[WP_THROWING_KNIFE]==0);
+}
+/* The sea lion by the knife, end to end in ClientThink's order: the knife comes
+ * straight out, is thrown and lands; the gun's quick raise names it as the
+ * hint; a use press takes it back and the free empties the hint. Equipment
+ * pressed in a quick raise then comes straight out, chain after chain, until a
+ * gun in reach becomes the hint. */
+static void TestKnifeSeaLion(void) {
+ playerState_t *ps=KnifeThrower(1); gentity_t *knife=NULL,*gun; int t,i;
+ ps->ammo[WP_FLASH]=3; BG_RebuildWeaponMask(ps);
+ EndFrame(); CHECK(ps->cursorHintEntIndex==0);
+ UseStep(BUTTON_LETHAL); EndFrame();
+ CHECK(ps->weapon==WP_THROWING_KNIFE && ps->weaponstate==WEAPON_RAISING);
+ for(t=0;t<3000 && ps->ammo[WP_THROWING_KNIFE];t++) { UseStep(0); EndFrame(); }
+ CHECK(t<3000 && ps->cursorHintEntIndex==0);
+ knife=GroundKnife(20,0,0);
+ for(t=0;t<12000 && !(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_RAISING);t++) {
+  UseStep(0); CHECK(ps->cursorHintEntIndex==0 || !BG_OffhandOut(ps)); EndFrame();
+ }
+ CHECK((ps->weaponAction&(WA_TYPE_MASK|WA_FIRED))==(WA_LETHAL|WA_FIRED));
+ CHECK(ps->cursorHintEntIndex==knife->s.number);
+ UseStep(BUTTON_USE); EndFrame();
+ CHECK(!knife->inuse && ps->ammo[WP_THROWING_KNIFE]==1 && ps->cursorHintEntIndex==ENTITYNUM_NONE);
+ CHECK(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_RAISING && !(ps->weapFlags&PWF_USE_RELOAD));
+ for(i=0;i<3;i++) {
+  UseStep(BUTTON_TACTICAL); EndFrame();
+  CHECK(ps->weapon==WP_FLASH && ps->weaponstate==WEAPON_RAISING);	/* the gun never went down */
+  for(t=0;t<12000 && !(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_RAISING);t++) { UseStep(0); EndFrame(); }
+  CHECK(ps->cursorHintEntIndex==ENTITYNUM_NONE && ps->ammo[WP_FLASH]==2-i);
+  if(i==2) break;
+ }
+ for(t=0;t<12000 && ps->weaponstate!=WEAPON_READY;t++) { UseStep(0); EndFrame(); }
+ /* a gun in reach ends it */
+ gun=Floor(WP_RAILGUN,0,2,8,0); EndFrame();
+ CHECK(ps->cursorHintEntIndex==gun->s.number);
+ ps->ammo[WP_FLASH]=1;
+ UseStep(BUTTON_LETHAL); EndFrame();
+ CHECK(ps->weapon==WP_THROWING_KNIFE && ps->weaponstate==WEAPON_RAISING);	/* the knife's own pull */
+ for(t=0;t<12000 && !(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_RAISING);t++) { UseStep(0); EndFrame(); }
+ UseStep(BUTTON_TACTICAL); EndFrame();
+ CHECK(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_DROPPING &&
+  ps->weaponTime==BG_WeaponQuickDropTime(WP_MACHINEGUN));
+}
 int main(void) {
  TestDrops(); TestScavenge(); TestHold(); TestSwap(); TestDuplicateBase(); TestUseReload(); TestUseBusy(); TestBombFirst(); TestContestedPickup(); TestReach(); TestCursorHint();
+ TestTakeWindow(); TestTakeKeepsDrop(); TestKnifePickup(); TestKnifeSeaLion();
  printf("PASS: %d death/drop/pickup/slot-intent checks\n",checks); return 0;
 }

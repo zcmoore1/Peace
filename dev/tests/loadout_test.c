@@ -765,34 +765,100 @@ static void TestSemtexCancelKeepsLock(void) {
  for(t=0;t<cancel+500 && fired[WP_ROCKET_LAUNCHER]<2;t++) {
   if(t%16==0) { Toggle(); move.cmd.buttons=BUTTON_WEAPON_SWAP; } else move.cmd.buttons=BUTTON_ATTACK;
   Step(1);
-  CHECK(ps.weapon==WP_ROCKET_LAUNCHER || fired[WP_ROCKET_LAUNCHER]<2);
+  CHECK(ps.weapon==WP_ROCKET_LAUNCHER);	/* each Y is shorter than the rocket's drop */
  }
  move.cmd.buttons=0;
- CHECK(fired[WP_SEMTEX]==0 && (fired[WP_ROCKET_LAUNCHER]<2 || t>=cancel));
+ CHECK(fired[WP_SEMTEX]==0 && fired[WP_ROCKET_LAUNCHER]==2 && t>cancel);
 }
 /* MW2's sea lion, from its own gate (CheckForOffHand 5791b0-5791ce): with no
  * use hint at all (ENTITYNUM_NONE) and either no gun in hand or the gun's quick
  * raise after equipment, equipment comes straight out and the gun is never
  * lowered. Every life starts at 0 and a live hint is an entity number, so an
  * ordinary chain still quick-drops. Pmove only ever reads the hint. */
-static void SeaLionChain(int hint, int *instant) {
- int t;
+static void SeaLionChain(int hint, int flashFirst, int *instant) {
+ int t, first=flashFirst ? WA_TACTICAL : WA_LETHAL, second=flashFirst ? WA_LETHAL : WA_TACTICAL;
  Ready(WP_SHOTGUN,WP_MACHINEGUN); ps.cursorHintEntIndex=hint; ps.ammo[WP_FLASH]=1;
- move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
- for(t=0;t<12000 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
- CHECK(ps.weaponstate==WEAPON_RAISING && (ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==(WA_LETHAL|WA_FIRED));
+ move.cmd.buttons=flashFirst ? BUTTON_TACTICAL : BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+ for(t=0;t<12000 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);t++) {
+  Step(1);
+  if(BG_IsActionWeapon(ps.weapon)) CHECK(BG_OffhandOut(&ps));	/* MW2 freezes the hint through the throw */
+ }
+ CHECK(ps.weaponstate==WEAPON_RAISING && (ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==(first|WA_FIRED));
  Run(BG_WeaponQuickRaiseTime(WP_SHOTGUN)/2);
- move.cmd.buttons=BUTTON_TACTICAL; Step(1); move.cmd.buttons=0;
- *instant=ps.weapon==WP_FLASH && ps.weaponstate==WEAPON_RAISING;
+ move.cmd.buttons=flashFirst ? BUTTON_LETHAL : BUTTON_TACTICAL; Step(1); move.cmd.buttons=0;
+ *instant=ps.weapon==(flashFirst ? BG_LethalWeapon(&ps) : WP_FLASH) && ps.weaponstate==WEAPON_RAISING;
  if(!*instant) CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_DROPPING &&
   ps.weaponTime==BG_WeaponQuickDropTime(WP_SHOTGUN));
- else CHECK(ps.weaponTime==BG_WeaponDrawTime(&ps) && (ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==WA_TACTICAL);
+ else CHECK(ps.weaponTime==BG_WeaponDrawTime(&ps) && (ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==second);
  CHECK(ps.cursorHintEntIndex==hint);
+}
+/* MW2's throwing knife (weapClass 9): OffHandInit prepares it in the same call,
+ * so it comes out with the gun never lowered, hint or not; it stays raised
+ * while the lethal button is held and is thrown on release; a tap throws once
+ * the pull is over. The knife is spent at the throw, and the gun recovers as it
+ * does from any quick action. */
+static void KnifeReady(int count, int hint) {
+ bg_class_t cl=*BG_Class(0);
+ Ready(WP_SHOTGUN,WP_MACHINEGUN);
+ cl.slot[0]=WP_SHOTGUN; cl.slot[1]=WP_MACHINEGUN; cl.lethal=WP_THROWING_KNIFE; cl.lethalCount=count;
+ CHECK(BG_ValidateClass(&cl));
+ BG_ApplyClass(&ps,&cl); move.cmd.weapon=WP_SHOTGUN; ps.cursorHintEntIndex=hint;
+ CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_READY && ps.ammo[WP_THROWING_KNIFE]==count);
+ CHECK(BG_LethalWeapon(&ps)==WP_THROWING_KNIFE);
+}
+static void TestThrowingKnife(void) {
+ const int hints[3]={0,MAX_CLIENTS+7,ENTITYNUM_NONE};
+ int i,t,pull;
+ for(i=0;i<3;i++) {
+  /* out at once from a gun at rest, held as long as the button is */
+  KnifeReady(1,hints[i]);
+  move.cmd.buttons=BUTTON_LETHAL; Step(1);
+  CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_RAISING);
+  CHECK(ps.weaponTime==BG_WeaponDrawTime(&ps) && ps.weaponTime==BG_THROWING_KNIFE_PULL_MS);
+  for(t=0;t<3000;t++) { Step(1); CHECK(ps.weapon==WP_THROWING_KNIFE && !fired[WP_THROWING_KNIFE]); }
+  CHECK(ps.weaponstate==WEAPON_READY && ps.ammo[WP_THROWING_KNIFE]==1);
+  move.cmd.buttons=0; Step(1);
+  CHECK(fired[WP_THROWING_KNIFE]==1 && ps.ammo[WP_THROWING_KNIFE]==0 && (ps.weaponAction&WA_FIRED));
+  CHECK(ps.cursorHintEntIndex==hints[i]);
+  for(t=0;t<12000 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+  CHECK((ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==(WA_LETHAL|WA_FIRED));
+  CHECK(ps.weaponTime==BG_WeaponQuickRaiseTime(WP_SHOTGUN));
+  Returned(); CHECK(fired[WP_SHOTGUN]==0);
+  /* none left: a press asks for nothing */
+  move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0; Step(1);
+  CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_READY && !(ps.weaponAction&WA_TYPE_MASK));
+ }
+ /* a tap throws on the first command after the pull */
+ KnifeReady(1,0);
+ move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+ pull=ps.weaponTime;
+ for(t=0;t<12000 && !fired[WP_THROWING_KNIFE];t++) Step(1);
+ CHECK(t==pull+1 && ps.ammo[WP_THROWING_KNIFE]==0);
+ /* the next knife comes out of the gun's quick raise as directly, with the
+  * hint live; a flash pressed there still lowers the gun */
+ for(i=0;i<2;i++) {
+  KnifeReady(2,0); ps.ammo[WP_FLASH]=1;
+  move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+  for(t=0;t<12000 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+  Run(BG_WeaponQuickRaiseTime(WP_SHOTGUN)/2);
+  move.cmd.buttons=i ? BUTTON_TACTICAL : BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+  if(!i) CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_RAISING &&
+   ps.weaponTime==BG_THROWING_KNIFE_PULL_MS && ps.ammo[WP_THROWING_KNIFE]==1);
+  else CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_DROPPING &&
+   ps.weaponTime==BG_WeaponQuickDropTime(WP_SHOTGUN));
+ }
+ /* the class menu and validation accept it as the lethal */
+ { bg_class_t cl=*BG_Class(0); char text[256];
+   cl.lethal=WP_THROWING_KNIFE; cl.lethalCount=1; CHECK(BG_ValidateClass(&cl));
+   CHECK(BG_SerializeClass(&cl,text,sizeof(text)));
+   memset(&cl,0,sizeof(cl)); CHECK(BG_ParseClass(text,&cl) && cl.lethal==WP_THROWING_KNIFE); }
 }
 static void TestSeaLion(void) {
  const int hints[3]={0,MAX_CLIENTS+7,ENTITYNUM_NONE};
  int i,t,n,instant;
- for(i=0;i<3;i++) { SeaLionChain(hints[i],&instant); CHECK(instant==(hints[i]==ENTITYNUM_NONE)); }
+ /* Every offhand's return is OFFHAND_END (MW2's OffHandEnd writes it for
+  * both), so a flash's return opens the gate for the lethal as well. */
+ for(i=0;i<6;i++) { SeaLionChain(hints[i%3],i/3,&instant); CHECK(instant==(hints[i%3]==ENTITYNUM_NONE)); }
  /* From a gun at rest it still quick-drops: the gate needs OFFHAND_END. */
  Ready(WP_SHOTGUN,WP_MACHINEGUN); ps.cursorHintEntIndex=ENTITYNUM_NONE;
  move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
@@ -835,9 +901,95 @@ static void TestSeaLion(void) {
   Ready(WP_SHOTGUN,WP_MACHINEGUN); ps.weapon=WP_NONE; ps.cursorHintEntIndex=i==2 ? ENTITYNUM_NONE : 0;
   move.cmd.buttons=i ? BUTTON_LETHAL : 0; Step(1); move.cmd.buttons=0;
   if(i==0) CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING && ps.weaponTime==BG_WeaponDrawTime(&ps));
-  if(i==1) CHECK(ps.weapon==WP_NONE && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_EMPTY_HAND_OFFHAND_TIME);
+  if(i==1) {
+   CHECK(ps.weapon==WP_NONE && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_EMPTY_HAND_OFFHAND_TIME);
+   Run(BG_EMPTY_HAND_OFFHAND_TIME);
+   CHECK(ps.weapon==BG_LethalWeapon(&ps) && ps.weaponstate==WEAPON_RAISING);
+  }
   if(i==2) CHECK(ps.weapon==BG_LethalWeapon(&ps) && ps.weaponstate==WEAPON_RAISING);
  }
+ /* The knife from an empty hand never reads the hint: the gate is equipment's. */
+ {
+  int w[2],state[2],time[2],k;
+  for(k=0;k<2;k++) {
+   Ready(WP_SHOTGUN,WP_MACHINEGUN); ps.weapon=WP_NONE; ps.cursorHintEntIndex=k ? ENTITYNUM_NONE : 0;
+   move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
+   w[k]=ps.weapon; state[k]=ps.weaponstate; time[k]=ps.weaponTime;
+   for(t=0;t<12000 && !fired[WP_KNIFE];t++) Step(1);
+   CHECK(fired[WP_KNIFE]==1);
+   for(t=0;t<12000 && BG_IsActionWeapon(ps.weapon);t++) Step(1);
+   CHECK(t<12000 && (ps.weapon==WP_NONE || !(ps.weaponAction&WA_TYPE_MASK)));
+  }
+  CHECK(w[0]==w[1] && state[0]==state[1] && time[0]==time[1]);
+ }
+ /* MW2's OffHandEnd with weapon 0: equipment pulled from an empty hand goes
+  * back to an empty hand, never into a gun's quick raise. While the selection
+  * is stale the hand stays empty; a current one then draws the gun on its
+  * ordinary raise, with nothing latched. */
+ for(i=0;i<4;i++) {
+  int action=i&1 ? BUTTON_TACTICAL : BUTTON_LETHAL, stale=i<2;
+  Ready(WP_SHOTGUN,WP_MACHINEGUN); ps.weapon=WP_NONE; ps.cursorHintEntIndex=ENTITYNUM_NONE;
+  ps.ammo[WP_FLASH]=1;
+  if(stale) { ps.slotFlags[0]^=BG_GUN_GENERATION; move.cmd.weapon=BG_SLOT_COMMAND; }
+  move.cmd.buttons=action; Step(1); move.cmd.buttons=0;
+  CHECK(BG_IsActionWeapon(ps.weapon) && ps.weaponstate==WEAPON_RAISING && (ps.weaponAction&WA_LEFT_EMPTY));
+  for(t=0;t<12000 && BG_IsActionWeapon(ps.weapon);t++) Step(1);
+  CHECK(fired[action==BUTTON_LETHAL ? BG_LethalWeapon(&ps) : WP_FLASH]==1);
+  CHECK(ps.weapon==WP_NONE || (ps.weapon==WP_SHOTGUN && !stale && !(ps.weaponAction&WA_TYPE_MASK)));
+  if(stale) {
+   for(t=0;t<3000;t++) { Step(1); CHECK(ps.weapon==WP_NONE); }
+   CHECK(ps.weaponstate==WEAPON_READY && !(ps.weaponAction&(WA_TYPE_MASK|WA_LEFT_EMPTY)));
+   move.cmd.weapon=BG_SlotCommand(&ps,0);
+  }
+  for(t=0;t<100 && ps.weapon==WP_NONE;t++) Step(1);
+  CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING && !(ps.weaponAction&WA_TYPE_MASK));
+  CHECK(ps.weaponTime==BG_WeaponDrawTime(&ps) && BG_WeaponDrawTime(&ps)!=BG_WeaponQuickRaiseTime(WP_SHOTGUN));
+ }
+ /* A Semtex cancelled from an empty hand leaves it empty at once, keeps the
+  * Semtex, and the gun then comes up on its ordinary raise. */
+ {
+  bg_class_t cl=*BG_Class(0);
+  int ammo;
+  Ready(WP_SHOTGUN,WP_MACHINEGUN);
+  cl.slot[0]=WP_SHOTGUN; cl.slot[1]=WP_MACHINEGUN; cl.lethal=WP_SEMTEX;
+  BG_ApplyClass(&ps,&cl); move.cmd.weapon=WP_SHOTGUN; ps.weapon=WP_NONE; ps.cursorHintEntIndex=ENTITYNUM_NONE;
+  ammo=ps.ammo[WP_SEMTEX];
+  move.cmd.buttons=BUTTON_LETHAL; Step(1);
+  CHECK(ps.weapon==WP_SEMTEX && ps.weaponstate==WEAPON_RAISING);
+  Run(BG_WeaponDrawTime(&ps)/2);
+  move.cmd.buttons=BUTTON_LETHAL|BUTTON_WEAPON_SWAP; Step(1); move.cmd.buttons=0;
+  CHECK(ps.weapon==WP_NONE && ps.weaponstate==WEAPON_READY && !(ps.weaponAction&WA_RETURNING));
+  for(t=0;t<100 && ps.weapon==WP_NONE;t++) Step(1);
+  CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING && ps.weaponTime==BG_WeaponDrawTime(&ps));
+  CHECK(ps.ammo[WP_SEMTEX]==ammo && !fired[WP_SEMTEX]);
+ }
+ /* The throwing knife from an empty hand comes straight out, hint or not, and
+  * goes back to an empty hand. */
+ for(i=0;i<2;i++) {
+  KnifeReady(1,i ? ENTITYNUM_NONE : 0); ps.weapon=WP_NONE;
+  ps.slotFlags[0]^=BG_GUN_GENERATION; move.cmd.weapon=BG_SLOT_COMMAND;
+  move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+  CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_RAISING && ps.weaponTime==BG_THROWING_KNIFE_PULL_MS);
+  for(t=0;t<12000 && BG_IsActionWeapon(ps.weapon);t++) Step(1);
+  CHECK(fired[WP_THROWING_KNIFE]==1 && ps.weapon==WP_NONE);
+ }
+ /* A ladder taken and left with an empty hand while the selection is stale:
+  * the hand stays empty, never a draw of nothing, and the slot keeps its first
+  * raise for when the selection catches up. */
+ Ready(WP_SHOTGUN,WP_MACHINEGUN); ps.weapon=WP_NONE;
+ ps.slotFlags[0]^=BG_GUN_GENERATION; ps.slotFlags[0]|=BG_GUN_FIRST_DRAW; move.cmd.weapon=BG_SLOT_COMMAND;
+ ps.stats[STAT_LADDER]|=LADDER_ATTACHED;
+ for(t=0;t<2000 && ps.weaponstate!=WEAPON_LADDER;t++) Step(1);
+ CHECK(ps.weaponstate==WEAPON_LADDER && ps.weapon==WP_NONE);
+ ps.stats[STAT_LADDER]&=~LADDER_ATTACHED; Step(1);
+ CHECK(ps.weapon==WP_NONE && ps.weaponstate==WEAPON_READY && (ps.slotFlags[0]&BG_GUN_FIRST_DRAW));
+ move.cmd.weapon=BG_SlotCommand(&ps,0); Step(1);
+ CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING && ps.weaponTime==BG_WeaponFirstRaiseTime(WP_SHOTGUN));
+ /* An empty hand has nothing to aim. */
+ Ready(WP_SHOTGUN,WP_MACHINEGUN); move.cmd.buttons=BUTTON_ADS;
+ PM_CheckADS(); CHECK(ps.pm_flags&PMF_ADS);
+ ps.weapon=WP_NONE; PM_CheckADS(); CHECK(!(ps.pm_flags&PMF_ADS));
+ move.cmd.buttons=0;
  /* A selection sent before the client saw the pickup names the gun just
   * dropped: the hands stay empty until it catches up, and the other slot
   * can still be chosen. */
@@ -1274,7 +1426,7 @@ static void TestHeldThroughRespawn(void) {
 }
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
- TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestNoSwapInQuickAction(); TestSemtexCancelKeepsLock(); TestSeaLion(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
+ TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestNoSwapInQuickAction(); TestSemtexCancelKeepsLock(); TestThrowingKnife(); TestSeaLion(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
  TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;

@@ -263,6 +263,14 @@ Tactical equipment. Placeholder visuals until real assets land.
 		"icons/peace_semtex", "Semtex", 0, IT_WEAPON, WP_SEMTEX, "", ""
 	},
 
+/* Lethal equipment: MW2's throwing knife. The frag's grenade model stands in
+   until the knife model lands. */
+	{
+		"weapon_throwingknife", "sound/misc/w_pkup.wav",
+		{ "models/weapons2/grenadel/grenadel.md3", NULL, NULL, NULL },
+		"icons/iconw_grenade", "Throwing Knife", 0, IT_WEAPON, WP_THROWING_KNIFE, "", ""
+	},
+
 /*QUAKED weapon_shotgun (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{

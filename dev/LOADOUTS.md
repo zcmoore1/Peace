@@ -140,7 +140,10 @@ gun. A held action button does not repeat. Empty equipment does nothing; a ladde
 grab clears queued actions. Every knife and grenade defers a Y until the gun it
 left is fully back on its quick raise (MW2's CheckForChangeWeapon); YY cannot
 cancel that raise. Semtex adds hold/release and a pre-throw cancel; see
-`dev/SEMTEX.md` for controls, timing, art and compatibility notes.
+`dev/SEMTEX.md` for controls, timing, art and compatibility notes. The throwing
+knife is a lethal choice too: it comes out without lowering the gun, throws on
+release, sticks where it lands and is taken back with use; see
+`dev/THROWING_KNIFE.md`.
 
 Only the selected validated definition is sent in `peace_loadout` userinfo.
 `peace_class_0`–`peace_class_4` stay local. The server rejects malformed names,

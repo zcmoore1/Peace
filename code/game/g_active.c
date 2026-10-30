@@ -757,7 +757,7 @@ void ClientThink_real( gentity_t *ent ) {
 	int			oldEventSequence;
 	int			msec;
 	usercmd_t	*ucmd;
-	qboolean	sndUsable;
+	qboolean	usedAtOnce;
 
 	client = ent->client;
 
@@ -987,8 +987,8 @@ void ClientThink_real( gentity_t *ent ) {
 		G_TouchTriggers( ent );
 	}
 
-	// Bomb use and reload-to-pickup have independent clocks and buttons.
-	sndUsable = G_UseThink(ent, ucmd);
+	// Bomb use, the knife and reload-to-pickup have independent clocks and buttons.
+	usedAtOnce = G_UseThink(ent, ucmd);
 
 	// NOTE: now copy the exact origin over otherwise clients can be snapped into solid
 	VectorCopy( ent->client->ps.origin, ent->r.currentOrigin );
@@ -1005,10 +1005,11 @@ void ClientThink_real( gentity_t *ent ) {
 	}
 
 	// MW2's use and use/reload, after the command has moved the player: a press
-	// over a floor gun is held for it, a press at a bomb site or the bomb is a
-	// use, and anything else asks the weapon for a reload on the next command.
+	// over a floor gun is held for it, a press at a bomb site, the bomb or a
+	// knife's hint is a use, and anything else asks the weapon for a reload on
+	// the next command.
 	BG_UpdateActivate( &client->ps, &client->activate, ucmd->buttons,
-		!sndUsable && G_FindWeaponPickup( ent ) != NULL, sndUsable );
+		!usedAtOnce && G_FindWeaponPickup( ent ) != NULL, usedAtOnce );
 
 	// swap and latch button actions
 	client->oldbuttons = client->buttons;

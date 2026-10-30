@@ -173,7 +173,8 @@ source for MW2 behaviour; the owner rejects it.
   (`BG_OffhandOut`) or dead it writes nothing; spawn leaves 0, a live entity
   number. Only freeing what it names (`G_ClearCursorHintRefs` in
   `G_FreeEntity`, flagged `FL_CURSOR_HINT`) makes it `ENTITYNUM_NONE`, and a
-  pickup frees its dropped gun at once. Pmove only reads it: with no hint at
+  pickup frees its dropped gun - or a throwing knife taken back by use - at
+  once. A resting knife outranks any gun as the hint. Pmove only reads it: with no hint at
   all and either no gun in hand or the gun's quick raise after equipment
   (MW2's OFFHAND_END, a Semtex cancel's included), equipment comes straight
   out and the gun is never lowered (MW2's CheckForOffHand 5791b0-5791ce). So
@@ -182,7 +183,11 @@ source for MW2 behaviour; the owner rejects it.
   and instant double cancels until a gun in reach takes the hint. Never test
   for the glitch; never write `ENTITYNUM_NONE` into the hint anywhere else
   (doing so at spawn would start every life in it). The knife's return is not
-  OFFHAND_END. This drop that never happens is not a holster: no reload, shot
+  OFFHAND_END. The throwing knife's own pull never lowers the gun, hint or not
+  (MW2's weaponClass 9 prepares in OffHandInit, `BG_OffhandPreparesAtOnce`).
+  A quick action pulled from an empty hand goes back to an empty hand
+  (`WA_LEFT_EMPTY`): its own drop goes to no gun, the only drop that may.
+  A gun is never lowered toward an unowned selection. This drop that never happens is not a holster: no reload, shot
   or bolt clock can run in that raise or in an empty hand, so the NAC rule is
   untouched.
 - **Melee is its own kind of swap.** Equipment pressed on the knife's own
@@ -407,7 +412,8 @@ source for MW2 behaviour; the owner rejects it.
 - `pm_flags` — **full.** All 16 networked bits used. A 17th needs the wire
   format widened.
 - `STAT_WEAPONS` — full 32-bit wire mask at `PS_STAT_WEAPONS`. `MAX_WEAPONS`
-  is 24, with equipment through 14 in baseq3 and 17 in missionpack. Other
+  is 24; the M300 is 15 and the throwing knife 16 in baseq3 (18 and 19 in
+  missionpack). Other
   stats remain signed int16: their bit 15 must stay unused.
 - `weaponAnimSeq` — **full.** 2 bits in `msg.c`; all four values are taken
   (`RSEQ_START/LOOP/END` + `ASEQ_FIRE`). A fifth animation segment has to widen
@@ -505,12 +511,19 @@ retiming a weapon breaks the test without telling you anything.
 modulo selection, same-update YY firing, reload/pull-out cancellation, tap/hold
 actions, the sprint latch and its ending conditions, aim with sprint held, MW2
 air control (stick-only push, aim scale, stopspeed floor, ladder exempt), all
-nine action bits through the actual network codec, and pose release.
+all ten action bits through the actual network codec, and pose release. It
+also builds `knife_missile_test.c`, the throwing knife's real launch, impact
+and rest code.
 Pose checks cover source retention, ladder holsters, loop/endpoint semantics,
 reload/action exclusions, ordinary sprint reversal and frame-only crossfades,
 plus YY flow (reversed draw, eased return, fire cut-in) through the real
 `PM_Weapon`, which is why the pose test links `pickup_pmove_driver.c`.
 Loadouts UI and class definitions are documented in `dev/LOADOUTS.md`.
+
+`dev/tests/run-pickups.sh` runs the inventory, pickup, use/reload, take
+window (with the client's selection lagging the snapshot), throwing-knife
+pickup and sea lion checks, and `cursor_hint_wiring_test.c`, which links the
+real `ClientEndFrame`, `G_FreeEntity` and hint pass.
 
 `dev/tests/run-fakereload.cmd` (or `.sh`) models ioquake3's client/server
 clocks (snapshot drift, sv_fps frames, ping) with the real `Pmove` on both
@@ -564,6 +577,10 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
 - Supported attachment masks live in the shared class weapon catalog. The
   M40's scope is integral, so a red-dot spawn preference cannot invent a
   nonexistent attachment variant. See `dev/M40A3.md`.
+- The throwing knife (`WP_THROWING_KNIFE`) is appended lethal equipment
+  (16 basegame / 19 missionpack), with the frag's grenade as placeholder art.
+  Its flight, stick, pickup by use and world bound are in `dev/THROWING_KNIFE.md`.
+  Its speed, damage, bounce and pull time are placeholder weapon data.
 
 The enum is not enough. A weapon in `STAT_WEAPONS` with no `bg_itemlist` entry
 crashes on spawn: `CG_RegisterWeapon` calls `CG_Error`, and `BG_FindItemForWeapon`

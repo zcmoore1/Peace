@@ -20,7 +20,9 @@ Swapping the gun in hand empties the hand, as MW2's take does: the new gun is
 drawn once your selection names it, about a round trip later (each slot's
 generation bit, `BG_SlotCommand`). Collecting a dropped gun your use hint named
 frees it and leaves you with no hint at all - MW2's sea lion (see CLAUDE.md).
-A map gun is only hidden to respawn, so the hint keeps naming it. Releasing early resets progress
+A map gun is only hidden to respawn, so the hint keeps naming it. A resting
+throwing knife outranks any gun as the hint and is taken with a use press, not
+a hold (`dev/THROWING_KNIFE.md`); taking it frees it too. Releasing early resets progress
 and supplies the normal reload input: a `+reload` tap is read by the weapon at
 once, a use/reload tap is the server's, as in MW2, where a tap of X over a usable
 item reloads on release (`BG_UpdateActivate`; `pickupHeld` 3 marks that hold so

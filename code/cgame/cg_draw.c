@@ -2471,7 +2471,8 @@ static void CG_DrawLoadoutHud( void ) {
 
 	// Equipment counts are just the ammo on those weapon entries.
 	Com_sprintf( line, sizeof( line ), "%s %i   TAC %i",
-		BG_LethalWeapon(ps) == WP_SEMTEX ? "SEMTEX" : "LETHAL",
+		BG_LethalWeapon(ps) == WP_SEMTEX ? "SEMTEX" :
+		BG_LethalWeapon(ps) == WP_THROWING_KNIFE ? "KNIFE" : "LETHAL",
 		ps->ammo[BG_LethalWeapon(ps)], ps->ammo[WP_FLASH] );
 	CG_DrawSmallString( x, y, line, 1.0f );
 

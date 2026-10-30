@@ -329,6 +329,66 @@ static void SemtexFollow(gentity_t *ent) {
 	trap_LinkEntity(ent);
 }
 
+/*
+================
+ThrowingKnifeImpact
+
+MW2's MissileImpact for the throwing knife ('Knife' stickiness). It hurts only
+above g_minGrenadeDamageSpeed. The hit velocity is reflected and scaled; the
+knife then sticks if it came in head-on (the reflection within ~45.6 degrees
+of the surface normal) or has settled on a floor, and otherwise bounces. It
+never sticks in a player here: it hits, then falls from there to rest. A
+stopped knife stays until it is picked back up.
+================
+*/
+static void ThrowingKnifeImpact( gentity_t *ent, trace_t *trace, gentity_t *other ) {
+	vec3_t	velocity, bounced, origin;
+	float	speed, dot;
+	int		hitTime = level.previousTime + ( level.time - level.previousTime ) * trace->fraction;
+
+	BG_EvaluateTrajectoryDelta( &ent->s.pos, hitTime, velocity );
+	if ( other->takedamage && VectorLength( velocity ) > BG_THROWING_KNIFE_HIT_SPEED ) {
+		G_Damage( other, ent, ent->parent ? ent->parent : ent, velocity, trace->endpos,
+			ent->damage, 0, ent->methodOfDeath );
+	}
+	if ( other->client ) {
+		// drop from the hit, passing through the one it hit
+		ent->target_ent = other;
+		VectorCopy( trace->endpos, ent->s.pos.trBase );
+		VectorClear( ent->s.pos.trDelta );
+		ent->s.pos.trType = TR_GRAVITY;
+		ent->s.pos.trTime = level.time;
+		VectorCopy( trace->endpos, ent->r.currentOrigin );
+		trap_LinkEntity( ent );
+		return;
+	}
+	dot = DotProduct( velocity, trace->plane.normal );
+	VectorMA( velocity, -2 * dot, trace->plane.normal, bounced );
+	VectorScale( bounced, BG_THROWING_KNIFE_BOUNCE, bounced );
+	speed = VectorLength( bounced );
+	if ( ( trace->plane.normal[2] > BG_THROWING_KNIFE_FLOOR_Z && speed < BG_THROWING_KNIFE_REST_SPEED ) ||
+	     ( speed > 0 && DotProduct( trace->plane.normal, bounced ) / speed > BG_THROWING_KNIFE_STICK_DOT ) ) {
+		VectorMA( trace->endpos, 1.0f, trace->plane.normal, origin );
+		G_SetOrigin( ent, origin );
+		vectoangles( velocity, ent->s.angles );		// buried along the throw
+		VectorCopy( ent->s.angles, ent->s.apos.trBase );
+		VectorCopy( ent->s.angles, ent->r.currentAngles );
+		VectorClear( ent->s.apos.trDelta );
+		ent->s.apos.trType = TR_STATIONARY;
+		ent->s.apos.trTime = 0;
+		ent->nextthink = 0;
+		ent->think = 0;
+		ent->target_ent = NULL;
+		trap_LinkEntity( ent );
+		return;
+	}
+	VectorCopy( bounced, ent->s.pos.trDelta );
+	VectorMA( trace->endpos, 0.1f, trace->plane.normal, ent->r.currentOrigin );
+	VectorCopy( ent->r.currentOrigin, ent->s.pos.trBase );
+	ent->s.pos.trTime = level.time;
+	G_AddEvent( ent, EV_GRENADE_BOUNCE, 0 );
+}
+
 void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 	gentity_t		*other;
 	qboolean		hitClient = qfalse;
@@ -339,6 +399,10 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 	other = &g_entities[trace->entityNum];
 	if (ent->s.weapon == WP_SEMTEX) {
 		SemtexStick(ent, trace, other);
+		return;
+	}
+	if (ent->s.weapon == WP_THROWING_KNIFE) {
+		ThrowingKnifeImpact(ent, trace, other);
 		return;
 	}
 
@@ -520,6 +584,10 @@ void G_RunMissile( gentity_t *ent ) {
 		G_RunThink(ent);
 		return;
 	}
+	if (ent->s.weapon == WP_THROWING_KNIFE && ent->s.pos.trType == TR_STATIONARY) {
+		G_RunThink(ent);	// stopped: no longer a missile, nothing it touches moves it
+		return;
+	}
 
 	// get current position
 	BG_EvaluateTrajectory( &ent->s.pos, level.time, origin );
@@ -641,6 +709,67 @@ gentity_t *fire_semtex(gentity_t *self, vec3_t start, vec3_t dir) {
 	bolt->damage = 0;
 	bolt->nextthink = level.time + SEMTEX_FUSE_TIME;
 	bolt->semtexOwnerConnect = self->client ? self->client->pers.enterTime : 0;
+	return bolt;
+}
+
+/*
+=================
+fire_throwingknife
+
+MW2's G_FireGrenade for weapClass 9: thrown along the view at the knife's
+speed plus the thrower's own speed along it, falling under gravity and
+spinning end over end (apos) from 120 degrees back. It never explodes: in
+flight it lives BG_THROWING_KNIFE_LIFE, and once stopped it stays until a
+pickup frees it - or, the oldest of BG_THROWING_KNIFE_WORLD_MAX out, another is thrown.
+=================
+*/
+gentity_t *fire_throwingknife(gentity_t *self, vec3_t start, vec3_t dir) {
+	gentity_t	*bolt, *oldest = NULL;
+	vec3_t		angles;
+	int			i, count = 0;
+
+	// Peace's bound, not MW2's: the exe never frees a stopped knife, and any
+	// cleanup it has is script. The oldest goes, freed like any other.
+	for ( i = MAX_CLIENTS; i < level.num_entities; i++ ) {
+		gentity_t *knife = &g_entities[i];
+		if ( !knife->inuse || knife->s.eType != ET_MISSILE || knife->s.weapon != WP_THROWING_KNIFE ) continue;
+		count++;
+		if ( !oldest || knife->timestamp < oldest->timestamp ) oldest = knife;
+	}
+	if ( count >= BG_THROWING_KNIFE_WORLD_MAX ) G_FreeEntity( oldest );
+
+	VectorNormalize( dir );
+	bolt = G_Spawn();
+	bolt->classname = "throwingknife";
+	bolt->nextthink = level.time + BG_THROWING_KNIFE_LIFE;
+	bolt->think = G_FreeEntity;
+	bolt->s.eType = ET_MISSILE;
+	bolt->r.svFlags = SVF_USE_CURRENT_ORIGIN;
+	bolt->s.weapon = WP_THROWING_KNIFE;
+	bolt->r.ownerNum = self->s.number;
+	bolt->parent = self;
+	bolt->damage = BG_THROWING_KNIFE_DAMAGE;
+	bolt->methodOfDeath = MOD_GAUNTLET;
+	bolt->clipmask = MASK_SHOT;
+	bolt->target_ent = NULL;
+	bolt->timestamp = level.time;		// BG_USE_SPAWN_DELAY counts from here
+
+	bolt->s.pos.trType = TR_GRAVITY;
+	bolt->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;
+	VectorCopy( start, bolt->s.pos.trBase );
+	VectorScale( dir, BG_THROWING_KNIFE_SPEED, bolt->s.pos.trDelta );
+	if ( self->client ) {
+		VectorMA( bolt->s.pos.trDelta, DotProduct( self->client->ps.velocity, dir ), dir, bolt->s.pos.trDelta );
+	}
+	SnapVector( bolt->s.pos.trDelta );
+	VectorCopy( start, bolt->r.currentOrigin );
+
+	vectoangles( dir, angles );
+	angles[PITCH] = AngleNormalize180( angles[PITCH] - 120 );
+	bolt->s.apos.trType = TR_LINEAR;
+	bolt->s.apos.trTime = level.time;
+	VectorCopy( angles, bolt->s.apos.trBase );
+	VectorSet( bolt->s.apos.trDelta, BG_THROWING_KNIFE_SPIN, 0, 0 );
 	return bolt;
 }
 

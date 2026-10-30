@@ -93,9 +93,16 @@ int BG_ReloadTime( const playerState_t *ps, int authoredTime ) {
 
 // Quick actions reuse weapon states, but never become either inventory slot.
 // Gameplay and presentation share this classification, including recovery.
+// MW2's weapClass 9, the throwing knife: OffHandInit calls OffHandPrepare in
+// the same call (578eec), so the knife is in hand on the press and the gun is
+// never lowered first. Every other offhand pays the gun's quickDropTime.
+qboolean BG_OffhandPreparesAtOnce( int weapon ) {
+	return weapon == WP_THROWING_KNIFE;
+}
+
 qboolean BG_IsActionWeapon( int weapon ) {
 	return weapon == WP_KNIFE || weapon == WP_FRAG ||
-		weapon == WP_FLASH || weapon == WP_SEMTEX;
+		weapon == WP_FLASH || weapon == WP_SEMTEX || weapon == WP_THROWING_KNIFE;
 }
 
 static const struct { int weapon; const char *name; int attachments; } classWeapons[] = {
@@ -167,7 +174,8 @@ qboolean BG_ValidateClass( const bg_class_t *loadout ) {
 	if ( !loadout || !BG_ClassNameValid(loadout->name) ) return qfalse;
 	if ( !BG_IsClassWeapon(loadout->slot[0]) || !BG_IsClassWeapon(loadout->slot[1]) ||
 		loadout->slot[0] == loadout->slot[1] ) return qfalse;
-	if ( loadout->lethal != WP_NONE && loadout->lethal != WP_FRAG && loadout->lethal != WP_SEMTEX ) return qfalse;
+	if ( loadout->lethal != WP_NONE && loadout->lethal != WP_FRAG && loadout->lethal != WP_SEMTEX &&
+		loadout->lethal != WP_THROWING_KNIFE ) return qfalse;
 	if ( loadout->tactical != WP_NONE && loadout->tactical != WP_FLASH ) return qfalse;
 	if ( loadout->lethalCount < 0 || loadout->lethalCount > 3 ||
 		loadout->tacticalCount < 0 || loadout->tacticalCount > 3 ) return qfalse;

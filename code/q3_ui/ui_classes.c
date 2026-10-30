@@ -220,6 +220,7 @@ static const char *UI_ClassEquipmentName( int weapon ) {
 	switch ( weapon ) {
 	case WP_FRAG: return "Frag grenade";
 	case WP_SEMTEX: return "Semtex";
+	case WP_THROWING_KNIFE: return "Throwing knife";
 	case WP_FLASH: return "Flash grenade";
 	default: return "None";
 	}
@@ -274,7 +275,7 @@ static void UI_ClassSelectDraw( void ) {
 	UI_DrawString(320, 208, BG_ClassWeaponName(loadout->slot[0]), UI_SMALLFONT, color_white);
 	UI_DrawString(320, 236, "SECONDARY", UI_SMALLFONT, classMuted);
 	UI_DrawString(320, 256, BG_ClassWeaponName(loadout->slot[1]), UI_SMALLFONT, color_white);
-	Com_sprintf(line, sizeof(line), "%s x%i / %s x%i", loadout->lethal == WP_SEMTEX ? "Semtex" : loadout->lethal ? "Frag" : "None", loadout->lethalCount, loadout->tactical ? "Flash" : "None", loadout->tacticalCount);
+	Com_sprintf(line, sizeof(line), "%s x%i / %s x%i", loadout->lethal == WP_SEMTEX ? "Semtex" : loadout->lethal == WP_THROWING_KNIFE ? "Knife" : loadout->lethal ? "Frag" : "None", loadout->lethalCount, loadout->tactical ? "Flash" : "None", loadout->tacticalCount);
 	UI_DrawString(320, 290, line, UI_SMALLFONT, color_white);
 	for ( i = 0; i < BG_PERK_SLOTS; i++ ) {
 		Com_sprintf(line, sizeof(line), "%i  %s", i + 1, BG_Perk(loadout->perk[i])->name);
@@ -639,6 +640,7 @@ static void UI_ClassOpenPicker( int kind, int slot, int category ) {
 		if ( kind == CLASS_LETHAL ) {
 			UI_ClassPageRow(&classPicker, WP_FRAG, "Frag grenade", "A timed explosive grenade. Choose how many to carry on the next screen.", current == WP_FRAG, qfalse);
 			UI_ClassPageRow(&classPicker, WP_SEMTEX, "Semtex", "A sticky explosive grenade. Choose how many to carry on the next screen.", current == WP_SEMTEX, qfalse);
+			UI_ClassPageRow(&classPicker, WP_THROWING_KNIFE, "Throwing knife", "Thrown straight from the hand; kills on a hit, sticks where it lands, pick it back up with use.", current == WP_THROWING_KNIFE, qfalse);
 		} else UI_ClassPageRow(&classPicker, WP_FLASH, "Flash grenade", "Disorients players in its blast. Choose how many to carry on the next screen.", current == WP_FLASH, qfalse);
 		Q_strncpyz(classPicker.note, "Carry one to three of each equipment type. Counts reset on spawn.", sizeof(classPicker.note));
 	}

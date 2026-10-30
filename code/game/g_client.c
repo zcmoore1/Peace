@@ -1192,6 +1192,8 @@ void ClientSpawn(gentity_t *ent) {
 	// underbarrel and equipment counts. One shared function so the server and
 	// any future loadout-change path can never disagree.
 	BG_ApplyClass( &client->ps, &client->pers.selectedLoadout );
+	client->knifeMax = client->ps.ammo[WP_THROWING_KNIFE];
+	client->knifeHold = ENTITYNUM_NONE;
 	{
 		int attachments;
 		// The existing sight preference seeds the spawn loadout. Thereafter

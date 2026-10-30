@@ -619,7 +619,8 @@ static const char *cg_viewModelBase[WP_NUM_WEAPONS] = {
 	"",									// WP_FRAG
 	"",                                 // WP_FLASH
 	"",                                 // WP_SEMTEX (procedural MD3 hand pose)
-	"models/weapons2/m40a3/view"          // WP_M40A3
+	"models/weapons2/m40a3/view",         // WP_M40A3
+	""                                  // WP_THROWING_KNIFE (frag model until the knife lands)
 };
 
 /*
@@ -719,6 +720,12 @@ void CG_RegisterWeapon( int weaponNum ) {
 		weaponInfo->flashModel = 0;
 		weaponInfo->barrelModel = 0;
 		cgs.media.grenadeExplosionShader = trap_R_RegisterShader("grenadeExplosion");
+		break;
+	case WP_THROWING_KNIFE:
+		// placeholder art: a thrown knife looks like a thrown frag until its model lands
+		weaponInfo->missileModel = trap_R_RegisterModel( "models/ammo/grenade1.md3" );
+		weaponInfo->flashModel = 0;
+		weaponInfo->barrelModel = 0;
 		break;
 	case WP_GAUNTLET:
 		MAKERGB( weaponInfo->flashDlightColor, 0.6f, 0.6f, 1.0f );

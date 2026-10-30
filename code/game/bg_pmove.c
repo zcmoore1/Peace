@@ -1866,6 +1866,7 @@ static const int bg_weaponMagSize[MAX_WEAPONS] = {
 	1,		// WP_FLASH
 	1,      // WP_SEMTEX
 	M40_MAG_SIZE,
+	1,		// WP_THROWING_KNIFE (one in hand)
 };
 
 // ---------------------------------------------------------------------------
@@ -2005,7 +2006,8 @@ static const bg_weaponAnimSeg_t bg_weaponFire[MAX_WEAPONS] = {
 	/* WP_FRAG            */ { 0, bgnotes_none },
 	/* WP_FLASH           */ { 0, bgnotes_none },
 	/* WP_SEMTEX          */ { 0, bgnotes_none },
-	/* WP_M40A3           */ { M40_FIRE_MS, bgnotes_m40_fire }
+	/* WP_M40A3           */ { M40_FIRE_MS, bgnotes_m40_fire },
+	/* WP_THROWING_KNIFE  */ { 0, bgnotes_none }
 };
 
 int BG_WeaponFireLength( int weapon ) {
@@ -2039,6 +2041,7 @@ static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
 	/* WP_M40A3           */ { { { M40_RELOAD_START_MS, bgnotes_m40_start },
 	                             { M40_RELOAD_LOOP_MS, bgnotes_m40_loop },
 	                             { M40_RELOAD_END_MS, bgnotes_m40_end } }, qtrue },
+	/* WP_THROWING_KNIFE  */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 };
 
 // Holster / deploy lengths. Always stamped on a weapon change - never 0, so a
@@ -2065,6 +2068,7 @@ static const int bg_weaponDropTime[MAX_WEAPONS] = {
 	BG_RAPID_DROP_TIME,	// WP_FLASH
 	BG_RAPID_DROP_TIME,	// WP_SEMTEX
 	M40_DROP_MS,
+	BG_RAPID_DROP_TIME,	// WP_THROWING_KNIFE
 };
 
 static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
@@ -2087,6 +2091,7 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 	150,	// WP_FLASH
 	350,    // WP_SEMTEX pull back into held pose
 	M40_RAISE_MS,
+	BG_THROWING_KNIFE_PULL_MS,	// WP_THROWING_KNIFE: MW2's iHoldFireTime (weapon data)
 };
 
 // MW2's quickDropTime and quickRaiseTime (its weapon files): the gun going
@@ -2101,6 +2106,7 @@ static const int bg_weaponQuickDropTime[MAX_WEAPONS] = {
 #endif
 	250, 250, 250, 250,
 	M40_QUICK_DROP_MS,
+	250,	// WP_THROWING_KNIFE
 };
 static const int bg_weaponQuickRaiseTime[MAX_WEAPONS] = {
 	250,	// WP_NONE
@@ -2119,6 +2125,7 @@ static const int bg_weaponQuickRaiseTime[MAX_WEAPONS] = {
 #endif
 	250, 250, 250, 250,
 	M40_QUICK_RAISE_MS,	// MW2's Intervention
+	250,	// WP_THROWING_KNIFE
 };
 
 int BG_WeaponMagSize( int weapon ) {
@@ -2157,14 +2164,14 @@ static const int bg_weaponSprintInTime[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	250, 250, 250,
 #endif
-	150, 150, 150, 150, M40_SPRINT_IN_MS
+	150, 150, 150, 150, M40_SPRINT_IN_MS, 150
 };
 static const int bg_weaponSprintOutTime[MAX_WEAPONS] = {
 	180, 180, 250, 250, 300, 300, 250, 300, 250, 350, 150,
 #ifdef MISSIONPACK
 	300, 300, 300,
 #endif
-	180, 180, 180, 180, M40_SPRINT_OUT_MS
+	180, 180, 180, 180, M40_SPRINT_OUT_MS, 180
 };
 
 int BG_WeaponSprintInTime( int weapon ) {
@@ -2467,6 +2474,8 @@ int BG_LethalWeapon( const playerState_t *ps ) {
 	// Keep the action's identity through its last throw and inventory rebuilds.
 	if (ps->weapon == WP_SEMTEX || ps->ammo[WP_SEMTEX] > 0 ||
 		(ps->stats[STAT_WEAPONS] & (1 << WP_SEMTEX))) return WP_SEMTEX;
+	if (ps->weapon == WP_THROWING_KNIFE || ps->ammo[WP_THROWING_KNIFE] > 0 ||
+		(ps->stats[STAT_WEAPONS] & (1 << WP_THROWING_KNIFE))) return WP_THROWING_KNIFE;
 	return WP_FRAG;
 }
 
@@ -2491,6 +2500,7 @@ static const int bg_weaponMaxReserve[MAX_WEAPONS] = {
 	0,		// WP_FLASH          (count lives in STAT_TACTICAL_COUNT)
 	0,      // WP_SEMTEX
 	M40_RESERVE,
+	0,		// WP_THROWING_KNIFE
 };
 
 int BG_WeaponMaxReserve( int weapon ) {
@@ -2523,6 +2533,7 @@ static const int bg_weaponSpread[MAX_WEAPONS] = {
 	0,		// WP_FLASH
 	0,      // WP_SEMTEX
 	M40_HIP_SPREAD,
+	0,		// WP_THROWING_KNIFE
 };
 
 static const float bg_weaponAdsSpreadScale[MAX_WEAPONS] = {
@@ -2530,7 +2541,7 @@ static const float bg_weaponAdsSpreadScale[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	.15f, .15f, .15f,
 #endif
-	.15f, .15f, .15f, .15f, M40_ADS_SPREAD_SCALE
+	.15f, .15f, .15f, .15f, M40_ADS_SPREAD_SCALE, .15f
 };
 
 // Aimed through an overlay scope rather than over the sights (MW2's
@@ -2540,7 +2551,7 @@ static const int bg_weaponScopeOverlay[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	0, 0, 0,
 #endif
-	0, 0, 0, 0, M40_SCOPE_OVERLAY
+	0, 0, 0, 0, M40_SCOPE_OVERLAY, 0
 };
 
 int BG_WeaponScopeOverlay( int weapon ) {
@@ -2644,6 +2655,7 @@ void BG_RebuildWeaponMask( playerState_t *ps ) {
 	if ( ps->ammo[WP_FRAG]  > 0 ) mask |= ( 1 << WP_FRAG );
 	if ( ps->ammo[WP_FLASH] > 0 ) mask |= ( 1 << WP_FLASH );
 	if ( ps->ammo[WP_SEMTEX] > 0 ) mask |= ( 1 << WP_SEMTEX );
+	if ( ps->ammo[WP_THROWING_KNIFE] > 0 ) mask |= ( 1 << WP_THROWING_KNIFE );
 
 	ps->stats[STAT_WEAPONS] = mask;
 }
@@ -2662,7 +2674,7 @@ void BG_SetSlotWeapon( playerState_t *ps, int slot, int weapon ) {
 		return;
 	}
 	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ||
-	     weapon == WP_KNIFE || weapon == WP_FRAG || weapon == WP_FLASH || weapon == WP_SEMTEX ) {
+	     BG_IsActionWeapon( weapon ) ) {
 		return;
 	}
 
@@ -3155,9 +3167,10 @@ static void PM_UpdateWeaponAction( void ) {
 				// equipment, the equipment comes straight out (OffHandPrepare)
 				// and the gun is never lowered. The hint is server state; pmove
 				// only reads it.
-				prepare = nextAction != WA_MELEE &&
+				prepare = ( nextAction != WA_MELEE &&
 					pm->ps->cursorHintEntIndex == ENTITYNUM_NONE &&
-					( pm->ps->weapon == WP_NONE || offhandEnd );
+					( pm->ps->weapon == WP_NONE || offhandEnd ) ) ||
+					( nextAction == WA_LETHAL && BG_OffhandPreparesAtOnce( BG_LethalWeapon( pm->ps ) ) );
 				action = nextAction;
 				returning = recovering = 0;
 				leftEmpty = pm->ps->weapon == WP_NONE ? WA_LEFT_EMPTY : 0;
@@ -3310,11 +3323,14 @@ clears the lock in the same think, the drop finishes early on its own.
 ===============
 */
 static void PM_BeginWeaponChange( int weapon ) {
-	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
+	// Only a quick action that left an empty hand is put down to none (MW2's
+	// OffHandEnd with weapon 0); a gun is never lowered toward no gun, so an
+	// unowned selection changes nothing (MW2's CheckForChangeWeapon).
+	if ( weapon == WP_NONE && BG_IsActionWeapon( pm->ps->weapon ) ) {
+		// the equipment's own drop, below
+	} else if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
 		return;
-	}
-
-	if ( !( pm->ps->stats[STAT_WEAPONS] & ( 1 << weapon ) ) ) {
+	} else if ( !( pm->ps->stats[STAT_WEAPONS] & ( 1 << weapon ) ) ) {
 		return;
 	}
 
@@ -3873,7 +3889,8 @@ static void PM_Weapon( void ) {
 
 	// A quick action fires once from its own button, never from the trigger.
 	// Release-to-throw. A short tap stays queued through holster and deploy.
-	if (pm->ps->weapon == WP_SEMTEX && (pm->cmd.buttons & BUTTON_LETHAL)) return;
+	if ((pm->ps->weapon == WP_SEMTEX || pm->ps->weapon == WP_THROWING_KNIFE) &&
+		(pm->cmd.buttons & BUTTON_LETHAL)) return;	// held: raised until it is let go
 	if ( BG_IsActionWeapon( pm->ps->weapon ) &&
 		(PM_ActionWeapon() != pm->ps->weapon || (pm->ps->weaponAction & WA_FIRED)) ) {
 		return;
@@ -3963,6 +3980,7 @@ static void PM_Weapon( void ) {
 	case WP_SEMTEX:
 	case WP_FRAG:
 	case WP_FLASH:
+	case WP_THROWING_KNIFE:
 		addTime = BG_QUICK_ACTION_HOLD;	// one hold: melee and equipment recover alike
 		break;
 	case WP_LIGHTNING:

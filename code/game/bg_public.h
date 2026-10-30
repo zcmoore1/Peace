@@ -196,6 +196,24 @@ typedef enum {
 // How long a swung knife or a thrown grenade is held before recovery starts.
 // One value: recovering from melee and from equipment is the same thing.
 #define BG_QUICK_ACTION_HOLD      500
+// MW2's throwing knife times are weapon data (fastfiles), not code: these are
+// placeholders until the owner supplies throwingknife_mp's values.
+#define BG_THROWING_KNIFE_PULL_MS 150	// iHoldFireTime: in hand, ready to throw
+#define BG_THROWING_KNIFE_SPEED   1200	// projectileSpeed (weapon data, placeholder)
+#define BG_THROWING_KNIFE_DAMAGE  135	// damage (weapon data, placeholder: one hit kills)
+#define BG_THROWING_KNIFE_BOUNCE  0.4f	// per-surface bounce scale (weapon data, placeholder)
+// MW2's code and dvar defaults for the throwing knife (iw4x.exe):
+#define BG_THROWING_KNIFE_SPIN    2000	// deg/s end over end in flight (0x6ddf68)
+#define BG_THROWING_KNIFE_LIFE    30000	// ms in flight before it is freed (5e947c)
+#define BG_THROWING_KNIFE_WORLD_MAX 32	// Peace's bound on knives out at once: the oldest is freed
+#define BG_THROWING_KNIFE_HIT_SPEED 400.0f	// g_minGrenadeDamageSpeed: slower does no damage
+#define BG_THROWING_KNIFE_REST_SPEED 20.0f	// grenadeRestThreshold: settles on a floor below it
+#define BG_THROWING_KNIFE_STICK_DOT 0.7f	// head-on within ~45.6 degrees sticks (0x717154)
+#define BG_THROWING_KNIFE_FLOOR_Z  0.7f	// a floor it may settle on
+#define BG_KNIFE_PICKUP_RADIUS    90.0f	// player_throwbackInnerRadius, flat, from the origin
+#define BG_KNIFE_PICKUP_REACH     160.0f	// player_throwbackOuterRadius, from the eye
+#define BG_KNIFE_PICKUP_STILL     100.0f	// bg_maxGrenadeIndicatorSpeed: moving faster is no pickup
+#define BG_USE_SPAWN_DELAY        500	// g_useholdspawndelay: no pickup this soon after it spawns
 #define BG_LADDER_REACH           4.0f
 #define BG_LADDER_SPEED           160.0f
 #define BG_LADDER_FRICTION        5.0f
@@ -494,6 +512,7 @@ typedef enum {
 	WP_FLASH,			// tactical equipment
 	WP_SEMTEX,           // held lethal equipment; release to throw
 	WP_M40A3,            // scoped bolt-action rifle; appended to preserve class IDs
+	WP_THROWING_KNIFE,   // lethal equipment: thrown, sticks, picked back up (MW2's)
 
 	WP_NUM_WEAPONS
 } weapon_t;
@@ -535,6 +554,7 @@ int BG_RequestedSlot(const playerState_t *ps, int selection);
 int BG_SlotCommand(const playerState_t *ps, int slot);
 qboolean BG_SlotCommandCurrent(const playerState_t *ps, int selection);
 qboolean BG_OffhandOut(const playerState_t *ps);
+qboolean BG_OffhandPreparesAtOnce( int weapon );
 #define BG_EMPTY_HAND_OFFHAND_TIME 100	// MW2's OffHandInit with no gun in hand
 void BG_GetSlot(const playerState_t *ps, int slot, bg_weaponInstance_t *gun);
 void BG_PutSlot(playerState_t *ps, int slot, const bg_weaponInstance_t *gun);

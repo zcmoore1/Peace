@@ -238,7 +238,7 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 	int				slot;
 
 	// Equipment pickups replenish their own count; they cannot replace a gun.
-	if ( wep == WP_KNIFE || wep == WP_FRAG || wep == WP_FLASH || wep == WP_SEMTEX ) {
+	if ( BG_IsActionWeapon( wep ) ) {
 		ps->ammo[wep] = wep == WP_KNIFE ? -1 : 3;
 		BG_RebuildWeaponMask( ps );
 		return g_weaponRespawn.integer;
@@ -585,23 +585,130 @@ const entityState_t *G_FindWeaponPickup(gentity_t *player) {
 	return best;
 }
 
+static qboolean G_IsThrowingKnife(const gentity_t *ent) {
+	return ent->inuse && ent->s.eType == ET_MISSILE && ent->s.weapon == WP_THROWING_KNIFE;
+}
+
+/*
+G_FindKnifePickup
+
+MW2's use list for a throwing knife: one moving no faster than
+bg_maxGrenadeIndicatorSpeed, within the eye reach and in sight, for a player
+who carries knives and has room for one more. No owner or team check. A knife
+must first come within the inner radius of the player's feet; one the hint
+already names keeps its place out to the eye reach. The lowest
+128 * (1 - dot) + distance wins.
+*/
+static gentity_t *G_FindKnifePickup(gentity_t *player) {
+	gclient_t *client = player->client;
+	playerState_t *ps = &client->ps;
+	gentity_t *best = NULL;
+	float bestScore = 0;
+	vec3_t eye, forward, origin, delta;
+	trace_t trace;
+	int i;
+	if (client->knifeMax <= 0 || ps->ammo[WP_THROWING_KNIFE] >= client->knifeMax) return NULL;
+	VectorCopy(ps->origin, eye);
+	eye[2] += ps->viewheight;
+	AngleVectors(ps->viewangles, forward, NULL, NULL);
+	for (i = MAX_CLIENTS; i < level.num_entities; i++) {
+		gentity_t *knife = &g_entities[i];
+		float distance, score;
+		if (!G_IsThrowingKnife(knife) || VectorLength(knife->s.pos.trDelta) > BG_KNIFE_PICKUP_STILL) continue;
+		BG_EvaluateTrajectory(&knife->s.pos, level.time, origin);
+		VectorSubtract(origin, ps->origin, delta);
+		if (ps->cursorHintEntIndex != i &&
+			delta[0] * delta[0] + delta[1] * delta[1] > BG_KNIFE_PICKUP_RADIUS * BG_KNIFE_PICKUP_RADIUS) continue;
+		VectorSubtract(origin, eye, delta);
+		distance = VectorNormalize(delta);
+		if (distance > BG_KNIFE_PICKUP_REACH) continue;
+		trap_Trace(&trace, eye, NULL, NULL, origin, player->s.number, MASK_SOLID);
+		if (trace.startsolid || trace.fraction < 1.0f) continue;
+		score = 128 * (1 - DotProduct(forward, delta)) + distance;
+		if (best && score >= bestScore) continue;
+		best = knife;
+		bestScore = score;
+	}
+	return best;
+}
+
+/*
+G_TakeKnife
+
+MW2's Touch_Item for a knife taken by use: one more knife, the pickup sound,
+and the knife is freed - which empties every use hint naming it (the sea
+lion). The hands are not touched.
+*/
+static void G_TakeKnife(gentity_t *player, gentity_t *knife) {
+	playerState_t *ps = &player->client->ps;
+	ps->ammo[WP_THROWING_KNIFE]++;
+	BG_RebuildWeaponMask(ps);
+	G_AddEvent(player, EV_ITEM_PICKUP, BG_FindItemForWeapon(WP_THROWING_KNIFE) - bg_itemlist);
+	G_LogPrintf("Item: %i %s\n", player->s.number, knife->classname);
+	G_FreeEntity(knife);
+}
+
+/*
+G_UseKnife
+
+MW2's Player_ActivateCmd and Player_ActivateHoldCmd for a throwing knife. A
+new use press while the last end-frame's hint is a knife takes that knife as
+its hold, and is used: it is never a reload. While the button stays held the
+knife is taken once it is g_useholdspawndelay old (g_useholdtime is 0), so a
+press on a settled knife takes it on that command. A press made while
+sprinting or with equipment out uses nothing (BG_UpdateActivate). Returns
+whether the hint is a knife, for BG_UpdateActivate.
+*/
+static qboolean G_UseKnife(gentity_t *player, usercmd_t *cmd) {
+	gclient_t *client = player->client;
+	playerState_t *ps = &client->ps;
+	const int useButtons = BUTTON_USE | BUTTON_USE_RELOAD;
+	int old = client->activate.done ? client->activate.buttons : 0;
+	qboolean hinted = client->cursorHint && ps->cursorHintEntIndex >= MAX_CLIENTS &&
+		ps->cursorHintEntIndex < ENTITYNUM_MAX_NORMAL && G_IsThrowingKnife(&g_entities[ps->cursorHintEntIndex]);
+	gentity_t *knife;
+	if (hinted && (cmd->buttons & useButtons & ~old) &&
+		!(ps->pm_flags & PMF_SPRINTING) && !BG_OffhandOut(ps)) {
+		client->knifeHold = ps->cursorHintEntIndex;
+		client->knifeHoldSpawn = g_entities[client->knifeHold].timestamp;
+	}
+	if (!(cmd->buttons & useButtons) || client->knifeHold == ENTITYNUM_NONE) {
+		client->knifeHold = ENTITYNUM_NONE;
+		return hinted;
+	}
+	knife = &g_entities[client->knifeHold];
+	if (!G_IsThrowingKnife(knife) || knife->timestamp != client->knifeHoldSpawn) {
+		client->knifeHold = ENTITYNUM_NONE;
+	} else if (level.time - knife->timestamp >= BG_USE_SPAWN_DELAY) {
+		client->knifeHold = ENTITYNUM_NONE;
+		if (ps->stats[STAT_HEALTH] > 0 && ps->ammo[WP_THROWING_KNIFE] < client->knifeMax)
+			G_TakeKnife(player, knife);
+	}
+	return hinted;
+}
+
 /*
 G_UseThink
 
-The bomb and the floor gun, after a command's Pmove. MW2 uses one thing per
-use/reload press, and the bomb comes first: a press at a site or the case is
-never a floor-gun hold too, and a press already used there cannot become one.
-Returns whether the bomb was usable, for BG_UpdateActivate.
+The bomb, the throwing knife and the floor gun, after a command's Pmove. MW2
+uses one thing per use/reload press, and the bomb comes first: a press at a
+site or the case is never a floor-gun hold too, and a press already used there
+cannot become one. A knife outranks any gun in MW2's use list, so a press on a
+knife's hint is the knife's. Returns whether a press is used at once, for
+BG_UpdateActivate.
 */
 qboolean G_UseThink(gentity_t *player, usercmd_t *cmd) {
 	gclient_t *client = player->client;
 	qboolean sndUsable = G_SNDUsable(player);
+	qboolean knifeHinted;
 	G_SNDUse(player, cmd);
-	if (sndUsable) client->activate.hold = qfalse;
-	if (client->ps.pickupHeld == 3 && (sndUsable || (client->activate.done && !client->activate.hold)))
+	knifeHinted = !sndUsable && G_UseKnife(player, cmd);
+	if (sndUsable || knifeHinted) client->activate.hold = qfalse;
+	if (client->ps.pickupHeld == 3 &&
+		(sndUsable || knifeHinted || (client->activate.done && !client->activate.hold)))
 		client->ps.pickupHeld = 2;
 	G_CommitWeaponPickup(player);
-	return sndUsable;
+	return sndUsable || knifeHinted;
 }
 
 void G_CommitWeaponPickup(gentity_t *player) {
@@ -661,14 +768,19 @@ names (G_ClearCursorHintRefs) turns it into ENTITYNUM_NONE. Pmove reads it.
 void G_UpdateCursorHint(gentity_t *player) {
 	playerState_t *ps = &player->client->ps;
 	const entityState_t *item;
+	gentity_t *knife;
+	player->client->cursorHint = qfalse;
 	if (ps->stats[STAT_HEALTH] <= 0 || ps->pm_type != PM_NORMAL ||
 		(ps->pm_flags & PMF_SPRINTING) || BG_OffhandOut(ps)) return;
 	if (G_SNDUsable(player)) {
 		ps->cursorHintEntIndex = ENTITYNUM_WORLD;	// a site or the bomb: never freed
+		player->client->cursorHint = qtrue;
 		return;
 	}
-	item = G_FindWeaponPickup(player);
+	knife = G_FindKnifePickup(player);	// a missile outranks any gun (-512)
+	item = knife ? &knife->s : G_FindWeaponPickup(player);
 	if (!item) return;
+	player->client->cursorHint = qtrue;
 	ps->cursorHintEntIndex = item->number;
 	g_entities[item->number].flags |= FL_CURSOR_HINT;
 }

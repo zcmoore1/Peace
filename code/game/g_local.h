@@ -278,6 +278,10 @@ struct gclient_s {
 	int			oldbuttons;
 	int			latched_buttons;
 	bg_activate_t	activate;		// MW2's use and use/reload history (BG_UpdateActivate)
+	int				knifeMax;		// throwing knives this life started with: a pickup's room
+	qboolean		cursorHint;		// MW2's cursorHint: the last end-frame found something to use
+	int				knifeHold;		// MW2's useHoldEntity: the knife a held use is taking
+	int				knifeHoldSpawn;	// its timestamp, so a reused entity number is not it
 
 	vec3_t		oldOrigin;
 
@@ -556,6 +560,7 @@ void G_RunMissile( gentity_t *ent );
 gentity_t *fire_plasma (gentity_t *self, vec3_t start, vec3_t aimdir);
 gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t aimdir);
 gentity_t *fire_semtex (gentity_t *self, vec3_t start, vec3_t aimdir);
+gentity_t *fire_throwingknife (gentity_t *self, vec3_t start, vec3_t aimdir);
 gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir);
 gentity_t *fire_bfg (gentity_t *self, vec3_t start, vec3_t dir);
 gentity_t *fire_grapple (gentity_t *self, vec3_t start, vec3_t dir);

@@ -2411,8 +2411,10 @@ float BG_WeaponPickupDistance(const playerState_t *ps, const entityState_t *item
 	if (ps->stats[STAT_HEALTH] <= 0 || ps->pm_type != PM_NORMAL ||
 		!BG_WeaponItem(item, &gun) || BG_MatchingWeaponSlot(ps, &gun) >= 0) return -1;
 	if (item->modelindex2 && item->clientNum == ps->clientNum && time < item->time + BG_PICKUP_OWNER_DELAY) return -1;
+	// MW2's player_useRadius, from the eye to the item's centre
 	BG_EvaluateTrajectory(&item->pos, time, origin);
 	VectorSubtract(origin, ps->origin, delta);
+	delta[2] -= ps->viewheight;
 	distance = VectorLengthSquared(delta);
 	return distance <= BG_PICKUP_RANGE * BG_PICKUP_RANGE ? distance : -1;
 }

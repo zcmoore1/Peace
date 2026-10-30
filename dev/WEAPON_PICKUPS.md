@@ -11,9 +11,11 @@ the floor gun's magazine and reserve to that slot's reserve (up to capacity).
 The floor item is consumed, including when already full. This does not load
 the held magazine, clear an open action, change slots or select a weapon.
 
-For a non-matching gun within 64 units and unobstructed reach, hold the reload
+For a non-matching gun within 128 units of the eye (MW2's player_useRadius) and
+unobstructed reach, hold the reload
 button (`+reload`) or use/reload (`+usereload`, the gamepad's X) continuously for
-1000 ms. The HUD shows the item and progress. Releasing early resets progress
+1000 ms. A gun you dropped yourself is not a candidate for its first 1000 ms
+(`BG_PICKUP_OWNER_DELAY`, MW2's). The HUD shows the item and progress. Releasing early resets progress
 and supplies the normal reload input: a `+reload` tap is read by the weapon at
 once, a use/reload tap is the server's, as in MW2, where a tap of X over a usable
 item reloads on release (`BG_UpdateActivate`; `pickupHeld` 3 marks that hold so

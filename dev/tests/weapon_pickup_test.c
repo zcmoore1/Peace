@@ -315,7 +315,31 @@ static void TestContestedPickup(void) {
  CHECK(other->stats[STAT_SLOT_PRIMARY]==WP_MACHINEGUN);
  CHECK(level.num_entities==MAX_CLIENTS+2);
 }
+/* MW2's reach: player_useRadius from the eye to the item, and your own dropped
+ * gun is not yours to pick up again for BG_PICKUP_OWNER_DELAY. */
+static void TestReach(void) {
+ playerState_t *ps=Reset();
+ gentity_t *item=Floor(WP_RAILGUN,0,3,7,0);
+ bg_weaponInstance_t rail={0};
+ vec3_t at;
+ float flat=sqrt(BG_PICKUP_RANGE*BG_PICKUP_RANGE-ps->viewheight*ps->viewheight);
+ VectorSet(ps->origin,0,0,0);
+ VectorSet(at,BG_PICKUP_RANGE-1,0,ps->viewheight); G_SetOrigin(item,at);
+ CHECK(BG_WeaponPickupDistance(ps,&item->s,level.time)>=0);
+ VectorSet(at,BG_PICKUP_RANGE+1,0,ps->viewheight); G_SetOrigin(item,at);
+ CHECK(BG_WeaponPickupDistance(ps,&item->s,level.time)<0);
+ VectorSet(at,flat-1,0,0); G_SetOrigin(item,at);
+ CHECK(BG_WeaponPickupDistance(ps,&item->s,level.time)>=0);
+ VectorSet(at,BG_PICKUP_RANGE-1,0,0); G_SetOrigin(item,at);
+ CHECK(BG_WeaponPickupDistance(ps,&item->s,level.time)<0);
+ ps=Reset(); VectorSet(ps->origin,0,0,0);
+ item=G_DropWeapon(&g_entities[0],SLOT_PRIMARY);
+ CHECK(item!=NULL); VectorSet(at,0,0,ps->viewheight); G_SetOrigin(item,at);
+ rail.weapon=WP_RAILGUN; rail.ammo=3; BG_PutSlot(ps,SLOT_PRIMARY,&rail);
+ CHECK(BG_WeaponPickupDistance(ps,&item->s,level.time+BG_PICKUP_OWNER_DELAY-1)<0);
+ CHECK(BG_WeaponPickupDistance(ps,&item->s,level.time+BG_PICKUP_OWNER_DELAY)>=0);
+}
 int main(void) {
- TestDrops(); TestScavenge(); TestHold(); TestSwap(); TestDuplicateBase(); TestUseReload(); TestUseBusy(); TestBombFirst(); TestContestedPickup();
+ TestDrops(); TestScavenge(); TestHold(); TestSwap(); TestDuplicateBase(); TestUseReload(); TestUseBusy(); TestBombFirst(); TestContestedPickup(); TestReach();
  printf("PASS: %d death/drop/pickup/slot-intent checks\n",checks); return 0;
 }

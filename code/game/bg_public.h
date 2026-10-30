@@ -520,9 +520,9 @@ const char *BG_AttachmentName( int index );
 int BG_WeaponAttachmentMask(int weapon);
 #define BG_GUN_FIRST_DRAW 1
 #define BG_GUN_UNCHAMBERED 2
-#define BG_PICKUP_RANGE 64.0f
+#define BG_PICKUP_RANGE 128.0f	// MW2's player_useRadius, eye to item
 #define BG_PICKUP_HOLD_TIME 1000
-#define BG_PICKUP_OWNER_DELAY 500
+#define BG_PICKUP_OWNER_DELAY 1000	// MW2: your own dropped gun waits this long
 typedef struct {
 	int weapon, attachments, ammo, reserve, flags;
 } bg_weaponInstance_t;

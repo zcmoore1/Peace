@@ -16,7 +16,8 @@ static void FloorTrace(trace_t *tr, const vec3_t start, const vec3_t mins,
 	}
 }
 static int NoContents(const vec3_t p, int pass) { (void)p; (void)pass; return 0; }
-void trap_SnapVector(float *v) { SnapVector(v); }
+/* The engine's Q_SnapVector rounds to nearest, as MW2's does; q_shared's macro truncates. */
+void trap_SnapVector(float *v) { v[0] = rintf(v[0]); v[1] = rintf(v[1]); v[2] = rintf(v[2]); }
 void FakeReloadModel(pmove_t *move) {
 	move->trace = FloorTrace; move->pointcontents = NoContents; move->tracemask = MASK_PLAYERSOLID;
 	move->pmove_msec = 8;

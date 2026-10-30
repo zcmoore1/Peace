@@ -23,7 +23,8 @@ void QDECL Com_Error(int level, const char *fmt, ...) {
     va_start(args, fmt); vfprintf(stderr, fmt, args); va_end(args);
     exit(1);
 }
-void trap_SnapVector(float *v) { SnapVector(v); }
+/* The engine's Q_SnapVector rounds to nearest, as MW2's does; q_shared's macro truncates. */
+void trap_SnapVector(float *v) { v[0] = rintf(v[0]); v[1] = rintf(v[1]); v[2] = rintf(v[2]); }
 #ifdef HUNK_DEBUG
 void *Hunk_AllocDebug(int size, ha_pref preference, char *label, char *file, int line) {
     (void)label; (void)file; (void)line;
@@ -407,15 +408,22 @@ static float FlatSpeed(void) { return sqrt(ps.velocity[0] * ps.velocity[0] + ps.
  * scaled by BG_JumpLandFactor; a jump within BG_JUMP_WAIT of the last is
  * refused, and the press is spent. */
 static void TestLanding(void) {
-    float air, v; int t, landed;
+    float air, v, top; int t, landed;
     Reset(-300, -240, 24.125f); move.cmd.angles[YAW] = ANGLE2SHORT(90);
     move.cmd.forwardmove = 127;
     for (t = 0; t < 40; t++) Tick(8);
     CHECK(ps.groundEntityNum != ENTITYNUM_NONE && fabs(FlatSpeed() - ps.speed) < 2);
+    v = ps.origin[2];
     move.cmd.upmove = 127; Tick(8); move.cmd.upmove = 0;
     CHECK(ps.groundEntityNum == ENTITYNUM_NONE && ps.jumpLand == -1 &&
           ps.jumpWait > 0 && ps.velocity[2] > 0);
-    for (t = 0; t < 200 && ps.groundEntityNum == ENTITYNUM_NONE; t++) { air = FlatSpeed(); Tick(8); }
+    /* MW2's jump_height, whatever the speed: BG_JUMP_HEIGHT, and a little more
+     * at 8ms commands, where rounding the speed every think lifts it, as
+     * MW2's at 125fps (6.4 u/s of gravity a think rounds back up by 0.4). */
+    for (t = 0, top = ps.origin[2]; t < 200 && ps.groundEntityNum == ENTITYNUM_NONE; t++) {
+        air = FlatSpeed(); Tick(8); if (ps.origin[2] > top) top = ps.origin[2];
+    }
+    CHECK(top - v > BG_JUMP_HEIGHT + 1.5f && top - v < BG_JUMP_HEIGHT + 3);
     CHECK(ps.groundEntityNum != ENTITYNUM_NONE && ps.jumpLand == -1);
     CHECK(fabs(FlatSpeed() - air * 0.67f) < 2);               /* touchdown */
     v = FlatSpeed(); Tick(8);
@@ -434,8 +442,8 @@ static void TestLanding(void) {
     Tick(8); CHECK(ps.jumpLand == BG_JUMP_LAND_TIME);
     move.cmd.upmove = 127; Tick(8); move.cmd.upmove = 0;
     CHECK(ps.groundEntityNum == ENTITYNUM_NONE &&
-          ps.velocity[2] < JUMP_VELOCITY / sqrt(BG_JumpLandFactor(BG_JUMP_LAND_TIME - 8)) + 1 &&
-          ps.velocity[2] > JUMP_VELOCITY / sqrt(2.5f) - 10);
+          ps.velocity[2] < BG_JumpVelocity(&ps) / sqrt(BG_JumpLandFactor(BG_JUMP_LAND_TIME - 8)) + 1 &&
+          ps.velocity[2] > BG_JumpVelocity(&ps) / sqrt(2.5f) - 10);
     /* That low hop lands inside the wait: the press there is spent, held or
      * not, and only a fresh press after the wait jumps. */
     for (t = 0; t < 200 && ps.groundEntityNum == ENTITYNUM_NONE; t++) Tick(8);
@@ -565,7 +573,7 @@ static void AirStep(int jumpLand, float originAbove, float ledgeAbove) {
     move.cmd.forwardmove = 0;
 }
 static void TestAirStep(void) {
-    const float jumpHeight = (float)(JUMP_VELOCITY * JUMP_VELOCITY) / (2 * DEFAULT_GRAVITY);
+    const float jumpHeight = BG_JUMP_HEIGHT;
     int t; float z;
     AirStep(-1, 4, 10);                  /* a jump reaches the lip: up onto it */
     CHECK(ps.origin[1] > -15 && ps.origin[2] > 124);

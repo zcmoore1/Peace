@@ -237,7 +237,12 @@ source for MW2 behaviour; the owner rejects it.
   sprinting) and holds it in the air, so a sprint switching in the air moves
   the camera, as in MW2. Picture only: the muzzle, aim and the gun's own bob
   are unchanged.
-- **Jumps and landings are MW2's.** `ps.jumpLand` is MW2's jumping flag and
+- **Jumps and landings are MW2's.** A jump leaves at `BG_JumpVelocity`, MW2's
+  sqrt(2 g jump_height) for `BG_JUMP_HEIGHT` 39 (249.8 at gravity 800; Q3's
+  270 is gone). The engine rounds velocity to nearest every think, as MW2
+  does, so 8ms commands jump about 41: MW2's 125fps jump. Test harnesses snap
+  the same way (`rintf`), never with q_shared's truncating `SnapVector`.
+  `ps.jumpLand` is MW2's jumping flag and
   landing timer in one (0 none, -1 jumped and not landed, >0 ms of slowdown),
   `ps.jumpWait` its 500ms between jumps, `ps.jumpOriginZ` the take-off height.
   A landing from `BG_HARD_LAND_HEIGHT` (12) or more keeps 0.67 of all the
@@ -252,7 +257,7 @@ source for MW2 behaviour; the owner rejects it.
   a pending slowdown. Stairs and curbs are not ledges: `PM_StepSlideMove` is
   MW2's, pushing every ground move down up to `STEPSIZE_DOWN` (9) past its
   step, so walking down them never lands (`EV_STEP_DOWN_4/8` smooth the eye).
-  In the air only a jump steps up, and only to `JUMP_VELOCITY`'s height above
+  In the air only a jump steps up, and only to `BG_JUMP_HEIGHT` above
   `jumpOriginZ` (MW2's Jump_GetStepHeight): a fall never climbs a lip, and a
   jump never climbs a ledge it cannot clear. Peace has no mantle. All three
   are durations or positions, never clocks, so a replay rebases none.

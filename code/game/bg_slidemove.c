@@ -271,11 +271,10 @@ void PM_StepSlideMove( qboolean gravity ) {
 	stepSize = STEPSIZE;
 
 	if ( pm->ps->groundEntityNum == ENTITYNUM_NONE ) {
-		if ( !bumped || pm->ps->jumpLand >= 0 || pm->ps->gravity <= 0 ) {
+		if ( !bumped || pm->ps->jumpLand >= 0 ) {
 			return;
 		}
-		stepSize = pm->ps->jumpOriginZ - start_o[2] +
-			(float)( JUMP_VELOCITY * JUMP_VELOCITY ) / ( 2.0f * pm->ps->gravity );
+		stepSize = pm->ps->jumpOriginZ + BG_JUMP_HEIGHT - start_o[2];
 		if ( stepSize > STEPSIZE ) {
 			stepSize = STEPSIZE;
 		}

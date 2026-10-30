@@ -9,7 +9,8 @@ static gentity_t *lastAttacker;
 #define CHECK(x) do { checks++; if (!(x)) { fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x); exit(1); } } while(0)
 void QDECL Com_Error(int code,const char *fmt,...) { (void)code; (void)fmt; abort(); }
 void QDECL Com_Printf(const char *fmt,...) { (void)fmt; }
-void trap_SnapVector(float *v) { SnapVector(v); }
+/* The engine's Q_SnapVector rounds to nearest, as MW2's does; q_shared's macro truncates. */
+void trap_SnapVector(float *v) { v[0] = rintf(v[0]); v[1] = rintf(v[1]); v[2] = rintf(v[2]); }
 void trap_LinkEntity(gentity_t *e) { e->r.linked=qtrue; }
 void trap_Trace(trace_t *t,const vec3_t s,const vec3_t mins,const vec3_t maxs,const vec3_t end,int pass,int mask) {
  (void)s;(void)mins;(void)maxs;(void)pass;(void)mask; traceCount++;

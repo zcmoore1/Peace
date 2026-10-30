@@ -547,7 +547,9 @@ void BG_BeginWeaponDraw(playerState_t *ps);
 #define BG_JUMP_LAND_HIGH     1200	// ... after landing a step above the take-off
 #define BG_JUMP_LAND_STEP     18.0f
 #define BG_HARD_LAND_HEIGHT   12.0f	// a fall this high keeps 0.67 of the velocity
+#define BG_JUMP_HEIGHT        39.0f	// MW2's jump_height: how high a jump goes
 float BG_JumpLandFactor( int jumpLand );
+float BG_JumpVelocity( const playerState_t *ps );
 // MW2's view bob: the eye's offset on z and along the view's right (BG_GetPlayerViewOrigin).
 float BG_ViewBobCycle( const playerState_t *ps );
 float BG_VerticalViewBob( const playerState_t *ps, float cycle, float speed, float adsFrac );

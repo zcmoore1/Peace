@@ -8,7 +8,8 @@ void QDECL Com_Printf(const char *fmt,...) { (void)fmt; }
 void QDECL Com_Error(int level,const char *fmt,...) {
  va_list args; (void)level; va_start(args,fmt); vfprintf(stderr,fmt,args); va_end(args); exit(1);
 }
-void trap_SnapVector(float *v) { SnapVector(v); }
+/* The engine's Q_SnapVector rounds to nearest, as MW2's does; q_shared's macro truncates. */
+void trap_SnapVector(float *v) { v[0] = rintf(v[0]); v[1] = rintf(v[1]); v[2] = rintf(v[2]); }
 static void Ready(int weapon,int perk) {
  bg_class_t cl=*BG_Class(0);
  memset(&ps,0,sizeof(ps)); memset(&move,0,sizeof(move)); memset(&pml,0,sizeof(pml));
@@ -178,7 +179,7 @@ static void TestMovement(void) {
   * input, an existing falling/knockback velocity is also unchanged. */
  for(boost=0;boost<2;boost++) {
   MovementReady(boost ? PERK_EXPEDITIOUS : PERK_NONE);move.cmd.upmove=127;
-  CHECK(PM_CheckJump());CHECK(ps.velocity[2]==JUMP_VELOCITY);
+  CHECK(PM_CheckJump());CHECK(ps.velocity[2]==BG_JumpVelocity(&ps) && ps.velocity[2]>0);
   PM_AirMove();if(!boost)jump=ps.velocity[2];else CHECK(ps.velocity[2]==jump);
   MovementReady(boost ? PERK_EXPEDITIOUS : PERK_NONE);
   move.cmd.forwardmove=0;pml.walking=pml.groundPlane=qfalse;

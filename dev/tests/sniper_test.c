@@ -8,7 +8,8 @@ void QDECL Com_Printf(const char *fmt,...) { (void)fmt; }
 void QDECL Com_Error(int level,const char *fmt,...) {
  va_list a; (void)level; va_start(a,fmt); vfprintf(stderr,fmt,a); va_end(a); exit(1);
 }
-void trap_SnapVector(float *v) { SnapVector(v); }
+/* The engine's Q_SnapVector rounds to nearest, as MW2's does; q_shared's macro truncates. */
+void trap_SnapVector(float *v) { v[0] = rintf(v[0]); v[1] = rintf(v[1]); v[2] = rintf(v[2]); }
 static void Step(int ms) {
  int seq=ps.eventSequence;
  pml.msec=ms; move.cmd.serverTime+=ms; ps.commandTime=move.cmd.serverTime;

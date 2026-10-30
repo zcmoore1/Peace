@@ -222,6 +222,18 @@ float BG_HorizontalViewBob( const playerState_t *ps, float cycle, float speed, f
 
 /*
 ==================
+BG_JumpVelocity
+
+MW2's Jump_Start: the take-off speed that rises BG_JUMP_HEIGHT under this
+gravity, sqrt(2 g h) - 249.8 at 800.
+==================
+*/
+float BG_JumpVelocity( const playerState_t *ps ) {
+	return ps->gravity > 0 ? sqrt( 2.0f * ps->gravity * BG_JUMP_HEIGHT ) : 0.0f;
+}
+
+/*
+==================
 BG_JumpLandFactor
 
 MW2's Jump_GetSlowdownFriction: with jumpLand ms of a landing's slowdown left,
@@ -520,7 +532,7 @@ static qboolean PM_CheckJump( void ) {
 	pm->ps->groundEntityNum = ENTITYNUM_NONE;
 	// MW2's Jump_Start: a jump while a landing still slows you is lower, its
 	// squared speed divided by the same factor the landing friction uses.
-	pm->ps->velocity[2] = JUMP_VELOCITY / sqrt( BG_JumpLandFactor( pm->ps->jumpLand ) );
+	pm->ps->velocity[2] = BG_JumpVelocity( pm->ps ) / sqrt( BG_JumpLandFactor( pm->ps->jumpLand ) );
 	pm->ps->jumpLand = -1;
 	pm->ps->jumpWait = BG_JUMP_WAIT;
 	pm->ps->jumpOriginZ = pm->ps->origin[2];
@@ -3241,8 +3253,9 @@ static void PM_BeginWeaponChange( int weapon ) {
 	}
 
 	PM_AddEvent( EV_CHANGE_WEAPON );
-	pm->ps->weaponstate = WEAPON_DROPPING;
+	// Read before the state flips: a raise's lock is not a drop to keep.
 	pm->ps->weaponTime  = BG_HolsterTime( pm->ps );
+	pm->ps->weaponstate = WEAPON_DROPPING;
 	PM_StartTorsoAnim( TORSO_DROP );
 }
 

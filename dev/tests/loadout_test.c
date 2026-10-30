@@ -12,7 +12,8 @@ void QDECL Com_Error(int level, const char *fmt, ...) {
  va_list args; (void)level; va_start(args,fmt); vfprintf(stderr,fmt,args);
  va_end(args); exit(1);
 }
-void trap_SnapVector(float *v) { SnapVector(v); }
+/* The engine's Q_SnapVector rounds to nearest, as MW2's does; q_shared's macro truncates. */
+void trap_SnapVector(float *v) { v[0] = rintf(v[0]); v[1] = rintf(v[1]); v[2] = rintf(v[2]); }
 
 static void Ready(int primary, int secondary) {
  bg_class_t cl = *BG_Class(0);
@@ -658,6 +659,25 @@ static void TestGrenadeKeepsHolster(void) {
  for(t=0;t<12000 && !(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
  CHECK(fired[lethal]==1 && ps.weapon==WP_MACHINEGUN && !(ps.weaponAction&WA_TYPE_MASK));
 }
+/* A grenade pressed while the gun is still coming up takes the quick drop
+ * from where it is (MW2's OffHandInit out of a raise): only a drop already
+ * running is kept. Either gun, part way through an ordinary draw. */
+static void TestGrenadeOutOfRaise(void) {
+ const int guns[2]={WP_MACHINEGUN,WP_SHOTGUN};
+ int i,t;
+ for(i=0;i<2;i++) {
+  Ready(guns[!i],guns[i]);
+  Toggle();
+  for(t=0;t<12000 && !(ps.weapon==guns[i] && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+  Run(BG_WeaponDrawTime(&ps)/3);
+  /* The SPAS has more of its draw left here than a quick drop lasts. */
+  CHECK(ps.weapon==guns[i] && ps.weaponstate==WEAPON_RAISING &&
+   (guns[i]!=WP_SHOTGUN || ps.weaponTime>BG_WeaponQuickDropTime(guns[i])));
+  move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+  CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_LETHAL && ps.weaponstate==WEAPON_DROPPING &&
+   ps.weaponTime==BG_WeaponQuickDropTime(guns[i]) && BG_HolsterTime(&ps)==BG_WeaponQuickDropTime(guns[i]));
+ }
+}
 /* YY out of a holster started from the recovery draw readies the gun that
  * same think, so a knife on the YY command is a knife, as on any YY. */
 static void TestYYKnifeFromRecovery(void) {
@@ -1059,7 +1079,7 @@ static void TestHeldThroughRespawn(void) {
 }
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
- TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestYYKnifeFromRecovery(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
+ TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeOutOfRaise(); TestYYKnifeFromRecovery(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
  TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;

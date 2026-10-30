@@ -620,15 +620,71 @@ void G_CommitWeaponPickup(gentity_t *player) {
 	slot = ps->pickupSlot;
 	if (!G_DropWeapon(player, slot)) return; // no room for the outgoing instance
 	BG_PutSlot(ps, slot, &gun);
+	// A new instance in the slot: the client's selection of it from before
+	// this snapshot names the gun just dropped (BG_SlotCommandCurrent).
+	ps->slotFlags[slot] ^= BG_GUN_GENERATION;
 	if (slot == ps->stats[STAT_ACTIVE_SLOT] && !BG_IsActionWeapon(ps->weapon)) {
-		ps->weapon = gun.weapon;
 		if (!(ps->stats[STAT_LADDER] & (LADDER_ATTACHED | LADDER_HOLSTER)) &&
-			ps->weaponstate != WEAPON_LADDER) BG_BeginWeaponDraw(ps);
+			ps->weaponstate != WEAPON_LADDER) {
+			// MW2's BG_TakePlayerWeapon: the hands are empty until the
+			// client's selection names the new gun. What the old gun was
+			// doing ends with it.
+			ps->weapon = WP_NONE;
+			ps->weaponstate = WEAPON_READY;
+			ps->weaponTime = 0;
+			ps->weaponAnimTime = -1;
+			ps->pm_flags &= ~PMF_PENDING_MAG;
+		} else {
+			ps->weapon = gun.weapon;
+		}
 	}
 	G_LogPrintf("Item: %i %s\n", player->s.number, item->item->classname);
 	G_CompleteItemPickup(item, player, g_gametype.integer == GT_TEAM ?
 		g_weaponTeamRespawn.integer : g_weaponRespawn.integer, qfalse);
 	ps->pickupTarget = ENTITYNUM_NONE;
+	// MW2's Touch_Item frees the swapped weapon inside the use, before the
+	// end-frame hint pass (a map gun is only hidden to respawn).
+	if (item->flags & FL_DROPPED_ITEM) G_FreeEntity(item);
+}
+
+/*
+G_UpdateCursorHint
+
+MW2's Player_UpdateCursorHints, once per end-frame: the use hint names the
+usable thing in reach, and is sticky. With nothing usable in reach, while
+sprinting, with equipment out, or dead, it is not written at all, so it keeps
+naming the last thing it named, and spawn leaves it 0. Only freeing what it
+names (G_ClearCursorHintRefs) turns it into ENTITYNUM_NONE. Pmove reads it.
+*/
+void G_UpdateCursorHint(gentity_t *player) {
+	playerState_t *ps = &player->client->ps;
+	const entityState_t *item;
+	if (ps->stats[STAT_HEALTH] <= 0 || ps->pm_type != PM_NORMAL ||
+		(ps->pm_flags & PMF_SPRINTING) || BG_OffhandOut(ps)) return;
+	if (G_SNDUsable(player)) {
+		ps->cursorHintEntIndex = ENTITYNUM_WORLD;	// a site or the bomb: never freed
+		return;
+	}
+	item = G_FindWeaponPickup(player);
+	if (!item) return;
+	ps->cursorHintEntIndex = item->number;
+	g_entities[item->number].flags |= FL_CURSOR_HINT;
+}
+
+/*
+G_ClearCursorHintRefs
+
+MW2's G_FreeEntity: freeing an entity some client's use hint names leaves that
+hint naming nothing at all, ENTITYNUM_NONE - not 0, which every life starts on.
+*/
+void G_ClearCursorHintRefs(gentity_t *ent) {
+	int i;
+	if (!(ent->flags & FL_CURSOR_HINT)) return;
+	for (i = 0; i < level.maxclients; i++) {
+		gclient_t *client = g_entities[i].client;
+		if (!g_entities[i].inuse || !client) continue;
+		if (client->ps.cursorHintEntIndex == ent->s.number) client->ps.cursorHintEntIndex = ENTITYNUM_NONE;
+	}
 }
 
 //======================================================================

@@ -1790,7 +1790,7 @@ void CG_NextWeapon_f( void ) {
 	// here, so the toggle is always primary <-> secondary.
 	// Toggle the requested selection, not the last acknowledged active slot.
 	// A second press must reverse the first even before a server snapshot lands.
-	cg.weaponSelectSlot = BG_ToggleSlotWeapon(ps, BG_SLOT_COMMAND + cg.weaponSelectSlot) - BG_SLOT_COMMAND;
+	cg.weaponSelectSlot = BG_RequestedSlot(ps, BG_ToggleSlotWeapon(ps, BG_SlotCommand(ps, cg.weaponSelectSlot)));
 	want = ps->stats[STAT_SLOT_PRIMARY + cg.weaponSelectSlot];
 
 	if ( want <= WP_NONE || want >= WP_NUM_WEAPONS ) {

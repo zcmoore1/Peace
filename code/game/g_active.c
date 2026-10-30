@@ -1195,6 +1195,8 @@ void ClientEndFrame( gentity_t *ent ) {
 
 	ent->client->ps.stats[STAT_HEALTH] = ent->health;	// FIXME: get rid of ent->health...
 
+	G_UpdateCursorHint( ent );
+
 	G_SetClientSound (ent);
 
 	// set the latest infor

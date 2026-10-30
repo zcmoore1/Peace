@@ -471,6 +471,7 @@ void G_FreeEntity( gentity_t *ed ) {
 	if ( ed->neverFree ) {
 		return;
 	}
+	G_ClearCursorHintRefs( ed );
 
 	memset (ed, 0, sizeof(*ed));
 	ed->classname = "freed";

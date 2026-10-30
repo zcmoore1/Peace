@@ -153,7 +153,7 @@ static void CG_WeapPicture_Advance( const pmove_t *model, int first, int last,
 			move.ps = &pic;
 			move.cmd.buttons &= ~( BUTTON_ATTACK | BUTTON_RELOAD | BUTTON_MELEE | BUTTON_LETHAL |
 				BUTTON_TACTICAL | BUTTON_WEAPON_SWAP );
-			move.cmd.weapon = BG_SLOT_COMMAND + pic.stats[STAT_ACTIVE_SLOT];
+			move.cmd.weapon = BG_SlotCommand( &pic, pic.stats[STAT_ACTIVE_SLOT] );
 			Pmove( &move );
 		}
 		if ( CG_WeapPicture_BeganAction( &before, &pic ) || CG_WeapPicture_BeganQuick( &before, &pic ) ) {

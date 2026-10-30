@@ -2216,6 +2216,9 @@ int BG_HolsterTime( const playerState_t *ps ) {
 	}
 	if ( ( action == WA_LETHAL || action == WA_TACTICAL ) && !( ps->weaponAction & WA_FIRED ) ) {
 		int quick = BG_WeaponQuickDropTime( BG_ActiveSlotWeapon( ps ) );
+		if ( ps->weapon == WP_NONE ) {
+			return BG_EMPTY_HAND_OFFHAND_TIME;
+		}
 		// MW2's OffHandInit keeps a drop already running: while more of the
 		// gun's own holster is left than a quick drop, that is the drop.
 		if ( ps->weaponstate == WEAPON_DROPPING && !BG_IsActionWeapon( ps->weapon ) &&
@@ -2261,12 +2264,20 @@ int BG_ActiveSlotWeapon( const playerState_t *ps ) {
 
 int BG_RequestedSlot(const playerState_t *ps, int selection) {
 	int slot, active = ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ? SLOT_SECONDARY : SLOT_PRIMARY;
-	if (selection >= BG_SLOT_COMMAND && selection < BG_SLOT_COMMAND + SLOT_COUNT)
-		return selection - BG_SLOT_COMMAND;
+	if (BG_IS_SLOT_COMMAND(selection))
+		return (selection - BG_SLOT_COMMAND) % SLOT_COUNT;
 	if (selection == ps->stats[STAT_SLOT_PRIMARY + active]) return active;
 	for (slot = 0; slot < SLOT_COUNT; slot++)
 		if (selection == ps->stats[STAT_SLOT_PRIMARY + slot]) return slot;
 	return active;
+}
+
+// Equipment out or on its way out: MW2's offhand states 0x10-0x14, from the gun
+// going down for it to the throw. The gun's quick raise after it (0x15) is not.
+qboolean BG_OffhandOut(const playerState_t *ps) {
+	int action = ps->weaponAction & WA_TYPE_MASK;
+	return (action == WA_LETHAL || action == WA_TACTICAL) &&
+		(BG_IsActionWeapon(ps->weapon) || !(ps->weaponAction & WA_FIRED));
 }
 
 int BG_WeaponFirstRaiseTime(int weapon) {
@@ -2302,7 +2313,7 @@ void BG_GetSlot(const playerState_t *ps, int slot, bg_weaponInstance_t *gun) {
 	if (slot < 0 || slot >= SLOT_COUNT) return;
 	gun->weapon = ps->stats[STAT_SLOT_PRIMARY + slot];
 	gun->attachments = ps->slotAttachments[slot];
-	gun->flags = ps->slotFlags[slot];
+	gun->flags = ps->slotFlags[slot] & ~BG_GUN_GENERATION;
 	gun->ammo = ps->slotAmmo[slot];
 	gun->reserve = ps->slotReserve[slot];
 	if (gun->weapon <= WP_NONE || gun->weapon >= WP_NUM_WEAPONS) return;
@@ -2323,7 +2334,7 @@ static void BG_StoreSlots(playerState_t *ps) {
 		BG_GetSlot(ps, slot, &gun);
 		ps->slotAmmo[slot] = gun.ammo;
 		ps->slotReserve[slot] = gun.reserve;
-		ps->slotFlags[slot] = gun.flags;
+		ps->slotFlags[slot] = (ps->slotFlags[slot] & BG_GUN_GENERATION) | gun.flags;
 	}
 }
 
@@ -2349,7 +2360,8 @@ void BG_PutSlot(playerState_t *ps, int slot, const bg_weaponInstance_t *gun) {
 	ps->slotAttachments[slot] = gun->attachments & BG_WeaponAttachmentMask(gun->weapon);
 	ps->slotAmmo[slot] = MAX(0, MIN(gun->ammo, BG_WeaponMagSize(gun->weapon)));
 	ps->slotReserve[slot] = MAX(0, MIN(gun->reserve, BG_WeaponMaxReserve(gun->weapon)));
-	ps->slotFlags[slot] = gun->flags & (BG_GUN_FIRST_DRAW | BG_GUN_UNCHAMBERED);
+	ps->slotFlags[slot] = (ps->slotFlags[slot] & BG_GUN_GENERATION) |
+		(gun->flags & (BG_GUN_FIRST_DRAW | BG_GUN_UNCHAMBERED));
 	BG_LoadSlots(ps);
 	BG_RebuildWeaponMask(ps);
 }
@@ -3051,6 +3063,7 @@ static qboolean PM_WeaponChangeOpen( void ) {
 
 // Latch a press through holster/deploy. Releasing the button cannot lose a tap,
 // and holding it cannot turn a quick action into a permanently selected weapon.
+static void PM_FinishWeaponChange( void );
 static void PM_UpdateWeaponAction( void ) {
 	// MW2's knife check refuses every raise and drop, a quick action's return
 	// and the command it ends on included. A drop the requested slot has come
@@ -3075,6 +3088,12 @@ static void PM_UpdateWeaponAction( void ) {
 	qboolean swapPressed = swap && !(pm->ps->weaponAction & WA_SWAP_HELD);
 	qboolean cancelDraw = qfalse;
 	qboolean cutDrop = qfalse;
+	// MW2's OFFHAND_END: the gun's quick raise after equipment, a Semtex
+	// cancel's included, read before the latch clears on its last command.
+	qboolean offhandEnd = ( ( action & WA_TYPE_MASK ) == WA_LETHAL || ( action & WA_TYPE_MASK ) == WA_TACTICAL ) &&
+		( action & WA_FIRED ) && !BG_IsActionWeapon( pm->ps->weapon ) &&
+		pm->ps->weaponstate == WEAPON_RAISING;
+	qboolean prepare = qfalse;
 	if (BG_RequestedSlot(pm->ps, pm->cmd.weapon) == pm->ps->stats[STAT_ACTIVE_SLOT]) returning = 0;
 	// A requested slot change waits for the ORIGINAL gun to finish recovery.
 	// Clear on the ready boundary so its normal holster can start this think.
@@ -3130,6 +3149,14 @@ static void PM_UpdateWeaponAction( void ) {
 				cutDrop = ( action & WA_TYPE_MASK ) == WA_MELEE &&
 					pm->ps->weaponstate == WEAPON_DROPPING &&
 					( BG_IsActionWeapon( pm->ps->weapon ) || !( action & WA_FIRED ) );
+				// MW2's CheckForOffHand (5791b0-5791ce): with no use hint at
+				// all and either no gun in hand or the gun's quick raise after
+				// equipment, the equipment comes straight out (OffHandPrepare)
+				// and the gun is never lowered. The hint is server state; pmove
+				// only reads it.
+				prepare = nextAction != WA_MELEE &&
+					pm->ps->cursorHintEntIndex == ENTITYNUM_NONE &&
+					( pm->ps->weapon == WP_NONE || offhandEnd );
 				action = nextAction;
 				returning = recovering = 0;
 			}
@@ -3153,6 +3180,9 @@ static void PM_UpdateWeaponAction( void ) {
 	}
 	if ( cutDrop ) {
 		pm->ps->weaponTime = BG_HolsterTime( pm->ps );
+	}
+	if ( prepare ) {
+		PM_FinishWeaponChange();
 	}
 	if ( action & WA_TYPE_MASK ) {
 		// A sprint the action ends waits for its button (PM_CheckSprint).
@@ -3195,10 +3225,7 @@ void BG_UpdateActivate( playerState_t *ps, bg_activate_t *use, int buttons,
 			// while equipment is coming out or going, and does nothing with it:
 			// no use, no hold, no reload, and none while it stays held. The
 			// gun's return after a throw (MW2's OFFHAND_END) is not refused.
-			int action = ps->weaponAction & WA_TYPE_MASK;
-			qboolean busy = (ps->pm_flags & PMF_SPRINTING) ||
-				( (action == WA_LETHAL || action == WA_TACTICAL) &&
-				  ( BG_IsActionWeapon( ps->weapon ) || !(ps->weaponAction & WA_FIRED) ) );
+			qboolean busy = (ps->pm_flags & PMF_SPRINTING) || BG_OffhandOut( ps );
 			use->hold = holdUsable && !busy;
 			used = busy || holdUsable || usedAtOnce;
 		}
@@ -3242,12 +3269,18 @@ static int PM_DesiredWeapon( void ) {
 	if ( special != WP_NONE && (pm->ps->stats[STAT_WEAPONS] & (1 << special)) ) {
 		return special;
 	}
+	// A slot command sent before the client saw that slot's pickup names the
+	// gun just dropped, which MW2's CheckForChangeWeapon ignores: what is in
+	// hand (no gun, right after the swap) stays until the selection catches up,
+	// about a round trip, as MW2's select hand-off does.
+	if ( !BG_SlotCommandCurrent( pm->ps, pm->cmd.weapon ) ) return pm->ps->weapon;
 	return pm->ps->stats[STAT_SLOT_PRIMARY + BG_RequestedSlot(pm->ps, pm->cmd.weapon)];
 }
 
 static int PM_DesiredSlot(void) {
 	if ((pm->ps->weaponAction & (WA_RETURNING | WA_RECOVERING | WA_TYPE_MASK)) ||
-		BG_IsActionWeapon(PM_DesiredWeapon())) return pm->ps->stats[STAT_ACTIVE_SLOT];
+		BG_IsActionWeapon(PM_DesiredWeapon()) || !BG_SlotCommandCurrent(pm->ps, pm->cmd.weapon))
+		return pm->ps->stats[STAT_ACTIVE_SLOT];
 	return BG_RequestedSlot(pm->ps, pm->cmd.weapon);
 }
 
@@ -3266,6 +3299,13 @@ static void PM_BeginWeaponChange( int weapon ) {
 	}
 
 	if ( !( pm->ps->stats[STAT_WEAPONS] & ( 1 << weapon ) ) ) {
+		return;
+	}
+
+	// No gun in hand (MW2's weapon 0, after a pickup's swap): a gun is simply
+	// drawn, there is nothing to put down (MW2 stamps no drop for it).
+	if ( pm->ps->weapon == WP_NONE && !BG_IsActionWeapon( weapon ) ) {
+		PM_FinishWeaponChange();
 		return;
 	}
 
@@ -3610,6 +3650,11 @@ static void PM_Weapon( void ) {
 		if ( want != pm->ps->weapon || PM_DesiredSlot() != pm->ps->stats[STAT_ACTIVE_SLOT] ) {
 			PM_BeginWeaponChange( want );
 		}
+	}
+	// An empty hand has nothing to fire, reload or lower; only equipment
+	// going out of it (DROPPING) carries on to finish.
+	if ( pm->ps->weapon == WP_NONE && pm->ps->weaponstate != WEAPON_DROPPING ) {
+		return;
 	}
 
 	// 1b. Sprint posture. Lowering into and rising out of the sprint carry are

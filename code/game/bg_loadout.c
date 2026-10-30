@@ -236,10 +236,26 @@ qboolean BG_SerializeClass( const bg_class_t *loadout, char *text, int size ) {
 
 // Weapon IDs need not be adjacent. Cycle the TWO SLOT INDICES modulo the slot
 // count, using the latest requested weapon rather than an acknowledged snapshot.
+// The slot command a client sends for a slot, carrying the generation it
+// last saw for it (a pickup flips it, server side, in the slot's flags).
+int BG_SlotCommand(const playerState_t *ps, int slot) {
+	if (slot < 0 || slot >= SLOT_COUNT) slot = 0;
+	return BG_SLOT_COMMAND + slot + ((ps->slotFlags[slot] & BG_GUN_GENERATION) ? SLOT_COUNT : 0);
+}
+
+// False for a slot command sent before the client saw that slot's pickup:
+// it names the gun that was dropped. Plain weapon IDs are always current.
+qboolean BG_SlotCommandCurrent(const playerState_t *ps, int selection) {
+	int slot;
+	if (!BG_IS_SLOT_COMMAND(selection)) return qtrue;
+	slot = (selection - BG_SLOT_COMMAND) % SLOT_COUNT;
+	return ((selection - BG_SLOT_COMMAND) >= SLOT_COUNT) == !!(ps->slotFlags[slot] & BG_GUN_GENERATION);
+}
+
 int BG_ToggleSlotWeapon( const playerState_t *ps, int selection ) {
 	int slot, next, weapon;
-	if (selection >= BG_SLOT_COMMAND && selection < BG_SLOT_COMMAND + SLOT_COUNT)
-		return BG_SLOT_COMMAND + (selection - BG_SLOT_COMMAND + 1) % SLOT_COUNT;
+	if (BG_IS_SLOT_COMMAND(selection))
+		return BG_SlotCommand(ps, ((selection - BG_SLOT_COMMAND) % SLOT_COUNT + 1) % SLOT_COUNT);
 	for ( slot = 0; slot < SLOT_COUNT; slot++ )
 		if ( selection == ps->stats[STAT_SLOT_PRIMARY + slot] ) break;
 	if ( slot == SLOT_COUNT ) slot = ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ? SLOT_SECONDARY : SLOT_PRIMARY;

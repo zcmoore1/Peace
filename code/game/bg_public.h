@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-9"
+#define	GAME_VERSION		BASEGAME "-10"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -511,6 +511,9 @@ typedef enum {
 // Slot intent survives replacement of its contents (and two differently
 // attached copies of one gun). Plain weapon IDs remain valid for bots/tools.
 #define BG_SLOT_COMMAND 128
+// cmd.weapon BG_SLOT_COMMAND + slot + SLOT_COUNT * the slot's generation bit,
+// so a selection made before the client saw a pickup can be told apart
+#define BG_IS_SLOT_COMMAND(s) ((s) >= BG_SLOT_COMMAND && (s) < BG_SLOT_COMMAND + 2 * SLOT_COUNT)
 #define BG_ATTACHMENT_REDDOT 1
 #define BG_MAX_CLASS_ATTACHMENTS 2
 #define BG_ATTACHMENTS_LEGACY 256 // version-2 class encoding of cg_sight fallback
@@ -520,6 +523,7 @@ const char *BG_AttachmentName( int index );
 int BG_WeaponAttachmentMask(int weapon);
 #define BG_GUN_FIRST_DRAW 1
 #define BG_GUN_UNCHAMBERED 2
+#define BG_GUN_GENERATION 4	// slotFlags only: flipped each time a pickup replaces the slot
 #define BG_PICKUP_RANGE 128.0f	// MW2's player_useRadius, eye to item
 #define BG_PICKUP_HOLD_TIME 1000
 #define BG_PICKUP_OWNER_DELAY 1000	// MW2: your own dropped gun waits this long
@@ -527,6 +531,10 @@ typedef struct {
 	int weapon, attachments, ammo, reserve, flags;
 } bg_weaponInstance_t;
 int BG_RequestedSlot(const playerState_t *ps, int selection);
+int BG_SlotCommand(const playerState_t *ps, int slot);
+qboolean BG_SlotCommandCurrent(const playerState_t *ps, int selection);
+qboolean BG_OffhandOut(const playerState_t *ps);
+#define BG_EMPTY_HAND_OFFHAND_TIME 100	// MW2's OffHandInit with no gun in hand
 void BG_GetSlot(const playerState_t *ps, int slot, bg_weaponInstance_t *gun);
 void BG_PutSlot(playerState_t *ps, int slot, const bg_weaponInstance_t *gun);
 void BG_SelectSlot(playerState_t *ps, int slot);

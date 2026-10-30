@@ -143,14 +143,40 @@ source for MW2 behaviour; the owner rejects it.
   reload tap in pmove, a use/reload tap through the server's bit (`pickupHeld`
   3 marks a use/reload hold so pmove does not also reload). S&D use is separate.
 - **Pickup does not own selection.** The reload hold latches its replacement
-  slot, while `cmd.weapon = BG_SLOT_COMMAND + slot` continues carrying the
-  latest selection. Old plain weapon IDs are supported for bots/tools. Neither
+  slot, while `cmd.weapon = BG_SlotCommand(ps, slot)` (`BG_SLOT_COMMAND` + slot,
+  + `SLOT_COUNT` for the slot's generation bit) continues carrying the latest
+  selection. A pickup that replaces the held slot flips that slot's
+  `BG_GUN_GENERATION` and empties the hand (`WP_NONE`, MW2's
+  BG_TakePlayerWeapon); a slot command still carrying the old generation names
+  the gun just dropped and is ignored (`BG_SlotCommandCurrent`, MW2's
+  CheckForChangeWeapon), so the hand stays empty about a round trip, until
+  the client's selection catches up (MW2's select hand-off). Nothing is put
+  down from an empty hand; equipment out of it pays `BG_EMPTY_HAND_OFFHAND_TIME`. Old plain weapon IDs are supported for bots/tools. Neither
   inventory replacement nor a delayed pickup event may overwrite Y intent.
   First deployment is pending until the instance is drawn, then consumed on
   start; normal holster/YY/sprint retention may interrupt it. No CAN state.
   `first_raise` is optional clip data, with ordinary raise as the art fallback.
   `cg_sight` seeds attachments at spawn; owned/dropped gun state drives optics
   thereafter, including spectators and replays. See `dev/WEAPON_PICKUPS.md`.
+- **The sea lion is MW2's, and emerges (owner's rule: do what MW2 does).**
+  `ps.cursorHintEntIndex` is MW2's sticky use hint, written only by the
+  server: `G_UpdateCursorHint` (end-frame) names the pickup in reach and
+  never clears it; with nothing in reach, sprinting, equipment out
+  (`BG_OffhandOut`) or dead it writes nothing; spawn leaves 0, a live entity
+  number. Only freeing what it names (`G_ClearCursorHintRefs` in
+  `G_FreeEntity`, flagged `FL_CURSOR_HINT`) makes it `ENTITYNUM_NONE`, and a
+  pickup frees its dropped gun at once. Pmove only reads it: with no hint at
+  all and either no gun in hand or the gun's quick raise after equipment
+  (MW2's OFFHAND_END, a Semtex cancel's included), equipment comes straight
+  out and the gun is never lowered (MW2's CheckForOffHand 5791b0-5791ce). So
+  swapping for a gun, then pulling equipment before the dropped gun (after
+  `BG_PICKUP_OWNER_DELAY`) or another becomes the hint, gives instant pulls
+  and instant double cancels until a gun in reach takes the hint. Never test
+  for the glitch; never write `ENTITYNUM_NONE` into the hint anywhere else
+  (doing so at spawn would start every life in it). The knife's return is not
+  OFFHAND_END. This drop that never happens is not a holster: no reload, shot
+  or bolt clock can run in that raise or in an empty hand, so the NAC rule is
+  untouched.
 - **Melee is its own kind of swap.** Equipment pressed on the knife's own
   command wins (MW2 checks its offhands first), and equipment cuts the knife at
   any point (MW2's offhand check takes every melee state): pressed before the
@@ -378,7 +404,7 @@ source for MW2 behaviour; the owner rejects it.
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 9-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, and post-throw recovery. Protocol 80 requires client, server
+  swap edge latch, and post-throw recovery. Protocol 81 requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
@@ -386,7 +412,10 @@ source for MW2 behaviour; the owner rejects it.
   server's use/reload request, and `PWF_SPRINT_RELEASE`. Neither is a clock,
   and neither is rebased. Protocol 80 adds `jumpLand` (signed 12 bits),
   `jumpWait` (10), `jumpOriginZ` (float) and `sprintUsed` (14): durations and a
-  height, none rebased.
+  height, none rebased. Protocol 81 adds `cursorHintEntIndex`
+  (`GENTITYNUM_BITS`; an entity number, never rebased) and widens
+  `slotFlags` to 3 bits for `BG_GUN_GENERATION`, a slot's bit that never
+  travels with a dropped instance.
   Dropped ET_ITEM uses `generic1` for attachments, `time2` for packed magazine
   and reserve, `otherEntityNum2` for chamber debt, and `time` as a spawn serial.
 - `perks` is a five-bit spawn-owned playerstate field. All three class perk

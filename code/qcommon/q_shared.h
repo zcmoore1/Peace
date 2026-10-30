@@ -1198,6 +1198,7 @@ typedef struct playerState_s {
 	// notes; stowed variants of the same base gun keep independent magazines.
 	int             slotAmmo[2], slotReserve[2], slotAttachments[2], slotFlags[2];
 	int             pickupTarget, pickupSerial, pickupTime, pickupSlot, pickupHeld;
+	int             cursorHintEntIndex;	// MW2's sticky use hint, written only by the server
 
 	vec3_t		viewangles;		// for fixed views
 	int			viewheight;

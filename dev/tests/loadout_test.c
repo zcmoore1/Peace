@@ -770,6 +770,86 @@ static void TestSemtexCancelKeepsLock(void) {
  move.cmd.buttons=0;
  CHECK(fired[WP_SEMTEX]==0 && (fired[WP_ROCKET_LAUNCHER]<2 || t>=cancel));
 }
+/* MW2's sea lion, from its own gate (CheckForOffHand 5791b0-5791ce): with no
+ * use hint at all (ENTITYNUM_NONE) and either no gun in hand or the gun's quick
+ * raise after equipment, equipment comes straight out and the gun is never
+ * lowered. Every life starts at 0 and a live hint is an entity number, so an
+ * ordinary chain still quick-drops. Pmove only ever reads the hint. */
+static void SeaLionChain(int hint, int *instant) {
+ int t;
+ Ready(WP_SHOTGUN,WP_MACHINEGUN); ps.cursorHintEntIndex=hint; ps.ammo[WP_FLASH]=1;
+ move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+ for(t=0;t<12000 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+ CHECK(ps.weaponstate==WEAPON_RAISING && (ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==(WA_LETHAL|WA_FIRED));
+ Run(BG_WeaponQuickRaiseTime(WP_SHOTGUN)/2);
+ move.cmd.buttons=BUTTON_TACTICAL; Step(1); move.cmd.buttons=0;
+ *instant=ps.weapon==WP_FLASH && ps.weaponstate==WEAPON_RAISING;
+ if(!*instant) CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_DROPPING &&
+  ps.weaponTime==BG_WeaponQuickDropTime(WP_SHOTGUN));
+ else CHECK(ps.weaponTime==BG_WeaponDrawTime(&ps) && (ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==WA_TACTICAL);
+ CHECK(ps.cursorHintEntIndex==hint);
+}
+static void TestSeaLion(void) {
+ const int hints[3]={0,MAX_CLIENTS+7,ENTITYNUM_NONE};
+ int i,t,n,instant;
+ for(i=0;i<3;i++) { SeaLionChain(hints[i],&instant); CHECK(instant==(hints[i]==ENTITYNUM_NONE)); }
+ /* From a gun at rest it still quick-drops: the gate needs OFFHAND_END. */
+ Ready(WP_SHOTGUN,WP_MACHINEGUN); ps.cursorHintEntIndex=ENTITYNUM_NONE;
+ move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+ CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_WeaponQuickDropTime(WP_SHOTGUN));
+ /* The knife's return is not OFFHAND_END (MeleeEnd never writes it). */
+ Ready(WP_SHOTGUN,WP_MACHINEGUN); ps.cursorHintEntIndex=ENTITYNUM_NONE;
+ move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
+ for(t=0;t<12000 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+ Run(BG_WeaponQuickRaiseTime(WP_SHOTGUN)/2);
+ move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+ CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_WeaponQuickDropTime(WP_SHOTGUN));
+ /* The double cancels: a Semtex cancelled to the gun's quick raise, pulled
+  * again inside it and cancelled again, over and over, with no drop. */
+ {
+  bg_class_t cl=*BG_Class(0);
+  int ammo;
+  Ready(WP_SHOTGUN,WP_MACHINEGUN);
+  cl.slot[0]=WP_SHOTGUN; cl.slot[1]=WP_MACHINEGUN; cl.lethal=WP_SEMTEX;
+  BG_ApplyClass(&ps,&cl); move.cmd.weapon=WP_SHOTGUN; ps.cursorHintEntIndex=ENTITYNUM_NONE;
+  ammo=ps.ammo[WP_SEMTEX];
+  move.cmd.buttons=BUTTON_LETHAL; Step(1);
+  CHECK(ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_WeaponQuickDropTime(WP_SHOTGUN));
+  for(t=0;t<12000 && ps.weapon!=WP_SEMTEX;t++) Step(1);
+  for(n=0;n<10;n++) {
+   move.cmd.buttons=BUTTON_LETHAL|BUTTON_WEAPON_SWAP; Step(1); move.cmd.buttons=0; Step(1);
+   CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING &&
+    (ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==(WA_LETHAL|WA_FIRED));
+   Run(BG_WeaponQuickRaiseTime(WP_SHOTGUN)/3);
+   move.cmd.buttons=BUTTON_LETHAL; Step(1);
+   CHECK(ps.weapon==WP_SEMTEX && ps.weaponstate==WEAPON_RAISING && ps.cursorHintEntIndex==ENTITYNUM_NONE);
+   for(t=0;t<12000 && ps.weaponstate!=WEAPON_READY && ps.weaponstate!=WEAPON_FIRING;t++) Step(1);
+  }
+  move.cmd.buttons=BUTTON_LETHAL|BUTTON_WEAPON_SWAP; Step(1); move.cmd.buttons=0;
+  CHECK(ps.ammo[WP_SEMTEX]==ammo && !fired[WP_SEMTEX]);
+ }
+ /* No gun in hand (MW2's weapon 0, after a pickup's swap): with no hint the
+  * equipment raise starts that command; with a hint it pays the empty hand's
+  * own time; with nothing pressed the slot's gun is drawn, nothing put down. */
+ for(i=0;i<3;i++) {
+  Ready(WP_SHOTGUN,WP_MACHINEGUN); ps.weapon=WP_NONE; ps.cursorHintEntIndex=i==2 ? ENTITYNUM_NONE : 0;
+  move.cmd.buttons=i ? BUTTON_LETHAL : 0; Step(1); move.cmd.buttons=0;
+  if(i==0) CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING && ps.weaponTime==BG_WeaponDrawTime(&ps));
+  if(i==1) CHECK(ps.weapon==WP_NONE && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_EMPTY_HAND_OFFHAND_TIME);
+  if(i==2) CHECK(ps.weapon==BG_LethalWeapon(&ps) && ps.weaponstate==WEAPON_RAISING);
+ }
+ /* A selection sent before the client saw the pickup names the gun just
+  * dropped: the hands stay empty until it catches up, and the other slot
+  * can still be chosen. */
+ Ready(WP_SHOTGUN,WP_MACHINEGUN); ps.weapon=WP_NONE; ps.slotFlags[0]^=BG_GUN_GENERATION;
+ move.cmd.weapon=BG_SLOT_COMMAND;
+ for(t=0;t<100;t++) { Step(1); CHECK(ps.weapon==WP_NONE); }
+ move.cmd.weapon=BG_SlotCommand(&ps,0); Step(1);
+ CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);
+ Ready(WP_SHOTGUN,WP_MACHINEGUN); ps.weapon=WP_NONE; ps.slotFlags[0]^=BG_GUN_GENERATION;
+ move.cmd.weapon=BG_SlotCommand(&ps,1); Step(1);
+ CHECK(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_RAISING && ps.stats[STAT_ACTIVE_SLOT]==SLOT_SECONDARY);
+}
 /* A knife pressed during the knife is lost: MW2's knife check refuses its
  * own melee states, so one press is one knife. */
 static void TestKnifeInKnife(void) {
@@ -1194,7 +1274,7 @@ static void TestHeldThroughRespawn(void) {
 }
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
- TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestNoSwapInQuickAction(); TestSemtexCancelKeepsLock(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
+ TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestNoSwapInQuickAction(); TestSemtexCancelKeepsLock(); TestSeaLion(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
  TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;

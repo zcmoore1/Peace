@@ -26,7 +26,7 @@ gentity_t *G_Spawn(void) {
  gentity_t *e=&g_entities[level.num_entities++]; CHECK(level.num_entities<MAX_GENTITIES);
  memset(e,0,sizeof(*e)); e->inuse=qtrue; e->s.number=e-g_entities; return e;
 }
-void G_FreeEntity(gentity_t *e) { e->inuse=qfalse; e->r.contents=0; }
+void G_FreeEntity(gentity_t *e) { G_ClearCursorHintRefs(e); e->inuse=qfalse; e->r.contents=0; }
 void G_SetOrigin(gentity_t *e,vec3_t p) {
  VectorCopy(p,e->s.pos.trBase); VectorCopy(p,e->r.currentOrigin);
  e->s.pos.trType=TR_STATIONARY; VectorClear(e->s.pos.trDelta);
@@ -43,13 +43,14 @@ int Pickup_Team(gentity_t *e,gentity_t *other) { (void)e;(void)other; return 1; 
 qboolean G_SNDUsable(gentity_t *e) { (void)e; return bombUsable; }
 qboolean G_SNDUse(gentity_t *e,usercmd_t *cmd) { (void)e; return bombUsable && (cmd->buttons & (BUTTON_USE|BUTTON_USE_RELOAD)); }
 
+static int staleSelection;
 static playerState_t *Reset(void) {
  int i;
  memset(g_entities,0,sizeof(g_entities)); memset(clients,0,sizeof(clients));
  memset(&level,0,sizeof(level)); memset(&move,0,sizeof(move));
  level.time=1000; level.num_entities=MAX_CLIENTS; level.maxclients=2;
  g_weaponRespawn.integer=5; g_weaponTeamRespawn.integer=10;
- pickups=usedTargets=0; blocked=bombUsable=qfalse;
+ pickups=usedTargets=0; blocked=bombUsable=qfalse; staleSelection=0;
  for(i=0;i<2;i++) {
   gentity_t *e=&g_entities[i]; e->client=&clients[i]; e->inuse=qtrue;
   e->s.number=i; e->health=100; BG_ApplyClass(&clients[i].ps,BG_Class(0));
@@ -67,8 +68,12 @@ static gentity_t *Floor(int weapon,int attachments,int ammo,int reserve,int flag
  item=G_DropWeapon(&g_entities[1],SLOT_PRIMARY);
  CHECK(item!=NULL); G_SetOrigin(item,clients[0].ps.origin); return item;
 }
+/* The client re-sends its slot with the generation of the latest snapshot, as
+ * cg_view.c does; staleSelection holds it back, as a round trip would. */
 static void Step(int msec) {
  level.time+=msec; move.cmd.serverTime+=msec;
+ if(!staleSelection && BG_IS_SLOT_COMMAND(move.cmd.weapon))
+  move.cmd.weapon=BG_SlotCommand(move.ps,BG_RequestedSlot(move.ps,move.cmd.weapon));
  move.pickupItem=G_FindWeaponPickup(&g_entities[0]); PickupWeaponStep(&move,msec);
  G_CommitWeaponPickup(&g_entities[0]);
 }
@@ -116,7 +121,11 @@ static void TestHold(void) {
   Step(1000-elapsed);
   CHECK(pickups==1 && !item->r.contents && ps->stats[STAT_SLOT_PRIMARY]==WP_RAILGUN);
   CHECK(ps->ammo[WP_RAILGUN]==2 && ps->ammoReserve[WP_RAILGUN]==9);
-  CHECK(ps->weaponstate==WEAPON_RAISING && ps->weaponDraw);
+  /* MW2's take: no gun in hand until the client's selection names the new
+   * one, which it does with the next command here. */
+  CHECK(ps->weapon==WP_NONE && !BG_SlotCommandCurrent(ps,move.cmd.weapon));
+  Step(1);
+  CHECK(ps->weapon==WP_RAILGUN && ps->weaponstate==WEAPON_RAISING && ps->weaponDraw);
   CHECK((ps->torsoAnim&~ANIM_TOGGLEBIT)==TORSO_RAISE);
   CHECK(ps->weaponTime==BG_WeaponFirstRaiseTime(WP_RAILGUN));
   CHECK(!(ps->slotFlags[0]&BG_GUN_FIRST_DRAW));
@@ -339,7 +348,53 @@ static void TestReach(void) {
  CHECK(BG_WeaponPickupDistance(ps,&item->s,level.time+BG_PICKUP_OWNER_DELAY-1)<0);
  CHECK(BG_WeaponPickupDistance(ps,&item->s,level.time+BG_PICKUP_OWNER_DELAY)>=0);
 }
+/* MW2's sticky use hint (Player_UpdateCursorHints) and how a free ends it
+ * (G_FreeEntity's 0x416250): the sea lion enters by collecting what the hint
+ * names, and leaves when a usable gun becomes the hint. */
+static void TestCursorHint(void) {
+ playerState_t *ps=Reset(), *other=&clients[1].ps;
+ gentity_t *item=Floor(WP_RAILGUN,0,3,7,0), *last;
+ vec3_t far;
+ int t, number=item->s.number;
+ CHECK(ps->cursorHintEntIndex==0);			/* every life starts at 0 */
+ G_UpdateCursorHint(&g_entities[0]);
+ CHECK(ps->cursorHintEntIndex==number && (item->flags & FL_CURSOR_HINT));
+ VectorSet(far,4000,0,0); G_SetOrigin(item,far);	/* out of reach: still named */
+ G_UpdateCursorHint(&g_entities[0]); CHECK(ps->cursorHintEntIndex==number);
+ G_SetOrigin(item,ps->origin);
+ /* frozen while sprinting or with equipment out */
+ last=Floor(WP_ROCKET_LAUNCHER,0,4,8,0);
+ VectorSet(far,ps->origin[0],ps->origin[1],ps->origin[2]+ps->viewheight); G_SetOrigin(last,far);
+ ps->pm_flags|=PMF_SPRINTING;
+ G_UpdateCursorHint(&g_entities[0]); CHECK(ps->cursorHintEntIndex==number);
+ ps->pm_flags&=~PMF_SPRINTING; ps->weaponAction=WA_LETHAL;
+ G_UpdateCursorHint(&g_entities[0]); CHECK(ps->cursorHintEntIndex==number);
+ ps->weaponAction=0;
+ G_UpdateCursorHint(&g_entities[0]); CHECK(ps->cursorHintEntIndex==last->s.number);	/* unfrozen: the nearer gun */
+ G_FreeEntity(last); CHECK(ps->cursorHintEntIndex==ENTITYNUM_NONE);
+ G_UpdateCursorHint(&g_entities[0]); CHECK(ps->cursorHintEntIndex==number);
+ /* collecting it frees it: no hint at all */
+ move.cmd.buttons=BUTTON_RELOAD;
+ for(t=0;t<2000 && !pickups;t++) { Step(1); G_UpdateCursorHint(&g_entities[0]); }
+ move.cmd.buttons=0;
+ CHECK(pickups==1 && !item->inuse && ps->cursorHintEntIndex==ENTITYNUM_NONE);
+ /* the gun just dropped is not the hint for BG_PICKUP_OWNER_DELAY, then is */
+ for(t=MAX_CLIENTS;t<level.num_entities;t++) if(g_entities[t].inuse && g_entities[t].s.clientNum==0 &&
+  g_entities[t].s.modelindex2) G_SetOrigin(&g_entities[t],ps->origin);
+ for(t=0;t<BG_PICKUP_OWNER_DELAY-50;t++) { Step(1); G_UpdateCursorHint(&g_entities[0]); }
+ CHECK(ps->cursorHintEntIndex==ENTITYNUM_NONE);
+ for(t=0;t<100;t++) { Step(1); G_UpdateCursorHint(&g_entities[0]); }
+ CHECK(ps->cursorHintEntIndex>=MAX_CLIENTS && ps->cursorHintEntIndex!=ENTITYNUM_NONE);
+ /* someone else collecting the gun you were last hinted on gives no hint */
+ ps=Reset(); item=Floor(WP_RAILGUN,0,3,7,0); number=item->s.number;
+ other->cursorHintEntIndex=number; item->flags|=FL_CURSOR_HINT;
+ G_FreeEntity(item); CHECK(other->cursorHintEntIndex==ENTITYNUM_NONE);
+ /* freeing what no hint ever named leaves 0 alone, entity 0 included */
+ ps=Reset(); item=Floor(WP_RAILGUN,0,3,7,0);
+ G_FreeEntity(item); G_FreeEntity(&g_entities[0]);
+ CHECK(ps->cursorHintEntIndex==0 && other->cursorHintEntIndex==0);
+}
 int main(void) {
- TestDrops(); TestScavenge(); TestHold(); TestSwap(); TestDuplicateBase(); TestUseReload(); TestUseBusy(); TestBombFirst(); TestContestedPickup(); TestReach();
+ TestDrops(); TestScavenge(); TestHold(); TestSwap(); TestDuplicateBase(); TestUseReload(); TestUseBusy(); TestBombFirst(); TestContestedPickup(); TestReach(); TestCursorHint();
  printf("PASS: %d death/drop/pickup/slot-intent checks\n",checks); return 0;
 }

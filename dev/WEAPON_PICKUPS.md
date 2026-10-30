@@ -15,7 +15,11 @@ For a non-matching gun within 128 units of the eye (MW2's player_useRadius) and
 unobstructed reach, hold the reload
 button (`+reload`) or use/reload (`+usereload`, the gamepad's X) continuously for
 1000 ms. A gun you dropped yourself is not a candidate for its first 1000 ms
-(`BG_PICKUP_OWNER_DELAY`, MW2's). The HUD shows the item and progress. Releasing early resets progress
+(`BG_PICKUP_OWNER_DELAY`, MW2's). The HUD shows the item and progress.
+Swapping the gun in hand empties the hand, as MW2's take does: the new gun is
+drawn once your selection names it, about a round trip later (each slot's
+generation bit, `BG_SlotCommand`). Collecting the gun your use hint named
+frees it and leaves you with no hint at all - MW2's sea lion (see CLAUDE.md). Releasing early resets progress
 and supplies the normal reload input: a `+reload` tap is read by the weapon at
 once, a use/reload tap is the server's, as in MW2, where a tap of X over a usable
 item reloads on release (`BG_UpdateActivate`; `pickupHeld` 3 marks that hold so

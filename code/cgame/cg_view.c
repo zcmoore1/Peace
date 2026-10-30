@@ -783,7 +783,10 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	// Clamp before it becomes cmd.weapon - nothing may ask pmove for a weapon
 	// that is not in a slot.
 	if ( !CG_Killcam_Active() ) CG_ValidateWeaponSelect();
-	trap_SetUserCmdValue( BG_SLOT_COMMAND + cg.weaponSelectSlot, cg.zoomSensitivity );
+	// The slot carries the generation the latest snapshot shows for it, so the
+	// server can tell a selection made before a pickup reached us.
+	trap_SetUserCmdValue( cg.snap ? BG_SlotCommand( &cg.snap->ps, cg.weaponSelectSlot ) :
+		BG_SLOT_COMMAND + cg.weaponSelectSlot, cg.zoomSensitivity );
 
 	// this counter will be bumped for every valid scene we generate
 	cg.clientFrame++;

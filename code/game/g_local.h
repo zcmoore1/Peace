@@ -51,6 +51,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define FL_NO_BOTS				0x00002000	// spawn point not for bot use
 #define FL_NO_HUMANS			0x00004000	// spawn point just for bots
 #define FL_FORCE_GESTURE		0x00008000	// force gesture on client
+#define FL_CURSOR_HINT			0x00010000	// some client's use hint has named it (MW2's 0x200000)
 
 // movers are things like doors, plats, buttons, etc
 typedef enum {
@@ -477,6 +478,8 @@ gentity_t *LaunchItem( gitem_t *item, vec3_t origin, vec3_t velocity );
 gentity_t *G_DropWeapon(gentity_t *owner, int slot);
 const entityState_t *G_FindWeaponPickup(gentity_t *player);
 void G_CommitWeaponPickup(gentity_t *player);
+void G_UpdateCursorHint(gentity_t *player);
+void G_ClearCursorHintRefs(gentity_t *ent);
 qboolean G_UseThink(gentity_t *player, usercmd_t *cmd);
 void SetRespawn (gentity_t *ent, float delay);
 void G_SpawnItem (gentity_t *ent, gitem_t *item);

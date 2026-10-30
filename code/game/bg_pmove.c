@@ -177,6 +177,51 @@ void PM_ClipVelocity( vec3_t in, vec3_t normal, vec3_t out, float overbounce ) {
 
 /*
 ==================
+MW2's view bob
+
+BG_GetPlayerViewOrigin and CG_OffsetFirstPersonView in MW2's executable: the
+eye moves by a vertical bob on z and a horizontal bob along the view's right,
+each an amplitude (by stance and sprint, blended with aiming, per unit of
+speed, never above BG_VIEWBOB_MAX) times a curve of the bob cycle. The cycle
+freezes in the air, so a sprint switching on or off there moves the camera.
+No angle bob at the hip. Amplitudes are { horizontal, vertical }.
+==================
+*/
+static const float bg_viewBobSprinting[2]   = { 0.02f,   0.014f  };
+static const float bg_viewBobStanding[2]    = { 0.007f,  0.007f  };
+static const float bg_viewBobStandingAds[2] = { 0.007f,  0.007f  };
+static const float bg_viewBobDucked[2]      = { 0.0075f, 0.0075f };
+static const float bg_viewBobDuckedAds[2]   = { 0.0075f, 0.0075f };
+#define BG_VIEWBOB_MAX 8.0f
+
+float BG_ViewBobCycle( const playerState_t *ps ) {
+	return ( ps->bobCycle & 255 ) / 255.0f * M_PI * 2.0f + M_PI * 2.0f;
+}
+
+static float BG_ViewBobAmplitude( const playerState_t *ps, int axis, float speed, float adsFrac ) {
+	float amp;
+	if ( ps->pm_flags & PMF_DUCKED ) {
+		amp = ( 1.0f - adsFrac ) * bg_viewBobDucked[axis] + adsFrac * bg_viewBobDuckedAds[axis];
+	} else if ( ps->pm_flags & PMF_SPRINTING ) {
+		amp = bg_viewBobSprinting[axis];
+	} else {
+		amp = ( 1.0f - adsFrac ) * bg_viewBobStanding[axis] + adsFrac * bg_viewBobStandingAds[axis];
+	}
+	amp *= speed;
+	return amp > BG_VIEWBOB_MAX ? BG_VIEWBOB_MAX : amp;
+}
+
+float BG_VerticalViewBob( const playerState_t *ps, float cycle, float speed, float adsFrac ) {
+	return ( sin( cycle * 2.0f ) + 0.2f * sin( cycle * 4.0f + M_PI * 0.5f ) ) * 0.75f *
+		BG_ViewBobAmplitude( ps, 1, speed, adsFrac );
+}
+
+float BG_HorizontalViewBob( const playerState_t *ps, float cycle, float speed, float adsFrac ) {
+	return sin( cycle ) * BG_ViewBobAmplitude( ps, 0, speed, adsFrac );
+}
+
+/*
+==================
 BG_JumpLandFactor
 
 MW2's Jump_GetSlowdownFriction: with jumpLand ms of a landing's slowdown left,
@@ -1617,7 +1662,9 @@ static void PM_Footsteps( void ) {
 	// if not trying to move
 	if ( !pm->cmd.forwardmove && !pm->cmd.rightmove ) {
 		if (  pm->xyspeed < 5 ) {
-			pm->ps->bobCycle = 0;	// start at beginning of cycle again
+			if ( pm->xyspeed < 1 ) {
+				pm->ps->bobCycle = 0;	// MW2 starts the cycle over once stopped
+			}
 			if ( pm->ps->pm_flags & PMF_DUCKED ) {
 				PM_ContinueLegsAnim( LEGS_IDLECR );
 			} else {
@@ -1631,7 +1678,6 @@ static void PM_Footsteps( void ) {
 	footstep = qfalse;
 
 	if ( pm->ps->pm_flags & PMF_DUCKED ) {
-		bobmove = 0.5;	// ducked characters bob much faster
 		if ( pm->ps->pm_flags & PMF_BACKWARDS_RUN ) {
 			PM_ContinueLegsAnim( LEGS_BACKCR );
 		}
@@ -1651,7 +1697,6 @@ static void PM_Footsteps( void ) {
 	*/
 	} else {
 		if ( !( pm->cmd.buttons & BUTTON_WALKING ) ) {
-			bobmove = 0.4f;	// faster speeds bob faster
 			if ( pm->ps->pm_flags & PMF_BACKWARDS_RUN ) {
 				PM_ContinueLegsAnim( LEGS_BACK );
 			}
@@ -1660,7 +1705,6 @@ static void PM_Footsteps( void ) {
 			}
 			footstep = qtrue;
 		} else {
-			bobmove = 0.3f;	// walking bobs slow
 			if ( pm->ps->pm_flags & PMF_BACKWARDS_RUN ) {
 				PM_ContinueLegsAnim( LEGS_BACKWALK );
 			}
@@ -1668,6 +1712,32 @@ static void PM_Footsteps( void ) {
 				PM_ContinueLegsAnim( LEGS_WALK );
 			}
 		}
+	}
+
+	// MW2's cycle rate: speed over the most this posture can go, times MW2's
+	// rate for it - 0.335 standing, 0.34 ducked, 0.36 backpedalling, a little
+	// less aimed, 0.5 sprinting - so the camera bob keeps MW2's cadence. Too
+	// slow to bob holds the cycle. Footstep events still fall on its crossings.
+	{
+		qboolean back = ( pm->ps->pm_flags & PMF_BACKWARDS_RUN ) != 0;
+		qboolean aimed = ( pm->ps->pm_flags & PMF_ADS ) != 0;
+		float maxSpeed = pm->ps->speed * BG_MovementScale( pm->ps );
+		if ( pm->ps->pm_flags & PMF_SPRINTING ) {
+			maxSpeed *= 1.4f;
+		} else if ( aimed ) {
+			maxSpeed *= pm_adsScale;
+		}
+		if ( pm->ps->pm_flags & PMF_DUCKED ) {
+			maxSpeed *= pm_duckScale;
+			bobmove = aimed ? 0.315f : 0.34f;
+		} else if ( ( pm->ps->pm_flags & PMF_SPRINTING ) && !back ) {
+			bobmove = 0.5f;		// MW2's player_sprintCameraBob
+		} else if ( back ) {
+			bobmove = aimed ? 0.325f : 0.36f;
+		} else {
+			bobmove = aimed ? 0.305f : 0.335f;
+		}
+		bobmove = ( pm->xyspeed < 10 || maxSpeed <= 0 ) ? 0 : pm->xyspeed / maxSpeed * bobmove;
 	}
 
 	// check for footstep / splash sounds

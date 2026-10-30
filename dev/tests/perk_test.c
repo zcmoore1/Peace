@@ -111,6 +111,7 @@ static void TestFootsteps(void) {
  for(water=0;water<3;water++) for(metal=0;metal<2;metal++) for(silent=0;silent<2;silent++) {
   Ready(WP_MACHINEGUN,silent ? PERK_SILENT_FOOTSTEPS : PERK_NONE);
   ps.groundEntityNum=ENTITYNUM_WORLD; ps.velocity[0]=200; move.cmd.forwardmove=127;
+  ps.speed=320;	/* g_speed: MW2's cycle rate is speed over the posture's most */
   move.waterlevel=water; pml.groundTrace.surfaceFlags=metal ? SURF_METALSTEPS : 0;
   ps.bobCycle=63; pml.msec=10; seq=ps.eventSequence; PM_Footsteps();
   CHECK(ps.eventSequence-seq==(silent ? 0 : 1));

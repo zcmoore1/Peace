@@ -548,6 +548,10 @@ void BG_BeginWeaponDraw(playerState_t *ps);
 #define BG_JUMP_LAND_STEP     18.0f
 #define BG_HARD_LAND_HEIGHT   12.0f	// a fall this high keeps 0.67 of the velocity
 float BG_JumpLandFactor( int jumpLand );
+// MW2's view bob: the eye's offset on z and along the view's right (BG_GetPlayerViewOrigin).
+float BG_ViewBobCycle( const playerState_t *ps );
+float BG_VerticalViewBob( const playerState_t *ps, float cycle, float speed, float adsFrac );
+float BG_HorizontalViewBob( const playerState_t *ps, float cycle, float speed, float adsFrac );
 typedef struct {
 	int buttons;		// the last command's buttons, as the use code saw them
 	qboolean done;		// this press has used something (MW2's useButtonDone)

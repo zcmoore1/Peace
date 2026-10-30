@@ -855,6 +855,51 @@ static void TestLedgeClearsLanding(void) {
  ps.jumpLand=-1; RespawnMove(0,PM_NORMAL);
  CHECK(ps.jumpLand==-1);
 }
+/* MW2's camera bob (BG_GetPlayerViewOrigin): its curve and amplitudes, the
+ * 8-unit cap, and the snap - the cycle holds still in the air, so a sprint
+ * switching there moves the eye. Its cadence (PM_Footsteps): speed over the
+ * posture's most, times MW2's rate, truncated each think. */
+static void TestViewBob(void) {
+ const float speed=320, c0=BG_ViewBobCycle(&ps);
+ float c,v,h,vs,hs;
+ int i,steps,before;
+ Ready(WP_MACHINEGUN,WP_SHOTGUN);
+ ps.bobCycle=0; CHECK(fabs(BG_ViewBobCycle(&ps)-2*M_PI)<1e-4f);
+ ps.bobCycle=255; CHECK(fabs(BG_ViewBobCycle(&ps)-4*M_PI)<1e-4f);
+ (void)c0;
+ ps.bobCycle=40; c=BG_ViewBobCycle(&ps);
+ v=BG_VerticalViewBob(&ps,c,speed,0); h=BG_HorizontalViewBob(&ps,c,speed,0);
+ CHECK(fabs(h-sin(c)*0.007f*speed)<1e-3f);
+ CHECK(fabs(v-(sin(2*c)+0.2f*sin(4*c+M_PI/2))*0.75f*0.007f*speed)<1e-3f);
+ ps.pm_flags|=PMF_SPRINTING;
+ vs=BG_VerticalViewBob(&ps,c,speed,0); hs=BG_HorizontalViewBob(&ps,c,speed,0);
+ CHECK(fabs(hs-sin(c)*0.02f*speed)<1e-3f && fabs(hs-h)>1);			/* the snap */
+ CHECK(fabs(vs-v*0.014f/0.007f)<1e-3f);
+ CHECK(fabs(BG_HorizontalViewBob(&ps,c,1000,0)-sin(c)*8)<1e-3f);		/* capped */
+ ps.pm_flags=PMF_DUCKED;
+ CHECK(fabs(BG_HorizontalViewBob(&ps,c,speed,0)-sin(c)*0.0075f*speed)<1e-3f);
+ /* Cadence: an 8ms think at the posture's full speed. */
+ for(i=0;i<5;i++) {
+  const int flags[]={0,PMF_SPRINTING,PMF_DUCKED,PMF_ADS,PMF_BACKWARDS_RUN};
+  const float rate[]={0.335f,0.5f,0.34f,0.305f,0.36f};
+  const float most[]={1,1.4f,pm_duckScale,pm_adsScale,1};
+  Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.speed=320; ps.groundEntityNum=0; ps.pm_flags=flags[i];
+  move.cmd.forwardmove=i==4 ? -127 : 127; ps.velocity[0]=320*most[i]; ps.bobCycle=10;
+  pml.msec=100; PM_Footsteps();	/* long enough that each rate truncates apart */
+  CHECK(ps.bobCycle==10+(int)(rate[i]*100));
+ }
+ /* Held still too slow to bob, and in the air; reset once stopped. */
+ ps.velocity[0]=9.5f; ps.bobCycle=50; pml.msec=1000; PM_Footsteps(); CHECK(ps.bobCycle==50);
+ pml.msec=8;
+ ps.velocity[0]=320; ps.groundEntityNum=ENTITYNUM_NONE; PM_Footsteps(); CHECK(ps.bobCycle==50);
+ ps.groundEntityNum=0; ps.velocity[0]=0; move.cmd.forwardmove=0; PM_Footsteps(); CHECK(ps.bobCycle==0);
+ /* Over a second of running the cycle keeps MW2's per-think truncation. */
+ Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.speed=320; ps.groundEntityNum=0; ps.velocity[0]=320;
+ move.cmd.forwardmove=127; pml.msec=8; ps.bobCycle=0; before=0;
+ for(steps=0;steps<100;steps++) { PM_Footsteps(); before+=(int)(0.335f*8); }
+ CHECK(ps.bobCycle==(before&255));
+ move.cmd.forwardmove=0;
+}
 static void TestHeldThroughRespawn(void) {
  const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL,BUTTON_LETHAL};
  const int specials[]={WP_KNIFE,WP_FRAG,WP_FLASH,WP_SEMTEX};
@@ -892,7 +937,7 @@ static void TestHeldThroughRespawn(void) {
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
  TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
- TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestHeldThroughRespawn();
+ TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;
 }

@@ -212,6 +212,16 @@ source for MW2 behaviour; the owner rejects it.
   or Extreme Conditioning perk yet. In the air after a jump (`jumpLand` -1)
   MW2's start gate skips the quick-action test: that sprint starts and
   `PM_UpdateWeaponAction` ends it the same think, so its button waits.
+- **The camera bob is MW2's.** `BG_ViewBobCycle`, `BG_VerticalViewBob` and
+  `BG_HorizontalViewBob` are MW2's view bob (BG_GetPlayerViewOrigin): the eye
+  moves on z and along the view's right by an amplitude set by stance, sprint
+  and aim, times speed, capped at 8 units. `CG_OffsetFirstPersonView` adds it;
+  Quake's angle bob and run tilt are gone (MW2 tilts neither at the hip).
+  `PM_Footsteps` turns the cycle at MW2's rate (speed over the posture's most,
+  times 0.335 standing, 0.34 ducked, 0.36 backpedalling, less aimed, 0.5
+  sprinting) and holds it in the air, so a sprint switching in the air moves
+  the camera, as in MW2. Picture only: the muzzle, aim and the gun's own bob
+  are unchanged.
 - **Jumps and landings are MW2's.** `ps.jumpLand` is MW2's jumping flag and
   landing timer in one (0 none, -1 jumped and not landed, >0 ms of slowdown),
   `ps.jumpWait` its 500ms between jumps, `ps.jumpOriginZ` the take-off height.

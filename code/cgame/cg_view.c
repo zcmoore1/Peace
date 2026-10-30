@@ -316,12 +316,9 @@ CG_OffsetFirstPersonView
 static void CG_OffsetFirstPersonView( void ) {
 	float			*origin;
 	float			*angles;
-	float			bob;
 	float			ratio;
 	float			delta;
-	float			speed;
 	float			f;
-	vec3_t			predictedVelocity;
 	int				timeDelta;
 	
 	if ( cg.snap->ps.pm_type == PM_INTERMISSION ) {
@@ -364,30 +361,8 @@ static void CG_OffsetFirstPersonView( void ) {
 	angles[PITCH] += ratio * cg.fall_value;
 #endif
 
-	// add angles based on velocity
-	VectorCopy( cg.predictedPlayerState.velocity, predictedVelocity );
-
-	delta = DotProduct ( predictedVelocity, cg.refdef.viewaxis[0]);
-	angles[PITCH] += delta * cg_runpitch.value;
-	
-	delta = DotProduct ( predictedVelocity, cg.refdef.viewaxis[1]);
-	angles[ROLL] -= delta * cg_runroll.value;
-
-	// add angles based on bob
-
-	// make sure the bob is visible even at low speeds
-	speed = cg.xyspeed > 200 ? cg.xyspeed : 200;
-
-	delta = cg.bobfracsin * cg_bobpitch.value * speed;
-	if (cg.predictedPlayerState.pm_flags & PMF_DUCKED)
-		delta *= 3;		// crouching
-	angles[PITCH] += delta;
-	delta = cg.bobfracsin * cg_bobroll.value * speed;
-	if (cg.predictedPlayerState.pm_flags & PMF_DUCKED)
-		delta *= 3;		// crouching accentuates roll
-	if (cg.bobcycle & 1)
-		delta = -delta;
-	angles[ROLL] += delta;
+	// MW2 tilts the view with neither velocity nor bob at the hip: its camera
+	// bob is all in the eye's position (below).
 
 //===================================
 
@@ -401,13 +376,18 @@ static void CG_OffsetFirstPersonView( void ) {
 			* (DUCK_TIME - timeDelta) / DUCK_TIME;
 	}
 
-	// add bob height
-	bob = cg.bobfracsin * cg.xyspeed * cg_bobup.value;
-	if (bob > 6) {
-		bob = 6;
+	// MW2's camera bob (CG_OffsetFirstPersonView): up on z and across the view's
+	// right, sized by stance, sprint and aim. The cycle holds still in the air,
+	// so a sprint switching there moves the camera, as in MW2.
+	{
+		vec3_t right;
+		float cycle = BG_ViewBobCycle( &cg.predictedPlayerState );
+		float adsFrac = CG_Sights_Fraction();
+		origin[2] += BG_VerticalViewBob( &cg.predictedPlayerState, cycle, cg.xyspeed, adsFrac );
+		AngleVectors( angles, NULL, right, NULL );
+		VectorMA( origin, BG_HorizontalViewBob( &cg.predictedPlayerState, cycle, cg.xyspeed, adsFrac ),
+			right, origin );
 	}
-
-	origin[2] += bob;
 
 
 	// add fall height

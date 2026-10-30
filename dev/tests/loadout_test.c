@@ -578,24 +578,45 @@ static void TestAirSprintDuringAction(void) {
 }
 /* Equipment cuts the knife at any point, as MW2's offhand check takes every
  * melee state: pressed while the gun goes down for the knife or while the
- * knife comes up, the knife never lands; pressed after it, the throw follows. */
+ * knife comes up, the knife never lands; pressed after it, the throw follows.
+ * At every stage the gun's whole quickDropTime starts on the press (MW2's
+ * OffHandInit): the knife's hold after its hit, and the rapid drops either
+ * side of it, are not kept. */
 static void TestEquipmentCutsKnife(void) {
  int stage,t,lethal;
- for(stage=0;stage<3;stage++) {
+ for(stage=0;stage<4;stage++) {
   Ready(WP_MACHINEGUN,WP_SHOTGUN); lethal=BG_LethalWeapon(&ps);
   CHECK(ps.ammo[lethal]>0);
   move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
   CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_MELEE && ps.weaponstate==WEAPON_DROPPING);
+  if(stage==0) Step(1);
   if(stage>=1) for(t=0;t<5000 && !(ps.weapon==WP_KNIFE && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
-  if(stage==2) for(t=0;t<5000 && !fired[WP_KNIFE];t++) Step(1);
-  CHECK(fired[WP_KNIFE]==(stage==2));
+  if(stage>=2) for(t=0;t<5000 && !fired[WP_KNIFE];t++) Step(1);
+  if(stage==2) { Step(1); CHECK(ps.weaponstate==WEAPON_FIRING && ps.weaponTime>BG_QUICK_ACTION_HOLD/2); }
+  if(stage==3) { for(t=0;t<5000 && ps.weaponstate!=WEAPON_DROPPING;t++) Step(1); Step(1); }
+  CHECK(ps.weapon==(stage ? WP_KNIFE : WP_MACHINEGUN) && fired[WP_KNIFE]==(stage>=2));
+  CHECK(stage==1 || stage==2 || (ps.weaponstate==WEAPON_DROPPING && ps.weaponTime<BG_RAPID_DROP_TIME));
   move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
   CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_LETHAL);
-  /* The knife in hand goes away on the gun's quick drop (MW2's OffHandInit). */
-  if(stage==1) CHECK(ps.weapon==WP_KNIFE && ps.weaponstate==WEAPON_DROPPING &&
+  /* The gun, or the knife in hand, goes away on the gun's quick drop. */
+  CHECK(ps.weapon==(stage ? WP_KNIFE : WP_MACHINEGUN) && ps.weaponstate==WEAPON_DROPPING &&
    ps.weaponTime==BG_WeaponQuickDropTime(WP_MACHINEGUN));
   for(t=0;t<12000 && (ps.weaponAction&WA_TYPE_MASK);t++) Step(1);
-  CHECK(fired[WP_KNIFE]==(stage==2) && fired[lethal]==1);
+  CHECK(fired[WP_KNIFE]==(stage>=2) && fired[lethal]==1);
+ }
+}
+/* Y and the knife on one command: MW2's weapon change runs before its knife,
+ * so the swap's own holster starts and the knife is lost. Either gun. */
+static void TestSwapBeatsKnife(void) {
+ const int guns[2]={WP_MACHINEGUN,WP_SHOTGUN};
+ int i,t;
+ for(i=0;i<2;i++) {
+  Ready(guns[i],guns[!i]);
+  Toggle(); move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
+  CHECK(!(ps.weaponAction&WA_TYPE_MASK) && ps.weapon==guns[i] &&
+   ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_WeaponDropTime(guns[i]));
+  for(t=0;t<12000 && !(ps.weapon==guns[!i] && ps.weaponstate==WEAPON_READY);t++) Step(1);
+  CHECK(ps.weapon==guns[!i] && !fired[WP_KNIFE]);
  }
 }
 /* A knife pressed during the knife is lost: MW2's knife check refuses its
@@ -984,7 +1005,7 @@ static void TestHeldThroughRespawn(void) {
 }
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
- TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
+ TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
  TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;

@@ -444,6 +444,18 @@ static void TestLanding(void) {
     CHECK(ps.jumpWait == 0);
     move.cmd.upmove = 0; Tick(8); move.cmd.upmove = 127; Tick(8); move.cmd.upmove = 0;
     CHECK(ps.groundEntityNum == ENTITYNUM_NONE);
+    /* A press made in the air is spent by touchdown (MW2's Jump_Check reads
+     * the command before): held through the landing it never jumps. */
+    for (t = 0; t < 300; t++) Tick(8);
+    CHECK(ps.groundEntityNum != ENTITYNUM_NONE && ps.jumpWait == 0 && ps.jumpLand == 0);
+    move.cmd.upmove = 127; Tick(8); move.cmd.upmove = 0; Tick(8); Tick(8);
+    CHECK(ps.groundEntityNum == ENTITYNUM_NONE);
+    move.cmd.upmove = 127;
+    for (t = 0; t < 200 && ps.groundEntityNum == ENTITYNUM_NONE; t++) Tick(8);
+    CHECK(ps.groundEntityNum != ENTITYNUM_NONE && ps.jumpWait == 0);
+    for (t = 0; t < 30; t++) { Tick(8); CHECK(ps.groundEntityNum != ENTITYNUM_NONE); }
+    move.cmd.upmove = 0; Tick(8); move.cmd.upmove = 127; Tick(8); move.cmd.upmove = 0;
+    CHECK(ps.groundEntityNum == ENTITYNUM_NONE);
     /* A landing a step above the take-off cuts to 0.5 and slows for 1200ms. */
     for (t = 0; t < 2; t++) {
         Reset(-300, -230, 24.125f); Tick(8);

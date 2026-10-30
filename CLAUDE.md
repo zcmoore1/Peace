@@ -158,15 +158,20 @@ source for MW2 behaviour; the owner rejects it.
   and never in a raise or drop (MW2's knife check refuses states 1-5), so a
   knife pressed during a swap, a draw or a quick action's return is lost -
   except on the command YY returns the drop to the held gun, as MW2 readies
-  the gun before its knife. Whatever gun is out, it goes down for the
+  the gun before its knife. For the same reason Y and the knife on one
+  command is the swap: its holster starts and the knife is lost. Whatever gun is out, it goes down for the
   knife in the one universal `BG_RAPID_DROP_TIME` (50ms, the minimum swap), not
   its own holster. `BG_HolsterTime` is the single rule — gun's own
   drop, quick drop, rapid, or the ladder's — used by pmove to stamp and by
   cgame to fit the drop clip, so the two cannot disagree. Every grenade (frag,
   flash, Semtex) sends the gun, or the knife it cuts, away on the gun's MW2
   `quickDropTime` (`BG_WeaponQuickDropTime`, 250ms), as MW2's OffHandInit
-  (owner's rule: MW2's numbers). Do not add a second timing rule in the
-  renderer.
+  (owner's rule: MW2's numbers). Out of the knife that is the whole quick
+  drop from the press: the knife's hold after its hit ends there
+  (`PM_WeaponChangeOpen`), and a rapid drop already running for or after it
+  is restamped, never kept. cgame re-anchors any restamped drop at the pose on
+  screen (`CG_WeapAnim_ReanchorDrop`); the fit is still `BG_HolsterTime`. Do
+  not add a second timing rule in the renderer.
 - **Recovering from melee and from equipment is ONE thing, in time and
   function.** Knife, frag, flash and a released Semtex use `BG_QUICK_ACTION_HOLD` (500ms),
   go away in `BG_RAPID_DROP_TIME`, then the gun comes back on its MW2 quick
@@ -232,7 +237,9 @@ source for MW2 behaviour; the owner rejects it.
   0.65 more and starts 1800ms of slowdown (0.5 and 1200ms if it landed 18 units
   above the take-off). During it the ground friction and the squared speed of
   a jump are both scaled by `BG_JumpLandFactor` (2.5 falling to 1). A jump
-  inside `BG_JUMP_WAIT` is refused and its press spent. A ladder, deep water
+  inside `BG_JUMP_WAIT` is refused and its press spent, and so is a press made
+  in the air (MW2's Jump_Check reads the command before): holding it through
+  the landing never jumps. A ladder, deep water
   or ground too steep to walk on clears the state; walking off a ledge clears
   a pending slowdown. Stairs and curbs are not ledges: `PM_StepSlideMove` is
   MW2's, pushing every ground move down up to `STEPSIZE_DOWN` (9) past its

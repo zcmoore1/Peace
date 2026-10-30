@@ -90,6 +90,7 @@ static qboolean      cg_retainedActive, cg_retainedDrop, cg_previousSprint;
 static float         cg_retainedRate = 1.0f;
 static qboolean      cg_animContextValid;
 static int           cg_animClient, cg_animSpawn, cg_animTeleport, cg_animSlot, cg_animAttachments;
+static int           cg_dropLock, cg_dropDuration;	// the drop as last fitted
 
 static int CG_WeapAnim_DrawClip(const weapAnimDef_t *def, const playerState_t *ps) {
 	return ps->weaponDraw && def->clips[WANIM_FIRST_RAISE].numFrames > 0 ? WANIM_FIRST_RAISE : WANIM_RAISE;
@@ -125,6 +126,7 @@ void CG_WeapAnim_Reset( void ) {
 	cg_weapAnimWeapon = WP_NONE;
 	cg_retainedActive = cg_retainedDrop = cg_previousSprint = qfalse;
 	cg_animContextValid = qfalse;
+	cg_dropLock = cg_dropDuration = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +242,25 @@ static void CG_WeapAnim_BeginHolster(const weapAnimDef_t *def, animLayer_t *move
 		move->fit = MOVE_FIT_FORWARD;
 	}
 	move->targetWeight = 1.0f;
+}
+
+// Pmove restamped the running drop (a grenade cutting the knife takes the
+// gun's whole quick drop): carry on from the pose on screen, so the rest of
+// the clip spans what is left of the new lock. The fit stays BG_HolsterTime.
+static void CG_WeapAnim_ReanchorDrop(const weapAnimDef_t *def, const playerState_t *ps,
+                                     animLayer_t *move) {
+	float len = CG_WeapAnim_ClipLength(def, move->clip);
+	int duration = BG_HolsterTime(ps);
+	float f, p;
+	if (len <= 0.0f || duration <= 0) return;
+	f = 1.0f - (float)ps->weaponTime / duration;
+	if (f < 0.0f) f = 0.0f;
+	if (f > 0.99f) f = 0.99f;
+	p = move->time / len;
+	if (p > 1.0f) p = 1.0f;
+	move->startFraction = move->fit == MOVE_FIT_REVERSE ? p / (1.0f - f) : (p - f) / (1.0f - f);
+	if (move->startFraction < 0.0f) move->startFraction = 0.0f;
+	if (move->startFraction > 1.0f) move->startFraction = 1.0f;
 }
 
 // Gameplay cancelled the transition (YY): the gun is already ready to fire.
@@ -417,9 +438,14 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 			CG_WeapAnim_PlayLayer( move, CG_WeapAnim_DrawClip(def, ps) );
 			move->fit = MOVE_FIT_FORWARD;
 		} else if ( ps->weaponstate == WEAPON_DROPPING ) {
-			if ( move->fit != MOVE_FIT_FORWARD || move->clip != WANIM_DROP ) {
-				if ( move->fit != MOVE_FIT_REVERSE ) CG_WeapAnim_BeginHolster( def, move );
+			if ( move->fit != MOVE_FIT_REVERSE &&
+			     ( move->fit != MOVE_FIT_FORWARD || move->clip != WANIM_DROP ) ) {
+				CG_WeapAnim_BeginHolster( def, move );
+			} else if ( ps->weaponTime > cg_dropLock || BG_HolsterTime( ps ) != cg_dropDuration ) {
+				CG_WeapAnim_ReanchorDrop( def, ps, move );
 			}
+			cg_dropLock = ps->weaponTime;
+			cg_dropDuration = BG_HolsterTime( ps );
 			// A gun at rest fades into the drop like it fades out of the draw.
 			if ( move->clip == WANIM_DROP ) move->blendSpeed = MOVE_BLEND_SPEED;
 		} else {

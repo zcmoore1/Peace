@@ -761,6 +761,13 @@ static void PM_AirMove( void ) {
 
 	PM_Friction();
 
+	// MW2's Jump_Check refuses a jump already down on the command before, and
+	// only a walking or ladder think checks: a press made in the air is spent
+	// by the time the ground is reached. It takes a fresh press there.
+	if ( pm->cmd.upmove >= 10 ) {
+		pm->ps->pm_flags |= PMF_JUMP_HELD;
+	}
+
 	// Off the ground during a landing's slowdown (a ledge walked off): MW2
 	// clears the jump state, so the next landing is not a jump's.
 	if ( pm->ps->jumpLand > 0 ) {
@@ -1011,13 +1018,13 @@ static void PM_WalkMove( void ) {
 	// all of the velocity, harder when it landed a step above the take-off, and
 	// starts the slowdown that the friction and the next jump read.
 	if ( pm->ps->jumpLand < 0 ) {
-		float scale = 0.65f;
+		float cut = 0.65f;
 		pm->ps->jumpLand = BG_JUMP_LAND_TIME;
 		if ( pm->ps->origin[2] >= pm->ps->jumpOriginZ + BG_JUMP_LAND_STEP ) {
 			pm->ps->jumpLand = BG_JUMP_LAND_HIGH;
-			scale = 0.5f;
+			cut = 0.5f;
 		}
-		VectorScale( pm->ps->velocity, scale, pm->ps->velocity );
+		VectorScale( pm->ps->velocity, cut, pm->ps->velocity );
 	}
 
 	if ( PM_CheckJump () ) {
@@ -2995,18 +3002,30 @@ static int PM_HeldActionButtons( void ) {
 	return (pm->cmd.buttons >> 15) & 7;
 }
 
+// Whether step 1 may begin a weapon change this think. A shot's fire lock
+// holds it; a quick action's hold does not once the latch wants something
+// else (MW2's offhand check takes MELEE_FIRE, the knife's hold after its hit).
+static qboolean PM_WeaponChangeOpen( void ) {
+	return pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ||
+		( BG_IsActionWeapon( pm->ps->weapon ) && !( pm->ps->weaponAction & WA_FIRED ) );
+}
+
 // Latch a press through holster/deploy. Releasing the button cannot lose a tap,
 // and holding it cannot turn a quick action into a permanently selected weapon.
 static void PM_UpdateWeaponAction( void ) {
 	// MW2's knife check refuses every raise and drop, a quick action's return
 	// and the command it ends on included. A drop the requested slot has come
 	// back from is not refused: YY readies the gun in this same think (below),
-	// as MW2's weapon change runs before its knife.
+	// as MW2's weapon change runs before its knife. For the same reason a swap
+	// step 1 begins on this very command is a drop already.
 	qboolean swapping = pm->ps->weaponstate == WEAPON_RAISING ||
 		( pm->ps->weaponstate == WEAPON_DROPPING &&
 		  !( !BG_IsActionWeapon( pm->ps->weapon ) &&
 		     pm->ps->weapon == BG_ActiveSlotWeapon( pm->ps ) &&
-		     BG_RequestedSlot( pm->ps, pm->cmd.weapon ) == pm->ps->stats[STAT_ACTIVE_SLOT] ) );
+		     BG_RequestedSlot( pm->ps, pm->cmd.weapon ) == pm->ps->stats[STAT_ACTIVE_SLOT] ) ) ||
+		( pm->ps->weaponstate != WEAPON_DROPPING && PM_WeaponChangeOpen() &&
+		  !( pm->ps->weaponAction & ( WA_RETURNING | WA_RECOVERING ) ) &&
+		  BG_RequestedSlot( pm->ps, pm->cmd.weapon ) != pm->ps->stats[STAT_ACTIVE_SLOT] );
 	int held = PM_HeldActionButtons();
 	int pressed = held & ~((pm->ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT);
 	int action = pm->ps->weaponAction & (WA_TYPE_MASK | WA_FIRED);
@@ -3015,6 +3034,7 @@ static void PM_UpdateWeaponAction( void ) {
 	qboolean swap = (pm->cmd.buttons & BUTTON_WEAPON_SWAP) != 0;
 	qboolean swapPressed = swap && !(pm->ps->weaponAction & WA_SWAP_HELD);
 	qboolean cancelDraw = qfalse;
+	qboolean cutDrop = qfalse;
 	if (BG_RequestedSlot(pm->ps, pm->cmd.weapon) == pm->ps->stats[STAT_ACTIVE_SLOT]) returning = 0;
 	// A requested slot change waits for the ORIGINAL gun to finish recovery.
 	// Clear on the ready boundary so its normal holster can start this think.
@@ -3061,6 +3081,11 @@ static void PM_UpdateWeaponAction( void ) {
 				!( (pm->ps->pm_flags & PMF_ADS) && BG_WeaponScopeOverlay( pm->ps->weapon ) ) )
 				nextAction = WA_MELEE;
 			if (nextAction) {
+				// MW2's OffHandInit out of a melee state stamps the gun's whole
+				// quickDropTime: a drop running for the knife, or the knife's
+				// own after its hit, is not kept.
+				cutDrop = ( action & WA_TYPE_MASK ) == WA_MELEE &&
+					pm->ps->weaponstate == WEAPON_DROPPING;
 				action = nextAction;
 				returning = recovering = 0;
 			}
@@ -3081,6 +3106,9 @@ static void PM_UpdateWeaponAction( void ) {
 	// Drawn once the latch says it is a return, so it is the quick raise.
 	if ( cancelDraw ) {
 		BG_BeginWeaponDraw( pm->ps );
+	}
+	if ( cutDrop ) {
+		pm->ps->weaponTime = BG_HolsterTime( pm->ps );
 	}
 	if ( action & WA_TYPE_MASK ) {
 		// A sprint the action ends waits for its button (PM_CheckSprint).
@@ -3528,7 +3556,7 @@ static void PM_Weapon( void ) {
 	}
 
 	// 1. Weapon change ALWAYS stamps a real holster first.
-	if ( !ladderWeapon && (pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING) ) {
+	if ( !ladderWeapon && PM_WeaponChangeOpen() ) {
 		int want = PM_DesiredWeapon();
 		if ( want != pm->ps->weapon || PM_DesiredSlot() != pm->ps->stats[STAT_ACTIVE_SLOT] ) {
 			PM_BeginWeaponChange( want );

@@ -430,6 +430,29 @@ static void TestFlow(weapAnimDef_t *def) {
  CHECK(flowPs.weaponstate==WEAPON_FIRING && move->targetWeight==0 && move->fit==MOVE_FIT_NONE);
  CHECK(cg_weapLayers[LAYER_BASE].clip==WANIM_FIRE);
 }
+/* A grenade pressed while the gun goes down for the knife restamps the drop to
+ * the gun's whole quick drop (MW2's OffHandInit). The picture carries on from
+ * the pose on screen and still lands exactly when the lock runs out. */
+static void TestDropRestamp(weapAnimDef_t *def) {
+ animLayer_t *move=&cg_weapLayers[LAYER_MOVE];
+ float drop=CG_WeapAnim_ClipLength(def,WANIM_DROP),last;
+ int t;
+ FlowBegin(); FlowSlot(SLOT_SECONDARY);
+ for(t=0;t<10000 && !(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_READY && move->weight==0);t+=8) FlowStep();
+ flow.cmd.buttons=BUTTON_MELEE; FlowStep(); flow.cmd.buttons=0; FlowStep(); FlowStep();
+ CHECK(flowPs.weaponstate==WEAPON_DROPPING && (flowPs.weaponAction&WA_TYPE_MASK)==WA_MELEE);
+ CHECK(move->clip==WANIM_DROP && move->fit==MOVE_FIT_FORWARD && move->time>drop/8);
+ last=move->time;
+ flow.cmd.buttons=BUTTON_LETHAL; FlowStep(); flow.cmd.buttons=0;
+ CHECK((flowPs.weaponAction&WA_TYPE_MASK)==WA_LETHAL && flowPs.weaponstate==WEAPON_DROPPING &&
+  flowPs.weaponTime>=BG_WeaponQuickDropTime(WP_SHOTGUN)-8);
+ CHECK(move->clip==WANIM_DROP && move->time>=last-.01f && move->time-last<=8*drop/BG_HolsterTime(&flowPs)+.01f);
+ while(flowPs.weaponstate==WEAPON_DROPPING && flowPs.weapon==WP_SHOTGUN) {
+  last=move->time; FlowStep();
+  if(flowPs.weaponstate==WEAPON_DROPPING) CHECK(move->time>=last-.01f && move->time-last<=8*drop/BG_HolsterTime(&flowPs)+.01f);
+ }
+ CHECK(last>=drop*.9f);
+}
 static void TestReloadPerk(weapAnimDef_t *def,int weapon) {
  playerState_t ps;int seq,perk,duration;
  for(seq=0;seq<RSEQ_COUNT;seq++)for(perk=0;perk<2;perk++) {
@@ -467,7 +490,7 @@ int main(void) {
  TestOwnership(def); TestExclusions(def); TestRelease(def); TestContext(def);
  TestFirstDraw(def,WP_SHOTGUN);
  TestReloadPerk(def,WP_SHOTGUN);
- TestFlow(def);
+ TestFlow(def); TestDropRestamp(def);
  CG_WeapAnim_RegisterClips(WP_M40A3,2,"assets/baseq3/models/weapons2/m40a3/view.cfg");
  def=&bg_weapAnimDefs[WP_M40A3];
  TestSprint(def,WP_M40A3); TestFirstDraw(def,WP_M40A3);

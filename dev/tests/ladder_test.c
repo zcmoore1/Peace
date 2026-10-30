@@ -524,6 +524,61 @@ static void TestStairs(void) {
     CHECK(ps.jumpLand > 0 && ps.origin[1] < 0);
     for (t = 0; t < 200 && ps.origin[1] < 40; t++) { Tick(8); CHECK(ps.jumpLand > 0 || ps.origin[1] >= 40); }
     move.cmd.forwardmove = 0;
+    /* The same stairs are walked up without leaving the ground. */
+    numStairBoxes = 0;
+    AddStairBox(-1000, -1000, -1000, 1000, 0, 0);
+    for (k = 1; k <= 12; k++) AddStairBox(-1000, 16 * (k - 1), -1000, 1000, 16 * k, -16 * k);
+    AddStairBox(-1000, 16 * 12, -1000, 1000, 4000, -16 * 12);
+    Reset(0, 16 * 12 + 100, 24.125f - 16 * 12); move.trace = StairTrace; move.pointcontents = StairContents;
+    move.cmd.angles[YAW] = ANGLE2SHORT(-90); move.cmd.forwardmove = 127;
+    for (t = 0; t < 4; t++) Tick(8);
+    CHECK(ps.groundEntityNum != ENTITYNUM_NONE);
+    lifts = 0;
+    for (t = 0; t < 2000 && ps.origin[1] > -32; t++) { Tick(8); if (ps.groundEntityNum == ENTITYNUM_NONE) lifts++; }
+    CHECK(ps.origin[1] <= -32 && lifts == 0 && fabs(ps.origin[2] - 24.125f) < 0.5f);
+    move.cmd.forwardmove = 0;
+}
+/* MW2's air step (Jump_GetStepHeight): in the air only a jump steps up, and
+ * only to its own height above the take-off. A fall never climbs the ledge. */
+static void AirStep(int jumpLand, float originAbove, float ledgeAbove) {
+    numStairBoxes = 0;
+    AddStairBox(-1000, -1000, -1000, 1000, 0, 0);
+    AddStairBox(-1000, 0, -1000, 1000, 1000, 100);
+    Reset(0, -15.5f, 24.125f); move.trace = StairTrace; move.pointcontents = StairContents;
+    ps.origin[2] = 100 + 24 - ledgeAbove;
+    ps.groundEntityNum = ENTITYNUM_NONE; VectorSet(ps.velocity, 0, 200, 0);
+    ps.jumpLand = jumpLand; ps.jumpOriginZ = ps.origin[2] - originAbove;
+    move.cmd.angles[YAW] = ANGLE2SHORT(90); move.cmd.forwardmove = 127;
+    Tick(8);
+    move.cmd.forwardmove = 0;
+}
+static void TestAirStep(void) {
+    const float jumpHeight = (float)(JUMP_VELOCITY * JUMP_VELOCITY) / (2 * DEFAULT_GRAVITY);
+    int t; float z;
+    AirStep(-1, 4, 10);                  /* a jump reaches the lip: up onto it */
+    CHECK(ps.origin[1] > -15 && ps.origin[2] > 124);
+    AirStep(0, 4, 10);                   /* a fall into the same lip does not climb it */
+    CHECK(ps.origin[1] < -15 && ps.origin[2] < 115);
+    AirStep(-1, jumpHeight - 5, 10);     /* past the jump's height: 5 of 10, no step */
+    CHECK(ps.origin[1] < -15 && ps.origin[2] < 115);
+    AirStep(-1, jumpHeight - 15, 10);    /* inside it: 15 of 10 */
+    CHECK(ps.origin[1] > -15 && ps.origin[2] > 124);
+    /* Pressed along a wall off a drop, the step's push down finds nothing:
+     * only the lift is undone, never STEPSIZE_DOWN more in one move. */
+    numStairBoxes = 0;
+    AddStairBox(-1000, -1000, -1000, 1000, 0, 0);
+    AddStairBox(-1000, 0, -1000, 1000, 1000, -200);
+    AddStairBox(16, -1000, -1000, 1000, 1000, 200);
+    Reset(0.5f, -40, 24.125f); move.trace = StairTrace; move.pointcontents = StairContents;
+    move.cmd.angles[YAW] = ANGLE2SHORT(80); move.cmd.forwardmove = 127;
+    Tick(8); CHECK(ps.groundEntityNum != ENTITYNUM_NONE);
+    for (t = 0; t < 400 && ps.groundEntityNum != ENTITYNUM_NONE; t++) {
+        z = ps.origin[2]; Tick(8);
+        CHECK(ps.origin[2] > z - 0.5f || ps.groundEntityNum == ENTITYNUM_NONE);
+        if (ps.groundEntityNum == ENTITYNUM_NONE) CHECK(ps.origin[2] > z - 1);
+    }
+    CHECK(ps.groundEntityNum == ENTITYNUM_NONE && ps.origin[1] > 15);
+    move.cmd.forwardmove = 0;
 }
 int main(void) {
     int checksum, i;
@@ -543,6 +598,7 @@ int main(void) {
     TestJumpSprint();
     TestLanding();
     TestStairs();
+    TestAirStep();
     for (i = 0; i < numAllocations; i++) free(allocations[i]);
     printf("PASS: ladder BSP collision, momentum, traversal, detach, yaw, weapon ordering and prediction replay (%d checks).\n", checks);
     return 0;

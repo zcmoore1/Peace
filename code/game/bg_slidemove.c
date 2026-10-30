@@ -239,138 +239,117 @@ qboolean	PM_SlideMove( qboolean gravity ) {
 ==================
 PM_StepSlideMove
 
+MW2's (PM_StepSlideMove). From the ground a blocked move, or any move on a
+slope, steps up STEPSIZE and slides again; then every ground move is pushed
+down as far as STEPSIZE_DOWN past the lift, so stairs and curbs are walked
+both ways, never flown off: no landing, no landing cut, the jump state kept.
+In the air nothing steps but a jump, and only up to its own height above
+where it left the ground (Jump_GetStepHeight), so a jump never climbs a ledge
+it cannot reach. It lands on ground no steeper than STEP_LAND_NORMAL (only on
+walkable ground for a jump's step), never on a player; anything else keeps
+the unstepped move.
 ==================
 */
-/*
-==================
-PM_StepDown
-
-MW2's step down (PM_StepSlideMove): a move that began on the ground is pulled
-down onto walkable ground up to STEPSIZE_DOWN below, so stairs and curbs are
-walked down, not flown off - no landing, no landing cut, the jump state kept.
-Never onto a player.
-==================
-*/
-#define	STEPSIZE_DOWN	9
-static void PM_StepDown( const vec3_t start_o ) {
-	trace_t		trace;
-	vec3_t		down;
-	float		delta;
-
-	VectorCopy( pm->ps->origin, down );
-	down[2] -= STEPSIZE_DOWN;
-	pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, down, pm->ps->clientNum, pm->tracemask );
-	if ( trace.allsolid || trace.fraction >= 1.0f || trace.entityNum < MAX_CLIENTS ||
-	     trace.plane.normal[2] < MIN_WALK_NORMAL ) {
-		return;
-	}
-	VectorCopy( trace.endpos, pm->ps->origin );
-	PM_ClipVelocity( pm->ps->velocity, trace.plane.normal, pm->ps->velocity, OVERCLIP );
-	delta = start_o[2] - pm->ps->origin[2];
-	if ( delta > 2 ) {
-		PM_AddEvent( delta < 7 ? EV_STEP_DOWN_4 : EV_STEP_DOWN_8 );
-	}
-}
+#define	STEPSIZE_DOWN		9
+#define	STEP_FLAT_NORMAL	0.9f
+#define	STEP_LAND_NORMAL	0.3f
 
 void PM_StepSlideMove( qboolean gravity ) {
 	vec3_t		start_o, start_v;
-//	vec3_t		down_o, down_v;
+	vec3_t		down_o, down_v;
 	trace_t		trace;
-//	float		down_dist, up_dist;
-//	vec3_t		delta, delta2;
 	vec3_t		up, down;
-	float		stepSize;
-	// MW2 steps down only from a ground entity: not from a slope too steep to
-	// walk, a ladder, or a jump (which has already left the ground).
-	qboolean	hadGround = pml.walking && !( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED );
+	float		stepSize, stepAmount, delta;
+	qboolean	bumped, jumpStep = qfalse;
+	// A ladder has no ground to step down to; a jump has cleared the plane.
+	qboolean	hadGround = pml.groundPlane && !( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED );
 
 	VectorCopy (pm->ps->origin, start_o);
 	VectorCopy (pm->ps->velocity, start_v);
 
-	if ( PM_SlideMove( gravity ) == 0 ) {
-		// we got exactly where we wanted to go first try
-		if ( hadGround ) {
-			PM_StepDown( start_o );
+	bumped = PM_SlideMove( gravity );
+	stepSize = STEPSIZE;
+
+	if ( pm->ps->groundEntityNum == ENTITYNUM_NONE ) {
+		if ( !bumped || pm->ps->jumpLand >= 0 || pm->ps->gravity <= 0 ) {
+			return;
 		}
+		stepSize = pm->ps->jumpOriginZ - start_o[2] +
+			(float)( JUMP_VELOCITY * JUMP_VELOCITY ) / ( 2.0f * pm->ps->gravity );
+		if ( stepSize > STEPSIZE ) {
+			stepSize = STEPSIZE;
+		}
+		if ( stepSize < 1 ) {
+			return;
+		}
+		jumpStep = qtrue;
+	}
+
+	VectorCopy (pm->ps->origin, down_o);
+	VectorCopy (pm->ps->velocity, down_v);
+
+	stepAmount = 0;
+	if ( bumped || ( pml.groundPlane && pml.groundTrace.plane.normal[2] < STEP_FLAT_NORMAL ) ) {
+		// test the player position if they were a stepheight higher, a unit
+		// short of anything overhead
+		VectorCopy (start_o, up);
+		up[2] += stepSize + 1;
+		pm->trace (&trace, start_o, pm->mins, pm->maxs, up, pm->ps->clientNum, pm->tracemask);
+		stepAmount = trace.fraction * ( stepSize + 1 ) - 1;
+		if ( stepAmount >= 1 ) {
+			// try slidemove from this position
+			VectorCopy (start_o, pm->ps->origin);
+			pm->ps->origin[2] += stepAmount;
+			VectorCopy (start_v, pm->ps->velocity);
+			PM_SlideMove( gravity );
+		} else {
+			if ( pm->debugLevel ) {
+				Com_Printf("%i:bend can't step\n", c_pmove);
+			}
+			stepAmount = 0;
+		}
+	}
+	if ( !hadGround && stepAmount == 0 ) {
 		return;
 	}
 
-	VectorCopy(start_o, down);
-	down[2] -= STEPSIZE;
-	pm->trace (&trace, start_o, pm->mins, pm->maxs, down, pm->ps->clientNum, pm->tracemask);
-	VectorSet(up, 0, 0, 1);
-	// never step up when you still have up velocity
-	if ( pm->ps->velocity[2] > 0 && (trace.fraction == 1.0 ||
-										DotProduct(trace.plane.normal, up) < 0.7)) {
-		return;
-	}
-
-	//VectorCopy (pm->ps->origin, down_o);
-	//VectorCopy (pm->ps->velocity, down_v);
-
-	VectorCopy (start_o, up);
-	up[2] += STEPSIZE;
-
-	// test the player position if they were a stepheight higher
-	pm->trace (&trace, start_o, pm->mins, pm->maxs, up, pm->ps->clientNum, pm->tracemask);
-	if ( trace.allsolid ) {
-		if ( pm->debugLevel ) {
-			Com_Printf("%i:bend can't step\n", c_pmove);
-		}
-		return;		// can't step up
-	}
-
-	stepSize = trace.endpos[2] - start_o[2];
-	// try slidemove from this position
-	VectorCopy (trace.endpos, pm->ps->origin);
-	VectorCopy (start_v, pm->ps->velocity);
-
-	PM_SlideMove( gravity );
-
-	// push down the final amount, and MW2's step down past it from the ground
+	// push down the final amount, and STEPSIZE_DOWN past it from the ground
 	VectorCopy (pm->ps->origin, down);
-	down[2] -= stepSize + ( hadGround ? STEPSIZE_DOWN : 0 );
+	down[2] -= stepAmount + ( hadGround ? STEPSIZE_DOWN : 0 );
 	pm->trace (&trace, pm->ps->origin, pm->mins, pm->maxs, down, pm->ps->clientNum, pm->tracemask);
-	if ( !trace.allsolid ) {
-		VectorCopy (trace.endpos, pm->ps->origin);
-	}
-	if ( trace.fraction < 1.0 ) {
-		PM_ClipVelocity( pm->ps->velocity, trace.plane.normal, pm->ps->velocity, OVERCLIP );
-	}
-
-#if 0
-	// if the down trace can trace back to the original position directly, don't step
-	pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, start_o, pm->ps->clientNum, pm->tracemask);
-	if ( trace.fraction == 1.0 ) {
+	if ( trace.fraction >= 1.0f ) {
+		pm->ps->origin[2] -= stepAmount;
+	} else if ( trace.allsolid || trace.entityNum < MAX_CLIENTS ||
+	            trace.plane.normal[2] < ( jumpStep ? MIN_WALK_NORMAL : STEP_LAND_NORMAL ) ) {
 		// use the original move
 		VectorCopy (down_o, pm->ps->origin);
 		VectorCopy (down_v, pm->ps->velocity);
 		if ( pm->debugLevel ) {
 			Com_Printf("%i:bend\n", c_pmove);
 		}
-	} else 
-#endif
-	{
-		// use the step move
-		float	delta;
+		return;
+	} else {
+		VectorCopy (trace.endpos, pm->ps->origin);
+		PM_ClipVelocity( pm->ps->velocity, trace.plane.normal, pm->ps->velocity, OVERCLIP );
+	}
 
-		delta = pm->ps->origin[2] - start_o[2];
-		if ( delta > 2 ) {
-			if ( delta < 7 ) {
-				PM_AddEvent( EV_STEP_4 );
-			} else if ( delta < 11 ) {
-				PM_AddEvent( EV_STEP_8 );
-			} else if ( delta < 15 ) {
-				PM_AddEvent( EV_STEP_12 );
-			} else {
-				PM_AddEvent( EV_STEP_16 );
-			}
-		} else if ( delta < -2 ) {
-			PM_AddEvent( delta > -7 ? EV_STEP_DOWN_4 : EV_STEP_DOWN_8 );
+	// use the step move; the eye smooths only what the step added
+	delta = pm->ps->origin[2] - down_o[2];
+	if ( delta > 2 ) {
+		if ( delta < 7 ) {
+			PM_AddEvent( EV_STEP_4 );
+		} else if ( delta < 11 ) {
+			PM_AddEvent( EV_STEP_8 );
+		} else if ( delta < 15 ) {
+			PM_AddEvent( EV_STEP_12 );
+		} else {
+			PM_AddEvent( EV_STEP_16 );
 		}
-		if ( pm->debugLevel ) {
-			Com_Printf("%i:stepped\n", c_pmove);
-		}
+	} else if ( delta < -2 ) {
+		PM_AddEvent( delta > -7 ? EV_STEP_DOWN_4 : EV_STEP_DOWN_8 );
+	}
+	if ( pm->debugLevel ) {
+		Com_Printf("%i:stepped\n", c_pmove);
 	}
 }
 

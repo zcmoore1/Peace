@@ -234,10 +234,13 @@ source for MW2 behaviour; the owner rejects it.
   a jump are both scaled by `BG_JumpLandFactor` (2.5 falling to 1). A jump
   inside `BG_JUMP_WAIT` is refused and its press spent. A ladder, deep water
   or ground too steep to walk on clears the state; walking off a ledge clears
-  a pending slowdown. Stairs and curbs are not ledges: `PM_StepSlideMove`
-  steps down up to `STEPSIZE_DOWN` (9) from walkable ground, as MW2's does,
-  so walking down them never lands (`EV_STEP_DOWN_4/8` smooth the eye). All
-  three are durations or positions, never clocks, so a replay rebases none.
+  a pending slowdown. Stairs and curbs are not ledges: `PM_StepSlideMove` is
+  MW2's, pushing every ground move down up to `STEPSIZE_DOWN` (9) past its
+  step, so walking down them never lands (`EV_STEP_DOWN_4/8` smooth the eye).
+  In the air only a jump steps up, and only to `JUMP_VELOCITY`'s height above
+  `jumpOriginZ` (MW2's Jump_GetStepHeight): a fall never climbs a lip, and a
+  jump never climbs a ledge it cannot clear. Peace has no mantle. All three
+  are durations or positions, never clocks, so a replay rebases none.
   MW2's damaging-landing stun is not ported (Peace keeps Q3's fall damage).
 - **Air control is MW2's.** `PM_AirMove` uses `PM_AirScale`, MW2's air move
   speed: base speed over forward/right only, slowed by `pm_adsScale` while

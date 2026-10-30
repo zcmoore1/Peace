@@ -184,10 +184,6 @@ typedef enum {
 #define WA_SWAP_HELD       128  // edge latch across usercmd pmove substeps
 #define WA_RECOVERING      256  // thrown equipment returns original gun before queued selection
 
-// Shared fast destination holster (future sidearms may use the same rule).
-// These are authored Peace timings, not claims of measured MW2 frame data.
-#define BG_FAST_HOLSTER_TIME 150
-
 // Ladder tuning is shared by prediction, authority and presentation. These are
 // initial feel values, not measured MW2 constants. A grab always pays a positive,
 // weapon-independent holster; animation notes still own the busy lock.
@@ -331,6 +327,8 @@ int  BG_HolsterTime( const playerState_t *ps );	// the holster this player is do
 int  BG_WeaponFireLength( int weapon );		// 0 = no modelled fire animation
 int  BG_WeaponDropTime( int weapon );		// holster length, never 0
 int  BG_WeaponRaiseTime( int weapon );		// deploy length, never 0
+int  BG_WeaponQuickDropTime( int weapon );	// MW2's quickDropTime: going away for a grenade
+int  BG_WeaponQuickRaiseTime( int weapon );	// MW2's quickRaiseTime: back after a knife or a grenade
 int  BG_WeaponDrawTime( const playerState_t *ps );
 int  BG_WeaponFirstRaiseTime( int weapon );
 int  BG_WeaponSprintInTime( int weapon );	// lower-into-sprint length

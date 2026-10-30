@@ -68,19 +68,20 @@ Fake reload. What matters is when X is let go: by the moment the gun is fully
 up, and as close to it as you can. The X press must also be held across the
 server's last snapshot before that moment, which falls anywhere in the last
 50ms and which you cannot see, so the window is a success rate. A 64ms tap,
-SPAS, every snapshot phase (`FAKERELOAD_PHASES=1`):
+SPAS, every snapshot phase, after a knife, a frag and a Semtex cancel
+(`FAKERELOAD_PHASES=1`):
 
 | let go of X, before the gun is up | 0 ms  | 8 ms  | 16 ms | 24 ms | 32 ms | 40 ms | 48 ms | 72 ms |
 |-----------------------------------|-------|-------|-------|-------|-------|-------|-------|-------|
-| own host (0 ms ping)              | 84–100% | 68–80% | 52–64% | 36–48% | 28–32% | 16% | 0% | 0% |
+| own host (0 ms ping)              | 84–92% | 64–80% | 48–64% | 32–48% | 16–32% | 0–16% | 0% | 0% |
 | 50 ms ping                        | 100%  | 100%  | 100%  | 100%  | 100%  | 100%  | 84–100% | 36–52% |
 | 100 ms ping and up                | 100%  | 100%  | 100%  | 100%  | 100%  | 100%  | 100%  | 100%  |
 
 Let go after the gun is up (even 8ms) and it is a real reload, at any ping.
 So on your own host it is tight but nearly certain if you let go right as the
-gun comes up; with ping it is easy. The recovery is the gun's own draw (SPAS
-1.5s, M300 0.65s), so "up" is the end of that draw. The harness checks these
-edges (`Windows`).
+gun comes up; with ping it is easy. The recovery is the gun's MW2 quick raise
+(SPAS 0.75s, M300 0.25s), so "up" is the end of that raise. The harness checks
+these edges (`Windows`).
 
 Fake bullet: a shot this long after a 16ms X tap is fake, on both guns:
 
@@ -96,8 +97,8 @@ Wild scope (M300, aim held): a knife this long after the gun is back:
 | after         | 0 ms  | 50 ms | 100 ms | 200 ms |
 |---------------|-------|-------|--------|--------|
 | knife         | ≤40   | ≤64   | ≤144   | ≤240   |
-| frag          | ≤16   | ≤88   | ≤112   | ≤208   |
-| Semtex cancel | ≤40   | ≤64   | ≤136   | ≤216   |
+| frag          | ≤16   | ≤96   | ≤120   | ≤208   |
+| Semtex cancel | ≤48   | ≤72   | ≤136   | ≤224   |
 
 These are measured with a packet every frame (loopback and LAN) and 20
 snapshots a second. That is also what you get on your own host with the shipped
@@ -132,11 +133,10 @@ every check still holds.
 These are read from MW2's own executable (`iw4x.exe`; knife check 0x577670,
 offhand check 0x579030, offhand init/end 0x578E00/0x577A10, knife end 0x578D80).
 
-- **A grenade out of the gun's return** pays the gun's own holster in Peace
-  (CLAUDE.md, "Frag/flash keep the gun's holster"); MW2 throws straight out of
-  the quick raise after a throw, and uses the gun's quick drop out of the knife.
-- **Quick drop and quick raise.** MW2 sends the gun away for any grenade on its
-  `quickDropTime` (250 ms on every gun in the weapon dump) and brings it back
-  after a knife or a grenade on its `quickRaiseTime` (750 ms M4/SPAS, 250 ms
-  USP/Intervention). Peace uses its rapid drop for the knife, the gun's own
-  holster for frag and flash, and the gun's normal draw for every recovery.
+- **A grenade out of the gun's return after a throw** pays the gun's quick
+  drop in Peace; MW2 throws straight out of that quick raise with no drop at
+  all. Peace keeps a real holster time on every drop (CLAUDE.md, the NAC).
+- **The knife's own timing.** MW2's knife never drops the gun: it plays on the
+  gun's model (meleeTime 800ms, the hit 79ms in), then the quick raise. Peace's
+  knife is its own weapon: a 50ms drop, its raise, `BG_QUICK_ACTION_HOLD`, a
+  50ms drop, then the quick raise.

@@ -18,7 +18,8 @@ static void SemtexReady(int gun) {
 static void Hold(void) {
  move.cmd.buttons=BUTTON_LETHAL; Step(1);
  CHECK(ps.weaponstate==WEAPON_DROPPING);
- CHECK(ps.weaponTime==BG_HolsterTime(&ps) && ps.weaponTime==BG_FAST_HOLSTER_TIME);
+ /* the gun's quick drop, as every MW2 offhand */
+ CHECK(ps.weaponTime==BG_HolsterTime(&ps) && ps.weaponTime==BG_WeaponQuickDropTime(BG_ActiveSlotWeapon(&ps)));
  Run(ps.weaponTime+BG_WeaponRaiseTime(WP_SEMTEX)+1);
  CHECK(ps.weapon==WP_SEMTEX && ps.weaponstate==WEAPON_READY);
  CHECK(fired[WP_SEMTEX]==0 && ps.ammo[WP_SEMTEX]==2);
@@ -27,11 +28,11 @@ static void Cancel(int gun) {
  int rounds=ps.ammo[WP_SEMTEX];
  move.cmd.buttons|=BUTTON_WEAPON_SWAP; Step(1);
  CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_RAISING);
- CHECK(ps.weaponTime==BG_WeaponRaiseTime(gun));
+ CHECK(ps.weaponTime==BG_WeaponQuickRaiseTime(gun));	/* MW2's quick raise */
  /* Same recovery as a knife or a thrown grenade: the latch holds until the
   * gun is fully drawn, and blocks sprint the whole time. */
  CHECK(ps.ammo[WP_SEMTEX]==rounds && (ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==(WA_LETHAL|WA_FIRED));
- Run(BG_WeaponRaiseTime(gun)+1);
+ Run(BG_WeaponQuickRaiseTime(gun)+1);
  CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_READY);
  CHECK(ps.ammo[WP_SEMTEX]==rounds && !(ps.weaponAction&WA_TYPE_MASK));
  move.cmd.buttons=0; Step(1);
@@ -60,7 +61,7 @@ static void TestSemtex(void) {
   Run(ps.weaponTime);
   CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_RAISING);
   CHECK(ps.weaponAction&WA_RECOVERING);
-  Run(BG_WeaponRaiseTime(gun)-1);
+  Run(BG_WeaponQuickRaiseTime(gun)-1);
   CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_RAISING && ps.weaponTime==1);
   Step(1);
   CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_DROPPING);
@@ -84,9 +85,9 @@ static void TestSemtex(void) {
   // Same-usercmd lethal+Y and stale slot selection: acknowledge same gun.
   SemtexReady(gun); move.cmd.weapon=ps.stats[STAT_SLOT_SECONDARY];
   move.cmd.buttons=BUTTON_LETHAL|BUTTON_WEAPON_SWAP; Step(1);
-  CHECK(ps.weapon==gun && ps.weaponTime==BG_WeaponRaiseTime(gun));
+  CHECK(ps.weapon==gun && ps.weaponTime==BG_WeaponQuickRaiseTime(gun));
   CHECK(ps.weaponAction&WA_RETURNING);
-  Run(10); CHECK(ps.weaponTime==BG_WeaponRaiseTime(gun)-10);
+  Run(10); CHECK(ps.weaponTime==BG_WeaponQuickRaiseTime(gun)-10);
   move.cmd.weapon=gun; move.cmd.buttons=0; Step(1);
   CHECK(!(ps.weaponAction&WA_RETURNING)); Returned(); CHECK(!fired[WP_SEMTEX]);
   // Cross the actual shipped reload notes, at several command intervals.

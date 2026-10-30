@@ -203,10 +203,10 @@ static void TestMeleeHolster(void) {
   CHECK(ps.weaponTime == BG_RAPID_DROP_TIME && BG_HolsterTime(&ps) == BG_RAPID_DROP_TIME);
   for (t = 0; t < BG_RAPID_DROP_TIME + BG_WeaponRaiseTime(WP_KNIFE) + 5 && !fired[WP_KNIFE]; t++) Step(1);
   CHECK(fired[WP_KNIFE] == 1);
-  /* equipment: still the gun's own holster */
+  /* equipment: the gun's quick drop (MW2's OffHandInit), not its holster */
   Ready(gun, other);
   move.cmd.buttons = BUTTON_LETHAL; Step(1); move.cmd.buttons = 0;
-  CHECK(ps.weaponTime == BG_WeaponDropTime(gun) && BG_HolsterTime(&ps) == BG_WeaponDropTime(gun));
+  CHECK(ps.weaponTime == BG_WeaponQuickDropTime(gun) && BG_HolsterTime(&ps) == BG_WeaponQuickDropTime(gun));
   /* an ordinary swap: the gun's own holster */
   Ready(gun, other);
   move.cmd.weapon = other; Step(1);
@@ -300,7 +300,7 @@ static void TestRecovery(void) {
    int hold, down, draw, total = RecoverPhases(gun, buttons[a], specials[a], &hold, &down, &draw);
    CHECK(hold >= BG_QUICK_ACTION_HOLD - 1 && hold <= BG_QUICK_ACTION_HOLD + 1);
    CHECK(down == BG_RAPID_DROP_TIME);
-   CHECK(draw == BG_WeaponRaiseTime(gun));
+   CHECK(draw == BG_WeaponQuickRaiseTime(gun));	/* MW2's quick raise */
    if (first < 0) first = total;
    CHECK(total == first);                         /* all quick actions recover alike */
   }
@@ -591,6 +591,9 @@ static void TestEquipmentCutsKnife(void) {
   CHECK(fired[WP_KNIFE]==(stage==2));
   move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
   CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_LETHAL);
+  /* The knife in hand goes away on the gun's quick drop (MW2's OffHandInit). */
+  if(stage==1) CHECK(ps.weapon==WP_KNIFE && ps.weaponstate==WEAPON_DROPPING &&
+   ps.weaponTime==BG_WeaponQuickDropTime(WP_MACHINEGUN));
   for(t=0;t<12000 && (ps.weaponAction&WA_TYPE_MASK);t++) Step(1);
   CHECK(fired[WP_KNIFE]==(stage==2) && fired[lethal]==1);
  }

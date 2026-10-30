@@ -161,21 +161,27 @@ source for MW2 behaviour; the owner rejects it.
   the gun before its knife. Whatever gun is out, it goes down for the
   knife in the one universal `BG_RAPID_DROP_TIME` (50ms, the minimum swap), not
   its own holster. `BG_HolsterTime` is the single rule — gun's own
-  drop, rapid, or the ladder's — used by pmove to stamp and by cgame to fit
-  the drop clip, so the two cannot disagree. Frag/flash keep the gun's holster;
-  Semtex uses the shared fast-destination time. Do not add a second timing rule
-  in the renderer.
+  drop, quick drop, rapid, or the ladder's — used by pmove to stamp and by
+  cgame to fit the drop clip, so the two cannot disagree. Every grenade (frag,
+  flash, Semtex) sends the gun, or the knife it cuts, away on the gun's MW2
+  `quickDropTime` (`BG_WeaponQuickDropTime`, 250ms), as MW2's OffHandInit
+  (owner's rule: MW2's numbers). Do not add a second timing rule in the
+  renderer.
 - **Recovering from melee and from equipment is ONE thing, in time and
   function.** Knife, frag, flash and a released Semtex use `BG_QUICK_ACTION_HOLD` (500ms),
-  go away in `BG_RAPID_DROP_TIME`, then the gun comes back with its own normal
-  draw. As in MW2 that draw is the normal one except **you cannot sprint
-  through it**: the `weaponAction` latch lasts until the gun is fully drawn,
-  and the latch is what blocks sprint. Once fired, selection asks for the gun.
+  go away in `BG_RAPID_DROP_TIME`, then the gun comes back on its MW2 quick
+  raise (`BG_WeaponQuickRaiseTime`: 750ms for rifles, shotguns and launchers,
+  250ms for the M300, as the Intervention), a Semtex cancel's return included
+  (owner's rule: MW2's MeleeEnd and OffHandEnd). `BG_WeaponDrawTime` is the
+  single draw rule, used by pmove to stamp and by cgame to fit the raise clip.
+  **You cannot sprint through it**: the `weaponAction` latch lasts until the
+  gun is fully drawn, and the latch is what blocks sprint. Once fired,
+  selection asks for the gun.
   YY cancels an ordinary recovery draw like any draw; a grenade pressed during
   the draw starts the next one, as MW2 lets one come out of the gun's return,
   but a knife pressed while a gun is being drawn back, the draw's last command
   included, is lost (owner's rule: MW2's knife check skips every raise). A swap
-  asked for during it is an ordinary holster, which a knife still shortens. The owner's Semtex exception queues
+  asked for during it is an ordinary holster, in which a knife is lost too. The owner's Semtex exception queues
   slot changes until the throw and original-gun recovery finish. The requested
   slot/HUD updates immediately; the physical holster starts at that boundary.
 - **An ordinary raise is cancellable by YY.** That is the owner's rule, not a

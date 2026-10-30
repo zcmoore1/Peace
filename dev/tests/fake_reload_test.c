@@ -117,18 +117,26 @@ static int Buttons(int now) {
 	return b;
 }
 
+/* A knife counts from the probe's own press: the quick action under test may
+ * itself be a knife, and with a short quick raise it can still be out when
+ * recording starts. */
+static int ProbeKnifeLive(void) { return S.knifeAt == NONE || base == NONE || curNow - base >= S.knifeAt; }
+static int SvKnifeOut(void) { return svPs.weapon == WP_KNIFE || (svPs.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == WA_MELEE; }
 static void ServerThink(usercmd_t *ucmd) {
-	pmove_t pm; int msec;
+	pmove_t pm; int msec, wasKnife;
 	if (ucmd->serverTime > levelTime + 200) ucmd->serverTime = levelTime + 200;
 	if (ucmd->serverTime < levelTime - 1000) ucmd->serverTime = levelTime - 1000;
 	msec = ucmd->serverTime - svPs.commandTime;
 	if (msec < 1) return;
 	if (msec > 200) svPs.commandTime = ucmd->serverTime - 200;
 	memset(&pm, 0, sizeof(pm)); pm.ps = &svPs; pm.cmd = *ucmd;
+	wasKnife = SvKnifeOut();
 	FakeReloadPmove(&pm);
 	if (curNow >= recordFrom) {	/* every command, so a one-command shot is seen */
 		if (svPs.weaponstate == WEAPON_RELOADING && !O.svReload) { O.svReload = 1; O.svReloadCmd = svPs.commandTime - svPs.weaponAnimTime; }
-		if (svPs.weapon == WP_KNIFE || (svPs.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == WA_MELEE) O.svKnife = 1;
+		/* A knife the server starts from a knife press in the window: the
+		 * quick action under test may itself be a knife still out then. */
+		if (SvKnifeOut() && (!wasKnife || S.knifeAt == NONE) && (ucmd->buttons & BUTTON_MELEE || S.knifeAt == NONE)) O.svKnife = 1;
 		if (svPs.weapon == GUN && svPs.ammo[GUN] < O.svMinAmmo) O.svMinAmmo = svPs.ammo[GUN];
 		if (svPs.weapon == GUN && svPs.weaponstate == WEAPON_FIRING && !O.svShot) { O.svShot = 1; O.svShotCmd = svPs.commandTime - svPs.weaponAnimTime; }
 	}
@@ -187,7 +195,7 @@ static void Record(const playerState_t *pic, int clip) {
 	if (GunAtRest(pic)) sawGunActionInPicture = 0;
 	if (pic->weapon == GUN && (pic->weaponstate == WEAPON_RELOADING ||
 		pic->weaponstate == WEAPON_FIRING || pic->weaponstate == WEAPON_BOLTING)) sawGunActionInPicture = 1;
-	if (pic->weapon == WP_KNIFE) {
+	if (pic->weapon == WP_KNIFE && ProbeKnifeLive()) {
 		O.knifePicMs += CL_FRAME;
 		if (clPred.weapon == GUN && (clPred.pm_flags & PMF_ADS)) O.adsUnderKnifeMs += CL_FRAME;
 		if (detached && !sawGunActionInPicture) O.knifePicWithoutGunAction = 1;

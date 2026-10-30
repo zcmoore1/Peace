@@ -7,7 +7,7 @@ throw. A quick tap queues a throw through preparation. Holding does not cook it.
 ## Y before and after release
 
 Before `EV_FIRE_WEAPON` commits the throw, Y / `weapnext` cancels to the **same
-gun**, preserves the grenade, and uses that gun's normal melee-return raise.
+gun**, preserves the grenade, and uses that gun's quick raise, as any return.
 Release and press lethal again to re-arm; holding through cancel never repeats.
 
 After emission, Y updates the selected slot/HUD immediately but queues the
@@ -23,14 +23,15 @@ recovery without overwriting the requested selection.
 
 ## Timings / art
 
-The destination holster uses shared positive `BG_FAST_HOLSTER_TIME` (150ms),
-followed by 350ms pullback. After release it shares `BG_QUICK_ACTION_HOLD` (500ms)
-and `BG_RAPID_DROP_TIME` (50ms) with melee/frag/flash, then the original gun's
-normal raise (SPAS: 1500ms). `BG_HolsterTime` supplies the same holster duration
-to gameplay and presentation. These are authored Peace timings,
-not measured MW2 values. The roster has **no sidearm category yet**; future
-sidearms can share the fast-destination helper. Normal gun-to-gun swap timings,
-including SPAS's 1500ms draw and holster, retain their normal cancellation rules.
+The gun goes away on its MW2 quick drop (`BG_WeaponQuickDropTime`, 250ms), as for
+every grenade, followed by 350ms pullback. After release it shares
+`BG_QUICK_ACTION_HOLD` (500ms) and `BG_RAPID_DROP_TIME` (50ms) with
+melee/frag/flash, then the original gun's MW2 quick raise
+(`BG_WeaponQuickRaiseTime`; SPAS 750ms, M300 250ms) - a pre-release cancel's
+return too. `BG_HolsterTime` and `BG_WeaponDrawTime` supply the same durations
+to gameplay and presentation. The pullback, hold and fuse are authored Peace
+timings, not measured MW2 values. Normal gun-to-gun swap timings, including
+SPAS's 1500ms draw and holster, retain their normal cancellation rules.
 
 Original low-poly prop and gloved hand: `python3 dev/tools/build_semtex_assets.py`.
 The first-person pullback/hold/throw poses are picture-only procedural motion,

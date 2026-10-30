@@ -5,6 +5,8 @@
   "ads_spread_scale": 0.0,
   "raise_ms": 650,
   "drop_ms": 500,
+  "quick_drop_ms": 250,
+  "quick_raise_ms": 250,
   "fire_ms": 950,
   "bolt_open_ms": 160,
   "bolt_close_ms": 780,

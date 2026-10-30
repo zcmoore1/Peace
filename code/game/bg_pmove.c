@@ -1977,6 +1977,38 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 	M40_RAISE_MS,
 };
 
+// MW2's quickDropTime and quickRaiseTime (its weapon files): the gun going
+// away for a grenade (PM_Weapon_OffHandInit), and coming back after a knife or
+// a grenade (MeleeEnd, OffHandEnd). Every MW2 gun quick-drops in 250; rifles,
+// shotguns and launchers quick-raise in 750, pistols and the Intervention in
+// 250. Equipment and the knife never quick-raise themselves.
+static const int bg_weaponQuickDropTime[MAX_WEAPONS] = {
+	250, 250, 250, 250, 250, 250, 250, 250, 250, 250, 250,
+#ifdef MISSIONPACK
+	250, 250, 250,
+#endif
+	250, 250, 250, 250,
+	M40_QUICK_DROP_MS,
+};
+static const int bg_weaponQuickRaiseTime[MAX_WEAPONS] = {
+	250,	// WP_NONE
+	250,	// WP_GAUNTLET
+	750,	// WP_MACHINEGUN (MW2's M4)
+	750,	// WP_SHOTGUN (MW2's SPAS-12)
+	750,	// WP_GRENADE_LAUNCHER
+	750,	// WP_ROCKET_LAUNCHER (MW2's RPG and AT4)
+	750,	// WP_LIGHTNING
+	750,	// WP_RAILGUN
+	750,	// WP_PLASMAGUN
+	750,	// WP_BFG
+	250,	// WP_GRAPPLING_HOOK
+#ifdef MISSIONPACK
+	750, 750, 750,
+#endif
+	250, 250, 250, 250,
+	M40_QUICK_RAISE_MS,	// MW2's Intervention
+};
+
 int BG_WeaponMagSize( int weapon ) {
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
 	return bg_weaponMagSize[weapon];
@@ -2053,6 +2085,8 @@ ONE rule, read by pmove when it stamps the holster and by cgame when it fits the
 drop clip, so the picture can never disagree with the timer.
 
   ladder grab - the universal BG_LADDER_DROP_TIME
+  equipment   - the gun (or the knife it cuts) going away for a grenade not
+                yet thrown: the gun's quickDropTime, as MW2's OffHandInit
   recovery    - any quick action going away: the universal BG_RAPID_DROP_TIME
   melee       - the gun going down for a knife not yet swung: the same rapid
                 time. Melee is its own kind of swap and never waits on a
@@ -2064,18 +2098,18 @@ on the mag-in frame is cancelled by the same note-and-lock collision as any swap
 ==============
 */
 int BG_HolsterTime( const playerState_t *ps ) {
+	int action = ps->weaponAction & WA_TYPE_MASK;
 	if ( ps->stats[STAT_LADDER] & LADDER_HOLSTER ) {
 		return BG_LADDER_DROP_TIME;
+	}
+	if ( ( action == WA_LETHAL || action == WA_TACTICAL ) && !( ps->weaponAction & WA_FIRED ) ) {
+		return BG_WeaponQuickDropTime( BG_ActiveSlotWeapon( ps ) );
 	}
 	if ( BG_IsActionWeapon(ps->weapon) ) {
 		return BG_RAPID_DROP_TIME;
 	}
-	if ( ( ps->weaponAction & WA_TYPE_MASK ) == WA_MELEE && !( ps->weaponAction & WA_FIRED ) ) {
+	if ( action == WA_MELEE && !( ps->weaponAction & WA_FIRED ) ) {
 		return BG_RAPID_DROP_TIME;
-	}
-	if ( (ps->weaponAction & WA_TYPE_MASK) == WA_LETHAL &&
-		!(ps->weaponAction & WA_FIRED) && BG_LethalWeapon(ps) == WP_SEMTEX ) {
-		return BG_FAST_HOLSTER_TIME;
 	}
 	return BG_WeaponDropTime( ps->weapon );
 }
@@ -2084,6 +2118,20 @@ int BG_WeaponRaiseTime( int weapon ) {
 	int t;
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return WEAPON_MIN_SWAP_TIME;
 	t = bg_weaponRaiseTime[weapon];
+	return ( t < WEAPON_MIN_SWAP_TIME ) ? WEAPON_MIN_SWAP_TIME : t;
+}
+
+int BG_WeaponQuickDropTime( int weapon ) {
+	int t;
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return WEAPON_MIN_SWAP_TIME;
+	t = bg_weaponQuickDropTime[weapon];
+	return ( t < WEAPON_MIN_SWAP_TIME ) ? WEAPON_MIN_SWAP_TIME : t;
+}
+
+int BG_WeaponQuickRaiseTime( int weapon ) {
+	int t;
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return WEAPON_MIN_SWAP_TIME;
+	t = bg_weaponQuickRaiseTime[weapon];
 	return ( t < WEAPON_MIN_SWAP_TIME ) ? WEAPON_MIN_SWAP_TIME : t;
 }
 
@@ -2108,8 +2156,25 @@ int BG_WeaponFirstRaiseTime(int weapon) {
 	return BG_WeaponRaiseTime(weapon) + BG_WeaponFireLength(weapon);
 }
 
+/*
+==============
+BG_WeaponDrawTime
+
+How long the gun coming up takes: ONE rule, read by pmove when it stamps the
+draw and by cgame when it fits the raise clip. A first deployment has its
+authored cycle; the gun coming back after a knife or a grenade - a Semtex
+cancel's return included, which latches as fired - is MW2's quick raise
+(MeleeEnd, OffHandEnd);
+anything else is the gun's own raise.
+==============
+*/
 int BG_WeaponDrawTime(const playerState_t *ps) {
-	return ps->weaponDraw ? BG_WeaponFirstRaiseTime(ps->weapon) : BG_WeaponRaiseTime(ps->weapon);
+	if ( ps->weaponDraw ) return BG_WeaponFirstRaiseTime( ps->weapon );
+	if ( ( ps->weaponAction & WA_TYPE_MASK ) && ( ps->weaponAction & WA_FIRED ) &&
+	     !BG_IsActionWeapon( ps->weapon ) ) {
+		return BG_WeaponQuickRaiseTime( ps->weapon );
+	}
+	return BG_WeaponRaiseTime( ps->weapon );
 }
 
 void BG_GetSlot(const playerState_t *ps, int slot, bg_weaponInstance_t *gun) {
@@ -2872,6 +2937,7 @@ static void PM_UpdateWeaponAction( void ) {
 	int recovering = pm->ps->weaponAction & WA_RECOVERING;
 	qboolean swap = (pm->cmd.buttons & BUTTON_WEAPON_SWAP) != 0;
 	qboolean swapPressed = swap && !(pm->ps->weaponAction & WA_SWAP_HELD);
+	qboolean cancelDraw = qfalse;
 	if (BG_RequestedSlot(pm->ps, pm->cmd.weapon) == pm->ps->stats[STAT_ACTIVE_SLOT]) returning = 0;
 	// A requested slot change waits for the ORIGINAL gun to finish recovery.
 	// Clear on the ready boundary so its normal holster can start this think.
@@ -2930,11 +2996,15 @@ static void PM_UpdateWeaponAction( void ) {
 			action = WA_LETHAL | WA_FIRED;
 			returning = WA_RETURNING;
 			pm->ps->weapon = BG_ActiveSlotWeapon(pm->ps);
-			BG_BeginWeaponDraw(pm->ps);
+			cancelDraw = qtrue;
 		}
 	}
 	pm->ps->weaponAction = action | (held << WA_HELD_SHIFT) | returning | recovering |
 		(swap ? WA_SWAP_HELD : 0);
+	// Drawn once the latch says it is a return, so it is the quick raise.
+	if ( cancelDraw ) {
+		BG_BeginWeaponDraw( pm->ps );
+	}
 	if ( action & WA_TYPE_MASK ) {
 		// A sprint the action ends waits for its button (PM_CheckSprint).
 		if ( ( pm->ps->pm_flags & PMF_SPRINTING ) && ( pm->cmd.buttons & BUTTON_SPRINT ) )

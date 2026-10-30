@@ -453,6 +453,29 @@ static void TestDropRestamp(weapAnimDef_t *def) {
  }
  CHECK(last>=drop*.9f);
 }
+/* A grenade pressed during a running holster keeps that drop: the picture runs
+ * on at the gun's own rate, across BG_HolsterTime handing over to the quick
+ * drop's fit, and arrives with the lock. */
+static void TestKeptHolster(weapAnimDef_t *def) {
+ animLayer_t *move=&cg_weapLayers[LAYER_MOVE];
+ float drop=CG_WeapAnim_ClipLength(def,WANIM_DROP),last=0;
+ float rate=8*drop/BG_WeaponDropTime(WP_SHOTGUN)*1.02f+.01f;
+ int t;
+ FlowBegin(); FlowSlot(SLOT_SECONDARY);
+ for(t=0;t<10000 && !(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_READY && move->weight==0);t+=8) FlowStep();
+ FlowSlot(SLOT_PRIMARY); FlowStep();
+ for(t=0;t<200;t+=8) FlowStep();
+ flow.cmd.buttons=BUTTON_LETHAL; FlowStep(); flow.cmd.buttons=0;
+ CHECK((flowPs.weaponAction&WA_TYPE_MASK)==WA_LETHAL && flowPs.weapon==WP_SHOTGUN &&
+  flowPs.weaponstate==WEAPON_DROPPING && flowPs.weaponTime>BG_WeaponQuickDropTime(WP_SHOTGUN));
+ while(flowPs.weaponstate==WEAPON_DROPPING && flowPs.weapon==WP_SHOTGUN) {
+  last=move->time; FlowStep();
+  if(flowPs.weaponstate==WEAPON_DROPPING && flowPs.weapon==WP_SHOTGUN) {
+   CHECK(move->clip==WANIM_DROP && move->time>=last-.01f && move->time-last<=rate);
+  }
+ }
+ CHECK(last>=drop*.95f);
+}
 static void TestReloadPerk(weapAnimDef_t *def,int weapon) {
  playerState_t ps;int seq,perk,duration;
  for(seq=0;seq<RSEQ_COUNT;seq++)for(perk=0;perk<2;perk++) {
@@ -490,7 +513,7 @@ int main(void) {
  TestOwnership(def); TestExclusions(def); TestRelease(def); TestContext(def);
  TestFirstDraw(def,WP_SHOTGUN);
  TestReloadPerk(def,WP_SHOTGUN);
- TestFlow(def); TestDropRestamp(def);
+ TestFlow(def); TestDropRestamp(def); TestKeptHolster(def);
  CG_WeapAnim_RegisterClips(WP_M40A3,2,"assets/baseq3/models/weapons2/m40a3/view.cfg");
  def=&bg_weapAnimDefs[WP_M40A3];
  TestSprint(def,WP_M40A3); TestFirstDraw(def,WP_M40A3);

@@ -2187,7 +2187,14 @@ int BG_HolsterTime( const playerState_t *ps ) {
 		return BG_LADDER_DROP_TIME;
 	}
 	if ( ( action == WA_LETHAL || action == WA_TACTICAL ) && !( ps->weaponAction & WA_FIRED ) ) {
-		return BG_WeaponQuickDropTime( BG_ActiveSlotWeapon( ps ) );
+		int quick = BG_WeaponQuickDropTime( BG_ActiveSlotWeapon( ps ) );
+		// MW2's OffHandInit keeps a drop already running: while more of the
+		// gun's own holster is left than a quick drop, that is the drop.
+		if ( ps->weaponstate == WEAPON_DROPPING && !BG_IsActionWeapon( ps->weapon ) &&
+		     ps->weaponTime > quick ) {
+			return BG_WeaponDropTime( ps->weapon );
+		}
+		return quick;
 	}
 	if ( BG_IsActionWeapon(ps->weapon) ) {
 		return BG_RAPID_DROP_TIME;
@@ -3018,11 +3025,12 @@ static void PM_UpdateWeaponAction( void ) {
 	// back from is not refused: YY readies the gun in this same think (below),
 	// as MW2's weapon change runs before its knife. For the same reason a swap
 	// step 1 begins on this very command is a drop already.
+	qboolean yyReturn = pm->ps->weaponstate == WEAPON_DROPPING &&
+		!BG_IsActionWeapon( pm->ps->weapon ) &&
+		pm->ps->weapon == BG_ActiveSlotWeapon( pm->ps ) &&
+		BG_RequestedSlot( pm->ps, pm->cmd.weapon ) == pm->ps->stats[STAT_ACTIVE_SLOT];
 	qboolean swapping = pm->ps->weaponstate == WEAPON_RAISING ||
-		( pm->ps->weaponstate == WEAPON_DROPPING &&
-		  !( !BG_IsActionWeapon( pm->ps->weapon ) &&
-		     pm->ps->weapon == BG_ActiveSlotWeapon( pm->ps ) &&
-		     BG_RequestedSlot( pm->ps, pm->cmd.weapon ) == pm->ps->stats[STAT_ACTIVE_SLOT] ) ) ||
+		( pm->ps->weaponstate == WEAPON_DROPPING && !yyReturn ) ||
 		( pm->ps->weaponstate != WEAPON_DROPPING && PM_WeaponChangeOpen() &&
 		  !( pm->ps->weaponAction & ( WA_RETURNING | WA_RECOVERING ) ) &&
 		  BG_RequestedSlot( pm->ps, pm->cmd.weapon ) != pm->ps->stats[STAT_ACTIVE_SLOT] );
@@ -3049,10 +3057,11 @@ static void PM_UpdateWeaponAction( void ) {
 		// A quick action is not over when it fires. It is over when the gun is
 		// back in hand and fully drawn: that whole recovery keeps the latch, and
 		// the latch is what blocks sprint (PM_CheckSprint) - MW2's recovery draw
-		// is the normal draw, except you cannot sprint through it.
+		// is the normal draw, except you cannot sprint through it. A holster out
+		// of that draw that YY returns is the gun ready again this same think.
 		if ( (action & WA_FIRED) && !BG_IsActionWeapon( pm->ps->weapon ) &&
 			((pm->ps->weaponstate != WEAPON_RAISING && pm->ps->weaponstate != WEAPON_DROPPING) ||
-			 (pm->ps->weaponstate == WEAPON_RAISING && pm->ps->weaponTime <= 0)) ) {
+			 (pm->ps->weaponstate == WEAPON_RAISING && pm->ps->weaponTime <= 0) || yyReturn) ) {
 			action = 0;
 		}
 		if (pm->ps->weapon == WP_SEMTEX && (action & WA_FIRED) &&
@@ -3223,7 +3232,7 @@ static void PM_BeginWeaponChange( int weapon ) {
 
 	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
 		// Already going down. If where we are going now has a quicker holster -
-		// melee asked for part way through a heavy gun's holster - finish as
+		// a ladder grabbed part way through a heavy gun's holster - finish as
 		// that one. Shortened only, never lengthened.
 		if ( pm->ps->weaponTime > BG_HolsterTime( pm->ps ) ) {
 			pm->ps->weaponTime = BG_HolsterTime( pm->ps );
@@ -3257,7 +3266,15 @@ static void PM_FinishWeaponChange( void ) {
 
 	// Save the old instance before loading the new slot's working registers.
 	// Quick actions keep the same slot; their ammo occupies separate entries.
-	if (!BG_IsActionWeapon(weapon)) BG_SelectSlot(pm->ps, PM_DesiredSlot());
+	if (!BG_IsActionWeapon(weapon)) {
+		int slot = PM_DesiredSlot();
+		// Only the gun a knife or grenade left comes back on its quick raise
+		// (MW2's MeleeEnd, OffHandEnd). Drawing the other slot is a swap: the
+		// quick action is over, and that gun draws on its own raise.
+		if (slot != pm->ps->stats[STAT_ACTIVE_SLOT] && (pm->ps->weaponAction & WA_FIRED))
+			pm->ps->weaponAction &= ~(WA_TYPE_MASK | WA_FIRED);
+		BG_SelectSlot(pm->ps, slot);
+	}
 	pm->ps->weapon      = weapon;
 	BG_BeginWeaponDraw(pm->ps);
 }

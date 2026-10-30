@@ -245,19 +245,25 @@ static void CG_WeapAnim_BeginHolster(const weapAnimDef_t *def, animLayer_t *move
 }
 
 // Pmove restamped the running drop (a grenade cutting the knife takes the
-// gun's whole quick drop): carry on from the pose on screen, so the rest of
-// the clip spans what is left of the new lock. The fit stays BG_HolsterTime.
-static void CG_WeapAnim_ReanchorDrop(const weapAnimDef_t *def, const playerState_t *ps,
-                                     animLayer_t *move) {
-	float len = CG_WeapAnim_ClipLength(def, move->clip);
+// gun's whole quick drop), or BG_HolsterTime handed it to another rule (a
+// grenade keeping a heavy holster, once less of it is left than a quick drop).
+// Carry on from where the old fit has the picture, so the rest of the clip
+// spans what is left of the lock. The fit stays BG_HolsterTime.
+static float CG_WeapAnim_DropFit(const animLayer_t *move, float f) {
+	if (f < 0.0f) f = 0.0f;
+	if (f > 1.0f) f = 1.0f;
+	return move->fit == MOVE_FIT_REVERSE ? move->startFraction * (1.0f - f) :
+		move->startFraction + (1.0f - move->startFraction) * f;
+}
+static void CG_WeapAnim_ReanchorDrop(const playerState_t *ps, animLayer_t *move) {
 	int duration = BG_HolsterTime(ps);
-	float f, p;
-	if (len <= 0.0f || duration <= 0) return;
+	int lock = ps->weaponTime < cg_dropLock ? ps->weaponTime : cg_dropLock;
+	float p, f;
+	if (duration <= 0 || cg_dropDuration <= 0) return;
+	p = CG_WeapAnim_DropFit(move, 1.0f - (float)lock / cg_dropDuration);
 	f = 1.0f - (float)ps->weaponTime / duration;
 	if (f < 0.0f) f = 0.0f;
 	if (f > 0.99f) f = 0.99f;
-	p = move->time / len;
-	if (p > 1.0f) p = 1.0f;
 	move->startFraction = move->fit == MOVE_FIT_REVERSE ? p / (1.0f - f) : (p - f) / (1.0f - f);
 	if (move->startFraction < 0.0f) move->startFraction = 0.0f;
 	if (move->startFraction > 1.0f) move->startFraction = 1.0f;
@@ -442,7 +448,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 			     ( move->fit != MOVE_FIT_FORWARD || move->clip != WANIM_DROP ) ) {
 				CG_WeapAnim_BeginHolster( def, move );
 			} else if ( ps->weaponTime > cg_dropLock || BG_HolsterTime( ps ) != cg_dropDuration ) {
-				CG_WeapAnim_ReanchorDrop( def, ps, move );
+				CG_WeapAnim_ReanchorDrop( ps, move );
 			}
 			cg_dropLock = ps->weaponTime;
 			cg_dropDuration = BG_HolsterTime( ps );
@@ -558,14 +564,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 		int duration = ps->weaponstate == WEAPON_RAISING ?
 		               BG_WeaponDrawTime( ps ) :
 		               BG_HolsterTime( ps );	// the same rule pmove stamped with
-		float fraction = 1.0f - (float)ps->weaponTime / duration;
-		if ( fraction < 0 ) fraction = 0;
-		if ( fraction > 1 ) fraction = 1;
-		if ( move->fit == MOVE_FIT_REVERSE ) {
-			fraction = move->startFraction * ( 1.0f - fraction );
-		} else {
-			fraction = move->startFraction + ( 1.0f - move->startFraction ) * fraction;
-		}
+		float fraction = CG_WeapAnim_DropFit( move, 1.0f - (float)ps->weaponTime / duration );
 		move->time = fraction * CG_WeapAnim_ClipLength( def, move->clip );
 	} else if ( move->fit == MOVE_FIT_RETURN ) {
 		float s, eased;

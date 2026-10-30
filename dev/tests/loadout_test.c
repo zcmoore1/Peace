@@ -619,6 +619,60 @@ static void TestSwapBeatsKnife(void) {
   CHECK(ps.weapon==guns[!i] && !fired[WP_KNIFE]);
  }
 }
+/* Only the gun a knife or grenade left comes back on its quick raise (MW2's
+ * MeleeEnd, OffHandEnd). Y during the action, or during its recovery draw,
+ * draws the other gun on that gun's own raise and ends the quick action. */
+static void TestOtherGunRaise(void) {
+ const int guns[2]={WP_MACHINEGUN,WP_SHOTGUN};
+ const int buttons[2]={BUTTON_MELEE,BUTTON_LETHAL};
+ int i,b,when,t;
+ for(i=0;i<2;i++) for(b=0;b<2;b++) for(when=0;when<2;when++) {
+  int other=guns[!i],expect;
+  Ready(guns[i],other);
+  move.cmd.buttons=buttons[b]; Step(1); move.cmd.buttons=0;
+  if(when) for(t=0;t<9000 && !(ps.weapon==guns[i] && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+  else Run(100);
+  CHECK(ps.weaponAction&WA_TYPE_MASK);
+  Toggle();
+  for(t=0;t<12000 && !(ps.weapon==other && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+  expect=ps.weaponDraw ? BG_WeaponFirstRaiseTime(other) : BG_WeaponRaiseTime(other);
+  CHECK(ps.weapon==other && ps.weaponstate==WEAPON_RAISING && !(ps.weaponAction&WA_TYPE_MASK));
+  CHECK(ps.weaponTime==expect && expect!=BG_WeaponQuickRaiseTime(other));
+ }
+}
+/* A grenade pressed during a running holster keeps it, as MW2's OffHandInit
+ * keeps DROPPING's time: the heavy SPAS still takes the rest of its own drop,
+ * never cut to the quick drop, then the grenade comes out. */
+static void TestGrenadeKeepsHolster(void) {
+ int t,left,lethal;
+ Ready(WP_SHOTGUN,WP_MACHINEGUN); lethal=BG_LethalWeapon(&ps);
+ Toggle(); Step(1);
+ CHECK(ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_WeaponDropTime(WP_SHOTGUN));
+ Run(16); left=ps.weaponTime;
+ move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+ CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_LETHAL && ps.weapon==WP_SHOTGUN &&
+  ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==left-1);
+ CHECK(BG_HolsterTime(&ps)==BG_WeaponDropTime(WP_SHOTGUN));
+ for(t=0;t<5000 && ps.weaponstate==WEAPON_DROPPING;t++) Step(1);
+ CHECK(t>=left-3 && t<=left && ps.weapon==lethal);
+ for(t=0;t<12000 && !(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+ CHECK(fired[lethal]==1 && ps.weapon==WP_MACHINEGUN && !(ps.weaponAction&WA_TYPE_MASK));
+}
+/* YY out of a holster started from the recovery draw readies the gun that
+ * same think, so a knife on the YY command is a knife, as on any YY. */
+static void TestYYKnifeFromRecovery(void) {
+ int t;
+ Ready(WP_SHOTGUN,WP_MACHINEGUN);
+ move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+ for(t=0;t<9000 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+ Run(200);
+ Toggle(); Step(1);
+ CHECK(ps.weaponstate==WEAPON_DROPPING && (ps.weaponAction&WA_FIRED));
+ Toggle(); move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
+ CHECK((ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==WA_MELEE);
+ for(t=0;t<4000 && !fired[WP_KNIFE];t++) Step(1);
+ CHECK(fired[WP_KNIFE]==1);
+}
 /* A knife pressed during the knife is lost: MW2's knife check refuses its
  * own melee states, so one press is one knife. */
 static void TestKnifeInKnife(void) {
@@ -1005,7 +1059,7 @@ static void TestHeldThroughRespawn(void) {
 }
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
- TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
+ TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestYYKnifeFromRecovery(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
  TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;

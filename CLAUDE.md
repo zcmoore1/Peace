@@ -166,11 +166,15 @@ source for MW2 behaviour; the owner rejects it.
   cgame to fit the drop clip, so the two cannot disagree. Every grenade (frag,
   flash, Semtex) sends the gun, or the knife it cuts, away on the gun's MW2
   `quickDropTime` (`BG_WeaponQuickDropTime`, 250ms), as MW2's OffHandInit
-  (owner's rule: MW2's numbers). Out of the knife that is the whole quick
+  (owner's rule: MW2's numbers). A grenade pressed during a running holster
+  keeps it, as OffHandInit keeps a drop already going: while more of the
+  gun's own drop is left than a quick drop, `BG_HolsterTime` answers that
+  drop, so nothing shortens it. Out of the knife it is the whole quick
   drop from the press: the knife's hold after its hit ends there
   (`PM_WeaponChangeOpen`), and a rapid drop already running for or after it
-  is restamped, never kept. cgame re-anchors any restamped drop at the pose on
-  screen (`CG_WeapAnim_ReanchorDrop`); the fit is still `BG_HolsterTime`. Do
+  is restamped, never kept. cgame re-anchors a drop that is restamped or whose
+  `BG_HolsterTime` changes where the old fit has it (`CG_WeapAnim_ReanchorDrop`),
+  so the picture never jumps; the fit is still `BG_HolsterTime`. Do
   not add a second timing rule in the renderer.
 - **Recovering from melee and from equipment is ONE thing, in time and
   function.** Knife, frag, flash and a released Semtex use `BG_QUICK_ACTION_HOLD` (500ms),
@@ -186,7 +190,11 @@ source for MW2 behaviour; the owner rejects it.
   the draw starts the next one, as MW2 lets one come out of the gun's return,
   but a knife pressed while a gun is being drawn back, the draw's last command
   included, is lost (owner's rule: MW2's knife check skips every raise). A swap
-  asked for during it is an ordinary holster, in which a knife is lost too. The owner's Semtex exception queues
+  asked for during it is an ordinary holster, in which a knife is lost too;
+  YY out of that holster readies the gun that think, so its knife is a knife.
+  Only the gun the action left quick-raises (MW2's MeleeEnd, OffHandEnd): when
+  `PM_FinishWeaponChange` draws the other slot after a fired quick action, the
+  latch ends and that gun draws on its own raise. The owner's Semtex exception queues
   slot changes until the throw and original-gun recovery finish. The requested
   slot/HUD updates immediately; the physical holster starts at that boundary.
 - **An ordinary raise is cancellable by YY.** That is the owner's rule, not a

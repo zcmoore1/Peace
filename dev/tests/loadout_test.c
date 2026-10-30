@@ -306,7 +306,9 @@ static void TestRecovery(void) {
    CHECK(total == first);                         /* all quick actions recover alike */
   }
  }
- /* YY cancels the recovery draw, like any draw */
+ /* A swap asked for during the recovery draw waits (MW2's CheckForChangeWeapon
+  * refuses the gun's quick raise after a knife): the draw runs on, and once
+  * the gun is up the ordinary holster starts, not melee's. */
  {
   int t;
   Ready(WP_SHOTGUN, WP_MACHINEGUN);
@@ -314,7 +316,8 @@ static void TestRecovery(void) {
   for (t = 0; t < 9000 && !(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_RAISING); t++) RStep();
   CHECK(ps.weaponstate == WEAPON_RAISING && ps.weaponTime > 2);
   move.cmd.weapon = WP_MACHINEGUN; RStep();
-  /* a real swap out of the recovery draw is a normal holster, not melee's */
+  CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_RAISING);
+  for (t = 0; t < 9000 && ps.weaponstate == WEAPON_RAISING; t++) RStep();
   CHECK(ps.weaponstate == WEAPON_DROPPING && ps.weaponTime == BG_WeaponDropTime(WP_SHOTGUN));
   move.cmd.weapon = WP_SHOTGUN; RStep();
   CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_READY);
@@ -348,9 +351,9 @@ static void TestRecovery(void) {
   move.cmd.buttons = BUTTON_TACTICAL; RStep(); move.cmd.buttons = 0;
   CHECK((ps.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == WA_TACTICAL);
  }
- /* A swap asked for during the recovery draw is an ordinary holster, in which
-  * a knife is lost (MW2 refuses a knife in any drop); once YY has cancelled
-  * the draw the gun is back, so a knife on the very next command is a knife. */
+ /* That holster, once the gun is up, is an ordinary one, in which a knife is
+  * lost (MW2 refuses a knife in any drop); once YY has cancelled it the gun is
+  * back, so a knife on the very next command is a knife. */
  {
   int t, yy;
   for (yy = 0; yy < 2; yy++) {
@@ -358,7 +361,8 @@ static void TestRecovery(void) {
    move.cmd.buttons = BUTTON_LETHAL; RStep(); move.cmd.buttons = 0;
    for (t = 0; t < 9000 && !(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_RAISING); t++) RStep();
    for (t = 0; t < 200; t++) RStep();
-   move.cmd.weapon = WP_MACHINEGUN; RStep();
+   move.cmd.weapon = WP_MACHINEGUN;
+   for (t = 0; t < 9000 && ps.weaponstate == WEAPON_RAISING; t++) RStep();
    CHECK(ps.weaponstate == WEAPON_DROPPING && ps.weaponTime > BG_RAPID_DROP_TIME);
    if (yy) { move.cmd.weapon = WP_SHOTGUN; RStep(); CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_READY); }
    else for (t = 0; t < 100; t++) RStep();
@@ -659,9 +663,10 @@ static void TestGrenadeKeepsHolster(void) {
  for(t=0;t<12000 && !(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
  CHECK(fired[lethal]==1 && ps.weapon==WP_MACHINEGUN && !(ps.weaponAction&WA_TYPE_MASK));
 }
-/* The same holster started by Y out of the knife's recovery draw is a running
- * drop like any other: MW2's OffHandInit keeps DROPPING's time whatever came
- * before it, and recovering from melee and from equipment is one thing. With
+/* The holster a Y during the knife's recovery draw starts once the gun is up
+ * is a running drop like any other: MW2's OffHandInit keeps DROPPING's time
+ * whatever came before it, and recovering from melee and from equipment is
+ * one thing. With
  * more or less of it left than a quick drop, a grenade neither restarts nor
  * lengthens it, exactly as after a frag throw. Only the knife's own drops are
  * cut (TestEquipmentCutsKnife). */
@@ -682,8 +687,11 @@ static void TestGrenadeKeepsRecoveryHolster(void) {
   Run(BG_WeaponQuickRaiseTime(gun)/2);
   CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_RAISING &&
    (ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==((f ? WA_LETHAL : WA_MELEE)|WA_FIRED));
+  /* MW2 refuses the change until the gun is up, then it is an ordinary holster. */
   Toggle(); Step(1);
-  CHECK(ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==drop && (ps.weaponAction&WA_FIRED));
+  CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_RAISING);
+  for(t=0;t<12000 && ps.weaponstate==WEAPON_RAISING;t++) Step(1);
+  CHECK(ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==drop && !(ps.weaponAction&WA_TYPE_MASK));
   while(ps.weaponTime>left) Step(1);
   special=p ? WP_FLASH : BG_LethalWeapon(&ps);
   CHECK(ps.weaponTime==left && ps.ammo[special]>0);
@@ -713,20 +721,54 @@ static void TestGrenadeOutOfRaise(void) {
    ps.weaponTime==BG_WeaponQuickDropTime(guns[i]) && BG_HolsterTime(&ps)==BG_WeaponQuickDropTime(guns[i]));
  }
 }
-/* YY out of a holster started from the recovery draw readies the gun that
- * same think, so a knife on the YY command is a knife, as on any YY. */
-static void TestYYKnifeFromRecovery(void) {
- int t;
- Ready(WP_SHOTGUN,WP_MACHINEGUN);
- move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
- for(t=0;t<9000 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
- Run(200);
- Toggle(); Step(1);
- CHECK(ps.weaponstate==WEAPON_DROPPING && (ps.weaponAction&WA_FIRED));
- Toggle(); move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
- CHECK((ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==WA_MELEE);
- for(t=0;t<4000 && !fired[WP_KNIFE];t++) Step(1);
- CHECK(fired[WP_KNIFE]==1);
+/* MW2's CheckForChangeWeapon refuses every melee and offhand state, the gun's
+ * quick raise after one included. Y (and YY) during a knife or a grenade, or
+ * during the gun's recovery raise, only asks: the gun the action left comes
+ * back on its quick raise, and once it is up the ordinary swap runs. */
+static void TestNoSwapInQuickAction(void) {
+ const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL};
+ int b,t,early,raised;
+ for(b=0;b<ARRAY_LEN(buttons);b++) for(early=0;early<2;early++) {
+  Ready(WP_SHOTGUN,WP_MACHINEGUN);
+  move.cmd.buttons=buttons[b]; Step(1); move.cmd.buttons=0;
+  if(early) { Run(100); Toggle(); Step(1); }
+  for(t=0;t<12000 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+  CHECK(ps.weapon==WP_SHOTGUN && ps.weaponTime==BG_WeaponQuickRaiseTime(WP_SHOTGUN) &&
+   (ps.weaponAction&WA_FIRED));
+  if(!early) Toggle();
+  for(raised=0;raised<6;raised++) { Step(1); CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING); }
+  Toggle(); Step(1); Toggle(); Step(1);	/* YY: nothing to cancel */
+  CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);
+  for(t=0;t<12000 && ps.weaponstate==WEAPON_RAISING;t++) Step(1);
+  CHECK(ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_WeaponDropTime(WP_SHOTGUN) &&
+   !(ps.weaponAction&WA_TYPE_MASK));
+  for(t=0;t<12000 && !(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+  CHECK(ps.weapon==WP_MACHINEGUN && ps.weaponTime==BG_WeaponDrawTime(&ps) &&
+   BG_WeaponDrawTime(&ps)!=BG_WeaponQuickRaiseTime(WP_MACHINEGUN));
+ }
+}
+/* A Semtex cancel never resets a gun's fire lock for free: the shot's lock is
+ * left for the quick drop, the cancel brings the gun back on its quick raise,
+ * and Y during that raise is refused, so the next shot waits it out. */
+static void TestSemtexCancelKeepsLock(void) {
+ bg_class_t cl=*BG_Class(0);
+ int t,cancel;
+ Ready(WP_ROCKET_LAUNCHER,WP_MACHINEGUN);
+ cl.slot[0]=WP_ROCKET_LAUNCHER; cl.slot[1]=WP_MACHINEGUN; cl.lethal=WP_SEMTEX;
+ BG_ApplyClass(&ps,&cl); move.cmd.weapon=WP_ROCKET_LAUNCHER;
+ move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0;
+ CHECK(fired[WP_ROCKET_LAUNCHER]==1 && ps.weaponstate==WEAPON_FIRING);
+ Run(8); move.cmd.buttons=BUTTON_LETHAL; Step(1);
+ Run(8); move.cmd.buttons=BUTTON_LETHAL|BUTTON_WEAPON_SWAP; Step(1); move.cmd.buttons=0;
+ CHECK(ps.weapon==WP_ROCKET_LAUNCHER && ps.weaponstate==WEAPON_RAISING && (ps.weaponAction&WA_RETURNING));
+ cancel=ps.weaponTime;
+ for(t=0;t<cancel+500 && fired[WP_ROCKET_LAUNCHER]<2;t++) {
+  if(t%16==0) { Toggle(); move.cmd.buttons=BUTTON_WEAPON_SWAP; } else move.cmd.buttons=BUTTON_ATTACK;
+  Step(1);
+  CHECK(ps.weapon==WP_ROCKET_LAUNCHER || fired[WP_ROCKET_LAUNCHER]<2);
+ }
+ move.cmd.buttons=0;
+ CHECK(fired[WP_SEMTEX]==0 && (fired[WP_ROCKET_LAUNCHER]<2 || t>=cancel));
 }
 /* A knife pressed during the knife is lost: MW2's knife check refuses its
  * own melee states, so one press is one knife. */
@@ -1152,7 +1194,7 @@ static void TestHeldThroughRespawn(void) {
 }
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
- TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestYYKnifeFromRecovery(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
+ TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestNoSwapInQuickAction(); TestSemtexCancelKeepsLock(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
  TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;

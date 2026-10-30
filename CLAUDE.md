@@ -188,22 +188,21 @@ source for MW2 behaviour; the owner rejects it.
   (owner's rule: MW2's MeleeEnd and OffHandEnd). `BG_WeaponDrawTime` is the
   single draw rule, used by pmove to stamp and by cgame to fit the raise clip.
   **You cannot sprint through it**: the `weaponAction` latch lasts until the
-  gun is fully drawn, and the latch is what blocks sprint. Once fired,
-  selection asks for the gun.
-  YY cancels an ordinary recovery draw like any draw; a grenade pressed during
-  the draw starts the next one, as MW2 lets one come out of the gun's return,
-  but a knife pressed while a gun is being drawn back, the draw's last command
-  included, is lost (owner's rule: MW2's knife check skips every raise). A swap
-  asked for during it is an ordinary holster, in which a knife is lost too;
-  YY out of that holster readies the gun that think, so its knife is a knife.
-  Only the gun the action left quick-raises (MW2's MeleeEnd, OffHandEnd): when
-  `PM_FinishWeaponChange` draws the other slot after a fired quick action, the
-  latch ends and that gun draws on its own raise. The owner's Semtex exception queues
-  slot changes until the throw and original-gun recovery finish. The requested
-  slot/HUD updates immediately; the physical holster starts at that boundary.
+  gun is fully drawn, and the latch is what blocks sprint. No weapon change
+  happens during a knife, a grenade or the gun's quick raise after one (owner's
+  rule: MW2's CheckForChangeWeapon refuses every melee and offhand state):
+  while latched, `PM_DesiredWeapon` wants the knife or equipment, then the gun
+  it left. A Y meanwhile updates the requested slot/HUD at once, the gun the
+  action left comes back on its quick raise, and the ordinary holster starts on
+  the ready boundary. So YY never cancels a recovery draw, and a Semtex cancel
+  can never reset a fire lock for free. A grenade pressed during the draw
+  starts the next one, as MW2 lets one come out of the gun's return, but a
+  knife pressed while a gun is being drawn back, the draw's last command
+  included, is lost (owner's rule: MW2's knife check skips every raise).
 - **An ordinary raise is cancellable by YY.** That is the owner's rule, not a
   bug: the NAC skips a holster, YY skips a draw, so long swap times on both
-  halves reward technique instead of only slowing play.
+  halves reward technique instead of only slowing play. A quick action's
+  recovery raise is not an ordinary raise (see above).
 - **Sprint latches and ends the MW2 way (owner's rule).** As PC MW2's
   `PM_UpdateSprint`: a press starts a sprint, the sprint goes on with the
   button let go or held, and a fresh press ends it. `PM_CheckSprint` uses
@@ -532,7 +531,8 @@ calls `Com_Error`. This has already caused one map-load crash. Also check every
 `MAX_WEAPONS` table in `bg_pmove.c` — they are positional.
 
 Semtex: pre-release Y cancels to the same gun using its melee-return raise.
-Post-release Y queues a normal slot swap behind throw and original-gun recovery.
+Post-release Y queues a normal slot swap behind throw and original-gun recovery,
+as every quick action now does.
 Never treat an emitted throw as a cancellable equip or reset queued selection
 during recovery. Keep note ordering intact; no NAC/zoomload feature branches.
 See `dev/SEMTEX.md` and the Semtex tests in `dev/tests/run-loadouts.*`.

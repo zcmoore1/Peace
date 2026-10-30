@@ -3227,20 +3227,24 @@ PM_BeginWeaponChange unchanged, so the holster always stamps a real drop time
 and the NAC is untouched.
 ===============
 */
+// MW2's CheckForChangeWeapon refuses every melee and offhand state, the gun's
+// quick raise after one included. So while a quick action is latched it wants
+// its knife or equipment, and once that has fired, the gun it left: a slot
+// asked for meanwhile waits until that gun is fully drawn (the latch clears
+// on the ready boundary), then its ordinary holster starts.
 static int PM_DesiredWeapon( void ) {
 	int special = PM_ActionWeapon();
-	if (pm->ps->weaponAction & (WA_RETURNING | WA_RECOVERING)) return BG_ActiveSlotWeapon(pm->ps);
-	// Once it has fired, the action wants the gun back. Nothing leaves early:
-	// step 1 holds the holster until the knife or grenade's lock has run out.
-	if ( special != WP_NONE && !(pm->ps->weaponAction & WA_FIRED) &&
-		(pm->ps->stats[STAT_WEAPONS] & (1 << special)) ) {
+	if (pm->ps->weaponAction & (WA_RETURNING | WA_RECOVERING | WA_FIRED)) return BG_ActiveSlotWeapon(pm->ps);
+	// Nothing leaves early: step 1 holds the holster until the knife or
+	// grenade's lock has run out.
+	if ( special != WP_NONE && (pm->ps->stats[STAT_WEAPONS] & (1 << special)) ) {
 		return special;
 	}
 	return pm->ps->stats[STAT_SLOT_PRIMARY + BG_RequestedSlot(pm->ps, pm->cmd.weapon)];
 }
 
 static int PM_DesiredSlot(void) {
-	if ((pm->ps->weaponAction & (WA_RETURNING | WA_RECOVERING)) ||
+	if ((pm->ps->weaponAction & (WA_RETURNING | WA_RECOVERING | WA_TYPE_MASK)) ||
 		BG_IsActionWeapon(PM_DesiredWeapon())) return pm->ps->stats[STAT_ACTIVE_SLOT];
 	return BG_RequestedSlot(pm->ps, pm->cmd.weapon);
 }
@@ -3300,15 +3304,7 @@ static void PM_FinishWeaponChange( void ) {
 
 	// Save the old instance before loading the new slot's working registers.
 	// Quick actions keep the same slot; their ammo occupies separate entries.
-	if (!BG_IsActionWeapon(weapon)) {
-		int slot = PM_DesiredSlot();
-		// Only the gun a knife or grenade left comes back on its quick raise
-		// (MW2's MeleeEnd, OffHandEnd). Drawing the other slot is a swap: the
-		// quick action is over, and that gun draws on its own raise.
-		if (slot != pm->ps->stats[STAT_ACTIVE_SLOT] && (pm->ps->weaponAction & WA_FIRED))
-			pm->ps->weaponAction &= ~(WA_TYPE_MASK | WA_FIRED);
-		BG_SelectSlot(pm->ps, slot);
-	}
+	if (!BG_IsActionWeapon(weapon)) BG_SelectSlot(pm->ps, PM_DesiredSlot());
 	pm->ps->weapon      = weapon;
 	BG_BeginWeaponDraw(pm->ps);
 }

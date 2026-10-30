@@ -1,20 +1,28 @@
 # Loadouts and weapon selection
 
-Peace's baseq3 main menu has **CLASS SELECT** and **CREATE A CLASS** directly
-below Multiplayer. The in-game menu also has **CLASS SELECT**. The four presets
-remain available, alongside five saved custom class slots.
+Open the in-game pause menu and choose **EDIT LOADOUT** to edit your selected
+custom class, or Custom 1 when a preset is equipped. **CHANGE CLASS** opens a
+browser with five saved custom classes and four fixed presets, a loadout preview,
+and an **EQ** marker for the next-spawn selection. The main menu's **CLASS SELECT**
+and **CREATE A CLASS** entries and the existing console commands remain available.
 
-**CREATE A CLASS** opens the editor for the selected custom class, or Custom 1
-when a preset is selected. Back returns to class selection; another Back returns
-to the main menu.
+1. Open a custom class with **EDIT LOADOUT**, **X** on a controller, or **E**.
+2. Choose **PRIMARY → Sniper rifles → M300 Praetorian**, for example. Primary and
+   secondary both browse the full gun catalog by category. The gun in the other
+   slot is marked **IN USE** and cannot be duplicated. Choosing a gun returns to
+   the loadout overview; Back returns one level without changing that choice.
+3. Open a gun's **Attachments** row to fit/remove compatible attachments. Open
+   **LETHAL** or **TACTICAL**, choose equipment, then choose 1–3 charges. Choosing
+   None empties that slot. Back from the quantity screen cancels that selection.
+4. Open any **PERK** card to read descriptions and select a perk. Perks already in
+   another slot are marked **IN USE**. Choose the name row to rename the class.
+5. **SAVE & EQUIP** saves the class and resumes the match. It applies on the next
+   spawn or S&D round. **SAVE ONLY** saves without selecting a different class;
+   editing an already equipped class updates its next-spawn definition.
 
-1. Choose a Custom slot and **CREATE / EDIT**, or run `ui_createclass`.
-2. Set the name, primary, secondary, grenade and tactical equipment. Both weapon
-   slots use the existing gun catalog and must contain different guns. Equipment
-   can be None, Frag or Semtex for lethal, and Flash for tactical, with 1–3 charges.
-   Highlight PERK 1, PERK 2 or PERK 3 and use left/right to cycle the perk roster.
-3. **SAVE CLASS**, then **SELECT CLASS**. Selection applies on the next spawn;
-   selecting or editing a class never refills the current life's ammo.
+The editor uses a private draft. Back from a changed loadout asks whether to
+**KEEP EDITING** or **DISCARD CHANGES**; Back from a picker preserves the draft.
+Selecting or editing a class never refills the current life's ammo.
 
 Melee is always a button action. It is not selectable as a primary/secondary.
 Each of the three perk slots can select **None**, **Quick Reload**, **9 Lives**,
@@ -45,17 +53,18 @@ are unchanged.
 Attachment choices are now per gun in Create Class. Capacity and compatibility
 are validated on the server as part of the saved class. They apply to spawn
 loadouts, not to looted guns: pickup instances keep the attachments they carried.
-Removing Second Nature clears the extra editor slots before saving. Duplicate
+Removing Second Nature trims attachments to the remaining capacity. Duplicate
 perks/attachments are rejected rather than stacked.
 
 Class serialization version 2 adds the two attachment masks; version 1 classes
 still load and inherit the old `cg_sight` preference at spawn. New editor saves
 store explicit choices, so changing `cg_sight` will not overwrite them. The active
-perk mask is a predicted/replayed playerstate field (protocol **76**, game **-6**).
-Changing class during a life takes effect only at the next spawn.
+perk mask is a predicted/replayed playerstate field. The combined use/reload
+build uses protocol **81**, game **-10**: rebuild the executable, server and all
+modules together. Changing class during a life takes effect only at the next spawn.
 
-Custom names allow 1–23 letters, numbers, spaces, hyphens and underscores. Back
-discards unsaved edits. Editing an already selected class updates its next-spawn
+Custom names allow 1–23 letters, numbers, spaces, hyphens and underscores. Leaving
+an edited draft requires confirming discard. Editing an already selected class updates its next-spawn
 definition. Custom classes and the selected class persist through game restarts
 in archived cvars; this is local persistence, not cloud account synchronization.
 
@@ -66,6 +75,7 @@ in archived cvars; this is local persistence, not cloud account synchronization.
 | Class select | `ui_classes` or `class` in a match | D-pad left |
 | Class editor | `ui_createclass` | D-pad right |
 | Choose/menu navigation | Arrow keys, Enter, Escape | D-pad/left stick, A, B |
+| Edit highlighted custom class | E | X |
 | Name entry | Keyboard | Keep the default name or use a keyboard |
 | Toggle weapon slots | `weapnext` / `weapprev` | Y |
 | Melee | `+melee` | B |
@@ -74,9 +84,9 @@ in archived cvars; this is local persistence, not cloud account synchronization.
 Copy the updated `dev/peace-gamepad.cfg` to the build's `baseq3` directory if
 using the supplied controller config. Classes can also be selected with
 `class 0`–`class 3` for presets and `class 4`–`class 8` for custom slots.
-In a match, press Escape and choose **CLASS SELECT**, or enter `class` in the
-console. Highlight the CLASS row, use left/right to choose a saved class, then
-activate **SELECT CLASS**. `class 4` directly selects the first saved custom
+In a match, press Escape and choose **CHANGE CLASS**, or enter `class` in the
+console. Highlight a saved class and activate it with Enter/A or a mouse click
+to equip it and resume the match. `class 4` directly selects the first saved custom
 class. The new loadout arrives on the next spawn (next round in S&D), not instantly.
 
 ## YY behavior
@@ -154,7 +164,10 @@ inventory mask. Both builds run the shared class/action regression tests.
 
 Run `dev/tests/run-loadouts.cmd` from the VS native tools prompt, or
 `sh dev/tests/run-loadouts.sh` on Linux. These exercise the real gameplay,
-menu callbacks, archived cvar boundary, playerstate codec and pose layers.
+menu callbacks, real menu input/stack, archived cvar boundary, playerstate codec
+and pose layers. Menu checks cover mouse hitboxes, directional gamepad navigation,
+nested Back, dirty-draft confirmation, perk/weapon compatibility, all five custom
+slots, and the pause menu's Save & Equip/resume path.
 `sh dev/tests/run-perks.sh` checks perk combinations, both class formats,
 reload note/cancel boundaries, footstep generation, authoritative fall damage,
 movement caps, jump invariance and repeatable prediction.

@@ -47,6 +47,7 @@ INGAME MENU
 #define ID_RESUME				18
 #define ID_TEAMORDERS			19
 #define ID_CLASSES               20
+#define ID_EDITLOADOUT           21
 
 
 typedef struct {
@@ -55,6 +56,7 @@ typedef struct {
 	menubitmap_s	frame;
 	menutext_s		team;
 	menutext_s      classes;
+	menutext_s      editloadout;
 	menutext_s		setup;
 	menutext_s		server;
 	menutext_s		leave;
@@ -111,6 +113,10 @@ void InGame_Event( void *ptr, int notification ) {
 	switch( ((menucommon_s*)ptr)->id ) {
 	case ID_CLASSES:
 		UI_ClassesMenu();
+		break;
+	case ID_EDITLOADOUT:
+		UI_ClassesMenu();
+		UI_CreateClassMenu((int)trap_Cvar_VariableValue("peace_classSelected") - BG_ClassCount());
 		break;
 	case ID_TEAM:
 		UI_TeamMainMenu();
@@ -189,9 +195,19 @@ void InGame_MenuInit( void ) {
 	s_ingame.classes.generic.y = y;
 	s_ingame.classes.generic.id = ID_CLASSES;
 	s_ingame.classes.generic.callback = InGame_Event;
-	s_ingame.classes.string = "CLASS SELECT";
+	s_ingame.classes.string = "CHANGE CLASS";
 	s_ingame.classes.color = color_red;
 	s_ingame.classes.style = UI_CENTER | UI_SMALLFONT;
+	y += INGAME_MENU_VERTICAL_SPACING;
+	s_ingame.editloadout.generic.type = MTYPE_PTEXT;
+	s_ingame.editloadout.generic.flags = QMF_CENTER_JUSTIFY | QMF_PULSEIFFOCUS;
+	s_ingame.editloadout.generic.x = 320;
+	s_ingame.editloadout.generic.y = y;
+	s_ingame.editloadout.generic.id = ID_EDITLOADOUT;
+	s_ingame.editloadout.generic.callback = InGame_Event;
+	s_ingame.editloadout.string = "EDIT LOADOUT";
+	s_ingame.editloadout.color = color_red;
+	s_ingame.editloadout.style = UI_CENTER | UI_SMALLFONT;
 	y += INGAME_MENU_VERTICAL_SPACING;
 	s_ingame.team.generic.type			= MTYPE_PTEXT;
 	s_ingame.team.generic.flags			= QMF_CENTER_JUSTIFY|QMF_PULSEIFFOCUS;
@@ -324,6 +340,7 @@ void InGame_MenuInit( void ) {
 
 	Menu_AddItem( &s_ingame.menu, &s_ingame.frame );
 	Menu_AddItem( &s_ingame.menu, &s_ingame.classes );
+	Menu_AddItem( &s_ingame.menu, &s_ingame.editloadout );
 	Menu_AddItem( &s_ingame.menu, &s_ingame.team );
 	Menu_AddItem( &s_ingame.menu, &s_ingame.addbots );
 	Menu_AddItem( &s_ingame.menu, &s_ingame.removebots );

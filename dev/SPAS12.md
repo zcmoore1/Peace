@@ -52,9 +52,11 @@ Generation prompt (built-in tool, UV guide supplied as the edit target):
 
 Sprint now has three distinct clips: a **200ms sprint-in transition**, a
 **600ms repeating carry loop**, and a **250ms sprint-out**. Both hands keep
-their existing grip as the shotgun rises into a canted high carry; subtle
-bob and sway give the loop motion. This is original animation on the supplied
-rig, not a ripped or frame-matched MW2 animation.
+their existing grip as the shotgun turns into a low, horizontal carry across
+the body, muzzle to the left. Vertical running bounce dominates the loop;
+small lateral sway and roll keep it from looking rigid. The framing keeps
+the arm ends outside the view. This is original animation on the supplied
+rig, taking its direction from the requested MW2 SPAS/Intervention carry.
 
 Entry and exit follow the existing predicted weapon timers. A short sprint
 tap reverses the partial transition; releasing sprint does not wait for a
@@ -81,11 +83,11 @@ CI checks reproducibility, endpoint/cycle continuity, and sprint/swap poses.
 
 ## Playtest
 
-With `dev-gpt` checked out, run in **x64 Native Tools Command Prompt for VS**:
+With `dev` checked out, run in **x64 Native Tools Command Prompt for VS**:
 
 ```bat
 cd /d C:\Users\ZackI\Desktop\OneManIW\ProjectPeace\dev2\Peace
-git pull origin dev-gpt
+git pull origin dev
 cmake --build out\build\x64-Debug --clean-first
 ```
 

@@ -1,0 +1,7 @@
+{
+  "description": "Original horizontal cross-body carry with vertical running bounce; +X forward, +Y left, +Z up, angles in degrees. Offsets are relative to the idle root. Animation only; timing stays in weapon.json.",
+  "offset": [5.0, -5.0, -1.0],
+  "pitch_yaw_roll": [7.0, 70.0, -10.0],
+  "bob": [0.06, 0.10, 0.80],
+  "sway_pitch_yaw_roll": [0.30, 0.40, 0.55]
+}

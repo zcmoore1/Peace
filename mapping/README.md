@@ -30,5 +30,14 @@ into your `baseq3`. The arena file makes the map appear in the in-game map
 list with its watermelon thumbnail; you can also launch it directly with
 `+devmap box2guns`.
 
-The full map-authoring pipeline (generators for geometry and levelshots,
-plus more maps) lives on the `claude/quake3-mod-maps-67wm8k` branch.
+## dm_outpost
+
+`dm_outpost` is a small FFA arena source: a central platform reached by
+stairs, crate cover and six spawns. `tools/mapgen.py` writes its `.map` and
+`tools/make_levelshot.py` its thumbnail; regenerating overwrites hand edits,
+so pick one workflow. Its shaders target stock `baseq3` textures, so compile it
+with `compile.sh dm_outpost` as above; missing textures show the checkerboard.
+
+The S&D maps (`peace_ladder`, `peace_sd`) do not use this pipeline: they are
+written straight to BSP by `dev/tools/build_*_map.py`, with no q3map2 and no
+retail textures (see `dev/SEARCH_AND_DESTROY.md`).

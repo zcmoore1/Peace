@@ -14,3 +14,11 @@ ${CC:-cc} -std=c99 -O0 -ffunction-sections -fdata-sections \
   dev/tests/snd_menu_test.c code/qcommon/q_math.c code/qcommon/q_shared.c \
   -Wl,--gc-sections -lm -o out/tests/snd-menu-test
 out/tests/snd-menu-test
+# peace_sd, the generated two-site arena, against the real engine collision
+# and player movement.
+${CC:-cc} -std=c99 -O0 -ffunction-sections -fdata-sections dev/tests/sd_map_test.c \
+  code/game/bg_loadout.c code/game/bg_misc.c code/game/bg_slidemove.c \
+  code/qcommon/cm_load.c code/qcommon/cm_trace.c code/qcommon/cm_test.c \
+  code/qcommon/cm_patch.c code/qcommon/cm_polylib.c code/qcommon/md4.c \
+  code/qcommon/q_math.c code/qcommon/q_shared.c -Wl,--gc-sections -lm -o out/tests/sd-map-test
+out/tests/sd-map-test

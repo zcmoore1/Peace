@@ -17,13 +17,21 @@ When a pull is also needed, put `git pull origin <branch>` between the two lines
 
 ## Branches
 
-- `dev1` — hipfire spread, dynamic crosshair, sprint/ADS first pass
-- `dev2` — NAC via a one-frame `WEAPON_RELOAD_END` state (superseded)
-- `dev2-standalone` — skips the retail-data boot check (`fs_checkPak0`)
-- `dev3` — NAC rebuilt on notetracks + segmented reloads
-- `dev3b` — Two-weapon loadout, melee/lethal/tactical, classes,
-  sprint transitions, still swap, gamepad, logging
-- `dev-gpt` — current GPT work: classes, YY, ladders, SPAS art/sprint, Search and Destroy, Semtex.
+- `dev` — **the development branch.** Work here and pull from here. It is
+  `dev-gpt-usereload` (MW2 use/reload, movement, quick actions, throwing knife
+  and sea lion, GPT's class menus, perks, attachments and M300, S&D, ladders,
+  Semtex) plus the standalone boot check and the generated maps from the older
+  branches below.
+- `dev-gpt-usereload` — where `dev` started; same history, kept until retired.
+- History only, all contained in `dev`: `dev1` (hipfire spread, dynamic
+  crosshair), `dev2` (NAC via a one-frame state, superseded), `dev2-standalone`
+  (the `fs_checkPak0` skip, now in `dev`), `dev3` (NAC on notetracks), `dev3b`
+  (two-weapon loadout, quick actions, classes), `gptbranch`, `dev-3b-gpt`,
+  `dev-gpt`, `feature/nested-class-menu`, `integration/usereload-class-menu`.
+- Superseded, not merged: `dev-claude` (an earlier S&D; its `peace_sd` map was
+  regenerated for `g_snd.c` in `dev`) and the early `claude/*` prototypes (the
+  `dm_outpost` source and map tools from `claude/quake3-mod-maps-67wm8k` are in
+  `dev`).
 
 ## Config files
 
@@ -552,7 +560,9 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
 - `g_gametype 8` (`GT_SND`) uses server-owned `g_snd.c`, configstrings 28/29,
   and the existing Use stats. Do not use weapon states or playerState bits
   for bomb ownership or round membership. `bg_pmove.c` remains unchanged.
-- `peace_ladder` has Site A on the platform. Normal rounds need both teams;
+- `peace_ladder` has Site A on the platform. `peace_sd` is a generated
+  two-site arena (`dev/tools/build_sd_map.py`, `--check`; its collision test
+  is in `run-snd`). Normal rounds need both teams;
   `exec peace-snd-practice` is a separate cheat-only solo test setup.
 - Run `dev/tests/run-snd.cmd` or `.sh`; see `dev/SEARCH_AND_DESTROY.md`.
 - QVM `sscanf` returns zero even after parsing! Do not use its return count

@@ -23,6 +23,10 @@ cl %test_flags% /Feout\build\snd-tests\replay_test.exe dev\tests\replay_test.c %
 if errorlevel 1 goto fail
 out\build\snd-tests\replay_test.exe
 if errorlevel 1 goto fail
+cl %test_flags% /Feout\build\snd-tests\sd_map.exe dev\tests\sd_map_test.c code\game\bg_loadout.c code\game\bg_misc.c code\game\bg_slidemove.c code\qcommon\cm_load.c code\qcommon\cm_trace.c code\qcommon\cm_test.c code\qcommon\cm_patch.c code\qcommon\cm_polylib.c code\qcommon\md4.c %test_common% /link /OPT:REF
+if errorlevel 1 goto fail
+out\build\snd-tests\sd_map.exe
+if errorlevel 1 goto fail
 popd
 exit /b 0
 :fail

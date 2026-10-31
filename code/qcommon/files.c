@@ -3528,12 +3528,13 @@ static void FS_AppendUserFriendlyPakList( char *buf, size_t bufsize, int foundPa
 ===================
 FS_CheckPak0
 
-Check whether any of the original id pak files is present,
-and start up in standalone mode, if there are none and a
-different com_basegame was set.
-Note: If you're building a game that doesn't depend on the
-Q3 media pak0.pk3, you'll want to remove this by defining
-STANDALONE in q_shared.h
+Stock ioquake3: check whether any of the original id pak files is present,
+and start up in standalone mode if there are none and a different com_basegame
+was set - otherwise Com_Error out demanding retail Quake 3 data.
+
+Peace: passed instantly (see the early return). Peace supplies its own media,
+so there is no retail data to audit. Set fs_checkPak0 1 on the command line to
+run the stock audit anyway.
 ===================
 */
 static void FS_CheckPak0( void )
@@ -3545,6 +3546,32 @@ static void FS_CheckPak0( void )
 	unsigned int foundPak = 0, foundTA = 0;
 	qboolean installHome = qfalse;
 	char *installPath;
+	cvar_t		*enforce;
+
+	// Peace is a total conversion: it neither ships nor requires the retail
+	// Quake 3 media, so the id-pak audit below has nothing legitimate to
+	// enforce. It is also the ONLY thing that can Com_Error(ERR_FATAL) out of a
+	// boot when pak0-pak8 are absent or incomplete, so pass it instantly and
+	// declare standalone instead.
+	//
+	// Declaring standalone is the point, not a side effect: every consumer of
+	// com_standalone relaxes correctly once it is set - the auth-server
+	// handshake (sv_client.c, cl_main.c), the CD-key read in FS_Startup, and
+	// the auth-backed banUser/banClient commands all drop out. Peace depends on
+	// none of them.
+	//
+	// Deliberately NOT done by defining STANDALONE: that macro also swaps
+	// BASEGAME, HOMEPATH_NAME and CONFIG_PREFIX to placeholder values in
+	// q_shared.h, and CMake only defines it for the client/server - not for the
+	// cgame/qagame/ui modules - so the engine and the game DLLs would disagree
+	// about which directory the assets live in. This keeps BASEGAME "baseq3".
+	//
+	// Reversible with no rebuild: +set fs_checkPak0 1 restores stock behaviour.
+	enforce = Cvar_Get( "fs_checkPak0", "0", CVAR_INIT );
+	if ( !enforce->integer ) {
+		Cvar_Set( "com_standalone", "1" );
+		return;
+	}
 
 	for( path = fs_searchpaths; path; path = path->next )
 	{

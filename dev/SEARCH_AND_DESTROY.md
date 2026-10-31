@@ -11,15 +11,21 @@ cmake --build out\build\x64-Debug --clean-first
 ## Play
 
 In the base-game menu: **Multiplayer → Create → Game Type: Search and Destroy**,
-select **peace_ladder**, then set the round target and duration and start.
-Join Red or Blue. Normal play needs at least one player on each team.
+select **peace_ladder** or **peace_sd**, then set the round target and duration
+and start. Join Red or Blue. Normal play needs at least one player on each team.
 Alternatively set `g_gametype 8`, `g_sndPractice 0`, then `map peace_ladder`.
-Everyone must rebuild the client, server and game modules together (protocol 73).
+Everyone must rebuild the client, server and game modules together (the current
+`PROTOCOL_VERSION`; see CLAUDE.md's capacity limits).
 
 **Site A is on the upper ladder platform**, marked by a gold outline and an A.
 Attackers spawn on the floor opposite the ladder; defenders spawn on the platform.
 The room is deliberately a mechanics test lab, not a balanced competitive map.
 It has four starts per side and no retail map geometry.
+
+**peace_sd** is a long hall with both sites on the defenders' half: A (orange
+pillar) and B (cyan pillar), each with a pad and a crate to plant behind, cover
+in the middle and a stair up to a perch. Attackers start at the -X end, five per
+side.
 
 - One life per round. Eliminated players can watch living teammates; Attack
   cycles teammates. Joining or changing team mid-round waits until the next round.
@@ -108,7 +114,11 @@ with clear line of sight. Add `snd` to the arena's type list. Add four or more
 defenders; roles remap those starts after a side switch. Maps without sites
 stay in waiting with a HUD warning instead of silently playing team deathmatch.
 
-`dev/tools/build_ladder_map.py` generates the committed BSP, markings and arena.
+`dev/tools/build_ladder_map.py` generates the committed BSP, markings and arena;
+`dev/tools/build_sd_map.py` (with `dev/tools/q3bsp.py`) generates `peace_sd`, and
+`dev/tests/sd_map_test.c` checks it against the real engine collision and player
+movement: spawns land, both sites can be stood on, the stair climbs, the hall is
+sealed.
 `dev/tools/build_snd_assets.py` generates the original bomb-case MD3 and shader.
 Both support `--check`; no external map compiler or art download is needed.
 Between rounds, players/classes/ammo reset; missiles, dropped items and corpses

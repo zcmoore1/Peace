@@ -22,7 +22,9 @@ and YY cannot cancel the gun's quick raise after a cancel or a throw.
 `cmd.weapon` is still the desired slot. A separate swap-intent button allows
 pre-throw cancel without changing selection. A return-acknowledgement bit handles
 stale slot requests. `WA_RECOVERING` pins the physical weapon through post-throw
-recovery without overwriting the requested selection.
+recovery without overwriting the requested selection - only when the Semtex
+left a gun: from an empty hand the hand is back the think it empties, as with
+every offhand, and a queued Y draws from it.
 
 ## Timings / art
 

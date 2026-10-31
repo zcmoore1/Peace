@@ -15,6 +15,9 @@ ${CC:-cc} $flags -UMISSIONPACK dev/tests/semtex_missile_test.c code/game/bg_misc
 out/tests/semtex-missile-test
 ${CC:-cc} $flags -UMISSIONPACK dev/tests/knife_missile_test.c code/game/bg_misc.c $common -Wl,--gc-sections -lm -o out/tests/knife-missile-test
 out/tests/knife-missile-test
+# A knife stuck in a player, through the real g_client.c body queue, g_utils.c and g_items.c.
+${CC:-cc} $flags -UMISSIONPACK dev/tests/knife_corpse_test.c code/game/g_missile.c code/game/g_client.c code/game/g_utils.c code/game/g_items.c code/game/bg_pmove.c $game $common -Wl,--gc-sections -lm -o out/tests/knife-corpse-test
+out/tests/knife-corpse-test
 ${CC:-cc} $flags dev/tests/class_menu_test.c code/q3_ui/ui_atoms.c code/q3_ui/ui_qmenu.c code/q3_ui/ui_mfield.c code/game/bg_loadout.c $common -Wl,--gc-sections -lm -o out/tests/class-menu-test
 out/tests/class-menu-test
 ${CC:-cc} $flags dev/tests/action_wire_test.c code/qcommon/msg.c code/qcommon/huffman.c $common -Wl,--gc-sections -lm -o out/tests/action-wire-test
@@ -23,3 +26,6 @@ ${CC:-cc} $flags dev/tests/weapon_pose_test.c dev/tests/pickup_pmove_driver.c $g
 out/tests/weapon-pose-test
 ${CC:-cc} $flags dev/tests/pose_vm_test.c code/qcommon/vm.c $common -Wl,--gc-sections -lm -o out/tests/pose-vm-test
 out/tests/pose-vm-test
+# Missiles as cgame draws them: the real CG_Missile, lerp and CG_RegisterWeapon.
+${CC:-cc} $flags dev/tests/missile_draw_test.c code/cgame/cg_weapons.c code/game/bg_misc.c $common -Wl,--gc-sections -lm -o out/tests/missile-draw-test
+out/tests/missile-draw-test

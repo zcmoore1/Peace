@@ -156,9 +156,11 @@ struct gentity_s {
 
 	gentity_t	*chain;
 	gentity_t	*enemy;
-	// Server-only sticky projectile attachment identity. Do not follow a
+	// Server-only stuck projectile carrier (enemy) identity. Do not follow a
 	// recycled mover, a respawned player, or a new connection in the same slot.
-	int semtexHostFreeTime, semtexHostSpawn, semtexHostConnect, semtexOwnerConnect;
+	int hostFreeTime, hostSpawn, hostConnect, semtexOwnerConnect;
+	vec3_t		hostForward;	// a carried missile's facing in its host's axis
+	int			restNum;		// what a stopped knife rests on (MW2's missile groundEntityNum)
 	gentity_t	*activator;
 	gentity_t	*teamchain;		// next entity in team
 	gentity_t	*teammaster;	// master of the team
@@ -561,6 +563,7 @@ gentity_t *fire_plasma (gentity_t *self, vec3_t start, vec3_t aimdir);
 gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t aimdir);
 gentity_t *fire_semtex (gentity_t *self, vec3_t start, vec3_t aimdir);
 gentity_t *fire_throwingknife (gentity_t *self, vec3_t start, vec3_t aimdir);
+void G_MoveCarriedMissiles( gentity_t *from, gentity_t *to );
 gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir);
 gentity_t *fire_bfg (gentity_t *self, vec3_t start, vec3_t dir);
 gentity_t *fire_grapple (gentity_t *self, vec3_t start, vec3_t dir);

@@ -186,10 +186,17 @@ source for MW2 behaviour; the owner rejects it.
   OFFHAND_END. The throwing knife's own pull never lowers the gun, hint or not
   (MW2's weaponClass 9 prepares in OffHandInit, `BG_OffhandPreparesAtOnce`).
   A quick action pulled from an empty hand goes back to an empty hand
-  (`WA_LEFT_EMPTY`): its own drop goes to no gun, the only drop that may.
-  A gun is never lowered toward an unowned selection. This drop that never happens is not a holster: no reload, shot
-  or bolt clock can run in that raise or in an empty hand, so the NAC rule is
-  untouched.
+  (`WA_LEFT_EMPTY`), every offhand alike: its own drop goes to no gun, the only
+  drop that may, and `WA_RECOVERING` is set only when a Semtex left a gun, so a
+  queued Y then draws straight from the empty hand. A gun is never lowered
+  toward an unowned selection. This drop that never happens is not a holster.
+  The throwing knife's instant pull also comes out of a reload, a shot or a
+  pump/bolt (MW2's OffHandInit+Prepare for class 9). It abandons what the gun
+  was doing, as any swap does: a reload keeps only rounds whose fill landed
+  before the press (a note due on the press think is lost, MW2's same-think
+  hand step) and restarts from 0, and an open action stays owed in
+  `STAT_UNCHAMBERED` and is worked from 0 when the gun is back. It stamps no
+  drop, so the NAC ordering is untouched.
 - **Melee is its own kind of swap.** Equipment pressed on the knife's own
   command wins (MW2 checks its offhands first), and equipment cuts the knife at
   any point (MW2's offhand check takes every melee state): pressed before the
@@ -512,8 +519,10 @@ modulo selection, same-update YY firing, reload/pull-out cancellation, tap/hold
 actions, the sprint latch and its ending conditions, aim with sprint held, MW2
 air control (stick-only push, aim scale, stopspeed floor, ladder exempt), all
 all ten action bits through the actual network codec, and pose release. It
-also builds `knife_missile_test.c`, the throwing knife's real launch, impact
-and rest code.
+also builds `knife_missile_test.c` (the throwing knife's real launch, impact,
+carry and rest code), `knife_corpse_test.c` (the real `CopyToBodyQue`,
+`BodySink`, `G_FreeEntity` and use code with a carried knife) and
+`missile_draw_test.c` (the real `CG_Missile` and snapshot lerp).
 Pose checks cover source retention, ladder holsters, loop/endpoint semantics,
 reload/action exclusions, ordinary sprint reversal and frame-only crossfades,
 plus YY flow (reversed draw, eased return, fire cut-in) through the real
@@ -580,7 +589,14 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
 - The throwing knife (`WP_THROWING_KNIFE`) is appended lethal equipment
   (16 basegame / 19 missionpack), with the frag's grenade as placeholder art.
   Its flight, stick, pickup by use and world bound are in `dev/THROWING_KNIFE.md`.
-  Its speed, damage, bounce and pull time are placeholder weapon data.
+  Its speed, damage, bounce and pull time are placeholder weapon data. It
+  sticks in players (owner's choice of MW2's `stickToPlayers`), rides them and
+  their corpse, and falls when the corpse goes; that carry is Semtex's
+  (`G_CarryMissile`/`G_FollowHost`, the `host*` fields), and only knives move
+  to corpses. A carried missile is sent `TR_INTERPOLATE` (pos and apos) so it
+  lerps with its carrier. `CG_Missile` registers a missile's weapon on first
+  sight: never rely on someone holding it (a frag in flight is
+  `WP_GRENADE_LAUNCHER`, which nobody holds).
 
 The enum is not enough. A weapon in `STAT_WEAPONS` with no `bg_itemlist` entry
 crashes on spawn: `CG_RegisterWeapon` calls `CG_Error`, and `BG_FindItemForWeapon`

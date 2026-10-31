@@ -434,10 +434,17 @@ static void CG_Missile( centity_t *cent ) {
 	if ( s1->weapon >= WP_NUM_WEAPONS ) {
 		s1->weapon = 0;
 	}
+	// A missile can outlast every sight of its thrower's weapon: a knife or a
+	// Semtex already lying in the map when this client connects or restarts
+	// video. Register it on first sight, as a held weapon is.
+	CG_RegisterWeapon( s1->weapon );
 	weapon = &cg_weapons[s1->weapon];
 
-	// calculate the axis
-	VectorCopy( s1->angles, cent->lerpAngles);
+	// calculate the axis (the throwing knife's is its apos, lerped with its
+	// origin by CG_CalcEntityLerpPositions)
+	if ( s1->weapon != WP_THROWING_KNIFE ) {
+		VectorCopy( s1->angles, cent->lerpAngles);
+	}
 
 	// add trails
 	if ( weapon->missileTrailFunc ) 
@@ -526,8 +533,9 @@ static void CG_Missile( centity_t *cent ) {
 	if (s1->weapon == WP_SEMTEX && s1->pos.trType == TR_STATIONARY)
 		AnglesToAxis(cent->lerpAngles, ent.axis);
 	if (s1->weapon == WP_THROWING_KNIFE) {
-		// end over end in flight, buried along the throw once stopped (apos)
-		BG_EvaluateTrajectory(&s1->apos, cg.time, cent->lerpAngles);
+		// end over end in flight, buried along the throw once stopped, and
+		// turned with whoever carries it: a carried knife's pos and apos are
+		// TR_INTERPOLATE, so both lerp between snapshots as its carrier does
 		AnglesToAxis(cent->lerpAngles, ent.axis);
 	}
 	// add to refresh list, possibly with quad glow

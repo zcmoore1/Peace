@@ -567,6 +567,20 @@ static void TestKnifePickup(void) {
  CHECK(!knife->inuse && gun->r.contents && pickups==1 && ps->stats[STAT_SLOT_PRIMARY]==WP_MACHINEGUN);
  UseStep(0); UseStep(0); CHECK(ps->weaponstate==WEAPON_READY && !(ps->weapFlags&PWF_USE_RELOAD));
  CHECK(ps->cursorHintEntIndex==gun->s.number); /* the gun is the hint after the knife */
+ /* A knife that comes to rest in reach during a hold for a floor gun takes
+  * nothing from that hold: the gun is collected on time, and the knife is
+  * left for a press of its own. */
+ ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0; ps->ammo[WP_MACHINEGUN]=4;
+ gun=Floor(WP_RAILGUN,0,2,8,0); VectorSet(at,0,0,ps->viewheight); G_SetOrigin(gun,at); EndFrame();
+ for(i=0;i<BG_PICKUP_HOLD_TIME/2;i++) { UseStep(BUTTON_USE_RELOAD); EndFrame(); }
+ CHECK(ps->pickupHeld==3 && clients[0].activate.hold && pickups==0);
+ level.time-=BG_USE_SPAWN_DELAY; knife=GroundKnife(10,0,0); level.time+=BG_USE_SPAWN_DELAY; EndFrame();
+ CHECK(ps->cursorHintEntIndex==knife->s.number);
+ for(i=0;i<BG_PICKUP_HOLD_TIME && !pickups;i++) { UseStep(BUTTON_USE_RELOAD); EndFrame(); }
+ CHECK(pickups==1 && ps->stats[STAT_SLOT_PRIMARY]==WP_RAILGUN && knife->inuse && ps->ammo[WP_THROWING_KNIFE]==0);
+ CHECK(i<=BG_PICKUP_HOLD_TIME-BG_PICKUP_HOLD_TIME/2);
+ UseStep(0); UseStep(0); CHECK(!(ps->weapFlags&PWF_USE_RELOAD) && knife->inuse);
+ UseStep(BUTTON_USE); CHECK(!knife->inuse && ps->ammo[WP_THROWING_KNIFE]==1);
  /* A press while sprinting uses nothing, held on or not; a new one does. */
  ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0;
  knife=GroundKnife(10,0,0); level.time+=BG_USE_SPAWN_DELAY; EndFrame();

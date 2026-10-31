@@ -3128,7 +3128,11 @@ static void PM_UpdateWeaponAction( void ) {
 			 (pm->ps->weaponstate == WEAPON_RAISING && pm->ps->weaponTime <= 0) || yyReturn) ) {
 			action = 0;
 		}
-		if (pm->ps->weapon == WP_SEMTEX && (action & WA_FIRED) &&
+		// Only a gun the Semtex left is recovered before a queued slot. An
+		// empty hand is back the think it empties, as after any equipment:
+		// MW2's OffHandEnd with weapon 0 (577a1a-577a2a) stamps no raise, only
+		// the one-think delay its swap check waits out (578bea-578bf2).
+		if (pm->ps->weapon == WP_SEMTEX && (action & WA_FIRED) && !leftEmpty &&
 			pm->ps->weaponstate == WEAPON_FIRING && pm->ps->weaponTime <= 0) recovering = WA_RECOVERING;
 		// A press during the recovery DRAW: equipment starts the next quick
 		// action, as MW2 lets a grenade come out of the gun's return. Equipment

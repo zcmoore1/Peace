@@ -797,15 +797,16 @@ static void SeaLionChain(int hint, int flashFirst, int *instant) {
  * while the lethal button is held and is thrown on release; a tap throws once
  * the pull is over. The knife is spent at the throw, and the gun recovers as it
  * does from any quick action. */
-static void KnifeReady(int count, int hint) {
+static void KnifeGunReady(int gun, int count, int hint) {
  bg_class_t cl=*BG_Class(0);
- Ready(WP_SHOTGUN,WP_MACHINEGUN);
- cl.slot[0]=WP_SHOTGUN; cl.slot[1]=WP_MACHINEGUN; cl.lethal=WP_THROWING_KNIFE; cl.lethalCount=count;
+ Ready(gun,WP_MACHINEGUN);
+ cl.slot[0]=gun; cl.slot[1]=WP_MACHINEGUN; cl.lethal=WP_THROWING_KNIFE; cl.lethalCount=count;
  CHECK(BG_ValidateClass(&cl));
- BG_ApplyClass(&ps,&cl); move.cmd.weapon=WP_SHOTGUN; ps.cursorHintEntIndex=hint;
- CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_READY && ps.ammo[WP_THROWING_KNIFE]==count);
+ BG_ApplyClass(&ps,&cl); move.cmd.weapon=gun; ps.cursorHintEntIndex=hint;
+ CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_READY && ps.ammo[WP_THROWING_KNIFE]==count);
  CHECK(BG_LethalWeapon(&ps)==WP_THROWING_KNIFE);
 }
+static void KnifeReady(int count, int hint) { KnifeGunReady(WP_SHOTGUN,count,hint); }
 static void TestThrowingKnife(void) {
  const int hints[3]={0,MAX_CLIENTS+7,ENTITYNUM_NONE};
  int i,t,pull;
@@ -1001,6 +1002,172 @@ static void TestSeaLion(void) {
  Ready(WP_SHOTGUN,WP_MACHINEGUN); ps.weapon=WP_NONE; ps.slotFlags[0]^=BG_GUN_GENERATION;
  move.cmd.weapon=BG_SlotCommand(&ps,1); Step(1);
  CHECK(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_RAISING && ps.stats[STAT_ACTIVE_SLOT]==SLOT_SECONDARY);
+}
+/* MW2's OffHandEnd with weapon 0 is every offhand's: a lethal pulled from an
+ * empty hand comes back to one, the Semtex too: with no gun to recover, a
+ * slot queued behind its throw waits only for the empty hand. While the
+ * selection is stale the hand stays empty and the slot keeps its first raise.
+ * Y while the lethal is out, before or after its throw, draws the other slot
+ * straight from the empty hand, never the replaced slot's gun first, and every
+ * lethal empties the hand and starts that draw on the same thinks after its
+ * throw. */
+static void TestLethalFromEmptyHand(void) {
+ const int lethals[]={WP_FRAG,WP_SEMTEX,WP_THROWING_KNIFE};
+ int l,y,t,thrown,empty,drawn,gap=-1;
+ for(y=0;y<3;y++) for(l=0;l<ARRAY_LEN(lethals);l++) {
+  bg_class_t cl=*BG_Class(0);
+  int lethal=lethals[l];
+  Ready(WP_SHOTGUN,WP_MACHINEGUN);
+  cl.slot[0]=WP_SHOTGUN; cl.slot[1]=WP_MACHINEGUN; cl.lethal=lethal; cl.lethalCount=1;
+  CHECK(BG_ValidateClass(&cl)); BG_ApplyClass(&ps,&cl);
+  /* a pickup's take: the slot holds a gun the selection has not seen yet */
+  ps.weapon=WP_NONE; ps.slotFlags[0]^=BG_GUN_GENERATION; ps.slotFlags[0]|=BG_GUN_FIRST_DRAW;
+  ps.cursorHintEntIndex=ENTITYNUM_NONE; move.cmd.weapon=BG_SLOT_COMMAND;
+  move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+  CHECK(ps.weapon==lethal && ps.weaponstate==WEAPON_RAISING && (ps.weaponAction&WA_LEFT_EMPTY));
+  if(y==1) move.cmd.weapon=BG_SlotCommand(&ps,SLOT_SECONDARY);
+  thrown=empty=drawn=-1;
+  for(t=0;t<12000 && drawn<0 && (empty<0 || t<empty+3000);t++) {
+   Step(1);
+   CHECK(ps.weapon==lethal || ps.weapon==WP_NONE || (y && ps.weapon==WP_MACHINEGUN));
+   if(thrown<0 && fired[lethal]) {
+    thrown=t;
+    if(y==2) move.cmd.weapon=BG_SlotCommand(&ps,SLOT_SECONDARY);
+   }
+   if(empty<0 && ps.weapon==WP_NONE) empty=t;
+   if(empty>=0 && ps.weapon!=WP_NONE) drawn=t;
+  }
+  CHECK(fired[lethal]==1 && thrown>=0 && empty>thrown && (ps.slotFlags[0]&BG_GUN_FIRST_DRAW));
+  if(!y) {
+   CHECK(drawn<0 && ps.weapon==WP_NONE && ps.weaponstate==WEAPON_READY);
+   CHECK(!(ps.weaponAction&(WA_TYPE_MASK|WA_FIRED|WA_RECOVERING|WA_LEFT_EMPTY)));
+   move.cmd.weapon=BG_SlotCommand(&ps,SLOT_PRIMARY); Step(1);
+   CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING &&
+    ps.weaponTime==BG_WeaponFirstRaiseTime(WP_SHOTGUN) && !(ps.weaponAction&WA_TYPE_MASK));
+   continue;
+  }
+  CHECK(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_RAISING &&
+   ps.stats[STAT_ACTIVE_SLOT]==SLOT_SECONDARY && ps.weaponTime==BG_WeaponDrawTime(&ps) &&
+   !(ps.weaponAction&(WA_TYPE_MASK|WA_RECOVERING|WA_LEFT_EMPTY)));
+  if(gap<0) gap=drawn-empty;
+  CHECK(drawn-empty==gap);
+ }
+}
+/* The throwing knife out of a gun that is busy: MW2's OffHandInit prepares it
+ * in the same call (578eec) out of every state its offhand check takes, so it
+ * is in hand on the press and the gun is never lowered. What the gun was doing
+ * is abandoned as by any swap: a reload keeps only the rounds its fill already
+ * put in, and one whose note lands on the press think is lost with it (MW2's
+ * hand step on that think, 44c56a-44c571); it starts again from 0. An action
+ * still open stays owed and is worked from 0 once the gun is back. The trigger
+ * is held throughout and nothing fires but the knife, once. */
+static void KnifeOutAndBack(int gun) {
+ int t, shots=fired[gun], ammo=ps.ammo[gun], reserve=ps.ammoReserve[gun];
+ int owed=ps.stats[STAT_UNCHAMBERED]&(1<<gun);
+ move.cmd.buttons=BUTTON_LETHAL|BUTTON_ATTACK; Step(1);
+ CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_RAISING &&
+  ps.weaponTime==BG_THROWING_KNIFE_PULL_MS && ps.weaponAnimTime==-1);
+ Run(BG_THROWING_KNIFE_PULL_MS);
+ CHECK(ps.weapon==WP_THROWING_KNIFE && !fired[WP_THROWING_KNIFE]);
+ move.cmd.buttons=BUTTON_ATTACK;
+ for(t=0;t<12000 && (ps.weaponAction&WA_TYPE_MASK);t++) {
+  Step(1);
+  CHECK(fired[gun]==shots && ps.ammo[gun]==ammo && ps.ammoReserve[gun]==reserve);
+  CHECK((ps.stats[STAT_UNCHAMBERED]&(1<<gun))==owed);
+  CHECK(ps.weaponstate!=WEAPON_DROPPING || ps.weapon==WP_THROWING_KNIFE);
+ }
+ move.cmd.buttons=0;
+ CHECK(fired[WP_THROWING_KNIFE]==1 && ps.ammo[WP_THROWING_KNIFE]==0);
+ CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_READY);
+}
+static void TestKnifeOutOfReload(void) {
+ const int guns[]={WP_SHOTGUN,WP_M40A3};
+ int g,when,t;
+ for(g=0;g<ARRAY_LEN(guns);g++) for(when=0;when<4;when++) {
+  int gun=guns[g], start, seat, press, ammo, total;
+  KnifeGunReady(gun,1,0);
+  ps.ammo[gun]-=2; total=ps.ammo[gun]+ps.ammoReserve[gun];
+  start=BG_ReloadSegmentTime(&ps,RSEQ_START);
+  CHECK(Note(gun,RSEQ_START,WNOTE_MAG_IN)<0);	/* the first round is the loop's */
+  seat=start+BG_ReloadTime(&ps,Note(gun,RSEQ_LOOP,WNOTE_MAG_IN));
+  /* mid-start, the think before the first round seats, the think it seats on,
+   * and the think after */
+  press=when ? seat+when-2 : start/2;
+  PM_BeginReload(); Run(press-1);
+  CHECK(ps.weaponstate==WEAPON_RELOADING && ps.weaponAnimSeq==(when ? RSEQ_LOOP : RSEQ_START));
+  CHECK(ps.ammo[gun]==BG_WeaponMagSize(gun)-(when==3 ? 1 : 2));
+  ammo=ps.ammo[gun];
+  KnifeOutAndBack(gun);
+  CHECK(ps.ammo[gun]==ammo && ps.ammo[gun]+ps.ammoReserve[gun]==total && !fired[gun]);
+  /* never resumed: the next reload starts from 0 and fills the gun */
+  move.cmd.buttons=BUTTON_RELOAD; Step(1); move.cmd.buttons=0;
+  CHECK(ps.weaponstate==WEAPON_RELOADING && ps.weaponAnimSeq==RSEQ_START &&
+   ps.weaponAnimTime==0 && ps.weaponTime==start);
+  for(t=0;t<12000 && ps.weaponstate==WEAPON_RELOADING;t++) Step(1);
+  CHECK(ps.ammo[gun]==BG_WeaponMagSize(gun) && ps.ammo[gun]+ps.ammoReserve[gun]==total);
+ }
+}
+/* A reload out of the shot owes the pump or bolt until its delayed action
+ * settles it on the reload clock; a knife before that think, or on it, leaves
+ * the action owed. */
+static void TestKnifeOutOfReloadSettle(void) {
+ const int guns[]={WP_SHOTGUN,WP_M40A3};
+ int g,when,t;
+ for(g=0;g<ARRAY_LEN(guns);g++) for(when=0;when<3;when++) {
+  int gun=guns[g], settle, add=Note(gun,RSEQ_START,WNOTE_MAG_IN), cap, ammo, total;
+  KnifeGunReady(gun,1,0);
+  settle=Note(gun,ASEQ_FIRE,WNOTE_BOLT_CLOSED)-Note(gun,ASEQ_FIRE,WNOTE_BOLT_OPEN);
+  cap=BG_WeaponReloadSegLength(gun,RSEQ_START);
+  if(add>=0 && add<cap) cap=add;
+  if(settle>cap) settle=cap;
+  settle=BG_ReloadTime(&ps,settle);
+  move.cmd.buttons=BUTTON_ATTACK; Step(1);
+  move.cmd.buttons=BUTTON_RELOAD; Step(1); move.cmd.buttons=0;
+  CHECK(fired[gun]==1 && ps.weaponstate==WEAPON_RELOADING && ps.weaponAnimTime==0 &&
+   (ps.stats[STAT_UNCHAMBERED]&(1<<gun)));
+  ammo=ps.ammo[gun]; total=ammo+ps.ammoReserve[gun];
+  /* before it settles, the think it settles on, and the think after */
+  Run(when ? settle+when-2 : settle/2);
+  CHECK(ps.weaponstate==WEAPON_RELOADING && ps.ammo[gun]==ammo);
+  CHECK(!!(ps.stats[STAT_UNCHAMBERED]&(1<<gun))==(when<2));
+  KnifeOutAndBack(gun);
+  CHECK(ps.ammo[gun]==ammo && ps.ammo[gun]+ps.ammoReserve[gun]==total && fired[gun]==1);
+  Step(1);
+  if(when<2) {
+   CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==0 &&
+    ps.weaponTime==BG_WeaponFireLength(gun));
+   for(t=0;t<12000 && ps.weaponstate==WEAPON_BOLTING;t++) Step(1);
+  }
+  CHECK(ps.weaponstate==WEAPON_READY && !(ps.stats[STAT_UNCHAMBERED]&(1<<gun)) && fired[gun]==1);
+ }
+}
+/* Out of the shot's fire lock, out of the pump or bolt, on the think it closes
+ * and after: the action is owed unless its close landed before the press. */
+static void TestKnifeOutOfAction(void) {
+ const int guns[]={WP_SHOTGUN,WP_M40A3};
+ int g,when,t;
+ for(g=0;g<ARRAY_LEN(guns);g++) for(when=0;when<4;when++) {
+  int gun=guns[g], open=Note(gun,ASEQ_FIRE,WNOTE_BOLT_OPEN), close=Note(gun,ASEQ_FIRE,WNOTE_BOLT_CLOSED);
+  const int states[]={WEAPON_FIRING,WEAPON_BOLTING,WEAPON_BOLTING,WEAPON_BOLTING};
+  int press=when==0 ? open/2 : when==1 ? (open+close)/2 : close+when-2;
+  KnifeGunReady(gun,1,0);
+  CHECK(open>0 && close>open && close<BG_WeaponFireLength(gun));
+  move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0;
+  CHECK(fired[gun]==1 && ps.weaponAnimTime==0);
+  Run(press-1);
+  CHECK(ps.weaponstate==states[when] && ps.weaponAnimTime==press-1);
+  CHECK(when || ps.weaponTime>0);
+  CHECK(!!(ps.stats[STAT_UNCHAMBERED]&(1<<gun))==(when<3));
+  KnifeOutAndBack(gun);
+  CHECK(fired[gun]==1 && ps.ammo[gun]==BG_WeaponMagSize(gun)-1);
+  Step(1);
+  if(when<3) {
+   CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==0 &&
+    ps.weaponTime==BG_WeaponFireLength(gun));
+   for(t=0;t<12000 && ps.weaponstate==WEAPON_BOLTING;t++) Step(1);
+  }
+  CHECK(ps.weaponstate==WEAPON_READY && !(ps.stats[STAT_UNCHAMBERED]&(1<<gun)) && fired[gun]==1);
+ }
 }
 /* A knife pressed during the knife is lost: MW2's knife check refuses its
  * own melee states, so one press is one knife. */
@@ -1426,7 +1593,7 @@ static void TestHeldThroughRespawn(void) {
 }
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
- TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestNoSwapInQuickAction(); TestSemtexCancelKeepsLock(); TestThrowingKnife(); TestSeaLion(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
+ TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestNoSwapInQuickAction(); TestSemtexCancelKeepsLock(); TestThrowingKnife(); TestSeaLion(); TestLethalFromEmptyHand(); TestKnifeOutOfReload(); TestKnifeOutOfReloadSettle(); TestKnifeOutOfAction(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
  TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;

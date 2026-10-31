@@ -40,6 +40,10 @@ cl %test_flags% /Feout\build\loadout-tests\pose-vm.exe dev\tests\pose_vm_test.c 
 if errorlevel 1 goto fail
 out\build\loadout-tests\pose-vm.exe
 if errorlevel 1 goto fail
+cl %test_flags% /Feout\build\loadout-tests\missile-draw.exe dev\tests\missile_draw_test.c code\cgame\cg_weapons.c code\game\bg_misc.c %test_common% /link /OPT:REF
+if errorlevel 1 goto fail
+out\build\loadout-tests\missile-draw.exe
+if errorlevel 1 goto fail
 popd
 exit /b 0
 :fail

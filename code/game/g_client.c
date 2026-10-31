@@ -377,10 +377,12 @@ void InitBodyQue (void) {
 =============
 BodySink
 
-After sitting around for five seconds, fall into the ground and disappear
+After sitting around for five seconds, fall into the ground and disappear.
+A sinking corpse lets go of the knives it carries.
 =============
 */
 void BodySink( gentity_t *ent ) {
+	G_MoveCarriedMissiles( ent, NULL );
 	if ( level.time - ent->timestamp > 6500 ) {
 		// the body ques are never actually freed, they are just unlinked
 		trap_UnlinkEntity( ent );
@@ -418,6 +420,7 @@ void CopyToBodyQue( gentity_t *ent ) {
 	// grab a body que and cycle to the next one
 	body = level.bodyQue[ level.bodyQueIndex ];
 	level.bodyQueIndex = (level.bodyQueIndex + 1) % BODY_QUEUE_SIZE;
+	G_MoveCarriedMissiles( body, NULL );	// a reused corpse lets go of what it carried
 
 	body->s = ent->s;
 	body->s.eFlags = EF_DEAD;		// clear EF_TALK, etc
@@ -496,6 +499,7 @@ void CopyToBodyQue( gentity_t *ent ) {
 
 
 	VectorCopy ( body->s.pos.trBase, body->r.currentOrigin );
+	G_MoveCarriedMissiles( ent, body );	// knives stuck in the player stay in the corpse
 	trap_LinkEntity (body);
 }
 

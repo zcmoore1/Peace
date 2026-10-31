@@ -657,9 +657,11 @@ its hold, and is used: it is never a reload. While the button stays held the
 knife is taken once it is g_useholdspawndelay old (g_useholdtime is 0), so a
 press on a settled knife takes it on that command. A press made while
 sprinting or with equipment out uses nothing (BG_UpdateActivate). Returns
-whether the hint is a knife, for BG_UpdateActivate.
+whether the hint is a knife, for BG_UpdateActivate; *held says whether a press
+is the knife's this command. A knife that only becomes the hint during a hold
+for something else takes nothing from it: MW2 holds for what the press chose.
 */
-static qboolean G_UseKnife(gentity_t *player, usercmd_t *cmd) {
+static qboolean G_UseKnife(gentity_t *player, usercmd_t *cmd, qboolean *held) {
 	gclient_t *client = player->client;
 	playerState_t *ps = &client->ps;
 	const int useButtons = BUTTON_USE | BUTTON_USE_RELOAD;
@@ -667,6 +669,7 @@ static qboolean G_UseKnife(gentity_t *player, usercmd_t *cmd) {
 	qboolean hinted = client->cursorHint && ps->cursorHintEntIndex >= MAX_CLIENTS &&
 		ps->cursorHintEntIndex < ENTITYNUM_MAX_NORMAL && G_IsThrowingKnife(&g_entities[ps->cursorHintEntIndex]);
 	gentity_t *knife;
+	*held = qfalse;
 	if (hinted && (cmd->buttons & useButtons & ~old) &&
 		!(ps->pm_flags & PMF_SPRINTING) && !BG_OffhandOut(ps)) {
 		client->knifeHold = ps->cursorHintEntIndex;
@@ -679,7 +682,10 @@ static qboolean G_UseKnife(gentity_t *player, usercmd_t *cmd) {
 	knife = &g_entities[client->knifeHold];
 	if (!G_IsThrowingKnife(knife) || knife->timestamp != client->knifeHoldSpawn) {
 		client->knifeHold = ENTITYNUM_NONE;
-	} else if (level.time - knife->timestamp >= BG_USE_SPAWN_DELAY) {
+		return hinted;
+	}
+	*held = qtrue;
+	if (level.time - knife->timestamp >= BG_USE_SPAWN_DELAY) {
 		client->knifeHold = ENTITYNUM_NONE;
 		if (ps->stats[STAT_HEALTH] > 0 && ps->ammo[WP_THROWING_KNIFE] < client->knifeMax)
 			G_TakeKnife(player, knife);
@@ -700,12 +706,12 @@ BG_UpdateActivate.
 qboolean G_UseThink(gentity_t *player, usercmd_t *cmd) {
 	gclient_t *client = player->client;
 	qboolean sndUsable = G_SNDUsable(player);
-	qboolean knifeHinted;
+	qboolean knifeHinted, knifeHeld = qfalse;
 	G_SNDUse(player, cmd);
-	knifeHinted = !sndUsable && G_UseKnife(player, cmd);
-	if (sndUsable || knifeHinted) client->activate.hold = qfalse;
+	knifeHinted = !sndUsable && G_UseKnife(player, cmd, &knifeHeld);
+	if (sndUsable || knifeHeld) client->activate.hold = qfalse;
 	if (client->ps.pickupHeld == 3 &&
-		(sndUsable || knifeHinted || (client->activate.done && !client->activate.hold)))
+		(sndUsable || knifeHeld || (client->activate.done && !client->activate.hold)))
 		client->ps.pickupHeld = 2;
 	G_CommitWeaponPickup(player);
 	return sndUsable || knifeHinted;

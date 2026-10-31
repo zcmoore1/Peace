@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "g_local.h"
 
 #define	MISSILE_PRESTEP_TIME	50
+#define	THROWING_KNIFE_SUPPORT	4.635f	// MW2's resting support trace (0x731bd0)
 
 /*
 ================
@@ -272,61 +273,132 @@ static void ProximityMine_Player( gentity_t *mine, gentity_t *player ) {
 G_MissileImpact
 ================
 */
-static void SemtexHostAxis(gentity_t *host, vec3_t axis[3]) {
+static void G_HostAxis(gentity_t *host, vec3_t axis[3]) {
 	vec3_t angles;
 	VectorCopy(host->r.currentAngles, angles);
 	if (host->client) VectorSet(angles, 0, host->client->ps.viewangles[YAW], 0);
 	AnglesToAxis(angles, axis);
 }
 
-static void SemtexStick(gentity_t *ent, trace_t *trace, gentity_t *host) {
-	vec3_t origin, offset, axis[3];
+/*
+================
+G_CarryMissile
+
+The host carries a stopped missile from where it is now: its offset, surface
+normal (movedir) and facing are kept in the host's own axis, with the host's
+identity, so it rides only the host it was given.
+================
+*/
+static void G_CarryMissile(gentity_t *ent, gentity_t *host, const vec3_t forward) {
+	vec3_t offset, axis[3];
 	int i;
+	ent->enemy = host;
+	ent->hostFreeTime = host->freetime;
+	ent->hostSpawn = host->client ? host->client->ps.persistant[PERS_SPAWN_COUNT] : 0;
+	ent->hostConnect = host->client ? host->client->pers.enterTime : 0;
+	G_HostAxis(host, axis);
+	VectorSubtract(ent->r.currentOrigin, host->r.currentOrigin, offset);
+	for (i=0; i<3; i++) {
+		ent->pos1[i] = DotProduct(offset, axis[i]);
+		ent->pos2[i] = DotProduct(ent->movedir, axis[i]);
+		ent->hostForward[i] = DotProduct(forward, axis[i]);
+	}
+}
+
+/*
+================
+G_FollowHost
+
+Where a carried missile now is on its host, with its normal (movedir) and
+facing. Once that host is gone - freed, disconnected or respawned - it is let
+go and stays where it was last placed.
+================
+*/
+static qboolean G_FollowHost(gentity_t *ent, vec3_t origin, vec3_t forward) {
+	gentity_t *host = ent->enemy;
+	vec3_t axis[3];
+	int i;
+	if (!host) return qfalse;
+	if (!host->inuse || host->freetime != ent->hostFreeTime ||
+		(host->client && (host->client->pers.connected != CON_CONNECTED ||
+		host->client->ps.persistant[PERS_SPAWN_COUNT] != ent->hostSpawn ||
+		host->client->pers.enterTime != ent->hostConnect))) {
+		ent->enemy = NULL; // remain at last contact, never teleport to a respawn
+		return qfalse;
+	}
+	G_HostAxis(host, axis);
+	VectorCopy(host->r.currentOrigin, origin);
+	VectorClear(ent->movedir);
+	VectorClear(forward);
+	for (i=0; i<3; i++) {
+		VectorMA(origin, ent->pos1[i], axis[i], origin);
+		VectorMA(ent->movedir, ent->pos2[i], axis[i], ent->movedir);
+		VectorMA(forward, ent->hostForward[i], axis[i], forward);
+	}
+	return qtrue;
+}
+
+static void SemtexStick(gentity_t *ent, trace_t *trace, gentity_t *host) {
+	vec3_t origin;
 	VectorMA(trace->endpos, 1.0f, trace->plane.normal, origin);
 	G_SetOrigin(ent, origin);
 	VectorClear(ent->s.pos.trDelta);
 	VectorCopy(trace->plane.normal, ent->movedir);
 	vectoangles(ent->movedir, ent->s.angles);
 	ent->s.angles[PITCH] += 90;
-	if (host->inuse && (host->client || host->s.eType == ET_MOVER)) {
-		ent->enemy = host;
-		ent->semtexHostFreeTime = host->freetime;
-		ent->semtexHostSpawn = host->client ? host->client->ps.persistant[PERS_SPAWN_COUNT] : 0;
-		ent->semtexHostConnect = host->client ? host->client->pers.enterTime : 0;
-		SemtexHostAxis(host, axis);
-		VectorSubtract(origin, host->r.currentOrigin, offset);
-		for (i=0; i<3; i++) {
-			ent->pos1[i] = DotProduct(offset, axis[i]);
-			ent->pos2[i] = DotProduct(ent->movedir, axis[i]);
-		}
-	}
+	if (host->inuse && (host->client || host->s.eType == ET_MOVER))
+		G_CarryMissile(ent, host, ent->movedir);
 	// The fuse began on release, not contact. No impact damage or bounce.
 	trap_LinkEntity(ent);
 }
 
 static void SemtexFollow(gentity_t *ent) {
-	gentity_t *host = ent->enemy;
-	vec3_t origin, normal, axis[3];
-	int i;
-	if (!host) return;
-	if (!host->inuse || host->freetime != ent->semtexHostFreeTime ||
-		(host->client && (host->client->pers.connected != CON_CONNECTED ||
-		host->client->ps.persistant[PERS_SPAWN_COUNT] != ent->semtexHostSpawn ||
-		host->client->pers.enterTime != ent->semtexHostConnect))) {
-		ent->enemy = NULL; // remain at last contact, never teleport to a respawn
-		return;
-	}
-	SemtexHostAxis(host, axis);
-	VectorCopy(host->r.currentOrigin, origin);
-	VectorClear(normal);
-	for (i=0; i<3; i++) {
-		VectorMA(origin, ent->pos1[i], axis[i], origin);
-		VectorMA(normal, ent->pos2[i], axis[i], normal);
-	}
+	vec3_t origin, forward;
+	if (!G_FollowHost(ent, origin, forward)) return;
 	G_SetOrigin(ent, origin);
-	vectoangles(normal, ent->s.angles);
+	vectoangles(ent->movedir, ent->s.angles);
 	ent->s.angles[PITCH] += 90;
 	trap_LinkEntity(ent);
+}
+
+/*
+================
+ThrowingKnifePlace
+
+A stopped knife at origin, facing angles, with no velocity of its own: at rest
+(TR_STATIONARY), or re-placed on its carrier each frame (TR_INTERPOLATE, as
+MW2's 0x43B9D0 does).
+================
+*/
+static void ThrowingKnifePlace( gentity_t *ent, const vec3_t origin, const vec3_t angles, trType_t trType ) {
+	VectorCopy( origin, ent->s.pos.trBase );
+	VectorCopy( origin, ent->s.origin );
+	VectorCopy( origin, ent->r.currentOrigin );
+	VectorClear( ent->s.pos.trDelta );
+	ent->s.pos.trType = trType;
+	ent->s.pos.trTime = 0;
+	ent->s.pos.trDuration = 0;
+	VectorCopy( angles, ent->s.apos.trBase );
+	VectorCopy( angles, ent->s.angles );
+	VectorCopy( angles, ent->r.currentAngles );
+	VectorClear( ent->s.apos.trDelta );
+	ent->s.apos.trType = trType;
+	ent->s.apos.trTime = 0;
+	ent->s.apos.trDuration = 0;
+	trap_LinkEntity( ent );
+}
+
+/*
+================
+ThrowingKnifeLetGo
+
+The carrier lets go: the knife stays where it is, at rest on what it was in,
+and falls from there once nothing is behind it (ThrowingKnifeAtRest).
+================
+*/
+static void ThrowingKnifeLetGo( gentity_t *ent ) {
+	ent->enemy = NULL;
+	ThrowingKnifePlace( ent, ent->r.currentOrigin, ent->r.currentAngles, TR_STATIONARY );
 }
 
 /*
@@ -334,32 +406,39 @@ static void SemtexFollow(gentity_t *ent) {
 ThrowingKnifeImpact
 
 MW2's MissileImpact for the throwing knife ('Knife' stickiness). It hurts only
-above g_minGrenadeDamageSpeed. The hit velocity is reflected and scaled; the
-knife then sticks if it came in head-on (the reflection within ~45.6 degrees
-of the surface normal) or has settled on a floor, and otherwise bounces. It
-never sticks in a player here: it hits, then falls from there to rest. A
-stopped knife stays until it is picked back up.
+above g_minGrenadeDamageSpeed. A player it hits carries it (stickToPlayers):
+it is buried at the hit as MW2's bury branch does (0x5E53E0) and rides them,
+and their corpse after them. Off anything else the hit velocity is reflected
+and scaled; the knife then sticks if it came in head-on (the reflection within
+~45.6 degrees of the surface normal) or has settled on a floor, and otherwise
+bounces. A stopped knife stays until it is picked back up.
 ================
 */
 static void ThrowingKnifeImpact( gentity_t *ent, trace_t *trace, gentity_t *other ) {
-	vec3_t	velocity, bounced, origin;
+	vec3_t	velocity, dir, bounced, origin, angles, forward;
 	float	speed, dot;
 	int		hitTime = level.previousTime + ( level.time - level.previousTime ) * trace->fraction;
 
 	BG_EvaluateTrajectoryDelta( &ent->s.pos, hitTime, velocity );
 	if ( other->takedamage && VectorLength( velocity ) > BG_THROWING_KNIFE_HIT_SPEED ) {
-		G_Damage( other, ent, ent->parent ? ent->parent : ent, velocity, trace->endpos,
+		VectorCopy( velocity, dir );	// G_Damage normalizes its direction in place
+		G_Damage( other, ent, ent->parent ? ent->parent : ent, dir, trace->endpos,
 			ent->damage, 0, ent->methodOfDeath );
 	}
+	VectorCopy( trace->plane.normal, ent->movedir );
+	ent->restNum = trace->entityNum;
 	if ( other->client ) {
-		// drop from the hit, passing through the one it hit
-		ent->target_ent = other;
-		VectorCopy( trace->endpos, ent->s.pos.trBase );
-		VectorClear( ent->s.pos.trDelta );
-		ent->s.pos.trType = TR_GRAVITY;
-		ent->s.pos.trTime = level.time;
-		VectorCopy( trace->endpos, ent->r.currentOrigin );
-		trap_LinkEntity( ent );
+		// buried: pitched in by the surface, 1.5 in and 4.5 back along itself
+		BG_EvaluateTrajectory( &ent->s.apos, hitTime, angles );
+		angles[PITCH] = RAD2DEG( atan2( trace->plane.normal[2], sqrt( trace->plane.normal[0] * trace->plane.normal[0] +
+			trace->plane.normal[1] * trace->plane.normal[1] ) ) ) + random() * 30 - 15;
+		AngleVectors( angles, forward, NULL, NULL );
+		VectorMA( trace->endpos, -1.5f, trace->plane.normal, origin );
+		VectorMA( origin, -4.5f, forward, origin );
+		ThrowingKnifePlace( ent, origin, angles, TR_INTERPOLATE );
+		G_CarryMissile( ent, other, forward );
+		ent->nextthink = 0;
+		ent->think = 0;
 		return;
 	}
 	dot = DotProduct( velocity, trace->plane.normal );
@@ -369,24 +448,71 @@ static void ThrowingKnifeImpact( gentity_t *ent, trace_t *trace, gentity_t *othe
 	if ( ( trace->plane.normal[2] > BG_THROWING_KNIFE_FLOOR_Z && speed < BG_THROWING_KNIFE_REST_SPEED ) ||
 	     ( speed > 0 && DotProduct( trace->plane.normal, bounced ) / speed > BG_THROWING_KNIFE_STICK_DOT ) ) {
 		VectorMA( trace->endpos, 1.0f, trace->plane.normal, origin );
-		G_SetOrigin( ent, origin );
-		vectoangles( velocity, ent->s.angles );		// buried along the throw
-		VectorCopy( ent->s.angles, ent->s.apos.trBase );
-		VectorCopy( ent->s.angles, ent->r.currentAngles );
-		VectorClear( ent->s.apos.trDelta );
-		ent->s.apos.trType = TR_STATIONARY;
-		ent->s.apos.trTime = 0;
+		vectoangles( velocity, angles );		// buried along the throw
+		ThrowingKnifePlace( ent, origin, angles, TR_STATIONARY );
 		ent->nextthink = 0;
 		ent->think = 0;
-		ent->target_ent = NULL;
-		trap_LinkEntity( ent );
 		return;
 	}
 	VectorCopy( bounced, ent->s.pos.trDelta );
 	VectorMA( trace->endpos, 0.1f, trace->plane.normal, ent->r.currentOrigin );
 	VectorCopy( ent->r.currentOrigin, ent->s.pos.trBase );
 	ent->s.pos.trTime = level.time;
-	G_AddEvent( ent, EV_GRENADE_BOUNCE, 0 );
+	// MW2 sends no impact event for a trace that started in solid (5e65f1)
+	if ( !trace->startsolid ) G_AddEvent( ent, EV_GRENADE_BOUNCE, 0 );
+}
+
+/*
+================
+ThrowingKnifeAtRest
+
+A stopped knife, each frame (MW2's G_RunMissile 0x5E8BE0, 5e8c64-5e8d48). One
+carried by a player or corpse is re-placed on it. Any other stays where it is
+unless it rests on something other than the world with nothing
+THROWING_KNIFE_SUPPORT behind it - a mover that moved off, a corpse that sank
+or was reused, a carrier that let go - and then it falls from there. Nothing
+it touches moves it. The thrower is never in the way.
+================
+*/
+static qboolean ThrowingKnifeAtRest( gentity_t *ent ) {
+	vec3_t	origin, forward, angles, end;
+	trace_t	tr;
+	if ( G_FollowHost( ent, origin, forward ) ) {
+		vectoangles( forward, angles );
+		ThrowingKnifePlace( ent, origin, angles, TR_INTERPOLATE );
+		return qtrue;
+	}
+	if ( ent->s.pos.trType != TR_STATIONARY ) ThrowingKnifeLetGo( ent );
+	if ( ent->restNum == ENTITYNUM_WORLD ) return qtrue;
+	VectorMA( ent->r.currentOrigin, -THROWING_KNIFE_SUPPORT, ent->movedir, end );
+	trap_Trace( &tr, ent->r.currentOrigin, ent->r.mins, ent->r.maxs, end, ent->r.ownerNum, ent->clipmask );
+	if ( tr.fraction != 1 ) return qtrue;
+	ent->s.pos.trType = TR_GRAVITY;
+	ent->s.pos.trTime = level.time;
+	return qfalse;
+}
+
+/*
+================
+G_MoveCarriedMissiles
+
+MW2's ClonePlayer (0x5DE520) and the body queue's reuse: every throwing knife
+from carries moves, where it is, to to - the corpse - or with no to is let go.
+A Semtex keeps its own rule and stays at its last contact.
+================
+*/
+void G_MoveCarriedMissiles( gentity_t *from, gentity_t *to ) {
+	vec3_t	origin, forward, angles;
+	int		i;
+	for ( i = MAX_CLIENTS; i < level.num_entities; i++ ) {
+		gentity_t *knife = &g_entities[i];
+		if ( !knife->inuse || knife->s.eType != ET_MISSILE || knife->s.weapon != WP_THROWING_KNIFE ||
+			knife->enemy != from || !G_FollowHost( knife, origin, forward ) ) continue;
+		vectoangles( forward, angles );
+		ThrowingKnifePlace( knife, origin, angles, TR_INTERPOLATE );
+		if ( to ) G_CarryMissile( knife, to, forward );
+		else ThrowingKnifeLetGo( knife );
+	}
 }
 
 void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
@@ -584,8 +710,8 @@ void G_RunMissile( gentity_t *ent ) {
 		G_RunThink(ent);
 		return;
 	}
-	if (ent->s.weapon == WP_THROWING_KNIFE && ent->s.pos.trType == TR_STATIONARY) {
-		G_RunThink(ent);	// stopped: no longer a missile, nothing it touches moves it
+	if (ent->s.weapon == WP_THROWING_KNIFE && ent->s.pos.trType != TR_GRAVITY && ThrowingKnifeAtRest(ent)) {
+		G_RunThink(ent);
 		return;
 	}
 

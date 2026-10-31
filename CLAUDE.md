@@ -17,21 +17,20 @@ When a pull is also needed, put `git pull origin <branch>` between the two lines
 
 ## Branches
 
-- `dev` — **the development branch.** Work here and pull from here. It is
-  `dev-gpt-usereload` (MW2 use/reload, movement, quick actions, throwing knife
-  and sea lion, GPT's class menus, perks, attachments and M300, S&D, ladders,
-  Semtex) plus the standalone boot check and the generated maps from the older
-  branches below.
-- `dev-gpt-usereload` — where `dev` started; same history, kept until retired.
-- History only, all contained in `dev`: `dev1` (hipfire spread, dynamic
-  crosshair), `dev2` (NAC via a one-frame state, superseded), `dev2-standalone`
-  (the `fs_checkPak0` skip, now in `dev`), `dev3` (NAC on notetracks), `dev3b`
-  (two-weapon loadout, quick actions, classes), `gptbranch`, `dev-3b-gpt`,
-  `dev-gpt`, `feature/nested-class-menu`, `integration/usereload-class-menu`.
-- Superseded, not merged: `dev-claude` (an earlier S&D; its `peace_sd` map was
-  regenerated for `g_snd.c` in `dev`) and the early `claude/*` prototypes (the
-  `dm_outpost` source and map tools from `claude/quake3-mod-maps-67wm8k` are in
-  `dev`).
+- `dev` — **the development branch.** Work here and pull from here. It grew
+  out of `dev-gpt-usereload` (MW2 use/reload, movement, quick actions, throwing
+  knife and sea lion, GPT's class menus, perks, attachments and M300, S&D,
+  ladders, Semtex) and took in the standalone boot check and the generated maps
+  from the older branches.
+- Merged into `dev` and deleted (their history is all in `dev`): `dev1`,
+  `dev2`, `dev3`, `dev3b`, `gptbranch`, `dev-3b-gpt`, `dev-gpt`,
+  `dev-gpt-usereload`, `feature/nested-class-menu`,
+  `integration/usereload-class-menu`.
+- Kept as history, superseded: `dev2-standalone` (its `fs_checkPak0` skip is in
+  `dev`), `dev-claude` (an earlier S&D; its `peace_sd` map was regenerated for
+  `g_snd.c` in `dev`) and the early `claude/*` prototypes (the `dm_outpost`
+  source and map tools from `claude/quake3-mod-maps-67wm8k` are in `dev`).
+  `main` is still the initial commit.
 
 ## Config files
 

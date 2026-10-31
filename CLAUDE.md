@@ -22,7 +22,7 @@ When a pull is also needed, put `git pull origin <branch>` between the two lines
   knife and sea lion, GPT's class menus, perks, attachments and M300, S&D,
   ladders, Semtex) and took in the standalone boot check and the generated maps
   from the older branches.
-- Merged into `dev` and deleted (their history is all in `dev`): `dev1`,
+- Merged into `dev` and retired, safe to delete (their history is all in `dev`): `dev1`,
   `dev2`, `dev3`, `dev3b`, `gptbranch`, `dev-3b-gpt`, `dev-gpt`,
   `dev-gpt-usereload`, `feature/nested-class-menu`,
   `integration/usereload-class-menu`.

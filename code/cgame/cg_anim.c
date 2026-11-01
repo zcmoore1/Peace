@@ -298,6 +298,8 @@ static void CG_WeapAnim_ReanchorDrop(const playerState_t *ps, animLayer_t *move,
 // The picture travels back along the clip it was showing - up the draw, or back
 // up the drop - instead of cutting to idle. It eases in and out, and takes the
 // time that stretch of clip would naturally take, capped at MOVE_RETURN_MS.
+// Sprint posture is already eased in the authored clip. Once gameplay is
+// ready, retrace it at twice its ordinary exit rate without easing it again.
 static qboolean CG_WeapAnim_BeginReturn(const weapAnimDef_t *def, const playerState_t *ps, animLayer_t *move) {
 	float len = CG_WeapAnim_ClipLength(def, move->clip);
 	float from = move->time, natural;
@@ -315,14 +317,16 @@ static qboolean CG_WeapAnim_BeginReturn(const weapAnimDef_t *def, const playerSt
 		natural = (len - from) / len * BG_WeaponDrawTime(ps);
 	} else if (move->clip == WANIM_SPRINT_IN) {
 		move->returnTo = 0.0f;
-		natural = from / len * BG_WeaponSprintOutTime(ps->weapon);
+		natural = from / len * BG_WeaponSprintOutTime(ps->weapon) * .5f;
 	} else if (move->clip == WANIM_SPRINT_OUT) {
 		move->returnTo = len;
-		natural = (len - from) / len * BG_WeaponSprintOutTime(ps->weapon);
+		natural = (len - from) / len * BG_WeaponSprintOutTime(ps->weapon) * .5f;
 	} else {
 		return qfalse;
 	}
-	if (natural < 1.0f) return qfalse;	// already at rest: an ordinary release
+	// Even a transition cancelled at its ready endpoint transfers ownership.
+	// Otherwise the released retained layer would advance away during its fade.
+	if (natural < 1.0f) natural = 1.0f;
 	move->returnFrom = from;
 	move->returnTime = 0.0f;
 	move->returnLength = natural < MOVE_RETURN_MS ? natural : MOVE_RETURN_MS;
@@ -623,7 +627,10 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 		move->returnTime += (float)msec;
 		s = move->returnLength > 0.0f ? move->returnTime / move->returnLength : 1.0f;
 		if ( s > 1.0f ) s = 1.0f;
-		eased = s * s * ( 3.0f - 2.0f * s );	// smoothstep: no jolt at either end
+		// The sprint clip already eases its pose. Easing its clock as well
+		// holds near the carry before rushing home, especially at its endpoint.
+		eased = move->clip == WANIM_SPRINT_IN || move->clip == WANIM_SPRINT_OUT ?
+			s : s * s * ( 3.0f - 2.0f * s );
 		move->time = move->returnFrom + ( move->returnTo - move->returnFrom ) * eased;
 		if ( s >= 1.0f ) {
 			// Home: hand back to idle with the same short crossfade a draw ends on.

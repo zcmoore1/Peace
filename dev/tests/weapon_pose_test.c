@@ -750,6 +750,69 @@ static void TestSprintFlow(weapAnimDef_t *def) {
  nativePose=qfalse;
 }
 
+/* A cancelled sprint transition must visibly leave the carry promptly. The
+ * old double-eased, full sprint-out return barely moved in its first 40ms.
+ * Measure the actual shipped gun pose in both rendering paths, not only a
+ * decreasing clip clock. Gameplay remains ready throughout the visual return. */
+static float GunRotationDistance(const modelPose_t *a,const modelPose_t *b) {
+ float same=0,opposite=0;int k;
+ for(k=0;k<4;k++) {
+  float x=a->joints[0].rotate[k],y=b->joints[0].rotate[k];
+  same+=(x-y)*(x-y);opposite+=(x+y)*(x+y);
+ }
+ return sqrtf(same<opposite ? same : opposite);
+}
+static void TestSprintReturnResponse(weapAnimDef_t *def,int weapon,const char *path) {
+ playerState_t ps;
+ modelPose_t before,after,home;
+ int native,exiting,t;
+ float distance,remaining;
+ LoadAuthoredPoses(path);
+ for(native=0;native<2;native++)for(exiting=0;exiting<2;exiting++) {
+  nativePose=native;Ready(&ps,weapon);
+  ps.pm_flags=PMF_SPRINTING;ps.weaponstate=WEAPON_SPRINT_IN;
+  ps.weaponTime=BG_WeaponSprintInTime(weapon);Picture(&ps,0,&before);
+  ps.weaponTime=0;Picture(&ps,BG_WeaponSprintInTime(weapon),&before);
+  if(exiting) {
+   ps.pm_flags=0;ps.weaponstate=WEAPON_SPRINT_OUT;
+   ps.weaponTime=BG_WeaponSprintOutTime(weapon);Picture(&ps,0,&before);
+  }
+  ps.weaponstate=WEAPON_DROPPING;ps.weaponTime=BG_WeaponDropTime(weapon);
+  Picture(&ps,0,&before);CHECK(CG_WeapAnim_HoldsDrop());
+  ps.pm_flags=0;ps.weaponstate=WEAPON_READY;ps.weaponTime=0;
+  Picture(&ps,0,&after);CHECK(PoseDistance(&before,&after)<.001f);
+  home=authored[def->clips[WANIM_SPRINT_IN].firstFrame];
+  distance=GunRotationDistance(&before,&home);
+  CHECK(distance>.1f);
+  for(t=0;t<40;t+=8)Picture(&ps,8,&after);
+  remaining=GunRotationDistance(&after,&home);
+  if(remaining>=distance*.9f)fprintf(stderr,"sprint response: gun %d native %d exit %d distance %.3f remaining %.3f clip %d time %.3f return %.3f/%.3f\n",
+   weapon,native,exiting,distance,remaining,cg_weapLayers[LAYER_MOVE].clip,cg_weapLayers[LAYER_MOVE].time,
+   cg_weapLayers[LAYER_MOVE].returnTime,cg_weapLayers[LAYER_MOVE].returnLength);
+  CHECK(remaining<distance*.9f);
+  for(;t<144;t+=8)Picture(&ps,8,&after);
+  CHECK(GunRotationDistance(&after,&home)<distance*.03f); /* allow idle breathing */
+  CHECK(cg_weapLayers[LAYER_MOVE].fit==MOVE_FIT_NONE);
+  CHECK(ps.weaponstate==WEAPON_READY && ps.weaponTime==0);
+ }
+ /* If both presses arrive before the entry visibly moves, releasing its
+  * ownership must not start that entry while fading it out over ready. */
+ for(native=0;native<2;native++) {
+  nativePose=native;Ready(&ps,weapon);
+  ps.pm_flags=PMF_SPRINTING;ps.weaponstate=WEAPON_SPRINT_IN;
+  ps.weaponTime=BG_WeaponSprintInTime(weapon);Picture(&ps,0,&home);
+  ps.weaponstate=WEAPON_DROPPING;ps.weaponTime=BG_WeaponDropTime(weapon);
+  Picture(&ps,0,&before);CHECK(CG_WeapAnim_HoldsDrop());
+  ps.pm_flags=0;ps.weaponstate=WEAPON_READY;ps.weaponTime=0;
+  Picture(&ps,0,&after);
+  for(t=0;t<80;t+=8) {
+   Picture(&ps,8,&after);
+   CHECK(GunRotationDistance(&after,&home)<.015f);
+  }
+ }
+ nativePose=qfalse;
+}
+
 /* A real floor and full Pmove keep landing in the sequence. A presentation
  * restart must depend on the picture still visible, never on old layer clocks
  * left behind by an airborne holster. */
@@ -1010,12 +1073,14 @@ int main(void) {
  TestRestampLower(def,WP_SHOTGUN); TestRetainedKeptHolster(); TestSnapshotRestamp(def);
  TestShortDropKept();
  TestSprintFlow(def);
+ TestSprintReturnResponse(def,WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm");
  TestSprintReentry(def);
  TestPictureContinuity(def,WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm");
  CG_WeapAnim_RegisterClips(WP_M40A3,2,"assets/baseq3/models/weapons2/m40a3/view.cfg");
  def=&bg_weapAnimDefs[WP_M40A3];
  TestRestampLower(def,WP_M40A3);
  TestSprint(def,WP_M40A3); TestFirstDraw(def,WP_M40A3);
+ TestSprintReturnResponse(def,WP_M40A3,"assets/baseq3/models/weapons2/m40a3/view.iqm");
  TestReloadPerk(def,WP_M40A3);
  TestOwnership(def); TestExclusions(def);
  TestPictureContinuity(def,WP_M40A3,"assets/baseq3/models/weapons2/m40a3/view.iqm");

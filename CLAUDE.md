@@ -94,8 +94,9 @@ source for MW2 behaviour; the owner rejects it.
 - **Sprint cancellation returns along the visible transition.** Sprint, Y,
   end the sprint (it latches: a fresh press, aim, letting go of forward), Y
   transfers the retained sprint entry/exit into the existing move-layer
-  return. It travels from its current pose toward ready with the ordinary
-  sprint-out timing and return cap; it does not keep advancing away while
+  return. It retraces the authored easing at twice the ordinary sprint-out
+  rate (125ms SPAS / 130ms M300 for a full return), without easing the clock
+  a second time; it does not keep advancing away while
   fading to idle. The ready endpoint stays fixed throughout that fade. A new
   sprint may inherit only a posture that is still visible (including a
   move-layer return), never a hidden layer's old clock. A sprint still running

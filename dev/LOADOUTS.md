@@ -130,7 +130,11 @@ On cancellation a retained draw/drop or sprint transition returns along its
 visible clip. A swap does not end a sprint (a sprint latches, as in MW2), so
 its entry resumes without jumping back to frame zero. Sprint, Y, end the
 sprint (a fresh sprint press, aim, letting go of forward), Y retraces the
-partial entry toward ready through the same move-layer return. Firing owns
+partial entry toward ready through the same move-layer return. Sprint entry
+and exit retrace their authored easing at twice the ordinary exit rate
+(a full return takes 125ms for SPAS, 130ms for M300). They do not ease the
+clock a second time, which previously made the start nearly motionless.
+This is only visual travel after gameplay has already become ready. Firing owns
 the picture immediately once gameplay permits it. The blend never changes a
 busy timer, ammunition or chamber debt.
 

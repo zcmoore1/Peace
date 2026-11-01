@@ -123,9 +123,41 @@ def holster_clip(draw):
 
 def sprint_clips(nodes, idle, recipe):
     pivot = recipe["pivot"]
+    stowed = recipe.get("stowed_offsets", {})
+    assert all(any(name == key and parent >= 0 for name, parent in nodes) for key in stowed)
     pitch, yaw, roll = map(math.radians, recipe["pitch_yaw_roll"])
     carry = euler(roll, pitch, yaw)
     angle = math.acos(min(1, max(-1, carry[3])))
+
+    def turn_forearms(frame, fraction):
+        # Swing an elbow around its wrist, then compensate the wrist's local
+        # transform. The hand/fingers keep exactly the same world-space grip.
+        # This is authored pose data, not a runtime IK or gameplay rule.
+        indices = {name: i for i, (name, _) in enumerate(nodes)}
+        for adjustment in recipe.get("forearm_turns", []):
+            arm, hand = (indices[adjustment[key]] for key in ("forearm", "hand"))
+            assert nodes[hand][1] == arm and nodes[arm][1] >= 0
+            world = []
+            for (_, parent), c in zip(nodes, frame):
+                if parent < 0:
+                    world.append((c[:3], c[3:7]))
+                else:
+                    p, q = world[parent]
+                    world.append((tuple(a+b for a, b in zip(p, rotate(q, c[:3]))), mul(q, c[3:7])))
+            wrist, wrist_q = world[hand]
+            elbow, elbow_q = world[arm]
+            pitch, yaw, roll = [math.radians(v)*fraction for v in adjustment["pitch_yaw_roll"]]
+            turn = euler(roll, pitch, yaw)
+            elbow = tuple(a+b for a, b in zip(wrist, rotate(turn, tuple(a-b for a, b in zip(elbow, wrist)))))
+            elbow_q = unit(mul(turn, elbow_q))
+            for index, position, rotation, parent in (
+                    (arm, elbow, elbow_q, world[nodes[arm][1]]),
+                    (hand, wrist, wrist_q, (elbow, elbow_q))):
+                p, q = parent
+                inverse = (-q[0], -q[1], -q[2], q[3])
+                local = rotate(inverse, tuple(a-b for a, b in zip(position, p)))
+                frame[index] = (*local, *unit(mul(inverse, rotation)), *frame[index][7:])
+        return frame
 
     def pose(fraction, phase=0):
         # Quaternion interpolation keeps the gun and both hands as one rig.
@@ -139,14 +171,18 @@ def sprint_clips(nodes, idle, recipe):
         offset = [pivot[k]-rp[k]+f*recipe["offset"][k]+recipe["bob"][k]*wave
                   for k in range(3)]
         result = []
-        for (_, parent), c in zip(nodes, idle):
+        for (name, parent), c in zip(nodes, idle):
             if parent >= 0:
-                result.append(c)  # preserve every finger/grip and mechanical joint
+                # The loose reload shell and its holder normally sit behind
+                # the eye. Keep them behind the gun as it turns across the
+                # view; the hands and working gun joints retain their grip.
+                delta = stowed.get(name, (0, 0, 0))
+                result.append((*[c[k]+f*delta[k] for k in range(3)], *c[3:]))
             else:
                 p = rotate(q, c[:3])
                 result.append((*[p[k]+offset[k] for k in range(3)],
                                *unit(mul(q, c[3:7])), *c[7:10]))
-        return result
+        return turn_forearms(result, f)
 
     result = []
     for name, duration in zip(SPRINT_NAMES, (recipe["in_ms"], recipe["loop_ms"], recipe["out_ms"])):

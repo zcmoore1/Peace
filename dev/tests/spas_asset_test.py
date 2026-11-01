@@ -114,6 +114,48 @@ steps = [difference(a, b) for a, b in zip(carry, carry[1:])]
 assert difference(carry[-1], carry[0]) <= max(steps)*1.05, "Carry loop seam pops"
 
 roots = [i for i, p in enumerate(poses) if p[0] < 0]
+joint_ids = {name(struct.unpack_from("<I", data, h[14]+48*i)[0]): i for i in range(h[13])}
+stowed = {joint_ids[n] for n in ("Shell", "Holder")}
+reposed = {joint_ids[n] for n in ("Left_L_Arm", "Left_Hand")}
+
+
+def qmul(a, b):
+    x, y, z, w = a
+    X, Y, Z, W = b
+    return (w*X+x*W+y*Z-z*Y, w*Y-x*Z+y*W+z*X,
+            w*Z+x*Y-y*X+z*W, w*W-x*X-y*Y-z*Z)
+
+
+def inverse(q):
+    length = sum(x*x for x in q)
+    return (-q[0]/length, -q[1]/length, -q[2]/length, q[3]/length)
+
+
+def rotated(q, p):
+    return qmul(qmul(q, (*p, 0)), inverse(q))[:3]
+
+
+def grips(frame):
+    world = []
+    for pose, c in zip(poses, frame):
+        if pose[0] < 0:
+            world.append((c[:3], c[3:7]))
+        else:
+            p, q = world[pose[0]]
+            world.append((tuple(a+b for a, b in zip(p, rotated(q, c[:3]))), qmul(q, c[3:7])))
+    p, q = world[joint_ids["Base"]]
+    result = []
+    for label in ("Left_Hand", "Right_Hand"):
+        hand, rotation = world[joint_ids[label]]
+        local = rotated(inverse(q), tuple(a-b for a, b in zip(hand, p)))
+        rotation = qmul(inverse(q), rotation)
+        if rotation[3] < 0:
+            rotation = tuple(-x for x in rotation)
+        result.append((*local, *rotation))
+    return result
+
+
+idle_grips = grips(idle)
 
 # The synthetic holster preserves the draw's endpoints but should visibly
 # depart from ready during a quick cancellation. Compare actual shipped
@@ -144,10 +186,15 @@ for fraction in (1/16, 1/10):
     assert departure < full_departure*.25, "Quick YY makes an oversized holster movement"
 
 for frame in entry+carry+leave:
-    # Child locals (fingers, pump, shell, attachments) must keep their grip.
+    # Fingers, pump and attachments keep their locals. The loose reload props
+    # move behind the gun, and the trigger-side forearm bends around the wrist.
     for i, p in enumerate(poses):
         if p[0] >= 0:
-            assert max(abs(x-y) for x, y in zip(idle[i], frame[i])) < .0001
+            start = 7 if i in reposed else (3 if i in stowed else 0)
+            assert max(abs(x-y) for x, y in zip(idle[i][start:], frame[i][start:])) < .0001
+    # Compensating the wrist must preserve BOTH complete grips relative to the
+    # gun, including rotation, despite the changed forearm-local transforms.
+    assert difference(idle_grips, grips(frame)) < .005, "Sprint moves a hand off its grip"
     # All independent hand/gun roots undergo the same rigid motion. Their
     # mutual distances must remain unchanged after export/quantization.
     for a in roots:

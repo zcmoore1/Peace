@@ -24,7 +24,9 @@
 - For the sprint glide: start sprint and press Y quickly, end the sprint (a
   sprint latches, as in MW2: tap sprint again, aim, or let go of forward),
   then press Y again. The visible sprint entry retraces its motion toward
-  ready using the existing transition return. Sprint exit is continuous too.
+  ready using the existing transition return, at twice the ordinary exit
+  rate (at most 125ms of travel). It uses the authored easing once, so it
+  begins returning promptly. Sprint exit is continuous too.
   Gameplay is ready immediately; firing takes over the picture at once.
 - Sprint can begin or continue in the air, as in MW2. Its entry/carry/exit
   animations use the same weapon states as on the ground. Holding jump ends a
@@ -85,8 +87,11 @@ Sprint now has three distinct clips: a **200ms sprint-in transition**, a
 **600ms repeating carry loop**, and a **250ms sprint-out**. Both hands keep
 their existing grip as the shotgun turns into a low, horizontal carry across
 the body, muzzle to the left. Vertical running bounce dominates the loop;
-small lateral sway and roll keep it from looking rigid. The framing keeps
-the arm ends outside the view. This is original animation on the supplied
+small lateral sway and roll keep it from looking rigid. The carry is centered
+across the lower view. The trigger-side elbow turns around the wrist while
+the hand keeps its grip; the loose reload shell/holder stays behind the gun.
+This keeps the arm ends and spare shell out of view without pushing the entire
+weapon to the right. This is original animation on the supplied
 rig, taking its direction from the requested MW2 SPAS/Intervention carry.
 
 Entry and exit follow the existing predicted weapon timers. A short sprint

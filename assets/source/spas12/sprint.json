@@ -5,8 +5,10 @@
   "loop_ms": 600,
   "fps": 60,
   "pivot": [6.0, -2.7, -4.5],
-  "offset": [6.0, -12.0, -3.0],
-  "pitch_yaw_roll": [6.0, 70.0, 40.0],
+  "offset": [8.0, -2.7, -1.5],
+  "pitch_yaw_roll": [6.0, 70.0, -10.0],
+  "stowed_offsets": {"Shell": [-24.0, 0.0, 0.0], "Holder": [-24.0, 0.0, 0.0]},
+  "forearm_turns": [{"forearm": "Left_L_Arm", "hand": "Left_Hand", "pitch_yaw_roll": [135.0, 0.0, 0.0]}],
   "bob": [0.08, 0.12, 0.85],
   "sway_pitch_yaw_roll": [0.35, 0.45, 0.65]
 }

@@ -15,6 +15,11 @@ item's model in `bg_misc.c` and the missile model in `cg_weapons.c`.
 - **Hold and throw.** The knife stays raised while the lethal button is held
   and is thrown on release, as the Semtex is. A tap throws on the first command
   after the pull. The knife is spent at the throw, not at the press.
+- **Cancel.** As with the Semtex, Y while the knife is held, before the
+  release, sends it back to the gun on the gun's quick raise with nothing thrown
+  or spent (`BG_OffhandHeldToThrow`: MW2's holdButtonToThrow and
+  offhandHoldIsCancelable, the owner's choice). Pulled again in that raise it
+  comes straight out. A Y after the throw only queues the swap.
 - **Recovery** is the ONE quick-action recovery: `BG_QUICK_ACTION_HOLD`, the
   rapid drop, then the gun's quick raise (OFFHAND_END). From an empty hand it
   goes back to an empty hand. With no knives left, `BG_LethalWeapon` falls back

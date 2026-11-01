@@ -3181,7 +3181,7 @@ static void PM_UpdateWeaponAction( void ) {
 			}
 		}
 		if (swapPressed && !(action & WA_FIRED) && (action & WA_TYPE_MASK) == WA_LETHAL &&
-			BG_LethalWeapon(pm->ps) == WP_SEMTEX) {
+			BG_OffhandHeldToThrow(BG_LethalWeapon(pm->ps))) {
 			// Equipment never changes the active slot. Do not refund a throw
 			// already emitted. Use the same gun raise as the melee return, and
 			// the same recovery: the latch holds until that gun is fully drawn.
@@ -3893,7 +3893,7 @@ static void PM_Weapon( void ) {
 
 	// A quick action fires once from its own button, never from the trigger.
 	// Release-to-throw. A short tap stays queued through holster and deploy.
-	if ((pm->ps->weapon == WP_SEMTEX || pm->ps->weapon == WP_THROWING_KNIFE) &&
+	if (BG_OffhandHeldToThrow(pm->ps->weapon) &&
 		(pm->cmd.buttons & BUTTON_LETHAL)) return;	// held: raised until it is let go
 	if ( BG_IsActionWeapon( pm->ps->weapon ) &&
 		(PM_ActionWeapon() != pm->ps->weapon || (pm->ps->weaponAction & WA_FIRED)) ) {

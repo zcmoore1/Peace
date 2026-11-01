@@ -612,7 +612,7 @@ crashes on spawn: `CG_RegisterWeapon` calls `CG_Error`, and `BG_FindItemForWeapo
 calls `Com_Error`. This has already caused one map-load crash. Also check every
 `MAX_WEAPONS` table in `bg_pmove.c` — they are positional.
 
-Semtex: pre-release Y cancels to the same gun using its melee-return raise.
+Semtex and the throwing knife (`BG_OffhandHeldToThrow`): pre-release Y cancels to the same gun using its melee-return raise.
 Post-release Y queues a normal slot swap behind throw and original-gun recovery,
 as every quick action now does.
 Never treat an emitted throw as a cancellable equip or reset queued selection

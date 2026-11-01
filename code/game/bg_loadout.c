@@ -100,6 +100,14 @@ qboolean BG_OffhandPreparesAtOnce( int weapon ) {
 	return weapon == WP_THROWING_KNIFE;
 }
 
+// MW2's holdButtonToThrow and offhandHoldIsCancelable (weapon data, the owner's
+// choice): the Semtex and the throwing knife stay raised while the lethal button
+// is held, are thrown on its release, and a Y before that release cancels them
+// back to the gun with nothing spent.
+qboolean BG_OffhandHeldToThrow( int weapon ) {
+	return weapon == WP_SEMTEX || weapon == WP_THROWING_KNIFE;
+}
+
 qboolean BG_IsActionWeapon( int weapon ) {
 	return weapon == WP_KNIFE || weapon == WP_FRAG ||
 		weapon == WP_FLASH || weapon == WP_SEMTEX || weapon == WP_THROWING_KNIFE;

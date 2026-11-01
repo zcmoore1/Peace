@@ -848,6 +848,40 @@ static void TestThrowingKnife(void) {
   else CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_DROPPING &&
    ps.weaponTime==BG_WeaponQuickDropTime(WP_SHOTGUN));
  }
+ /* Cancelled like the Semtex: Y while it is held, before the release, sends it
+  * back to the gun on the gun's quick raise with nothing thrown or spent - on
+  * the press, mid-pull or held long - and from the quick raise it comes straight
+  * out again, over and over. A Y after the throw only queues the swap. */
+ {
+  const int when[3]={0,BG_THROWING_KNIFE_PULL_MS/2,BG_THROWING_KNIFE_PULL_MS*4};
+  for(i=0;i<3;i++) {
+   int n;
+   KnifeReady(1,0);
+   move.cmd.buttons=BUTTON_LETHAL; Step(1); Run(when[i]);
+   CHECK(ps.weapon==WP_THROWING_KNIFE);
+   for(n=0;n<5;n++) {
+    move.cmd.buttons=BUTTON_LETHAL|BUTTON_WEAPON_SWAP; Step(1); move.cmd.buttons=0; Step(1);
+    CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);
+    CHECK((ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==(WA_LETHAL|WA_FIRED));
+    CHECK(ps.weaponTime==BG_WeaponQuickRaiseTime(WP_SHOTGUN)-1);
+    CHECK(ps.ammo[WP_THROWING_KNIFE]==1 && !fired[WP_THROWING_KNIFE] && ps.stats[STAT_ACTIVE_SLOT]==SLOT_PRIMARY);
+    Run(BG_WeaponQuickRaiseTime(WP_SHOTGUN)/3);
+    move.cmd.buttons=BUTTON_LETHAL; Step(1);
+    CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_RAISING);
+   }
+   move.cmd.buttons=0; Step(1);
+   for(t=0;t<12000 && !fired[WP_THROWING_KNIFE];t++) Step(1);
+   CHECK(fired[WP_THROWING_KNIFE]==1 && ps.ammo[WP_THROWING_KNIFE]==0);
+  }
+  KnifeReady(1,0);
+  move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0; Step(1);
+  for(t=0;t<12000 && !fired[WP_THROWING_KNIFE];t++) Step(1);
+  move.cmd.weapon=WP_MACHINEGUN; move.cmd.buttons=BUTTON_WEAPON_SWAP; Step(1); move.cmd.buttons=0;
+  CHECK(ps.weapon==WP_THROWING_KNIFE && fired[WP_THROWING_KNIFE]==1 && ps.ammo[WP_THROWING_KNIFE]==0);
+  for(t=0;t<12000 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+  CHECK(ps.weapon==WP_SHOTGUN && !(ps.weaponAction&WA_RETURNING));
+  move.cmd.weapon=WP_SHOTGUN;
+ }
  /* the class menu and validation accept it as the lethal */
  { bg_class_t cl=*BG_Class(0); char text[256];
    cl.lethal=WP_THROWING_KNIFE; cl.lethalCount=1; CHECK(BG_ValidateClass(&cl));

@@ -1785,7 +1785,8 @@ void CG_NextWeapon_f( void ) {
 
 	ps = &cg.predictedPlayerState;
 	trap_SendConsoleCommand("_peaceWeaponSwap\n");
-	if (!(ps->weaponAction & WA_FIRED) && (ps->weaponAction & WA_TYPE_MASK) == WA_LETHAL && BG_LethalWeapon(ps) == WP_SEMTEX) {
+	if (!(ps->weaponAction & WA_FIRED) && (ps->weaponAction & WA_TYPE_MASK) == WA_LETHAL &&
+		BG_OffhandHeldToThrow(BG_LethalWeapon(ps))) {
 		cg.weaponSelectSlot = ps->stats[STAT_ACTIVE_SLOT];
 		cg.weaponSelect = BG_ActiveSlotWeapon(ps);
 		cg.weaponSelectTime = cg.time;

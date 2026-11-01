@@ -555,6 +555,7 @@ int BG_SlotCommand(const playerState_t *ps, int slot);
 qboolean BG_SlotCommandCurrent(const playerState_t *ps, int selection);
 qboolean BG_OffhandOut(const playerState_t *ps);
 qboolean BG_OffhandPreparesAtOnce( int weapon );
+qboolean BG_OffhandHeldToThrow( int weapon );
 #define BG_EMPTY_HAND_OFFHAND_TIME 100	// MW2's OffHandInit with no gun in hand
 void BG_GetSlot(const playerState_t *ps, int slot, bg_weaponInstance_t *gun);
 void BG_PutSlot(playerState_t *ps, int slot, const bg_weaponInstance_t *gun);

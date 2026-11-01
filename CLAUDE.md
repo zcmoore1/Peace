@@ -75,6 +75,20 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   the 40ms crossfade a draw ends on. A shot cuts the return immediately, and a
   returning cancel is never a retained sprint source. It holds no lock and is
   not a gameplay state. `TestFlow` drives it through the real `PM_Weapon`.
+- **Sprint cancellation returns along the visible transition.** Sprint, Y,
+  release sprint, Y transfers the retained sprint entry/exit into the existing
+  move-layer return. It travels from its current pose toward ready with the
+  ordinary sprint-out timing and return cap; it does not keep advancing away
+  while fading to idle. The ready endpoint stays fixed throughout that fade.
+  A new sprint may inherit only a posture that is still visible (including
+  a move-layer return), never a hidden layer's old clock. Holding sprint still
+  requests sprint. Airborne players
+  can start and maintain sprint through the same permission and weapon states;
+  crouch, ladder and quick-action restrictions still apply.
+- **Base-action releases preserve the last picture.** Fire/bolt/reload completion
+  and interruption into a holster use a 100ms pose release in native and
+  frame-only rendering. It never overlays the move layer's YY return with a
+  second transition; a new shot cancels it. Stereo eyes share one cosmetic clock.
 - **Bolting is a state, not a phase of firing.** `WEAPON_FIRING` is the shot;
   `WEAPON_BOLTING` is the action being worked. "Bolting" covers bolt, pump,
   cock and lever — they differ only in cycle length and note placement, never
@@ -85,17 +99,19 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   is simply abandoned, its debt still owed. An empty gun reloads itself out of
   the action, never out of the shot.
 - **The bolt cancel is the reload cancel.** `WNOTE_BOLT_CLOSED` on the fire
-  animation carries no rounds, so it clears the lock and the unchambered bit —
-  the same note, in the same place, that opens the reload's window. Never write
-  a second cancel.
+  animation carries no rounds. It clears the lock and queues chamber completion
+  for the same commit point as ammo filling, after completed transitions return.
+  An exact-note holster/sprint/ladder cancel therefore loses chamber completion
+  as well as unfinished reload ammo. Never write a second cancel.
 - **An open action is a debt, and it is never resumed.** Firing sets the
-  weapon's bit in `STAT_UNCHAMBERED`; only the close note clears it. A gun that
+  weapon's bit in `STAT_UNCHAMBERED`; committed close notes or the reload's
+  delayed action clear it. A gun that
   reaches `WEAPON_READY` with its bit set re-enters `WEAPON_BOLTING` from
   elapsed 0 — the whole cycle, exactly like a reload, which never resumes
-  either. This is what makes the cancel window a window: miss it and the swap
-  costs you the full bolt when you come back. Never add a partial-bolt state,
-  and never clear the bit anywhere but the fire cycle's close note or the
-  reload's delayed action (spawn is the one exception).
+  either. Early and exact-note cancels both owe the full cycle on return; late
+  cancels keep the completed chambering. Never add a partial-bolt state, or
+  clear the bit before the note or delayed action commits (spawn is the one
+  exception).
 - **The reload's delayed action is MW2's (owner's rule: do what MW2 does).**
   When a reload starts on a gun that still owes its pump or bolt, the action is
   settled after the gun's OWN action length (fire-cycle open to close, MW2's
@@ -112,6 +128,17 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   are read by `CG_WeapAnim_RegisterClips`. Re-exporting a model must never mean
   editing C, and no weapon may be named in that loader.
 - **cgame is picture only.** It never touches ammo or weapon state.
+- **Aim follows simulation permission, never a scheduled scope flash.** Aim
+  progress belongs to the player and survives weapon/slot/attachment changes.
+  `PM_CheckADS` evaluates `BG_CanAimDownSights` before `PM_Weapon`. An instant
+  transition can therefore select a scoped gun while the outgoing aim flag is
+  still live. The next movement update sees the raise and revokes permission;
+  cgame then clears aim using the same physical eligibility rule. Voluntary
+  button release still blends out normally. No handoff event, frame counter,
+  NAC detector or weapon exception may manufacture a visible flash. Multiple
+  movement updates before a render may pass through this overlap unseen.
+  Game version **-8** requires matching modules. Protocol **77** carries the
+  independent quick-action release timestamp described below.
 - **Movement modifiers are per-command values.** `PM_CmdScale` must not write
   sprint/ADS multipliers into `ps.speed`: prediction replay and pmove substeps
   would apply them repeatedly, making speed depend on latency or command count.
@@ -248,9 +275,12 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   When they disagree the clip is time-warped to fit and reads as jittery.
 - Material strings are baked into the IQM (`models/weapons2/spas12/...`), so
   moving an asset folder breaks its textures until re-export.
-- SPAS normal holster and draw are both 1500ms; ladder holster remains the
-  universal 100ms. Both clips are retimed to 1500ms in `view.cfg`, the IQM and
-  the importer (`CLIP_SECONDS`). Transition-note ordering and YY cancellation are unchanged.
+- SPAS normal holster is 829ms and draw is 1075ms, matching the dumped MW2
+  multiplayer SPAS weapon's `dropTime`/`raiseTime`. `view.cfg`, the IQM and the
+  importer (`CLIP_SECONDS`) carry those same lengths. Its custom first draw
+  still includes the existing pump/check, now 1708ms (draw + 633ms fire cycle).
+  Ladder holster stays the universal 100ms. Transition-note ordering and YY
+  cancellation are unchanged.
 - Export IQM triangle indices clockwise for Quake's GL_FRONT culling, while
   retaining outward normals. Blender keeps CCW indices. Reusing Blender order
   in the game renders inside surfaces and hides the front post during ADS.
@@ -290,6 +320,8 @@ Pose checks cover source retention, ladder holsters, loop/endpoint semantics,
 reload/action exclusions, ordinary sprint reversal and frame-only crossfades,
 plus YY flow (reversed draw, eased return, fire cut-in) through the real
 `PM_Weapon`, which is why the pose test links `pickup_pmove_driver.c`.
+The native/QVM pointer-boundary test links `cl_vm.c` and `vm_ptr.c` directly;
+keep it independent of the full client and VM lifecycle so MSVC can link it.
 Loadouts UI and class definitions are documented in `dev/LOADOUTS.md`.
 
 `dev/tests/run-fakereload.cmd` (or `.sh`) models ioquake3's client/server

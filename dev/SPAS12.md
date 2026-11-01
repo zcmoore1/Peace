@@ -4,9 +4,37 @@
   skin. Its triangle winding is corrected for Quake's culling; the old export
   rendered inside surfaces and hid the front sight post during ADS. UVs,
   vertices, skin weights and animation frames are preserved.
-- Normal holster and draw both take **1500ms** (YY cancels the draw), and grabbing a ladder
+- Normal holster takes **829ms** and draw **1075ms** (YY cancels the draw), and grabbing a ladder
   still uses the shared 100ms holster. YY and reload-note cancellation retain
   their existing shared state-machine behavior.
+  These normal swap lengths match the [MW2 multiplayer SPAS weapon data](https://github.com/FreeTheTech101/IW4-Dump-Files/blob/master/weapons/mp/spas12_mp).
+  The existing custom first deployment includes a pump/check and takes 1708ms;
+  it is separate from the normal raise.
+- Pump completion eases from the last rendered pose over **100ms**. YY follows
+  the current draw/drop clip back to ready, with an eased return capped at
+  **250ms** and a 40ms fade to idle. Interrupting a draw reverses that same clip
+  from its current position. These are presentation only: holding fire still
+  fires on the second Y when the gun is chambered and gameplay permits it.
+- The synthetic holster still follows the draw backwards, but samples that
+  path with ease-out progress `f*(2-f)`. This gives the start of a quick YY
+  noticeable movement instead of lingering in the draw's near-still final
+  poses. Its endpoints, 26-frame range and **829ms** duration stay unchanged;
+  no YY impulse or firing delay is added. Both the Blender importer and the
+  stdlib animation baker preserve this curve.
+- For the sprint glide: start sprint and press Y quickly, release sprint,
+  then press Y again. The visible sprint entry retraces its motion toward
+  ready using the existing transition return. Sprint exit is continuous too.
+  Gameplay is ready immediately; firing takes over the picture at once.
+- Sprint can begin or continue in the air. Its entry/carry/exit animations
+  use the same weapon states as on the ground; jumping does not force an exit.
+- A swap, sprint or ladder grab on the exact bolt-close frame keeps the instant
+  transition but abandons chamber completion. Returning requires the **entire
+  pump from zero**. Going late keeps the completed chambering.
+- Aim progress survives a weapon change while the outgoing ADS permission is
+  still live. An instantaneous aimed SPAS-to-sniper swap can show the scope;
+  the following movement update denies ADS during the raise and clears aim.
+  This is an observed simulation state, not a forced frame: a render that skips
+  over that update shows no delayed scope flash.
 - `cg_sight 0` (default) uses the rear aperture and front post. `cg_sight 1`
   selects the existing reflex attachment. Full aim ignores hip offsets.
 - The ADS blend now consumes the actual teleport-bit change once. The old

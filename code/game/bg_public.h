@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-7"
+#define	GAME_VERSION		BASEGAME "-8"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -500,6 +500,7 @@ typedef enum {
 int BG_LethalWeapon( const playerState_t *ps );
 int BG_ActiveSlotWeapon( const playerState_t *ps );
 qboolean BG_IsActionWeapon( int weapon );
+qboolean BG_CanAimDownSights( const playerState_t *ps );
 
 // Inventory slots. Two weapons, CoD style.
 typedef enum {

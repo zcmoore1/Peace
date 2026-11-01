@@ -1826,7 +1826,7 @@ static const int bg_weaponDropTime[MAX_WEAPONS] = {
 	200,	// WP_NONE
 	200,	// WP_GAUNTLET
 	200,	// WP_MACHINEGUN
-	1500,	// WP_SHOTGUN (SPAS-12 heavy holster; ladder uses its universal time)
+	829,	// WP_SHOTGUN (MW2 SPAS-12 normal drop; ladder uses its universal time)
 	250,	// WP_GRENADE_LAUNCHER
 	250,	// WP_ROCKET_LAUNCHER
 	200,	// WP_LIGHTNING
@@ -1848,7 +1848,7 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 	250,	// WP_NONE
 	250,	// WP_GAUNTLET
 	250,	// WP_MACHINEGUN
-	1500,	// WP_SHOTGUN  (heavy draw, matches the 1500ms holster; YY still cancels it)
+	1075,	// WP_SHOTGUN (MW2 SPAS-12 normal raise; YY still cancels it)
 	300,	// WP_GRENADE_LAUNCHER
 	300,	// WP_ROCKET_LAUNCHER
 	250,	// WP_LIGHTNING
@@ -2582,13 +2582,14 @@ PM_RunWeaponNotes
 Fire every note the anim clock crossed this think, for the segment currently
 playing. Crossing test only.
 
-No note fills the clip. MAG_IN only queues the fill and clears the busy lock;
-whether the fill actually happens is decided later in PM_Weapon by whether a
-holster got there first.
+Notes release the busy lock now, but only queue ammo/chamber completion.
+PM_Weapon commits those effects after transitions have had a chance to finish.
+The returned chamber completion lives only for this think, like its note.
 ===============
 */
-static void PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
+static qboolean PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 	const bg_weaponNote_t *n;
+	qboolean chamberClosed = qfalse;
 
 	n = PM_SegNotes( pm->ps->weapon, pm->ps->weaponAnimSeq );
 
@@ -2614,13 +2615,10 @@ static void PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 			break;
 
 		case WNOTE_BOLT_CLOSED:
-			// The action is shut and a round is under the hammer. Clearing the
-			// bit here is the whole of the "cancel late and you keep the round"
-			// half of the rule - and because the reload's END segment carries
-			// this same note, finishing a reload chambers the gun for free.
-			pm->ps->stats[STAT_UNCHAMBERED] &= ~( 1 << pm->ps->weapon );
-			// Closing the action on a shell gun carries no rounds, so it only
-			// releases the lock - which is exactly what makes it NAC-able too.
+			// Chambering is completion of the action, just as inserting ammo is
+			// completion of the reload. Queue it until the same commit point;
+			// a holster that finishes first abandons either kind of progress.
+			chamberClosed = qtrue;
 		case WNOTE_MAG_IN:
 			if ( n->param != 0 || n->note == WNOTE_MAG_IN ) {
 				pm->ps->pm_flags |= PMF_PENDING_MAG;
@@ -2638,6 +2636,7 @@ static void PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 			break;
 		}
 	}
+	return chamberClosed;
 }
 
 /*
@@ -2952,10 +2951,10 @@ PM_CheckSprint
 Sets or clears PMF_SPRINTING each tick. Sprint requires:
   - BUTTON_SPRINT held
   - moving forward (forwardmove > 0)
-  - on the ground and not ducking
+  - not ducking or using a ladder/quick action; ground contact is not required
 
-Entering sprint cancels an in-progress reload (the weapon snaps to the hip
-before the mag can seat). ADS is cleared immediately on sprint entry.
+ADS is cleared immediately on sprint entry. PM_Weapon orders the timed sprint
+posture against reload notes so the same-frame completion rules still apply.
 ==============
 */
 static void PM_CheckSprint( void ) {
@@ -2966,7 +2965,6 @@ static void PM_CheckSprint( void ) {
 	               !BG_IsActionWeapon(pm->ps->weapon) &&
 	               ( pm->cmd.buttons & BUTTON_SPRINT ) &&
 	               pm->cmd.forwardmove > 0 &&
-	               pml.groundPlane &&
 	               !( pm->ps->pm_flags & PMF_DUCKED ) );
 
 	if ( wantSprint ) {
@@ -2980,6 +2978,23 @@ static void PM_CheckSprint( void ) {
 	// sprint carry is a timed weapon action and belongs in PM_Weapon, where it
 	// is ordered against the animation notes - cancelling the reload from here
 	// would kill the mag-in note before it could ever fire.
+}
+
+// Physical aim eligibility, independent of the input button. Pmove evaluates
+// this before weapon transitions; presentation consumes that calculated flag
+// before distinguishing a voluntary aim release from a forced interruption.
+qboolean BG_CanAimDownSights( const playerState_t *ps ) {
+	return !(ps->weaponAction & WA_TYPE_MASK) &&
+		!BG_IsActionWeapon(ps->weapon) &&
+		!(ps->stats[STAT_LADDER] & LADDER_ATTACHED) &&
+		ps->weaponstate != WEAPON_LADDER &&
+		!(ps->pm_flags & PMF_SPRINTING) &&
+		ps->weaponstate != WEAPON_RELOADING &&
+		ps->weaponstate != WEAPON_SPRINT_IN &&
+		ps->weaponstate != WEAPON_SPRINTING &&
+		ps->weaponstate != WEAPON_SPRINT_OUT &&
+		ps->weaponstate != WEAPON_DROPPING &&
+		ps->weaponstate != WEAPON_RAISING;
 }
 
 /*
@@ -3003,18 +3018,7 @@ static void PM_CheckADS( void ) {
 	// client and the server never agrees one is happening, so there is no
 	// reload here to aim through. It is a network artefact, not a permission,
 	// and must not be reproduced by loosening this gate.
-	canADS = ( ( pm->cmd.buttons & BUTTON_ADS ) &&
-	           !( pm->ps->weaponAction & WA_TYPE_MASK ) &&
-	           !BG_IsActionWeapon( pm->ps->weapon ) &&
-	           !( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) &&
-	           pm->ps->weaponstate != WEAPON_LADDER &&
-	           !( pm->ps->pm_flags & PMF_SPRINTING ) &&
-	           pm->ps->weaponstate != WEAPON_RELOADING &&
-	           pm->ps->weaponstate != WEAPON_SPRINT_IN &&
-	           pm->ps->weaponstate != WEAPON_SPRINTING &&
-	           pm->ps->weaponstate != WEAPON_SPRINT_OUT &&
-	           pm->ps->weaponstate != WEAPON_DROPPING &&
-	           pm->ps->weaponstate != WEAPON_RAISING );
+	canADS = (pm->cmd.buttons & BUTTON_ADS) && BG_CanAimDownSights(pm->ps);
 
 	if ( canADS ) {
 		pm->ps->pm_flags |= PMF_ADS;
@@ -3035,6 +3039,8 @@ static void PM_Weapon( void ) {
 	int		oldElapsed;
 	qboolean ladderWeapon;
 	qboolean reload;
+	qboolean chamberClosed = qfalse;
+	qboolean reloadSettled = qfalse;
 
 	// don't allow attack until all buttons are up
 	if ( pm->ps->pm_flags & PMF_RESPAWNED ) {
@@ -3080,7 +3086,7 @@ static void PM_Weapon( void ) {
 	// arrives at its own time.
 	oldElapsed = pm->ps->weaponAnimTime;
 
-	// Only a reload anim is modelled for now, so only it advances the clock. The
+	// Reload and fire/bolt actions advance the animation clock. The
 	// note runner below deliberately does NOT gate on weaponstate: step 1 may
 	// have already flipped us to DROPPING and the mag-in note still has to land.
 	if ( ( pm->ps->weaponstate == WEAPON_RELOADING ||
@@ -3145,13 +3151,14 @@ static void PM_Weapon( void ) {
 	//    reload's mag-in note still has to land on this think for the race to
 	//    exist at all. MAG_IN zeroes the lock the holster just stamped.
 	if ( pm->ps->weaponAnimTime >= 0 ) {
-		PM_RunWeaponNotes( oldElapsed, pm->ps->weaponAnimTime );
+		chamberClosed = PM_RunWeaponNotes( oldElapsed, pm->ps->weaponAnimTime );
 	}
 	// 2b. The reload's delayed action on a gun that owes its pump or bolt lands
 	//     like any note: the lock goes on that think, so a holster stamped in
 	//     step 1 is spent and finishes in step 3. What it settles waits for
 	//     step 4, with the fill.
-	if ( PM_ReloadSettleCrossed( oldElapsed ) ) {
+	reloadSettled = PM_ReloadSettleCrossed( oldElapsed );
+	if ( reloadSettled ) {
 		pm->ps->weaponTime = 0;
 	}
 
@@ -3199,14 +3206,15 @@ static void PM_Weapon( void ) {
 		PM_StartTorsoAnim( TORSO_STAND );
 	}
 
-	// 4. Nobody holstered out from under us, so the reload's delayed work is
-	//    done: an owed pump or bolt is settled, and the queued rounds go in.
-	//    A holster that finished in step 3 skipped both - that is the NAC: the
-	//    swap is instant, the round is not loaded and the action is still owed.
+	// 4. No transition finished first, so commit the queued action completion
+	//    and ammo fill. Both a close note and a reload's delayed action settle
+	//    chamber debt here; completed transitions skip both kinds of progress.
 	//    Still RELOADING afterwards: the settle note has not arrived yet, and
 	//    the state alone is what keeps the gun from firing during the tail.
-	if ( PM_ReloadSettleCrossed( oldElapsed ) ) {
+	if ( chamberClosed || reloadSettled ) {
 		pm->ps->stats[STAT_UNCHAMBERED] &= ~( 1 << pm->ps->weapon );
+	}
+	if ( reloadSettled ) {
 		PM_AddEvent( EV_WEAPON_NOTETRACK );
 	}
 	if ( pm->ps->pm_flags & PMF_PENDING_MAG ) {
@@ -3237,8 +3245,8 @@ static void PM_Weapon( void ) {
 	//     Nothing here knows why the bit is set. A swap, a sprint, a death, a
 	//     dropped weapon picked back up - they all leave the same bit, so they
 	//     all get the same answer without being enumerated. The one way to not
-	//     end up here is to have let the close note land, which is what makes
-	//     the cancel window a window instead of a free swap.
+	//     end up here is to have let the close note's completion commit before
+	//     leaving. Interrupting on the note itself still abandons the action.
 	if ( pm->ps->weaponstate == WEAPON_READY &&
 	     ( pm->ps->stats[STAT_UNCHAMBERED] & ( 1 << pm->ps->weapon ) ) &&
 	     BG_WeaponFireLength( pm->ps->weapon ) > 0 ) {

@@ -388,6 +388,43 @@ static void RespawnMove(int buttons, int type) {
  move.cmd.buttons=buttons; move.cmd.serverTime=ps.commandTime+8;
  ps.pm_type=type; Pmove(&move);
 }
+static void TestAirSprint(void) {
+ const int weapons[]={WP_SHOTGUN,WP_M40A3};
+ int i,t,ammo;
+ for(i=0;i<ARRAY_LEN(weapons);i++) {
+  Ready(weapons[i],WP_MACHINEGUN);
+  move.trace=RespawnTrace; move.pointcontents=RespawnContents;
+  move.tracemask=MASK_PLAYERSOLID; move.cmd.forwardmove=127;
+  ps.speed=320; ps.gravity=800; ps.origin[2]=2048; ps.velocity[2]=200;
+  ammo=ps.ammo[ps.weapon];
+  /* Begin sprint after leaving the ground, then keep it through the apex. */
+  RespawnMove(BUTTON_SPRINT,PM_NORMAL);
+  CHECK(ps.groundEntityNum==ENTITYNUM_NONE && (ps.pm_flags&PMF_SPRINTING));
+  CHECK(ps.weaponstate==WEAPON_SPRINT_IN);
+  for(t=0;t<BG_WeaponSprintInTime(ps.weapon)+400;t+=8)
+   RespawnMove(BUTTON_SPRINT,PM_NORMAL);
+  CHECK(ps.weaponstate==WEAPON_SPRINTING && (ps.pm_flags&PMF_SPRINTING));
+  CHECK(ps.velocity[2]<0 && ps.groundEntityNum==ENTITYNUM_NONE);
+  CHECK(ps.speed==320 && ps.ammo[ps.weapon]==ammo);
+  RespawnMove(0,PM_NORMAL);
+  CHECK(ps.weaponstate==WEAPON_SPRINT_OUT && !(ps.pm_flags&PMF_SPRINTING));
+  for(t=0;t<BG_WeaponSprintOutTime(ps.weapon)+8;t+=8) RespawnMove(0,PM_NORMAL);
+  CHECK(ps.weaponstate==WEAPON_READY);
+
+  /* The same sprint -> Y -> release sprint -> Y sequence works in midair. */
+  RespawnMove(BUTTON_SPRINT,PM_NORMAL);
+  CHECK(ps.weaponstate==WEAPON_SPRINT_IN);
+  move.cmd.weapon=BG_SLOT_COMMAND+SLOT_SECONDARY;
+  RespawnMove(BUTTON_SPRINT,PM_NORMAL);
+  CHECK(ps.weaponstate==WEAPON_DROPPING);
+  RespawnMove(0,PM_NORMAL);
+  move.cmd.weapon=BG_SLOT_COMMAND+SLOT_PRIMARY;
+  RespawnMove(0,PM_NORMAL);
+  CHECK(ps.weapon==weapons[i] && ps.weaponstate==WEAPON_READY && ps.weaponTime==0);
+  CHECK(!(ps.pm_flags&PMF_SPRINTING) && ps.ammo[ps.weapon]==ammo);
+  CHECK(ps.groundEntityNum==ENTITYNUM_NONE && ps.velocity[2]<0);
+ }
+}
 static void TestHeldThroughRespawn(void) {
  const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL,BUTTON_LETHAL};
  const int specials[]={WP_KNIFE,WP_FRAG,WP_FLASH,WP_SEMTEX};
@@ -423,6 +460,7 @@ static void TestHeldThroughRespawn(void) {
  }
 }
 int main(void) {
+ TestAirSprint();
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
  TestMeleeHolster(); TestRecovery();
  TestMovementScale(); TestHeldThroughRespawn();

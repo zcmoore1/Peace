@@ -48,6 +48,7 @@ Each layer has:
 #define RETAINED_BLEND_SPEED 0.0125f // 80ms picture release; never a gameplay lock
 #define MOVE_BLEND_SPEED     0.025f  // 40ms move-layer crossfade into or out of idle
 #define MOVE_RETURN_MS       250.0f  // longest picture return after a cancelled transition
+#define RETURN_BLEND_MSEC    100.0f  // release a completed/interrupted base action
 
 // How the move layer's clip clock is driven. Every mode is picture only: the
 // gameplay lock decides readiness, and these only decide where the gun is drawn.
@@ -90,6 +91,24 @@ static qboolean      cg_retainedActive, cg_retainedDrop, cg_previousSprint;
 static float         cg_retainedRate = 1.0f;
 static qboolean      cg_animContextValid;
 static int           cg_animClient, cg_animSpawn, cg_animTeleport, cg_animSlot, cg_animAttachments;
+// Base-action releases start from the last picture, including a blend already
+// in progress. Draw/drop cancellation stays with the move layer's clip return.
+static qboolean      cg_lastFrameValid, cg_lastPoseValid, cg_returnPoseValid;
+static refEntity_t   cg_lastFrame, cg_returnSource;
+static modelPose_t   cg_returnPose;
+static int           cg_returnFrame, cg_previousWeaponState;
+static float         cg_returnTime;
+static qboolean      cg_animTimeValid;
+static int           cg_animUpdateTime;
+
+static qboolean CG_WeapAnim_SampleLayers(const weapAnimDef_t *def, refEntity_t *entity);
+
+static void CG_WeapAnim_ResetReturn(void) {
+	cg_lastFrameValid = cg_lastPoseValid = cg_returnPoseValid = qfalse;
+	cg_returnTime = RETURN_BLEND_MSEC;
+	cg_previousWeaponState = WEAPON_READY;
+	cg_animTimeValid = qfalse;
+}
 
 static int CG_WeapAnim_DrawClip(const weapAnimDef_t *def, const playerState_t *ps) {
 	return ps->weaponDraw && def->clips[WANIM_FIRST_RAISE].numFrames > 0 ? WANIM_FIRST_RAISE : WANIM_RAISE;
@@ -125,6 +144,7 @@ void CG_WeapAnim_Reset( void ) {
 	cg_weapAnimWeapon = WP_NONE;
 	cg_retainedActive = cg_retainedDrop = cg_previousSprint = qfalse;
 	cg_animContextValid = qfalse;
+	CG_WeapAnim_ResetReturn();
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +155,7 @@ static void CG_WeapAnim_WeaponChanged( int weapon ) {
 	Com_Memset( cg_weapLayers, 0, sizeof(cg_weapLayers) );
 	cg_retainedActive = cg_retainedDrop = cg_previousSprint = qfalse;
 	cg_retainedRate = 1.0f;
+	CG_WeapAnim_ResetReturn();
 
 	// Start with idle on base layer at full weight.
 	cg_weapLayers[LAYER_BASE].clip         = WANIM_IDLE;
@@ -246,11 +267,13 @@ static void CG_WeapAnim_BeginHolster(const weapAnimDef_t *def, animLayer_t *move
 // The picture travels back along the clip it was showing - up the draw, or back
 // up the drop - instead of cutting to idle. It eases in and out, and takes the
 // time that stretch of clip would naturally take, capped at MOVE_RETURN_MS.
-static void CG_WeapAnim_BeginReturn(const weapAnimDef_t *def, const playerState_t *ps, animLayer_t *move) {
+static qboolean CG_WeapAnim_BeginReturn(const weapAnimDef_t *def, const playerState_t *ps, animLayer_t *move) {
 	float len = CG_WeapAnim_ClipLength(def, move->clip);
 	float from = move->time, natural;
 
-	if (len <= 0.0f || move->weight <= 0.0f || move->targetWeight <= 0.0f) return;
+	if (move->clip == WANIM_SPRINT_IN || move->clip == WANIM_SPRINT_OUT)
+		len = CG_WeapAnim_LastFrameTime(def, move->clip);
+	if (len <= 0.0f || move->weight <= 0.0f || move->targetWeight <= 0.0f) return qfalse;
 	if (from < 0.0f) from = 0.0f;
 	if (from > len) from = len;
 	if (move->clip == WANIM_DROP) {
@@ -259,14 +282,21 @@ static void CG_WeapAnim_BeginReturn(const weapAnimDef_t *def, const playerState_
 	} else if (CG_WeapAnim_IsDrawClip(move->clip)) {
 		move->returnTo = len;
 		natural = (len - from) / len * BG_WeaponDrawTime(ps);
+	} else if (move->clip == WANIM_SPRINT_IN) {
+		move->returnTo = 0.0f;
+		natural = from / len * BG_WeaponSprintOutTime(ps->weapon);
+	} else if (move->clip == WANIM_SPRINT_OUT) {
+		move->returnTo = len;
+		natural = (len - from) / len * BG_WeaponSprintOutTime(ps->weapon);
 	} else {
-		return;
+		return qfalse;
 	}
-	if (natural < 1.0f) return;		// already at rest: an ordinary release
+	if (natural < 1.0f) return qfalse;	// already at rest: an ordinary release
 	move->returnFrom = from;
 	move->returnTime = 0.0f;
 	move->returnLength = natural < MOVE_RETURN_MS ? natural : MOVE_RETURN_MS;
 	move->fit = MOVE_FIT_RETURN;
+	return qtrue;
 }
 
 // Sprint does not erase an in-flight action. Carry its presentation forward;
@@ -293,13 +323,22 @@ static void CG_WeapAnim_UpdateRetention(const weapAnimDef_t *def, const playerSt
 			(!dropping && !def->clips[retained->clip].loop &&
 			 !CG_WeapAnim_TransitionBusy(def, retained))) {
 			cg_retainedActive = qfalse;
+			// A cancelled holster returns the picture it actually carried. The
+			// sprint transition follows the same clip return as a draw or drop;
+			// fading a still-advancing entry directly into idle loses that motion.
+			if (cg_retainedDrop && ps->weaponstate == WEAPON_READY &&
+				CG_WeapAnim_BeginReturn(def, ps, retained)) {
+				cg_weapLayers[LAYER_MOVE] = *retained;
+				retained->weight = 0;
+			}
 			retained->targetWeight = 0;
 			released = qtrue;
 		}
 	}
 
 	if (!forbidden && !released && !cg_retainedActive && retained->targetWeight <= 0 &&
-		((sprinting && !cg_previousSprint) || (dropping && cg_previousSprint))) {
+		((sprinting && !cg_previousSprint) || (dropping && (cg_previousSprint ||
+		 (cg_weapLayers[LAYER_SPRINT].weight > 0 && cg_weapLayers[LAYER_SPRINT].targetWeight > 0))))) {
 		// Choose the animation the player actually saw, not the newly requested
 		// weapon state. Reload clips cannot become a retained source.
 		for (i=LAYER_BASE; i<=LAYER_SPRINT; i++) {
@@ -363,6 +402,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	animLayer_t *base   = &cg_weapLayers[LAYER_BASE];
 	animLayer_t *move   = &cg_weapLayers[LAYER_MOVE];
 	animLayer_t *sprint = &cg_weapLayers[LAYER_SPRINT];
+	animLayer_t *posture = NULL;
 	int i;
 	int baseClip = WANIM_IDLE;
 
@@ -371,6 +411,16 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	qboolean swapping    = ( ps->weaponstate == WEAPON_RAISING ||
 	                         ps->weaponstate == WEAPON_DROPPING );
 	CG_WeapAnim_UpdateRetention(def, ps);
+	// Only a posture still on screen can supply a reversal point. Inactive
+	// layers retain their clip clocks, but those clocks are not a visible pose.
+	// A cancelled holster may have transferred the entry/exit to the move layer.
+	for (i = LAYER_MOVE; i < ANIM_LAYER_COUNT; i++) {
+		animLayer_t *l = &cg_weapLayers[i];
+		// A faint carry/action overlay is still fading to the underlying pose;
+		// promoting it to a full-weight entry would jump back into that pose.
+		if (l->weight >= 1.0f && (l->clip == WANIM_SPRINT_IN || l->clip == WANIM_SPRINT_OUT))
+			posture = l;
+	}
 
 	// -- Base layer: swap between idle and fire --
 	// Firing and pumping share one clip. On a pump gun the shot and the action
@@ -446,29 +496,21 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 			sprint->targetWeight = 0.0f;
 		} else {
 			float start = 0.0f;
-			qboolean reverse = sprint->weight > 0.0f &&
-				((clip == WANIM_SPRINT_OUT && sprint->clip == WANIM_SPRINT_IN) ||
-				 (clip == WANIM_SPRINT_IN && sprint->clip == WANIM_SPRINT_OUT));
-			if ( reverse ) {
-				float len = CG_WeapAnim_LastFrameTime( def, sprint->clip );
-				if ( len > 0.0f ) start = 1.0f - sprint->time / len;
-				if ( start < 0.0f ) start = 0.0f;
-				if ( start > 1.0f ) start = 1.0f;
-			}
-			// A still-held sprint may be requested again after a reversed drop.
-			// Resume the already-visible entry, never snap its picture to frame 0.
-			if (clip == WANIM_SPRINT_IN && sprint->targetWeight <= 0 &&
-				((sprint->clip == clip && sprint->time > 0) ||
-				 (cg_weapLayers[LAYER_RETAINED].clip == clip && cg_weapLayers[LAYER_RETAINED].weight > 0))) {
-				float len = CG_WeapAnim_LastFrameTime(def, clip);
-				float time = cg_weapLayers[LAYER_RETAINED].weight > 0 &&
-					cg_weapLayers[LAYER_RETAINED].clip == clip ? cg_weapLayers[LAYER_RETAINED].time : sprint->time;
-				if (len > 0) start = time / len;
-				if (start > 1) start = 1;
-				reverse = qtrue;
+			qboolean restarting = sprint->clip != clip || sprint->targetWeight <= 0.0f;
+			if (restarting && posture && clip != WANIM_SPRINT_LOOP) {
+				float len = CG_WeapAnim_LastFrameTime(def, posture->clip);
+				float carry = len > 0.0f ? posture->time / len : 0.0f;
+				if (posture->clip == WANIM_SPRINT_OUT) carry = 1.0f - carry;
+				start = clip == WANIM_SPRINT_IN ? carry : 1.0f - carry;
+				if (start < 0.0f) start = 0.0f;
+				if (start > 1.0f) start = 1.0f;
+				// Transfer ownership of the visible posture. Leaving its old copy
+				// fading above this layer would obscure the new transition.
+				if (posture != sprint && !cg_retainedActive)
+					posture->weight = posture->targetWeight = 0.0f;
 			}
 			CG_WeapAnim_PlayLayer( sprint, clip );
-			if ( reverse ) sprint->startFraction = start;
+			if ( restarting ) sprint->startFraction = start;
 			// Entry/exit clips already interpolate idle <-> carry. Blending their
 			// weight again delays a fast entry and makes a short tap snap to carry.
 			if ( CG_WeapAnim_ClipLength( def, clip ) > 0.0f ) sprint->weight = 1.0f;
@@ -497,7 +539,9 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 		}
 
 		// Advance clip time (will be clamped/looped in pose sample).
-		if ( l->weight > 0.0f ) {
+		// A move return has reached its endpoint before fading to idle. Keep
+		// that endpoint during the fade instead of playing outward again.
+		if ( l->weight > 0.0f && (i != LAYER_MOVE || l->targetWeight > 0.0f) ) {
 			l->time += (float)msec * (i == LAYER_RETAINED ? cg_retainedRate : 1.0f);
 		}
 	}
@@ -624,6 +668,35 @@ static qboolean CG_WeapAnim_SampleLayer( qhandle_t hModel, const weapAnimDef_t *
 	return trap_R_BuildModelPose( hModel, sample.frame, sample.oldframe, sample.backlerp, outPose );
 }
 
+static float CG_WeapAnim_ReturnWeight(void) {
+	float t = cg_returnTime / RETURN_BLEND_MSEC;
+	if (t >= 1) return 0;
+	return 1.0f - t * t * (3.0f - 2.0f * t);
+}
+
+static void CG_WeapAnim_UpdateReturn(const playerState_t *ps, int msec) {
+	int old = cg_previousWeaponState, next = ps->weaponstate;
+	qboolean baseAction = old == WEAPON_RELOADING || old == WEAPON_FIRING || old == WEAPON_BOLTING;
+	qboolean transition = old != next && baseAction &&
+		(next == WEAPON_READY || next == WEAPON_DROPPING);
+
+	// A shot takes over immediately; a previous base-action release cannot
+	// cover it. YY's draw/drop traversal has its own move-layer cancellation.
+	if (next == WEAPON_FIRING) {
+		cg_returnTime = RETURN_BLEND_MSEC;
+	} else if (cg_lastFrameValid && transition) {
+		cg_returnSource = cg_lastFrame;
+		cg_returnFrame = cg_lastFrame.backlerp >= .5f ? cg_lastFrame.oldframe : cg_lastFrame.frame;
+		cg_returnPoseValid = cg_lastPoseValid;
+		if (cg_returnPoseValid) cg_returnPose = cg.weaponPose;
+		cg_returnTime = 0;
+	} else if (msec > 0) {
+		cg_returnTime += msec;
+		if (cg_returnTime > RETURN_BLEND_MSEC) cg_returnTime = RETURN_BLEND_MSEC;
+	}
+	cg_previousWeaponState = next;
+}
+
 // ---------------------------------------------------------------------------
 // CG_WeapAnim_BuildPose
 // Main entry point. Evaluates all layers and writes the blended result into
@@ -633,7 +706,7 @@ static qboolean CG_WeapAnim_SampleLayer( qhandle_t hModel, const weapAnimDef_t *
 qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec ) {
 	const weapAnimDef_t *def;
 	modelPose_t layerPose;
-	int i;
+	int i, timeStep;
 	qboolean anyLayer = qfalse;
 
 	if ( ps->weapon <= WP_NONE || ps->weapon >= WP_NUM_WEAPONS )
@@ -657,7 +730,16 @@ qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec ) 
 
 	def = &bg_weapAnimDefs[ps->weapon];
 
-	CG_WeapAnim_UpdateLayers( def, ps, msec );
+	// Both stereo eyes share one cosmetic clock. State changes still apply.
+	timeStep = cg_animTimeValid && cg_animUpdateTime == cg.time ? 0 : msec;
+	if (timeStep < 0) timeStep = 0;
+	cg_animTimeValid = qtrue;
+	cg_animUpdateTime = cg.time;
+	CG_WeapAnim_UpdateReturn(ps, timeStep);
+	CG_WeapAnim_UpdateLayers( def, ps, timeStep );
+	if (cg_retainedActive || ps->weaponstate == WEAPON_LADDER ||
+		(ps->weaponAction & WA_TYPE_MASK) || BG_IsActionWeapon(ps->weapon) ||
+		ps->stats[STAT_HEALTH] <= 0) cg_returnTime = RETURN_BLEND_MSEC;
 
 	// Evaluate layers low→high, blending each onto the accumulated pose.
 	for ( i = 0; i < ANIM_LAYER_COUNT; i++ ) {
@@ -683,6 +765,14 @@ qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec ) 
 		}
 	}
 
+	if (anyLayer && cg_returnPoseValid && CG_WeapAnim_ReturnWeight() > 0) {
+		modelPose_t blended;
+		float weight = CG_WeapAnim_ReturnWeight();
+		trap_R_BlendModelPoses(&blended, &cg.weaponPose, 1.0f - weight, &cg_returnPose, weight);
+		cg.weaponPose = blended;
+	}
+	cg_lastPoseValid = anyLayer;
+	cg_lastFrameValid = CG_WeapAnim_SampleLayers(def, &cg_lastFrame);
 	return anyLayer;
 }
 
@@ -709,6 +799,26 @@ static qboolean CG_WeapAnim_SampleLayers(const weapAnimDef_t *def, refEntity_t *
 			entity->backlerp = source.backlerp;
 		}
 		sampled = qtrue;
+	}
+	if (sampled && CG_WeapAnim_ReturnWeight() > 0) {
+		float t = cg_returnTime / RETURN_BLEND_MSEC;
+		// Frame-only renderers have two samples. Settle the previous pair onto
+		// its nearest endpoint, then blend that endpoint into the new clip.
+		float settle = cg_returnSource.frame != cg_returnSource.oldframe &&
+			cg_returnSource.backlerp > .001f && cg_returnSource.backlerp < .999f ? .25f : 0;
+		if (t < settle) {
+			float f = t / settle;
+			float end = cg_returnFrame == cg_returnSource.oldframe ? 1.0f : 0.0f;
+			f = f * f * (3.0f - 2.0f * f);
+			entity->frame = cg_returnSource.frame;
+			entity->oldframe = cg_returnSource.oldframe;
+			entity->backlerp = cg_returnSource.backlerp + (end - cg_returnSource.backlerp) * f;
+		} else {
+			t = (t - settle) / (1.0f - settle);
+			entity->frame = entity->backlerp >= .5f ? entity->oldframe : entity->frame;
+			entity->oldframe = cg_returnFrame;
+			entity->backlerp = 1.0f - t * t * (3.0f - 2.0f * t);
+		}
 	}
 	return sampled;
 }

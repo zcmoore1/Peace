@@ -4,10 +4,14 @@
 cg_t cg;
 static int checks;
 static FILE *input;
+static modelPose_t authored[512];
+static int authoredFrames;
+static qboolean nativePose;
 #define CHECK(x) do { checks++; if (!(x)) { \
  fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); exit(1); } } while(0)
 void QDECL Com_Printf(const char *fmt,...) { (void)fmt; }
 void QDECL CG_Printf(const char *fmt,...) { (void)fmt; }
+void trap_SnapVector(float *v) { SnapVector(v); }
 void QDECL Com_Error(int level,const char *fmt,...) {
  va_list args; (void)level; va_start(args,fmt); vfprintf(stderr,fmt,args);
  va_end(args); exit(1);
@@ -21,10 +25,83 @@ void trap_FS_Read(void *buffer,int size,fileHandle_t handle) {
 }
 void trap_FS_FCloseFile(fileHandle_t handle) { (void)handle; fclose(input); }
 qboolean trap_R_BuildModelPose(qhandle_t model,int frame,int oldframe,float blend,modelPose_t *out) {
- (void)model; (void)frame; (void)oldframe; (void)blend; (void)out; return qfalse;
+ (void)model;
+ if(!nativePose)return qfalse;
+ CHECK(frame>=0 && frame<authoredFrames && oldframe>=0 && oldframe<authoredFrames);
+ trap_R_BlendModelPoses(out,&authored[frame],1-blend,&authored[oldframe],blend);
+ return qtrue;
 }
 void trap_R_BlendModelPoses(modelPose_t *out,const modelPose_t *a,float wa,const modelPose_t *b,float wb) {
- (void)out; (void)a; (void)wa; (void)b; (void)wb;
+ int j,k;float t=wb/(wa+wb);
+ out->numJoints=a->numJoints;
+ CHECK(a->numJoints==b->numJoints);
+ for(j=0;j<out->numJoints;j++) {
+  for(k=0;k<3;k++) {
+   out->joints[j].translate[k]=a->joints[j].translate[k]*(1-t)+b->joints[j].translate[k]*t;
+   out->joints[j].scale[k]=a->joints[j].scale[k]*(1-t)+b->joints[j].scale[k]*t;
+  }
+  {
+   float dot=0,sign=1,wa=1-t,wb=t;
+   for(k=0;k<4;k++)dot+=a->joints[j].rotate[k]*b->joints[j].rotate[k];
+   if(dot<0) { dot=-dot;sign=-1; }
+   if(dot<.999999f) {
+    float angle=acosf(dot),den=sinf(angle);
+    wa=sinf((1-t)*angle)/den;wb=sinf(t*angle)/den;
+   }
+   for(k=0;k<4;k++)out->joints[j].rotate[k]=a->joints[j].rotate[k]*wa+b->joints[j].rotate[k]*wb*sign;
+  }
+ }
+}
+
+/* Decode the shipped IQM, independently of cgame's sampler. Both the native
+ * pose and frame-only paths are checked against actual joint transforms. */
+static void LoadAuthoredPoses(const char *path) {
+ struct { int parent; unsigned mask; float offset[10],scale[10]; } poses[MAX_MODEL_JOINTS];
+ unsigned h[27];char magic[16];FILE *f=fopen(path,"rb");int frame,j,k;
+ CHECK(f!=NULL);CHECK(fread(magic,1,16,f)==16);CHECK(!memcmp(magic,"INTERQUAKEMODEL",14));
+ CHECK(fread(h,sizeof(unsigned),27,f)==27);
+ CHECK(h[19]<ARRAY_LEN(authored) && h[15]<=MAX_MODEL_JOINTS);
+ CHECK(sizeof(poses[0])==88);
+ fseek(f,h[16],SEEK_SET);CHECK(fread(poses,sizeof(poses[0]),h[15],f)==h[15]);
+ fseek(f,h[21],SEEK_SET);authoredFrames=h[19];
+ for(frame=0;frame<authoredFrames;frame++) {
+  authored[frame].numJoints=h[15];
+  for(j=0;j<(int)h[15];j++) {
+   float c[10];
+   for(k=0;k<10;k++) {
+    unsigned short channel=0;
+    if(poses[j].mask&(1<<k))CHECK(fread(&channel,2,1,f)==1);
+    c[k]=poses[j].offset[k]+poses[j].scale[k]*channel;
+   }
+   VectorCopy(c,authored[frame].joints[j].translate);
+   memcpy(authored[frame].joints[j].rotate,c+3,sizeof(quat_t));
+   VectorCopy(c+7,authored[frame].joints[j].scale);
+  }
+ }
+ fclose(f);
+}
+static float PoseDistance(const modelPose_t *a,const modelPose_t *b) {
+ float distance=0;int j,k;
+ CHECK(a->numJoints==b->numJoints);
+ for(j=0;j<a->numJoints;j++)for(k=0;k<3;k++) {
+  float d=fabs(a->joints[j].translate[k]-b->joints[j].translate[k]);
+  if(d>distance)distance=d;
+ }
+ for(j=0;j<a->numJoints;j++)for(k=0;k<4;k++) {
+  float d=fabs(a->joints[j].rotate[k]-b->joints[j].rotate[k]);
+  if(d>distance)distance=d;
+ }
+ return distance;
+}
+static void Picture(playerState_t *ps,int msec,modelPose_t *out) {
+ refEntity_t entity;playerState_t before=*ps;
+ memset(&entity,0,sizeof(entity));entity.hModel=1;
+ cg.time+=msec;
+ CHECK(CG_WeapAnim_Apply(ps,&entity,msec));
+ CHECK(!memcmp(ps,&before,sizeof(*ps)));
+ if(entity.pose)*out=*entity.pose;
+ else trap_R_BlendModelPoses(out,&authored[entity.frame],1-entity.backlerp,
+  &authored[entity.oldframe],entity.backlerp);
 }
 
 static void Ready(playerState_t *ps,int weapon) {
@@ -232,7 +309,7 @@ static void TestExclusions(weapAnimDef_t *def) {
 static void TestRelease(weapAnimDef_t *def) {
  playerState_t ps;
  animLayer_t *retained=&cg_weapLayers[LAYER_RETAINED];
- refEntity_t sample;
+ animLayer_t *move=&cg_weapLayers[LAYER_MOVE];
  float time,weight;
  int held,t;
  for(held=0;held<2;held++) {
@@ -246,17 +323,14 @@ static void TestRelease(weapAnimDef_t *def) {
   if(held) {
    CHECK(cg_weapLayers[LAYER_SPRINT].time>=time);
    CHECK(cg_weapLayers[LAYER_SPRINT].startFraction>0);
+  } else {
+   CHECK(retained->weight==0 && move->fit==MOVE_FIT_RETURN);
+   CHECK(move->clip==WANIM_SPRINT_IN && move->weight==1);
+   CHECK(move->time<time && move->returnTo==0);
   }
   weight=retained->weight;
   for(t=0;t<100 && retained->weight>0;t++) {
    Update(def,&ps,1); CHECK(retained->weight<weight); weight=retained->weight;
-   CHECK(CG_WeapAnim_SampleLayers(def,&sample));
-   if(!held && weight>.001f && weight<.999f) {
-    /* Both sides of half-weight are continuous blends, not clip switches. */
-    CHECK(sample.frame<def->clips[WANIM_IDLE].firstFrame+def->clips[WANIM_IDLE].numFrames);
-    CHECK(sample.oldframe>=def->clips[WANIM_SPRINT_IN].firstFrame);
-    CHECK(fabs(sample.backlerp-weight)<.0001f);
-   }
   }
   CHECK(retained->weight==0);
  }
@@ -330,7 +404,7 @@ static void FlowBegin(void) {
 static void FlowStep(void) {
  playerState_t before;
  flow.cmd.serverTime+=8; PickupWeaponStep(&flow,8);
- before=flowPs; CG_WeapAnim_BuildPose(&flowPs,1,8);
+ before=flowPs; cg.time+=8; CG_WeapAnim_BuildPose(&flowPs,1,8);
  CHECK(!memcmp(&before,&flowPs,sizeof(flowPs)));
 }
 static void FlowSlot(int slot) { flow.cmd.weapon=BG_SLOT_COMMAND+slot; }
@@ -341,6 +415,7 @@ static void FlowReturn(int clip,float home,float len) {
  float last,step=len/MOVE_RETURN_MS*8*1.5f+.01f,steps[64],peak=0;
  int held,n=0;
  CHECK(flowPs.weaponstate==WEAPON_READY && flowPs.weaponTime==0);
+ CHECK(cg_returnTime==RETURN_BLEND_MSEC); /* no second blend over the clip return */
  CHECK(move->clip==clip && move->fit==MOVE_FIT_RETURN && move->weight==1);
  for(held=0;move->targetWeight>0 && held<=MOVE_RETURN_MS+16;held+=8) {
   last=move->time; FlowStep();
@@ -352,6 +427,10 @@ static void FlowReturn(int clip,float home,float len) {
  /* Eased, not linear: it sets off and settles gently around a faster middle. */
  for(held=0;held<n;held++) if(steps[held]>peak) peak=steps[held];
  if(n>=8) CHECK(steps[0]<peak*.5f && steps[n-1]<peak*.5f);
+ for(held=0;held<48;held+=8) {
+  FlowStep();CHECK(fabs(move->time-home)<.01f);
+ }
+ CHECK(move->weight==0);
 }
 /* A Y pressed while a cancel is still easing home carries on from that pose. */
 static void FlowHolsterMidReturn(weapAnimDef_t *def,int clip) {
@@ -378,9 +457,10 @@ static void TestFlow(weapAnimDef_t *def) {
   FlowSlot(SLOT_PRIMARY);
   for(t=0;t<48;t+=8) {
    FlowStep(); CHECK(flowPs.weaponstate==WEAPON_DROPPING);
-   /* Back down no faster than the draw came up: 8ms of clip per 8ms frame at most. */
+   /* Reverse the visible stretch over the holster lock, which need not equal
+    * the draw's duration. Never traverse more than a whole draw in that time. */
    CHECK(move->clip==WANIM_RAISE && move->fit==MOVE_FIT_REVERSE && move->time<=last+.01f &&
-    last-move->time<=8*raise/BG_WeaponRaiseTime(WP_SHOTGUN)+.01f);
+    last-move->time<=8*raise/BG_WeaponDropTime(WP_SHOTGUN)+.01f);
    last=move->time;
   }
   FlowSlot(SLOT_SECONDARY); FlowStep();
@@ -430,6 +510,187 @@ static void TestFlow(weapAnimDef_t *def) {
  CHECK(flowPs.weaponstate==WEAPON_FIRING && move->targetWeight==0 && move->fit==MOVE_FIT_NONE);
  CHECK(cg_weapLayers[LAYER_BASE].clip==WANIM_FIRE);
 }
+/* A short sprint, Y, release sprint, Y: the real weapon think cancels the
+ * holster immediately. Its retained entry must travel home along the authored
+ * motion in both native and frame-only rendering, with no gameplay lock. */
+static void TestSprintFlow(weapAnimDef_t *def) {
+ animLayer_t *move=&cg_weapLayers[LAYER_MOVE], *retained=&cg_weapLayers[LAYER_RETAINED];
+ modelPose_t before,after;
+ int native,exiting,t,part,clip;
+ float from,last,home;
+ LoadAuthoredPoses("assets/baseq3/models/weapons2/spas12/view.iqm");
+ for(native=0;native<2;native++)for(exiting=0;exiting<2;exiting++)for(part=1;part<4;part++) {
+  nativePose=native;
+  FlowBegin(); FlowSlot(SLOT_SECONDARY);
+  for(t=0;t<10000 && !(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_READY &&
+   move->weight==0);t+=8) FlowStep();
+  flow.cmd.buttons=BUTTON_SPRINT; flowPs.pm_flags|=PMF_SPRINTING;
+  for(t=0;t<BG_WeaponSprintInTime(flowPs.weapon)*part/4;t+=8) FlowStep();
+  CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN);
+  /* Releasing just before the first Y can also leave a partial exit as the
+   * visible source. Both halves of a posture transition are cancellable. */
+  if(exiting) {
+   flow.cmd.buttons=0; flowPs.pm_flags&=~PMF_SPRINTING;
+   FlowStep(); FlowStep(); CHECK(flowPs.weaponstate==WEAPON_SPRINT_OUT);
+  }
+  clip=exiting ? WANIM_SPRINT_OUT : WANIM_SPRINT_IN;
+  FlowSlot(SLOT_PRIMARY); FlowStep();
+  CHECK(flowPs.weaponstate==WEAPON_DROPPING && CG_WeapAnim_HoldsDrop());
+  CHECK(retained->clip==clip && retained->weight==1);
+  Picture(&flowPs,0,&before); from=retained->time;
+  flow.cmd.buttons=0; flowPs.pm_flags&=~PMF_SPRINTING;
+  FlowSlot(SLOT_SECONDARY); flow.cmd.serverTime+=8; PickupWeaponStep(&flow,8);
+  Picture(&flowPs,0,&after);
+  CHECK(flowPs.weaponstate==WEAPON_READY && flowPs.weaponTime==0);
+  CHECK(!CG_WeapAnim_HoldsDrop() && retained->weight==0);
+  CHECK(move->fit==MOVE_FIT_RETURN && move->clip==clip && move->weight==1);
+  CHECK(fabs(move->time-from)<.01f && PoseDistance(&before,&after)<.001f);
+  home=exiting ? CG_WeapAnim_LastFrameTime(def,clip) : 0;
+  for(t=0;move->targetWeight>0 && t<MOVE_RETURN_MS+16;t+=8) {
+   last=move->time; FlowStep();
+   CHECK(flowPs.weaponstate==WEAPON_READY && flowPs.weaponTime==0);
+   CHECK(move->clip==clip && fabs(home-move->time)<=fabs(home-last)+.01f);
+  }
+  CHECK(move->targetWeight==0 && fabs(move->time-home)<.01f);
+  /* The return has reached home. Its short release must hold that endpoint;
+   * advancing a returned entry away again gives the tail a visible hiccup. */
+  for(t=0;t<48;t+=8) {
+   FlowStep();CHECK(fabs(move->time-home)<.01f);
+  }
+  CHECK(move->weight==0 && cg_weapLayers[LAYER_SPRINT].weight==0);
+
+  /* A trigger after cancellation takes the picture immediately, even while
+   * the entry is still returning. It must never preserve a delayed shot. */
+  flow.cmd.buttons=BUTTON_SPRINT; flowPs.pm_flags|=PMF_SPRINTING;
+  for(t=0;t<64;t+=8) FlowStep();
+  FlowSlot(SLOT_PRIMARY); FlowStep();
+  flow.cmd.buttons=0; flowPs.pm_flags&=~PMF_SPRINTING;
+  FlowSlot(SLOT_SECONDARY); FlowStep(); CHECK(move->fit==MOVE_FIT_RETURN);
+  flow.cmd.buttons=BUTTON_ATTACK; FlowStep();
+  CHECK(flowPs.weaponstate==WEAPON_FIRING && move->targetWeight==0 && move->fit==MOVE_FIT_NONE);
+  CHECK(!cg_retainedActive && retained->weight==0);
+ }
+ nativePose=qfalse;
+}
+
+/* A real floor and full Pmove keep landing in the sequence. A presentation
+ * restart must depend on the picture still visible, never on old layer clocks
+ * left behind by an airborne holster. */
+static void FlowFloorTrace(trace_t *tr,const vec3_t start,const vec3_t mins,
+ const vec3_t maxs,const vec3_t end,int pass,int mask) {
+ float bottom=start[2]+(mins ? mins[2] : 0), endBottom=end[2]+(mins ? mins[2] : 0);
+ (void)maxs;(void)pass;(void)mask;
+ memset(tr,0,sizeof(*tr));tr->fraction=1;tr->entityNum=ENTITYNUM_NONE;
+ VectorCopy(end,tr->endpos);
+ if(bottom<-.01f) { tr->allsolid=tr->startsolid=qtrue;tr->fraction=0; }
+ else if(endBottom<bottom && endBottom<=0) tr->fraction=bottom/(bottom-endBottom);
+ if(tr->fraction<1) {
+  int i;
+  if(tr->fraction<0)tr->fraction=0;
+  for(i=0;i<3;i++)tr->endpos[i]=start[i]+(end[i]-start[i])*tr->fraction;
+  tr->plane.normal[2]=1;tr->entityNum=ENTITYNUM_WORLD;tr->contents=CONTENTS_SOLID;
+ }
+}
+static int FlowFloorContents(const vec3_t point,int pass) {
+ (void)pass;return point[2]<0 ? CONTENTS_SOLID : 0;
+}
+static void FlowWorldStep(qboolean render) {
+ playerState_t before;
+ flow.cmd.serverTime+=8;Pmove(&flow);cg.time+=8;
+ if(render) {
+  before=flowPs;CG_WeapAnim_BuildPose(&flowPs,1,8);
+  CHECK(!memcmp(&before,&flowPs,sizeof(flowPs)));
+ }
+}
+static void FlowWorldBegin(void) {
+ int t;
+ FlowBegin();FlowSlot(SLOT_SECONDARY);
+ for(t=0;t<10000 && !(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_READY &&
+  cg_weapLayers[LAYER_MOVE].weight==0);t+=8)FlowStep();
+ CHECK(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_READY);
+ flow.trace=FlowFloorTrace;flow.pointcontents=FlowFloorContents;flow.tracemask=MASK_PLAYERSOLID;
+ flow.cmd.forwardmove=127;flowPs.commandTime=flow.cmd.serverTime;
+ flowPs.speed=320;flowPs.gravity=800;flowPs.origin[2]=24;
+ flowPs.groundEntityNum=ENTITYNUM_WORLD;FlowWorldStep(qtrue);
+ CHECK(flowPs.groundEntityNum==ENTITYNUM_WORLD);
+}
+static void TestSprintReentry(weapAnimDef_t *def) {
+ animLayer_t *move=&cg_weapLayers[LAYER_MOVE],*sprint=&cg_weapLayers[LAYER_SPRINT];
+ modelPose_t before,after;
+ int native,t,ammo;
+ float last,len=CG_WeapAnim_LastFrameTime(def,WANIM_SPRINT_IN);
+ LoadAuthoredPoses("assets/baseq3/models/weapons2/spas12/view.iqm");
+ for(native=0;native<2;native++) {
+  nativePose=native;FlowWorldBegin();ammo=flowPs.ammo[WP_SHOTGUN];
+  flow.cmd.upmove=127;FlowWorldStep(qtrue);flow.cmd.upmove=0;
+  CHECK(flowPs.groundEntityNum==ENTITYNUM_NONE);
+  flow.cmd.buttons=BUTTON_SPRINT;
+  for(t=0;t<BG_WeaponSprintInTime(WP_SHOTGUN)*3/4;t+=8)FlowWorldStep(qtrue);
+  CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN && flowPs.groundEntityNum==ENTITYNUM_NONE);
+  FlowSlot(SLOT_PRIMARY);FlowWorldStep(qtrue);
+  CHECK(flowPs.weaponstate==WEAPON_DROPPING && CG_WeapAnim_HoldsDrop());
+  flow.cmd.buttons=0;
+  for(t=0;t<BG_WeaponDropTime(WP_SHOTGUN) && flowPs.groundEntityNum==ENTITYNUM_NONE;t+=8)
+   FlowWorldStep(qtrue);
+  CHECK(flowPs.groundEntityNum==ENTITYNUM_WORLD && flowPs.weaponstate==WEAPON_DROPPING);
+  FlowSlot(SLOT_SECONDARY);FlowWorldStep(qtrue);
+  CHECK(flowPs.weaponstate==WEAPON_READY && flowPs.weaponTime==0 && move->fit==MOVE_FIT_RETURN);
+  for(t=0;t<MOVE_RETURN_MS+100;t+=8)FlowWorldStep(qtrue);
+  CHECK(move->weight==0 && sprint->weight==0 && !cg_retainedActive);
+  flow.cmd.buttons=BUTTON_SPRINT;FlowWorldStep(qtrue);Picture(&flowPs,0,&after);
+  CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN && flowPs.weaponTime==BG_WeaponSprintInTime(WP_SHOTGUN));
+  CHECK(sprint->startFraction==0 && sprint->time==0);
+  /* Idle breathes through its own loop; a new entry must start at its authored
+   * ready pose rather than an arbitrary breathing frame or stale carry pose. */
+  CHECK(PoseDistance(&after,&authored[def->clips[WANIM_SPRINT_IN].firstFrame])<.001f);
+  for(t=0;t<BG_WeaponSprintInTime(WP_SHOTGUN)/2;t+=8) {
+   last=sprint->time;FlowWorldStep(qtrue);
+   CHECK(sprint->time>last && sprint->time-last<=len*8/BG_WeaponSprintInTime(WP_SHOTGUN)+.01f);
+  }
+  CHECK(flowPs.ammo[WP_SHOTGUN]==ammo);
+
+  /* Re-request sprint while the cancelled entry is visibly returning. The
+   * current return pose is the start, rather than either its old entry clock
+   * or frame zero. The full gameplay entry lock is still stamped. */
+  FlowSlot(SLOT_PRIMARY);FlowWorldStep(qtrue);flow.cmd.buttons=0;
+  FlowSlot(SLOT_SECONDARY);FlowWorldStep(qtrue);
+  CHECK(move->fit==MOVE_FIT_RETURN && move->clip==WANIM_SPRINT_IN);
+  for(t=0;t<32;t+=8)FlowWorldStep(qtrue);
+  CHECK(move->fit==MOVE_FIT_RETURN && move->weight==1);
+  Picture(&flowPs,0,&before);last=move->time;
+  flow.cmd.buttons=BUTTON_SPRINT;FlowWorldStep(qtrue);Picture(&flowPs,0,&after);
+  CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN && flowPs.weaponTime==BG_WeaponSprintInTime(WP_SHOTGUN));
+  CHECK(fabs(sprint->time-last)<.01f && PoseDistance(&before,&after)<.001f);
+  CHECK(sprint->startFraction>0 && sprint->startFraction<1);
+  FlowWorldStep(qtrue);CHECK(sprint->time>last);
+
+  /* One rendered entry frame still shows idle, but the next Y carries the
+   * live transition forward before the second Y returns it. */
+  FlowWorldBegin();flow.cmd.buttons=BUTTON_SPRINT;FlowWorldStep(qtrue);
+  CHECK(sprint->clip==WANIM_SPRINT_IN && sprint->time==0);
+  FlowSlot(SLOT_PRIMARY);FlowWorldStep(qtrue);
+  CHECK(CG_WeapAnim_HoldsDrop() && cg_weapLayers[LAYER_RETAINED].clip==WANIM_SPRINT_IN);
+  flow.cmd.buttons=0;FlowWorldStep(qtrue);FlowSlot(SLOT_SECONDARY);FlowWorldStep(qtrue);
+  CHECK(flowPs.weaponstate==WEAPON_READY && move->fit==MOVE_FIT_RETURN && move->clip==WANIM_SPRINT_IN);
+
+  /* A cancelled carried sprint is fading out, not still at full carry. A
+   * restart late in that release must not promote its faint overlay to full
+   * carry and skip the new entry. */
+  FlowWorldBegin();flow.cmd.buttons=BUTTON_SPRINT;
+  for(t=0;t<BG_WeaponSprintInTime(WP_SHOTGUN)+32;t+=8)FlowWorldStep(qtrue);
+  CHECK(flowPs.weaponstate==WEAPON_SPRINTING);
+  FlowSlot(SLOT_PRIMARY);FlowWorldStep(qtrue);flow.cmd.buttons=0;
+  FlowSlot(SLOT_SECONDARY);FlowWorldStep(qtrue);
+  CHECK(cg_weapLayers[LAYER_RETAINED].clip==WANIM_SPRINT_LOOP && !cg_retainedActive);
+  for(t=0;t<48;t+=8)FlowWorldStep(qtrue);
+  CHECK(cg_weapLayers[LAYER_RETAINED].weight>0 && cg_weapLayers[LAYER_RETAINED].weight<.5f);
+  Picture(&flowPs,0,&before);
+  flow.cmd.buttons=BUTTON_SPRINT;FlowWorldStep(qtrue);Picture(&flowPs,0,&after);
+  CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN && flowPs.weaponTime==BG_WeaponSprintInTime(WP_SHOTGUN));
+  CHECK(sprint->startFraction<1);
+ }
+ nativePose=qfalse;
+}
 static void TestReloadPerk(weapAnimDef_t *def,int weapon) {
  playerState_t ps;int seq,perk,duration;
  for(seq=0;seq<RSEQ_COUNT;seq++)for(perk=0;perk<2;perk++) {
@@ -442,6 +703,93 @@ static void TestReloadPerk(weapAnimDef_t *def,int weapon) {
     (float)(duration/2)/duration*CG_WeapAnim_ClipLength(def,WANIM_RELOAD_START+seq))<.01f);
   CHECK(!cg_retainedActive);
  }
+}
+static void TestPictureContinuity(weapAnimDef_t *def,int weapon,const char *path) {
+ playerState_t ps;modelPose_t before,after,middle,destination;
+ int native,held,fraction,t;
+ LoadAuthoredPoses(path);
+ for(native=0;native<2;native++) {
+  nativePose=native;
+  /* The authored pump endpoint is not idle. A real sampled pose, not just
+   * a layer flag, must survive the exact simulation-ready boundary. */
+  Ready(&ps,weapon);ps.weaponstate=WEAPON_BOLTING;ps.weaponAnimSeq=ASEQ_FIRE;
+  ps.weaponAnimTime=BG_WeaponFireLength(weapon)-1;
+  Picture(&ps,0,&before);
+  ps.weaponstate=WEAPON_READY;ps.weaponAnimTime=-1;
+  Picture(&ps,0,&after);CHECK(PoseDistance(&before,&after)<.001f);
+  Picture(&ps,50,&middle);Picture(&ps,50,&destination);
+  CHECK(cg_returnTime==RETURN_BLEND_MSEC);
+  CHECK(PoseDistance(&middle,&destination)<=PoseDistance(&before,&destination)+.01f);
+
+  /* A new shot cancels the pump's cosmetic release immediately. */
+  Ready(&ps,weapon);ps.weaponstate=WEAPON_BOLTING;ps.weaponAnimSeq=ASEQ_FIRE;
+  ps.weaponAnimTime=BG_WeaponFireLength(weapon)-1;Picture(&ps,16,&before);
+  ps.weaponstate=WEAPON_READY;ps.weaponAnimTime=-1;Picture(&ps,16,&after);
+  CHECK(cg_returnTime==0);
+  ps.weaponstate=WEAPON_FIRING;ps.weaponAnimSeq=ASEQ_FIRE;ps.weaponAnimTime=0;
+  Picture(&ps,16,&after);
+  CHECK(cg_returnTime==RETURN_BLEND_MSEC);
+  CHECK(PoseDistance(&after,&authored[def->clips[WANIM_FIRE].firstFrame])<.001f);
+
+  Ready(&ps,weapon);Picture(&ps,16,&before);
+  ps.weaponstate=WEAPON_FIRING;ps.weaponAnimSeq=ASEQ_FIRE;ps.weaponAnimTime=0;
+  Picture(&ps,16,&after);
+  CHECK(cg_returnTime==RETURN_BLEND_MSEC);
+  CHECK(PoseDistance(&after,&authored[def->clips[WANIM_FIRE].firstFrame])<.001f);
+
+  /* Reload-ending YY releases the observed pose too; it never acquires the
+   * retained action layer that owns sprint/holster presentation. */
+  Ready(&ps,weapon);ps.weaponstate=WEAPON_RELOADING;ps.weaponAnimSeq=RSEQ_END;
+  ps.weaponAnimTime=BG_WeaponReloadSegLength(weapon,RSEQ_END)/2;
+  Picture(&ps,16,&before);
+  ps.weaponstate=WEAPON_DROPPING;ps.weaponTime=BG_WeaponDropTime(weapon);
+  Picture(&ps,0,&after);CHECK(PoseDistance(&before,&after)<.001f);
+  CHECK(!cg_retainedActive);
+  ps.weaponTime-=16;Picture(&ps,16,&before);
+  ps.weaponstate=WEAPON_READY;ps.weaponTime=0;
+  Picture(&ps,0,&after);CHECK(PoseDistance(&before,&after)<.001f);
+
+  for(held=0;held<2;held++)for(fraction=1;fraction<4;fraction++) {
+   Ready(&ps,weapon);ps.weaponstate=WEAPON_RAISING;
+   ps.weaponTime=BG_WeaponRaiseTime(weapon)*fraction/4;
+   Picture(&ps,16,&before);
+   ps.weaponstate=WEAPON_DROPPING;ps.weaponTime=BG_WeaponDropTime(weapon);
+   Picture(&ps,0,&after);CHECK(PoseDistance(&before,&after)<.001f);
+   CHECK(cg_weapLayers[LAYER_MOVE].startFraction>0);
+   for(t=0;t<4;t++) { ps.weaponTime-=8;Picture(&ps,8,&before); }
+   /* Reverse again while the first visual blend is still in flight. */
+   ps.weaponstate=held ? WEAPON_FIRING : WEAPON_READY;
+   ps.weaponAnimSeq=ASEQ_FIRE;ps.weaponAnimTime=0;ps.weaponTime=held ? BG_WeaponFireLength(weapon) : 0;
+   Picture(&ps,0,&after);CHECK(PoseDistance(&before,&after)<.001f);
+   for(t=0;t<100;t+=10) {
+    if(held)ps.weaponAnimTime+=10;
+    Picture(&ps,10,&after);
+   }
+   CHECK(cg_returnTime==RETURN_BLEND_MSEC);
+   CHECK(ps.weaponstate==(held ? WEAPON_FIRING : WEAPON_READY));
+  }
+  /* A second stereo submission is the same picture, not another tick. */
+  Ready(&ps,weapon);ps.weaponstate=WEAPON_BOLTING;ps.weaponAnimSeq=ASEQ_FIRE;
+  ps.weaponAnimTime=BG_WeaponFireLength(weapon)-1;Picture(&ps,16,&before);
+  ps.weaponstate=WEAPON_READY;Picture(&ps,16,&before);Picture(&ps,16,&before);
+  {
+   refEntity_t second;float time=cg_returnTime;
+   memset(&second,0,sizeof(second));second.hModel=1;
+   CHECK(CG_WeapAnim_Apply(&ps,&second,16));CHECK(cg_returnTime==time);
+   if(second.pose)after=*second.pose;
+   else trap_R_BlendModelPoses(&after,&authored[second.frame],1-second.backlerp,
+    &authored[second.oldframe],second.backlerp);
+   CHECK(PoseDistance(&before,&after)<.001f);
+  }
+  /* The gameplay shot/bolt distinction shares one continuous fire clip. */
+  Ready(&ps,weapon);ps.weaponstate=WEAPON_FIRING;ps.weaponAnimSeq=ASEQ_FIRE;
+  ps.weaponAnimTime=BG_WeaponFireLength(weapon)/3;Picture(&ps,0,&before);
+  ps.weaponstate=WEAPON_BOLTING;Picture(&ps,0,&after);
+  CHECK(PoseDistance(&before,&after)<.001f && cg_returnTime==RETURN_BLEND_MSEC);
+  ps.weaponstate=WEAPON_READY;Picture(&ps,0,&after);CHECK(cg_returnTime==0);
+  ps.clientNum++;Picture(&ps,0,&after);CHECK(cg_returnTime==RETURN_BLEND_MSEC);
+ }
+ nativePose=qfalse;
 }
 int main(void) {
  playerState_t ps;
@@ -468,10 +816,14 @@ int main(void) {
  TestFirstDraw(def,WP_SHOTGUN);
  TestReloadPerk(def,WP_SHOTGUN);
  TestFlow(def);
+ TestSprintFlow(def);
+ TestSprintReentry(def);
+ TestPictureContinuity(def,WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm");
  CG_WeapAnim_RegisterClips(WP_M40A3,2,"assets/baseq3/models/weapons2/m40a3/view.cfg");
  def=&bg_weapAnimDefs[WP_M40A3];
  TestSprint(def,WP_M40A3); TestFirstDraw(def,WP_M40A3);
  TestReloadPerk(def,WP_M40A3);
  TestOwnership(def); TestExclusions(def);
+ TestPictureContinuity(def,WP_M40A3,"assets/baseq3/models/weapons2/m40a3/view.iqm");
  printf("PASS: %d weapon presentation ownership checks\n",checks); return 0;
 }

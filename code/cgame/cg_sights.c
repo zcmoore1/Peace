@@ -140,15 +140,16 @@ void CG_Sights_Register( int weapon, const char *path ) {
 
 // Scope presentation is configured beside the model, not a weapon-ID branch.
 // Draw even with the ordinary HUD disabled and during replay, but never grant
-// aim permission: the existing predicted ADS blend is its only clock.
+// aim permission. Scope, FOV and model alignment all consume the same aim clock.
 void CG_Sights_DrawScope(void) {
 	const weaponSights_t *def = CG_Sights_Def(cg.predictedPlayerState.weapon);
+	float fraction = cg.adsFrac;
 	float alpha, width, x;
 	vec4_t white = {1,1,1,1}, black = {0,0,0,1};
 	if (!def || !def->scopeShader || !CG_Sights_Pose(def) || cg.renderingThirdPerson ||
 		cg.predictedPlayerState.stats[STAT_HEALTH] <= 0 ||
-		cg.predictedPlayerState.pm_type == PM_INTERMISSION || cg.adsFrac <= .8f) return;
-	alpha = Com_Clamp(0,1,(cg.adsFrac-.8f)/.2f);
+		cg.predictedPlayerState.pm_type == PM_INTERMISSION || fraction <= .8f) return;
+	alpha = Com_Clamp(0,1,(fraction-.8f)/.2f);
 	alpha = alpha*alpha*(3-2*alpha);
 	white[3] = black[3] = alpha;
 	// Correct physical aspect, including widescreen and reduced viewports.
@@ -170,7 +171,8 @@ qboolean CG_Sights_HideViewModel(void) {
 
 float CG_Sights_Fraction( void ) {
 	// Smooth endpoints, with one reversible linear clock underneath.
-	return cg.adsFrac * cg.adsFrac * (3.0f - 2.0f * cg.adsFrac);
+	float fraction = cg.adsFrac;
+	return fraction * fraction * (3.0f - 2.0f * fraction);
 }
 
 float CG_Sights_FovScale( int weapon ) {
@@ -182,25 +184,27 @@ void CG_Sights_Update( const playerState_t *ps ) {
 	const weaponSights_t *def;
 	float target, duration, step;
 	int elapsed = cg.time - cg.adsTime;
-	int sight = ps->slotAttachments[ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ? SLOT_SECONDARY : SLOT_PRIMARY];
 	int teleportBit = ps->eFlags & EF_TELEPORT_BIT;
+	qboolean reset;
 
 	if ( ps->weapon > WP_NONE && ps->weapon < WP_NUM_WEAPONS ) {
 		CG_RegisterWeapon( ps->weapon );
 	}
 	def = CG_Sights_Def( ps->weapon );
-	if ( !cg.adsTime || elapsed < 0 || cg.adsWeapon != ps->weapon ||
-	     cg.adsClientNum != ps->clientNum || cg.adsSight != sight ||
+	reset = !cg.adsTime || elapsed < 0 || cg.adsClientNum != ps->clientNum ||
 	     cg.adsTeleportBit != teleportBit || cg.renderingThirdPerson ||
 	     ps->stats[STAT_HEALTH] <= 0 || ps->pm_type == PM_INTERMISSION ||
-	     ps->persistant[PERS_TEAM] == TEAM_SPECTATOR ) {
+	     ps->persistant[PERS_TEAM] == TEAM_SPECTATOR;
+	// Aim belongs to the player, not the weapon or attachment. Consume the
+	// already-calculated ADS flag first: PM_Weapon may have changed the gun
+	// after that calculation. A later movement update revokes permission if
+	// the new action prevents aiming. Voluntary button release still eases out.
+	if (reset || (!(ps->pm_flags & PMF_ADS) && !BG_CanAimDownSights(ps))) {
 		cg.adsFrac = 0.0f;
 		elapsed = 0;
 	}
 	cg.adsTime = cg.time;
-	cg.adsWeapon = ps->weapon;
 	cg.adsClientNum = ps->clientNum;
-	cg.adsSight = sight;
 	// thisFrameTeleport is prediction-owned and can remain set indefinitely
 	// with synchronous clients, no prediction, or demo playback. Consume the
 	// actual player teleport edge once instead of resetting aim every frame.

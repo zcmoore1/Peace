@@ -4,7 +4,9 @@
 Geometry, materials, bind skeleton and original clip ranges are retained.
 All animation channels are rebuilt from the source SMDs, so repeated bakes do
 not accumulate quantization error. Sprint authoring lives in sprint.json.
-No Blender installation is needed; the Blender importer invokes this too.
+The synthetic holster resamples the draw backwards with an earlier departure
+from ready. No Blender installation is needed; the Blender importer invokes
+this too.
 """
 import argparse
 import json
@@ -76,6 +78,49 @@ def skeleton(path):
     return nodes, frames
 
 
+def holster_samples(count):
+    """Keep the draw's reverse path, with a quicker departure from ready.
+
+    The source draw settles gently at its end. Simply reversing those samples
+    stretched that near-still tail over the beginning of the 829ms holster.
+    Ease-out sampling puts more of the existing movement near the beginning,
+    without changing the endpoints, number of frames or gameplay duration.
+    The Blender preview and stdlib export use the same sampling rule.
+    """
+    assert count >= 2
+    for i in range(count):
+        f = i/(count-1)
+        sample = f*(2-f)*(count-1)
+        first = int(sample)
+        yield first, min(first+1, count-1), sample-first
+
+
+def holster_clip(draw):
+    reverse = list(reversed(draw))
+    result = []
+    for first, second, fraction in holster_samples(len(reverse)):
+        if fraction == 0:
+            result.append(reverse[first])
+            continue
+        frame = []
+        for a, b in zip(reverse[first], reverse[second]):
+            # Shortest-path quaternion interpolation keeps the mechanical
+            # joints rigid while sampling between the original authored poses.
+            dot = sum(x*y for x, y in zip(a[3:7], b[3:7]))
+            sign = -1 if dot < 0 else 1
+            angle = math.acos(min(1, abs(dot)))
+            wa, wb = 1-fraction, fraction
+            if angle > .000001:
+                wa = math.sin((1-fraction)*angle)/math.sin(angle)
+                wb = math.sin(fraction*angle)/math.sin(angle)
+            rotation = unit(tuple(a[k]*wa+b[k]*wb*sign for k in range(3, 7)))
+            position = tuple(a[k]+(b[k]-a[k])*fraction for k in range(3))
+            scale = tuple(a[k]+(b[k]-a[k])*fraction for k in range(7, 10))
+            frame.append((*position, *rotation, *scale))
+        result.append(frame)
+    return result
+
+
 def sprint_clips(nodes, idle, recipe):
     pivot = recipe["pivot"]
     pitch, yaw, roll = map(math.radians, recipe["pitch_yaw_roll"])
@@ -142,7 +187,7 @@ def build(model=None, config=None):
         nodes, frames = skeleton(SOURCE / filename)
         assert nodes == [(label(j[0]), j[1]) for j in joints[:-1]]
         clips.append((name, frames, rates[name], loop))
-    clips.append(("drop", list(reversed(clips[1][1])), rates["drop"], False))
+    clips.append(("drop", holster_clip(clips[1][1]), rates["drop"], False))
     clips.extend(sprint_clips(nodes, clips[0][1][0], json.loads((SOURCE / "sprint.json").read_text())))
     recipe = json.loads((SOURCE / "first_raise.json").read_text())
     deployment = []

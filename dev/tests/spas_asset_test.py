@@ -5,6 +5,7 @@ Quake's default material culls GL_FRONT. Regressing to Blender's CCW order
 renders the interior and makes the front sight post disappear in ADS.
 """
 from pathlib import Path
+import ast
 import math
 import struct
 
@@ -58,6 +59,17 @@ for i in range(h[17]):
     assert (first, count, loop) == (expected[0], expected[1], expected[3])
     assert abs(fps - expected[2]) < .0001
 
+# Reimporting the mesh must preserve the same retimed draw/holster as the
+# shipped clip table. Read its plain data without requiring Blender's bpy.
+importer = ast.parse((ROOT / "dev/tools/import_spas.py").read_text())
+durations = next(ast.literal_eval(node.value) for node in importer.body
+                 if isinstance(node, ast.Assign) and any(
+                     isinstance(target, ast.Name) and target.id == "CLIP_SECONDS"
+                     for target in node.targets))
+for label, seconds in durations.items():
+    _, count, fps, _ = clips[label]
+    assert abs(count/fps - seconds) < .000001, f"Importer timing differs: {label}"
+
 # Decode the shipped channels independently of the animation baker. This tests
 # the actual engine input, including quantization and clip offsets/loop flags.
 poses = [struct.unpack_from("<iI20f", data, h[16] + 88*i) for i in range(h[15])]
@@ -102,6 +114,35 @@ steps = [difference(a, b) for a, b in zip(carry, carry[1:])]
 assert difference(carry[-1], carry[0]) <= max(steps)*1.05, "Carry loop seam pops"
 
 roots = [i for i, p in enumerate(poses) if p[0] < 0]
+
+# The synthetic holster preserves the draw's endpoints but should visibly
+# depart from ready during a quick cancellation. Compare actual shipped
+# positions against the old straight reversed-draw samples; checking only
+# clip clocks would pass even when the gun barely moves on screen.
+draw = clip_frames("raise", 0)
+drop = clip_frames("drop", 0)
+assert len(drop) == len(draw)
+assert difference(drop[0], draw[-1]) < .0001
+assert difference(drop[-1], draw[0]) < .0001
+
+
+def sample_position(clip, fraction, bone):
+    sample = min(fraction*len(clip), len(clip)-1)
+    first = int(sample)
+    blend = sample-first
+    a, b = clip[first][bone], clip[min(first+1, len(clip)-1)][bone]
+    return [a[k]+(b[k]-a[k])*blend for k in range(3)]
+
+
+full_departure = max(math.dist(drop[0][i][:3], drop[-1][i][:3]) for i in roots)
+for fraction in (1/16, 1/10):
+    departure = max(math.dist(drop[0][i][:3], sample_position(drop, fraction, i))
+                    for i in roots)
+    previous = max(math.dist(drop[0][i][:3], sample_position(draw[::-1], fraction, i))
+                   for i in roots)
+    assert departure > previous*1.8, "Quick YY still lingers in the near-still tail"
+    assert departure < full_departure*.25, "Quick YY makes an oversized holster movement"
+
 for frame in entry+carry+leave:
     # Child locals (fingers, pump, shell, attachments) must keep their grip.
     for i, p in enumerate(poses):
@@ -115,4 +156,4 @@ for frame in entry+carry+leave:
             after = math.dist(frame[a][:3], frame[b][:3])
             assert abs(before-after) < .005, "Sprint separates gun and hands"
 
-print(f"PASS: {tested} SPAS triangles; clip metadata, sprint entry/loop/exit and grips.")
+print(f"PASS: {tested} SPAS triangles; clip metadata, holster departure, sprint entry/loop/exit and grips.")

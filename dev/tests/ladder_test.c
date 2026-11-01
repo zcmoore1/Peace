@@ -24,6 +24,11 @@ void QDECL Com_Error(int level, const char *fmt, ...) {
     exit(1);
 }
 void trap_SnapVector(float *v) { SnapVector(v); }
+/* The collision harness has no renderer or bot debug drawing. MSVC still
+   resolves this unused cm_patch reference before discarding its function. */
+void BotDrawDebugPolygons(void (*drawPoly)(int, int, float *), int value) {
+    (void)drawPoly; (void)value;
+}
 #ifdef HUNK_DEBUG
 void *Hunk_AllocDebug(int size, ha_pref preference, char *label, char *file, int line) {
     (void)label; (void)file; (void)line;
@@ -285,25 +290,30 @@ static void TestWeaponOrdering(void) {
             CHECK(ps.weaponTime == BG_WeaponRaiseTime(ps.weapon));
         }
     }
-    /* An interrupted bolt still owes its complete cycle; only its own close
-       note may clear the debt, including on the exact grab think. */
-    for (offset = -1; offset <= 0; offset++) {
+    /* Exact-note ladder entry finishes before chamber completion, just like
+       a holster. Late entry keeps an already committed chambered round. */
+    for (offset = -1; offset <= 1; offset++) {
         Reset(111, 0, 180);
         ps.weaponstate = WEAPON_BOLTING;
         ps.weaponAnimSeq = ASEQ_FIRE;
-        ps.weaponAnimTime = Note(WP_SHOTGUN, ASEQ_FIRE, WNOTE_BOLT_CLOSED) + offset - 1;
+        ps.weaponAnimTime = Note(WP_SHOTGUN, ASEQ_FIRE, WNOTE_BOLT_CLOSED) - 1;
         ps.weaponTime = BG_WeaponFireLength(WP_SHOTGUN) - ps.weaponAnimTime;
         ps.stats[STAT_UNCHAMBERED] = 1 << WP_SHOTGUN;
+        if (offset > 0) WeaponTick(1); /* really commit the close before grabbing */
+        else ps.weaponAnimTime += offset;
         ps.stats[STAT_LADDER] = LADDER_ATTACHED;
         WeaponTick(1);
-        CHECK(!!ps.stats[STAT_UNCHAMBERED] == (offset != 0));
+        CHECK(!!ps.stats[STAT_UNCHAMBERED] == (offset <= 0));
+        CHECK(ps.weaponstate == (offset == 0 ? WEAPON_LADDER : WEAPON_DROPPING));
+        CHECK(ps.weaponTime == (offset == 0 ? 0 : BG_LADDER_DROP_TIME));
         if (offset) WeaponTick(BG_LADDER_DROP_TIME);
         ps.stats[STAT_LADDER] = 0;
         WeaponTick(1);
         WeaponTick(BG_WeaponRaiseTime(WP_SHOTGUN));
         CHECK(ps.weaponstate == WEAPON_READY);
         WeaponTick(1);
-        CHECK(ps.weaponstate == (offset ? WEAPON_BOLTING : WEAPON_READY));
+        CHECK(ps.weaponstate == (offset <= 0 ? WEAPON_BOLTING : WEAPON_READY));
+        if (offset <= 0) CHECK(ps.weaponAnimTime == 0);
     }
 }
 

@@ -1,18 +1,14 @@
 /* Exercise the actual cgame/UI syscall boundary and VM pointer translation.
  * A QVM's trailing 32-bit pose offset must never be dereferenced as a native
  * pointer, nor read together with the next four bytes on a 64-bit host. */
-#include "../../code/client/cl_cgame.c"
+#include "../../code/client/client.h"
 #include "../../code/qcommon/vm_local.h"
 refexport_t re;
+vm_t *currentVM;
 static refEntity_t rendered;
 static int checks, submissions;
 #define CHECK(x) do { checks++; if (!(x)) { \
  fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); exit(1); } } while(0)
-void QDECL Com_Printf(const char *fmt,...) { (void)fmt; }
-void QDECL Com_Error(int level,const char *fmt,...) {
- va_list args; (void)level; va_start(args,fmt); vfprintf(stderr,fmt,args);
- va_end(args); exit(1);
-}
 static void Capture(const refEntity_t *entity) { rendered=*entity; submissions++; }
 static intptr_t QDECL NativeEntry(int call,int a0,int a1,int a2,int a3,int a4,
  int a5,int a6,int a7,int a8,int a9,int a10,int a11) { return 0; }

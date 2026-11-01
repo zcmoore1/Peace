@@ -101,7 +101,12 @@ When the request returns to the gun still held during an unfinished ordinary
 drop, shared pmove makes it READY with no remaining drop timer. The normal firing
 checks run in that same update, without an extra raise or animation lock. This
 also allows YY after a new gun appears during its raise, or during a reload tail.
-The viewmodel blends out of the canceled transition promptly.
+The viewmodel travels back along its current draw/drop clip, easing over the
+remaining motion's natural duration, capped at 250ms, then fading to idle over
+40ms. An interrupted draw reverses that same clip from its current position.
+Base-action releases (including a reload interrupted by a holster) blend from
+the last rendered pose over 100ms. These add no gameplay delay; a new shot
+cancels the visual return.
 
 This does not manufacture ammunition, erase an unfinished bolt/pump cycle, or
 override sprint/ladder restrictions. A reload canceled before insertion does
@@ -121,12 +126,17 @@ playing. Sprinting into a ladder uses the same ownership rule. Reload clips
 are excluded, and equipment actions/recovery block sprint.
 
 Sprint + Y and sprint + YY use the ordinary slot-toggle/drop-cancellation path.
-On cancellation the retained pose blends back to the current posture. A swap
-does not end a sprint (a sprint latches, as in MW2), so its entry resumes
-without jumping back to frame zero; ending the sprint (a fresh sprint press,
-aim, letting go of forward) returns the picture toward ready. Firing owns
+On cancellation a retained draw/drop or sprint transition returns along its
+visible clip. A swap does not end a sprint (a sprint latches, as in MW2), so
+its entry resumes without jumping back to frame zero. Sprint, Y, end the
+sprint (a fresh sprint press, aim, letting go of forward), Y retraces the
+partial entry toward ready through the same move-layer return. Firing owns
 the picture immediately once gameplay permits it. The blend never changes a
 busy timer, ammunition or chamber debt.
+
+A sprint can start or go on in the air, as in MW2, with the same
+entry/carry/exit animation; MW2's ending conditions still apply there, holding
+jump included (see `CLAUDE.md`, "Sprint latches and ends the MW2 way").
 
 Clip ranges and loop flags come from the model's config. The rule works with
 any weapon that provides those clips; SPAS currently has the complete authored
@@ -172,6 +182,9 @@ menu callbacks, real menu input/stack, archived cvar boundary, playerstate codec
 and pose layers. Menu checks cover mouse hitboxes, directional gamepad navigation,
 nested Back, dirty-draft confirmation, perk/weapon compatibility, all five custom
 slots, and the pause menu's Save & Equip/resume path.
+The native/QVM pose boundary test links the production `cl_vm.c` and
+`vm_ptr.c` directly, so it also runs on MSVC without linking the rest of the
+engine or relying on discarded functions to hide unresolved dependencies.
 `sh dev/tests/run-perks.sh` checks perk combinations, both class formats,
 reload note/cancel boundaries, footstep generation, authoritative fall damage,
 movement caps, jump invariance and repeatable prediction.

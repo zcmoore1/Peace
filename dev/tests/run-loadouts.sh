@@ -24,7 +24,7 @@ ${CC:-cc} $flags dev/tests/action_wire_test.c code/qcommon/msg.c code/qcommon/hu
 out/tests/action-wire-test
 ${CC:-cc} $flags dev/tests/weapon_pose_test.c dev/tests/pickup_pmove_driver.c $game $common -Wl,--gc-sections -lm -o out/tests/weapon-pose-test
 out/tests/weapon-pose-test
-${CC:-cc} $flags dev/tests/pose_vm_test.c code/qcommon/vm.c $common -Wl,--gc-sections -lm -o out/tests/pose-vm-test
+${CC:-cc} $flags dev/tests/pose_vm_test.c code/client/cl_vm.c code/qcommon/vm_ptr.c -Wl,--gc-sections -lm -o out/tests/pose-vm-test
 out/tests/pose-vm-test
 # Missiles as cgame draws them: the real CG_Missile, lerp and CG_RegisterWeapon.
 ${CC:-cc} $flags dev/tests/missile_draw_test.c code/cgame/cg_weapons.c code/game/bg_misc.c $common -Wl,--gc-sections -lm -o out/tests/missile-draw-test

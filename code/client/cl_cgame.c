@@ -35,28 +35,6 @@ extern qboolean loadCamera(const char *name);
 extern void startCamera(int time);
 extern qboolean getCameraInfo(int time, vec3_t *origin, vec3_t *angles);
 
-// QVM pointers are 32-bit offsets, not host pointers. All fields through
-// rotation have the same layout, but the trailing pose pointer may also have
-// extra alignment padding in a 64-bit native refEntity_t. Marshal the prefix
-// and resolve the nested pointer before handing the entity to either renderer.
-// The same boundary is used by cgame and UI, including entities with no pose.
-void CL_AddRefEntityFromVM( vm_t *vm, intptr_t entityAddress ) {
-	const byte *source = VM_ExplicitArgPtr(vm, entityAddress);
-	refEntity_t entity;
-	int poseOffset;
-	const size_t prefixSize = offsetof(refEntity_t, rotation) + sizeof(float);
-	if ( !source ) return;
-	if ( VM_IsNative(vm) ) {
-		re.AddRefEntityToScene((const refEntity_t *)source);
-		return;
-	}
-	Com_Memset(&entity, 0, sizeof(entity));
-	Com_Memcpy(&entity, source, prefixSize);
-	Com_Memcpy(&poseOffset, source + prefixSize, sizeof(poseOffset));
-	entity.pose = VM_ExplicitArgPtr(vm, poseOffset);
-	re.AddRefEntityToScene(&entity);
-}
-
 /*
 ====================
 CL_GetGameState

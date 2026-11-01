@@ -62,11 +62,19 @@ static void TestCycle(void) {
  Run(BG_WeaponDropTime(WP_MACHINEGUN)+BG_WeaponRaiseTime(WP_M40A3)+1);
  CHECK(ps.weapon==WP_M40A3 && ps.weaponstate==WEAPON_BOLTING);
  CHECK(ps.weaponAnimTime<=1 && shots==1);
- /* A note colliding with the holster naturally clears that lock. */
+ /* A note colliding with the holster clears its lock, then the completed
+  * holster returns before chamber completion. The next draw owes a full bolt. */
  Ready(); move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0; Run(close-1);
  move.cmd.weapon=BG_SLOT_COMMAND+1; Step(1);
  CHECK(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_RAISING);
- CHECK(!(ps.stats[STAT_UNCHAMBERED]&(1<<WP_M40A3)));
+ CHECK(ps.stats[STAT_UNCHAMBERED]&(1<<WP_M40A3));
+ Run(BG_WeaponRaiseTime(WP_MACHINEGUN));
+ move.cmd.weapon=BG_SLOT_COMMAND; Step(1);
+ Run(BG_WeaponDropTime(WP_MACHINEGUN)+BG_WeaponRaiseTime(WP_M40A3));
+ CHECK(ps.weapon==WP_M40A3 && ps.weaponstate==WEAPON_READY);
+ move.cmd.buttons=BUTTON_ATTACK; Step(1);
+ CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==0 && shots==1);
+ Run(end-1); CHECK(shots==1); Step(1); CHECK(shots==2);
 }
 static void TestReload(void) {
  int start=BG_WeaponReloadSegLength(WP_M40A3,RSEQ_START), loop=BG_WeaponReloadSegLength(WP_M40A3,RSEQ_LOOP);

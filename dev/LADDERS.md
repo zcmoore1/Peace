@@ -56,7 +56,8 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
 - The original reload helpers, swap helpers, note runner and their non-ladder
   ordering are unchanged. A ladder just owns the weapon while the hands are busy.
   Leaving raises the selected weapon using the existing deploy logic/timing.
-  A prematurely interrupted bolt still owes its entire cycle.
+  A prematurely interrupted bolt still owes its entire cycle, a grab on the
+  close note's own think included.
 - Gun use, equipment, ADS and sprint are blocked while attached. Real reloads
   still block ADS everywhere. This change does not split visual reload initiation
   from the authoritative reload state or manufacture future desync behavior.

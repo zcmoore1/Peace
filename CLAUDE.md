@@ -91,6 +91,21 @@ source for MW2 behaviour; the owner rejects it.
   the 40ms crossfade a draw ends on. A shot cuts the return immediately, and a
   returning cancel is never a retained sprint source. It holds no lock and is
   not a gameplay state. `TestFlow` drives it through the real `PM_Weapon`.
+- **Sprint cancellation returns along the visible transition.** Sprint, Y,
+  end the sprint (it latches: a fresh press, aim, letting go of forward), Y
+  transfers the retained sprint entry/exit into the existing move-layer
+  return. It travels from its current pose toward ready with the ordinary
+  sprint-out timing and return cap; it does not keep advancing away while
+  fading to idle. The ready endpoint stays fixed throughout that fade. A new
+  sprint may inherit only a posture that is still visible (including a
+  move-layer return), never a hidden layer's old clock. A sprint still running
+  through the swap still requests sprint. In the air the picture uses the same
+  sprint weapon states; whether a sprint starts, goes on or ends there is the
+  MW2 sprint rule below (holding jump ends one).
+- **Base-action releases preserve the last picture.** Fire/bolt/reload completion
+  and interruption into a holster use a 100ms pose release in native and
+  frame-only rendering. It never overlays the move layer's YY return with a
+  second transition; a new shot cancels it. Stereo eyes share one cosmetic clock.
 - **Bolting is a state, not a phase of firing.** `WEAPON_FIRING` is the shot;
   `WEAPON_BOLTING` is the action being worked. "Bolting" covers bolt, pump,
   cock and lever — they differ only in cycle length and note placement, never
@@ -103,17 +118,24 @@ source for MW2 behaviour; the owner rejects it.
   is simply abandoned, its debt still owed. An empty gun reloads itself out of
   the action, never out of the shot.
 - **The bolt cancel is the reload cancel.** `WNOTE_BOLT_CLOSED` on the fire
-  animation carries no rounds, so it clears the lock and the unchambered bit —
-  the same note, in the same place, that opens the reload's window. Never write
-  a second cancel.
+  animation carries no rounds. Like `WNOTE_MAG_IN` it clears the lock on its
+  think and only queues its completion: the chambering commits in step 4, the
+  same commit point as a reload's fill and delayed action. A swap, sprint or
+  ladder grab that completes on that exact think is still instant, but it
+  returns before step 4, so the chamber debt stays owed (owner's
+  rule: a successful NAC does not complete the pump). One think later — the
+  late cancel — the chambering has committed and is kept. It is the same note,
+  in the same place, that opens the reload's window. Never write a second
+  cancel.
 - **An open action is a debt, and it is never resumed.** Firing sets the
-  weapon's bit in `STAT_UNCHAMBERED`; only the close note clears it. A gun that
-  reaches `WEAPON_READY` with its bit set re-enters `WEAPON_BOLTING` from
-  elapsed 0 — the whole cycle, exactly like a reload, which never resumes
-  either. This is what makes the cancel window a window: miss it and the swap
-  costs you the full bolt when you come back. Never add a partial-bolt state,
-  and never clear the bit anywhere but the fire cycle's close note or the
-  reload's delayed action (spawn is the one exception).
+  weapon's bit in `STAT_UNCHAMBERED`; only the close note's step-4 commit or
+  the reload's delayed action clears it. A gun that reaches `WEAPON_READY`
+  with its bit set re-enters `WEAPON_BOLTING` from elapsed 0 — the whole
+  cycle, exactly like a reload, which never resumes either. A cancel before
+  the close note, or on its very think, costs the full pump or bolt when you
+  come back; a cancel a think later keeps the chambering. Never add a
+  partial-bolt state, and never clear the bit anywhere but those two commits
+  (spawn is the one exception).
 - **The reload's delayed action is MW2's (owner's rule: do what MW2 does).**
   When a reload starts on a gun that still owes its pump or bolt, the action is
   settled after the gun's OWN action length (fire-cycle open to close, MW2's
@@ -130,6 +152,20 @@ source for MW2 behaviour; the owner rejects it.
   are read by `CG_WeapAnim_RegisterClips`. Re-exporting a model must never mean
   editing C, and no weapon may be named in that loader.
 - **cgame is picture only.** It never touches ammo or weapon state.
+- **Aim follows simulation permission, never a scheduled scope flash.** Aim
+  progress belongs to the player and survives weapon/slot/attachment changes.
+  `BG_CanAimDownSights` is the shared physical rule (no empty hand, no quick
+  action, ladder, sprint, reload, raise or drop); `PM_CheckADS` adds the
+  buttons (aim held, and no sprint held with an unscoped gun) and runs before
+  `PM_Weapon`. An instant transition, such as a NAC from an aimed SPAS to the
+  M300, can therefore select a scoped gun while the outgoing aim flag is still
+  live, and that frame shows the scope. The next movement update sees the
+  raise and revokes permission; cgame clears aim when `PMF_ADS` is off and
+  `BG_CanAimDownSights` refuses. Letting go of aim, or holding sprint, blends
+  out normally. No handoff event, frame counter, NAC detector or weapon
+  exception may manufacture a visible flash. Multiple movement updates before
+  a render may pass through this overlap unseen. It reads only fields that
+  already travel: no protocol or game version change.
 - **Movement modifiers are per-command values.** `PM_CmdScale` must not write
   sprint/ADS multipliers into `ps.speed`: prediction replay and pmove substeps
   would apply them repeatedly, making speed depend on latency or command count.
@@ -486,9 +522,12 @@ source for MW2 behaviour; the owner rejects it.
   When they disagree the clip is time-warped to fit and reads as jittery.
 - Material strings are baked into the IQM (`models/weapons2/spas12/...`), so
   moving an asset folder breaks its textures until re-export.
-- SPAS normal holster and draw are both 1500ms; ladder holster remains the
-  universal 100ms. Both clips are retimed to 1500ms in `view.cfg`, the IQM and
-  the importer (`CLIP_SECONDS`). Transition-note ordering and YY cancellation are unchanged.
+- SPAS normal holster is 829ms and draw is 1075ms, matching the dumped MW2
+  multiplayer SPAS weapon's `dropTime`/`raiseTime`. `view.cfg`, the IQM and the
+  importer (`CLIP_SECONDS`) carry those same lengths. Its custom first draw
+  still includes the existing pump/check, now 1708ms (draw + 633ms fire cycle).
+  Ladder holster stays the universal 100ms. Transition-note ordering and YY
+  cancellation are unchanged.
 - Export IQM triangle indices clockwise for Quake's GL_FRONT culling, while
   retaining outward normals. Blender keeps CCW indices. Reusing Blender order
   in the game renders inside surfaces and hides the front post during ADS.
@@ -504,7 +543,8 @@ source for MW2 behaviour; the owner rejects it.
   Frame-only QVM/GL1 rendering crossfades the released source; native GL2 blends
   skeletal poses. The full authored clip coverage currently belongs to SPAS;
   legacy placeholder weapons still need their own animation assets.
-- Known SPAS gaps: the drop is the draw reversed, and hands still use a flat placeholder.
+- Known SPAS gaps: the drop is the draw reversed (resampled with ease-out
+  progress `f*(2-f)` so a quick YY moves at once), and hands still use a flat placeholder.
   The source mesh references missing `mw2_spas12.bmp`/`v_hands.bmp` atlases;
   other bundled BMPs do not match this model's UV layout. See `dev/SPAS12.md`.
 - ADS reset tracks the player `EF_TELEPORT_BIT` edge, not `thisFrameTeleport`:
@@ -517,7 +557,9 @@ source for MW2 behaviour; the owner rejects it.
 which `#include`s `bg_pmove.c` and drives `PM_Weapon` directly — reload
 segments, ammo conservation, swap/sprint ordering and the fire cycle, plus
 shoot-reload resets (instant reload, fastest NAC, Fayde, YY too early) on every
-gun with a worked action. Every
+gun with a worked action, the close note's chamber commit (early, exact and
+late cancels by swap, sprint and ladder, at every think length) and the aim a
+NAC carries onto the incoming gun through full `Pmove`. Every
 timing in it is read from the shipped tables; never write a literal there, or
 retiming a weapon breaks the test without telling you anything.
 
@@ -534,7 +576,14 @@ Pose checks cover source retention, ladder holsters, loop/endpoint semantics,
 reload/action exclusions, ordinary sprint reversal and frame-only crossfades,
 plus YY flow (reversed draw, eased return, fire cut-in) through the real
 `PM_Weapon`, which is why the pose test links `pickup_pmove_driver.c`.
+The native/QVM pointer-boundary test links `cl_vm.c` and `vm_ptr.c` directly;
+keep it independent of the full client and VM lifecycle so MSVC can link it.
 Loadouts UI and class definitions are documented in `dev/LOADOUTS.md`.
+
+`dev/tests/run-sights.cmd` builds `sights_test.c` with the shared bg code:
+sight configs, the aim clock, and the SPAS-to-M300 NAC through full `Pmove`
+showing the scope on that frame only. On Linux, build the same file list with
+`cc` (see `.github/workflows/weapon-sights.yml`).
 
 `dev/tests/run-pickups.sh` runs the inventory, pickup, use/reload, take
 window (with the client's selection lagging the snapshot), throwing-knife

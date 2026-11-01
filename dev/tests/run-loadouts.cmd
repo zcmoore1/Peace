@@ -36,7 +36,7 @@ cl %test_flags% /Feout\build\loadout-tests\pose.exe dev\tests\weapon_pose_test.c
 if errorlevel 1 goto fail
 out\build\loadout-tests\pose.exe
 if errorlevel 1 goto fail
-cl %test_flags% /Feout\build\loadout-tests\pose-vm.exe dev\tests\pose_vm_test.c code\qcommon\vm.c %test_common% /link /OPT:REF
+cl %test_flags% /Feout\build\loadout-tests\pose-vm.exe dev\tests\pose_vm_test.c code\client\cl_vm.c code\qcommon\vm_ptr.c /link /OPT:REF
 if errorlevel 1 goto fail
 out\build\loadout-tests\pose-vm.exe
 if errorlevel 1 goto fail

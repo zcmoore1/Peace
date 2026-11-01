@@ -1591,6 +1591,52 @@ static void TestWaterEndsJump(void) {
  ps.jumpLand=-1; ps.jumpOriginZ=5; RespawnMove(0,PM_NORMAL);
  CHECK(ps.jumpLand==0 && ps.jumpOriginZ==0);
 }
+/* The sprint carry and the sprint glide run in midair with the ground's weapon
+ * states: begun after leaving the ground, the sprint goes on through the apex
+ * and ends the MW2 way (a fresh press; it latches). Sprint, Y, end the sprint,
+ * Y returns a ready gun at once, in the air as on the ground. */
+static void TestAirSprintSwap(void) {
+ const int weapons[]={WP_SHOTGUN,WP_M40A3};
+ int i,t,ammo;
+ for(i=0;i<ARRAY_LEN(weapons);i++) {
+  Ready(weapons[i],WP_MACHINEGUN);
+  move.trace=RespawnTrace; move.pointcontents=RespawnContents;
+  move.tracemask=MASK_PLAYERSOLID; move.cmd.forwardmove=127;
+  move.cmd.weapon=BG_SLOT_COMMAND+SLOT_PRIMARY;
+  ps.speed=320; ps.gravity=800; ps.origin[2]=2048; ps.velocity[2]=200;
+  ammo=ps.ammo[ps.weapon];
+  /* Begin sprint after leaving the ground, then keep it through the apex. */
+  RespawnMove(BUTTON_SPRINT,PM_NORMAL);
+  CHECK(ps.groundEntityNum==ENTITYNUM_NONE && (ps.pm_flags&PMF_SPRINTING));
+  CHECK(ps.weaponstate==WEAPON_SPRINT_IN);
+  for(t=0;t<BG_WeaponSprintInTime(ps.weapon)+400;t+=8)
+   RespawnMove(0,PM_NORMAL);	/* let go: it latches */
+  CHECK(ps.weaponstate==WEAPON_SPRINTING && (ps.pm_flags&PMF_SPRINTING));
+  CHECK(ps.velocity[2]<0 && ps.groundEntityNum==ENTITYNUM_NONE);
+  CHECK(ps.speed==320 && ps.ammo[ps.weapon]==ammo);
+  RespawnMove(BUTTON_SPRINT,PM_NORMAL);	/* a fresh press ends it */
+  CHECK(ps.weaponstate==WEAPON_SPRINT_OUT && !(ps.pm_flags&PMF_SPRINTING));
+  for(t=0;t<BG_WeaponSprintOutTime(ps.weapon)+8;t+=8) RespawnMove(BUTTON_SPRINT,PM_NORMAL);
+  CHECK(ps.weaponstate==WEAPON_READY && !(ps.pm_flags&PMF_SPRINTING));
+
+  /* The sprint -> Y -> end the sprint -> Y sequence works in midair. */
+  RespawnMove(0,PM_NORMAL); RespawnMove(BUTTON_SPRINT,PM_NORMAL);
+  CHECK(ps.weaponstate==WEAPON_SPRINT_IN);
+  move.cmd.weapon=BG_SLOT_COMMAND+SLOT_SECONDARY;
+  RespawnMove(BUTTON_SPRINT,PM_NORMAL);
+  CHECK(ps.weaponstate==WEAPON_DROPPING && (ps.pm_flags&PMF_SPRINTING));
+  RespawnMove(0,PM_NORMAL);	/* the swap and letting go both leave it latched */
+  CHECK(ps.weaponstate==WEAPON_DROPPING && (ps.pm_flags&PMF_SPRINTING));
+  RespawnMove(BUTTON_SPRINT,PM_NORMAL);
+  CHECK(ps.weaponstate==WEAPON_DROPPING && !(ps.pm_flags&PMF_SPRINTING));
+  move.cmd.weapon=BG_SLOT_COMMAND+SLOT_PRIMARY;
+  RespawnMove(0,PM_NORMAL);
+  CHECK(ps.weapon==weapons[i] && ps.weaponstate==WEAPON_READY && ps.weaponTime==0);
+  CHECK(!(ps.pm_flags&PMF_SPRINTING) && ps.ammo[ps.weapon]==ammo);
+  CHECK(ps.groundEntityNum==ENTITYNUM_NONE && ps.velocity[2]<0);
+ }
+ move.cmd.forwardmove=0;
+}
 static void TestHeldThroughRespawn(void) {
  const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL,BUTTON_LETHAL};
  const int specials[]={WP_KNIFE,WP_FRAG,WP_FLASH,WP_SEMTEX};
@@ -1628,7 +1674,7 @@ static void TestHeldThroughRespawn(void) {
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
  TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestNoSwapInQuickAction(); TestSemtexCancelKeepsLock(); TestThrowingKnife(); TestSeaLion(); TestLethalFromEmptyHand(); TestKnifeOutOfReload(); TestKnifeOutOfReloadSettle(); TestKnifeOutOfAction(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
- TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestHeldThroughRespawn();
+ TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestAirSprintSwap(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;
 }

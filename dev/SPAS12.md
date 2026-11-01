@@ -4,9 +4,40 @@
   skin. Its triangle winding is corrected for Quake's culling; the old export
   rendered inside surfaces and hid the front sight post during ADS. UVs,
   vertices, skin weights and animation frames are preserved.
-- Normal holster and draw both take **1500ms** (YY cancels the draw), and grabbing a ladder
+- Normal holster takes **829ms** and draw **1075ms** (YY cancels the draw), and grabbing a ladder
   still uses the shared 100ms holster. YY and reload-note cancellation retain
   their existing shared state-machine behavior.
+  These normal swap lengths match the [MW2 multiplayer SPAS weapon data](https://github.com/FreeTheTech101/IW4-Dump-Files/blob/master/weapons/mp/spas12_mp).
+  The existing custom first deployment includes a pump/check and takes 1708ms;
+  it is separate from the normal raise.
+- Pump completion eases from the last rendered pose over **100ms**. YY follows
+  the current draw/drop clip back to ready, with an eased return capped at
+  **250ms** and a 40ms fade to idle. Interrupting a draw reverses that same clip
+  from its current position. These are presentation only: holding fire still
+  fires on the second Y when the gun is chambered and gameplay permits it.
+- The synthetic holster still follows the draw backwards, but samples that
+  path with ease-out progress `f*(2-f)`. This gives the start of a quick YY
+  noticeable movement instead of lingering in the draw's near-still final
+  poses. Its endpoints, 26-frame range and **829ms** duration stay unchanged;
+  no YY impulse or firing delay is added. Both the Blender importer and the
+  stdlib animation baker preserve this curve.
+- For the sprint glide: start sprint and press Y quickly, end the sprint (a
+  sprint latches, as in MW2: tap sprint again, aim, or let go of forward),
+  then press Y again. The visible sprint entry retraces its motion toward
+  ready using the existing transition return. Sprint exit is continuous too.
+  Gameplay is ready immediately; firing takes over the picture at once.
+- Sprint can begin or continue in the air, as in MW2. Its entry/carry/exit
+  animations use the same weapon states as on the ground. Holding jump ends a
+  sprint (MW2), and a held sprint button sprints again once jump is let go.
+- A swap, sprint or ladder grab on the exact bolt-close think keeps the instant
+  transition but abandons chamber completion. Returning requires the **entire
+  pump from zero**. Going one think late keeps the completed chambering.
+- Aim progress survives a weapon change while the outgoing ADS permission is
+  still live. An instantaneous aimed SPAS-to-M300 swap (the NAC off the pump)
+  shows one frame of the M300 scope;
+  the following movement update denies ADS during the raise and clears aim.
+  This is an observed simulation state, not a forced frame: a render that skips
+  over that update shows no delayed scope flash.
 - `cg_sight 0` (default) uses the rear aperture and front post. `cg_sight 1`
   selects the existing reflex attachment. Full aim ignores hip offsets.
 - The ADS blend now consumes the actual teleport-bit change once. The old
@@ -59,8 +90,9 @@ the arm ends outside the view. This is original animation on the supplied
 rig, taking its direction from the requested MW2 SPAS/Intervention carry.
 
 Entry and exit follow the existing predicted weapon timers. A short sprint
-tap reverses the partial transition; releasing sprint does not wait for a
-whole carry loop to finish. Swapping preserves the existing ownership rule:
+tap reverses the partial transition; ending the sprint (it latches: a fresh
+press, aiming or letting go of forward) does not wait for a whole carry loop
+to finish. Swapping preserves the existing ownership rule:
 sprint-in plays to its last frame and holds, while the full carry keeps
 looping. No movement speeds, gameplay locks, reload notes, swap logic, or
 client/server state fields changed.

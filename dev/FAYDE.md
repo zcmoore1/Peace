@@ -19,14 +19,19 @@ The NAC and the Fayde fall out of the existing ordering in `PM_Weapon`, which
 is MW2's: a swap always stamps a real holster, a note or delayed action can
 release the lock on the same think, and a holster whose lock is gone finishes
 before the reload's delayed work. That is why the fastest NAC swaps instantly
-yet the gun still owes its whole pump when it comes back.
+yet the gun still owes its whole pump when it comes back. The fire cycle's own
+close note works the same way: it releases the lock on its think but its
+chambering commits with the fill, so the NAC off the pump or bolt is instant
+and also comes back owing the whole action; one think later the chambering is
+kept, and the swap is an ordinary holster.
 
-## The five cases (dev/tests/shotgun_reload_test.c, 8 ms commands)
+## The cases (dev/tests/shotgun_reload_test.c, 8 ms commands)
 
 | | SPAS | M300 |
 |---|---|---|
 | plain refire, waiting for the pump/bolt | 648 ms | 960 ms |
 | no reload, NAC off the pump/bolt (close note) | 504 ms | 784 ms |
+| ...and swapping back | full pump | full bolt |
 | instant reload, NAC on the first round in | 544 ms | 808 ms |
 | **instant reload, Y on the settle think: fastest NAC** | **296 ms** | **512 ms** |
 | ...and swapping back | full pump | full bolt |

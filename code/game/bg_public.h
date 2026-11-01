@@ -520,6 +520,7 @@ typedef enum {
 int BG_LethalWeapon( const playerState_t *ps );
 int BG_ActiveSlotWeapon( const playerState_t *ps );
 qboolean BG_IsActionWeapon( int weapon );
+qboolean BG_CanAimDownSights( const playerState_t *ps );
 
 // Inventory slots. Two weapons, CoD style.
 typedef enum {

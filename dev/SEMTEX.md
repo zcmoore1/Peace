@@ -36,7 +36,7 @@ melee/frag/flash, then the original gun's MW2 quick raise
 return too. `BG_HolsterTime` and `BG_WeaponDrawTime` supply the same durations
 to gameplay and presentation. The pullback, hold and fuse are authored Peace
 timings, not measured MW2 values. Normal gun-to-gun swap timings, including
-SPAS's 1500ms draw and holster, retain their normal cancellation rules.
+SPAS's 1075ms draw and 829ms holster, retain their normal cancellation rules.
 
 Original low-poly prop and gloved hand: `python3 dev/tools/build_semtex_assets.py`.
 The first-person pullback/hold/throw poses are picture-only procedural motion,

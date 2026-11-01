@@ -284,6 +284,7 @@ struct gclient_s {
 	qboolean		cursorHint;		// MW2's cursorHint: the last end-frame found something to use
 	int				knifeHold;		// MW2's useHoldEntity: the knife a held use is taking
 	int				knifeHoldSpawn;	// its timestamp, so a reused entity number is not it
+	int				knifeHoldStart;	// MW2's useHoldTime: when the press latched it
 
 	vec3_t		oldOrigin;
 
@@ -487,6 +488,7 @@ void G_CommitWeaponPickup(gentity_t *player);
 void G_UpdateCursorHint(gentity_t *player);
 void G_ClearCursorHintRefs(gentity_t *ent);
 qboolean G_UseThink(gentity_t *player, usercmd_t *cmd);
+qboolean G_HoldUsable(gentity_t *player);
 void SetRespawn (gentity_t *ent, float delay);
 void G_SpawnItem (gentity_t *ent, gitem_t *item);
 void FinishSpawningItem( gentity_t *ent );

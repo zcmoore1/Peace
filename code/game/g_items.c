@@ -649,48 +649,72 @@ static void G_TakeKnife(gentity_t *player, gentity_t *knife) {
 }
 
 /*
+G_KnifeHinted
+
+Whether the last end-frame's use hint is a throwing knife (MW2's cursorHint
+naming a weaponClass 9 missile).
+*/
+static qboolean G_KnifeHinted(gentity_t *player) {
+	gclient_t *client = player->client;
+	int hint = client->ps.cursorHintEntIndex;
+	return client->cursorHint && hint >= MAX_CLIENTS && hint < ENTITYNUM_MAX_NORMAL &&
+		G_IsThrowingKnife(&g_entities[hint]);
+}
+
+/*
 G_UseKnife
 
 MW2's Player_ActivateCmd and Player_ActivateHoldCmd for a throwing knife. A
-new use press while the last end-frame's hint is a knife takes that knife as
-its hold, and is used: it is never a reload. While the button stays held the
-knife is taken once it is g_useholdspawndelay old (g_useholdtime is 0), so a
-press on a settled knife takes it on that command. A press made while
-sprinting or with equipment out uses nothing (BG_UpdateActivate). Returns
-whether the hint is a knife, for BG_UpdateActivate; *held says whether a press
-is the knife's this command. A knife that only becomes the hint during a hold
-for something else takes nothing from it: MW2 holds for what the press chose.
+new use press while the hint is a knife takes that knife as its hold. The
+knife is taken once the button has been held for the same hold a floor gun
+needs (BG_PICKUP_HOLD_TIME: MW2 runs both through ActivateHoldCmd and its one
+g_useholdtime) and the knife is g_useholdspawndelay old. Released early, a
+use/reload press asks for the reload, as over a floor gun (BG_UpdateActivate).
+A press made while sprinting or with equipment out uses nothing. *held says
+whether a press is the knife's this command. A knife that only becomes the hint
+during a hold for something else takes nothing from it: MW2 holds for what the
+press chose.
 */
-static qboolean G_UseKnife(gentity_t *player, usercmd_t *cmd, qboolean *held) {
+static void G_UseKnife(gentity_t *player, usercmd_t *cmd, qboolean *held) {
 	gclient_t *client = player->client;
 	playerState_t *ps = &client->ps;
 	const int useButtons = BUTTON_USE | BUTTON_USE_RELOAD;
 	int old = client->activate.done ? client->activate.buttons : 0;
-	qboolean hinted = client->cursorHint && ps->cursorHintEntIndex >= MAX_CLIENTS &&
-		ps->cursorHintEntIndex < ENTITYNUM_MAX_NORMAL && G_IsThrowingKnife(&g_entities[ps->cursorHintEntIndex]);
 	gentity_t *knife;
 	*held = qfalse;
-	if (hinted && (cmd->buttons & useButtons & ~old) &&
+	if (G_KnifeHinted(player) && (cmd->buttons & useButtons & ~old) &&
 		!(ps->pm_flags & PMF_SPRINTING) && !BG_OffhandOut(ps)) {
 		client->knifeHold = ps->cursorHintEntIndex;
 		client->knifeHoldSpawn = g_entities[client->knifeHold].timestamp;
+		client->knifeHoldStart = level.time;
 	}
 	if (!(cmd->buttons & useButtons) || client->knifeHold == ENTITYNUM_NONE) {
 		client->knifeHold = ENTITYNUM_NONE;
-		return hinted;
+		return;
 	}
 	knife = &g_entities[client->knifeHold];
 	if (!G_IsThrowingKnife(knife) || knife->timestamp != client->knifeHoldSpawn) {
 		client->knifeHold = ENTITYNUM_NONE;
-		return hinted;
+		return;
 	}
 	*held = qtrue;
-	if (level.time - knife->timestamp >= BG_USE_SPAWN_DELAY) {
+	if (level.time - knife->timestamp >= BG_USE_SPAWN_DELAY &&
+		level.time - client->knifeHoldStart >= BG_PICKUP_HOLD_TIME) {
 		client->knifeHold = ENTITYNUM_NONE;
+		client->activate.hold = qfalse;	// the hold was used: its release is not a reload
 		if (ps->stats[STAT_HEALTH] > 0 && ps->ammo[WP_THROWING_KNIFE] < client->knifeMax)
 			G_TakeKnife(player, knife);
 	}
-	return hinted;
+}
+
+/*
+G_HoldUsable
+
+Whether a use press now is held for something - a throwing knife the hint
+names, else a floor gun in reach - for BG_UpdateActivate.
+*/
+qboolean G_HoldUsable(gentity_t *player) {
+	return G_KnifeHinted(player) || G_FindWeaponPickup(player) != NULL;
 }
 
 /*
@@ -700,21 +724,22 @@ The bomb, the throwing knife and the floor gun, after a command's Pmove. MW2
 uses one thing per use/reload press, and the bomb comes first: a press at a
 site or the case is never a floor-gun hold too, and a press already used there
 cannot become one. A knife outranks any gun in MW2's use list, so a press on a
-knife's hint is the knife's. Returns whether a press is used at once, for
-BG_UpdateActivate.
+knife's hint is held for the knife, never the gun. Returns whether a press is
+used at once (the bomb), for BG_UpdateActivate; G_HoldUsable says whether it
+is held.
 */
 qboolean G_UseThink(gentity_t *player, usercmd_t *cmd) {
 	gclient_t *client = player->client;
 	qboolean sndUsable = G_SNDUsable(player);
-	qboolean knifeHinted, knifeHeld = qfalse;
+	qboolean knifeHeld = qfalse;
 	G_SNDUse(player, cmd);
-	knifeHinted = !sndUsable && G_UseKnife(player, cmd, &knifeHeld);
-	if (sndUsable || knifeHeld) client->activate.hold = qfalse;
+	if (!sndUsable) G_UseKnife(player, cmd, &knifeHeld);
+	if (sndUsable) client->activate.hold = qfalse;
 	if (client->ps.pickupHeld == 3 &&
 		(sndUsable || knifeHeld || (client->activate.done && !client->activate.hold)))
 		client->ps.pickupHeld = 2;
 	G_CommitWeaponPickup(player);
-	return sndUsable || knifeHinted;
+	return sndUsable;
 }
 
 void G_CommitWeaponPickup(gentity_t *player) {

@@ -79,10 +79,15 @@ item's model in `bg_misc.c` and the missile model in `cg_weapons.c`.
   be taken out of them, as in MW2. The lowest `128 * (1 - dot) + distance`
   wins, and a knife outranks any gun.
 - **Use.** A use or use/reload press while the last end-frame's hint is a knife
-  is a use and never a reload. MW2's `g_useholdtime` is 0, so the knife is taken
-  on that command once it is `g_useholdspawndelay` old (500ms). A press on a
-  younger knife holds for it. A press while sprinting or with equipment out
-  does nothing. Walking over a knife never collects it. A knife that only
+  is held for it, exactly as a floor gun is: MW2 runs both through
+  ActivateHoldCmd and its one `g_useholdtime`. The executable's default for it
+  is 0, but MW2 as played needs a hold for both, so the knife takes
+  `BG_PICKUP_HOLD_TIME`, the gun's hold, and only once the knife is
+  `g_useholdspawndelay` old (500ms). Let go early, use/reload asks for the
+  reload, as over a gun. A press while sprinting or with equipment out does
+  nothing. Walking over a knife never collects it. The HUD shows no progress
+  for a knife hold yet (the gun's bar is predicted in pmove; the knife's hold
+  is the server's). A knife that only
   becomes the hint during a hold for a floor gun takes nothing from that hold:
   MW2 holds for what the press chose.
 - **Take.** One more knife and the pickup sound. The hands are not touched.

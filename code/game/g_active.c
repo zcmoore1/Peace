@@ -1009,7 +1009,7 @@ void ClientThink_real( gentity_t *ent ) {
 	// knife's hint is a use, and anything else asks the weapon for a reload on
 	// the next command.
 	BG_UpdateActivate( &client->ps, &client->activate, ucmd->buttons,
-		!usedAtOnce && G_FindWeaponPickup( ent ) != NULL, usedAtOnce );
+		!usedAtOnce && G_HoldUsable( ent ), usedAtOnce );
 
 	// swap and latch button actions
 	client->oldbuttons = client->buttons;

@@ -147,9 +147,16 @@ int main(void) {
  CopyToBodyQue(&g_entities[1]); body=level.bodyQue[0]; Spawn(&g_entities[1],-500,0);
  Frame();
  CHECK(Carried(k,body) && VectorCompare(at,k->r.currentOrigin) && Hinted(k,60,0));
- /* taken from the corpse: freed, and nothing is left pointing at it */
+ /* taken from the corpse with a held use, as the server runs it: freed, and
+  * nothing is left pointing at it */
  slot=k->s.number; memset(&cmd,0,sizeof(cmd)); cmd.buttons=BUTTON_USE;
- G_UseThink(&g_entities[0],&cmd);
+ for(i=0;i<=BG_PICKUP_HOLD_TIME && k->inuse;i++) {
+  qboolean used;
+  level.time++;
+  used=G_UseThink(&g_entities[0],&cmd);
+  BG_UpdateActivate(&cl[0].ps,&cl[0].activate,cmd.buttons,!used && G_HoldUsable(&g_entities[0]),used);
+ }
+ CHECK(i==BG_PICKUP_HOLD_TIME+1);
  CHECK(!k->inuse && !k->enemy && cl[0].ps.ammo[WP_THROWING_KNIFE]==1 && cl[0].ps.cursorHintEntIndex==ENTITYNUM_NONE);
  BodySink(body); Frame();
  CHECK(!k->inuse);

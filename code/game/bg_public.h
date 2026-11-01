@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-11"
+#define	GAME_VERSION		BASEGAME "-12"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -355,6 +355,7 @@ int  BG_WeaponSprintInTime( int weapon );	// lower-into-sprint length
 int  BG_WeaponSprintOutTime( int weapon );	// raise-out-of-sprint length
 int  BG_WeaponBaseSpread( int weapon );
 int  BG_WeaponScopeOverlay( int weapon );	// aimed through an overlay scope (MW2: no knife while aimed)
+qboolean BG_CanAimDownSights( const playerState_t *ps ); // physical permission; button intent stays in pmove
 float BG_SpreadScale( const playerState_t *ps );
 float BG_WeaponSpread( const playerState_t *ps );
 

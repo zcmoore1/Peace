@@ -62,10 +62,23 @@ static void TestCycle(void) {
  Run(BG_WeaponDropTime(WP_MACHINEGUN)+BG_WeaponRaiseTime(WP_M40A3)+1);
  CHECK(ps.weapon==WP_M40A3 && ps.weaponstate==WEAPON_BOLTING);
  CHECK(ps.weaponAnimTime<=1 && shots==1);
- /* A note colliding with the holster naturally clears that lock. */
+ /* The close note releases the holster lock, but the completed transition
+  * returns before chamber completion commits. The full bolt remains owed. */
  Ready(); move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0; Run(close-1);
  move.cmd.weapon=BG_SLOT_COMMAND+1; Step(1);
  CHECK(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_RAISING);
+ CHECK(ps.stats[STAT_UNCHAMBERED]&(1<<WP_M40A3));
+ move.cmd.weapon=BG_SlotCommand(&ps,SLOT_PRIMARY); Step(1);
+ Run(BG_WeaponDropTime(WP_MACHINEGUN)+BG_WeaponRaiseTime(WP_M40A3));
+ CHECK(ps.weapon==WP_M40A3 && ps.weaponstate==WEAPON_READY);
+ move.cmd.buttons=BUTTON_ATTACK; Step(1);
+ CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==0 && shots==1);
+ Run(end-1); CHECK(shots==1); Step(1); CHECK(shots==2);
+ /* A whole think later completion is already committed; the drop is normal. */
+ Ready(); move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0; Run(close);
+ move.cmd.weapon=BG_SlotCommand(&ps,SLOT_SECONDARY); Step(1);
+ CHECK(ps.weapon==WP_M40A3 && ps.weaponstate==WEAPON_DROPPING);
+ CHECK(ps.weaponTime==BG_WeaponDropTime(WP_M40A3));
  CHECK(!(ps.stats[STAT_UNCHAMBERED]&(1<<WP_M40A3)));
 }
 static void TestReload(void) {

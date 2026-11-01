@@ -182,25 +182,27 @@ void CG_Sights_Update( const playerState_t *ps ) {
 	const weaponSights_t *def;
 	float target, duration, step;
 	int elapsed = cg.time - cg.adsTime;
-	int sight = ps->slotAttachments[ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ? SLOT_SECONDARY : SLOT_PRIMARY];
 	int teleportBit = ps->eFlags & EF_TELEPORT_BIT;
+	qboolean reset;
 
 	if ( ps->weapon > WP_NONE && ps->weapon < WP_NUM_WEAPONS ) {
 		CG_RegisterWeapon( ps->weapon );
 	}
 	def = CG_Sights_Def( ps->weapon );
-	if ( !cg.adsTime || elapsed < 0 || cg.adsWeapon != ps->weapon ||
-	     cg.adsClientNum != ps->clientNum || cg.adsSight != sight ||
+	reset = !cg.adsTime || elapsed < 0 || cg.adsClientNum != ps->clientNum ||
 	     cg.adsTeleportBit != teleportBit || cg.renderingThirdPerson ||
 	     ps->stats[STAT_HEALTH] <= 0 || ps->pm_type == PM_INTERMISSION ||
-	     ps->persistant[PERS_TEAM] == TEAM_SPECTATOR ) {
+	     ps->persistant[PERS_TEAM] == TEAM_SPECTATOR;
+	// Aim belongs to the player, not the weapon or attachment. Consume the
+	// already-calculated ADS flag first: PM_Weapon may have changed the gun
+	// after that calculation. The next movement update revokes permission when
+	// the new action prevents aiming. Voluntary button release still eases out.
+	if (reset || (!(ps->pm_flags & PMF_ADS) && !BG_CanAimDownSights(ps))) {
 		cg.adsFrac = 0.0f;
 		elapsed = 0;
 	}
 	cg.adsTime = cg.time;
-	cg.adsWeapon = ps->weapon;
 	cg.adsClientNum = ps->clientNum;
-	cg.adsSight = sight;
 	// thisFrameTeleport is prediction-owned and can remain set indefinitely
 	// with synchronous clients, no prediction, or demo playback. Consume the
 	// actual player teleport edge once instead of resetting aim every frame.

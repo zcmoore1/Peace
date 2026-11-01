@@ -60,7 +60,7 @@ Class serialization version 2 adds the two attachment masks; version 1 classes
 still load and inherit the old `cg_sight` preference at spawn. New editor saves
 store explicit choices, so changing `cg_sight` will not overwrite them. The active
 perk mask is a predicted/replayed playerstate field. The combined use/reload
-build uses protocol **82**, game **-11**: rebuild the executable, server and all
+build uses protocol **82**, game **-12**: rebuild the executable, server and all
 modules together. Changing class during a life takes effect only at the next spawn.
 
 Custom names allow 1–23 letters, numbers, spaces, hyphens and underscores. Leaving

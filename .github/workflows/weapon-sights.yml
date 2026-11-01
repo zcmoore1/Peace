@@ -68,7 +68,7 @@ jobs:
           mkdir -p out/tests
           cc -std=c99 -O0 -ffunction-sections -fdata-sections dev/tests/shotgun_reload_test.c code/game/bg_loadout.c code/game/bg_misc.c code/game/bg_slidemove.c code/qcommon/q_math.c code/qcommon/q_shared.c -Wl,--gc-sections -lm -o out/tests/weapon-test
           out/tests/weapon-test
-          cc -std=c99 -O0 -ffunction-sections -fdata-sections dev/tests/sights_test.c code/qcommon/q_math.c code/qcommon/q_shared.c -Wl,--gc-sections -lm -o out/tests/sights-test
+          cc -std=c99 -O0 -ffunction-sections -fdata-sections dev/tests/sights_test.c code/game/bg_pmove.c code/game/bg_loadout.c code/game/bg_misc.c code/game/bg_slidemove.c code/qcommon/q_math.c code/qcommon/q_shared.c -Wl,--gc-sections -lm -o out/tests/sights-test
           out/tests/sights-test
       - name: Test saved classes, YY, quick actions, poses and network deltas
         run: |

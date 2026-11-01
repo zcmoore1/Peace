@@ -286,25 +286,28 @@ static void TestWeaponOrdering(void) {
             CHECK(ps.weaponTime == BG_WeaponRaiseTime(ps.weapon));
         }
     }
-    /* An interrupted bolt still owes its complete cycle; only its own close
-       note may clear the debt, including on the exact grab think. */
-    for (offset = -1; offset <= 0; offset++) {
+    /* An early or exact-note grab abandons chamber completion. A late grab
+       retains the completion that committed on the preceding think. */
+    for (offset = -1; offset <= 1; offset++) {
         Reset(111, 0, 180);
         ps.weaponstate = WEAPON_BOLTING;
         ps.weaponAnimSeq = ASEQ_FIRE;
-        ps.weaponAnimTime = Note(WP_SHOTGUN, ASEQ_FIRE, WNOTE_BOLT_CLOSED) + offset - 1;
+        ps.weaponAnimTime = Note(WP_SHOTGUN, ASEQ_FIRE, WNOTE_BOLT_CLOSED) + (offset < 0 ? offset : 0) - 1;
         ps.weaponTime = BG_WeaponFireLength(WP_SHOTGUN) - ps.weaponAnimTime;
         ps.stats[STAT_UNCHAMBERED] = 1 << WP_SHOTGUN;
+        if (offset > 0) WeaponTick(1);
         ps.stats[STAT_LADDER] = LADDER_ATTACHED;
         WeaponTick(1);
-        CHECK(!!ps.stats[STAT_UNCHAMBERED] == (offset != 0));
+        CHECK(!!ps.stats[STAT_UNCHAMBERED] == (offset <= 0));
+        CHECK(ps.weaponstate == (offset == 0 ? WEAPON_LADDER : WEAPON_DROPPING));
         if (offset) WeaponTick(BG_LADDER_DROP_TIME);
         ps.stats[STAT_LADDER] = 0;
         WeaponTick(1);
         WeaponTick(BG_WeaponRaiseTime(WP_SHOTGUN));
         CHECK(ps.weaponstate == WEAPON_READY);
         WeaponTick(1);
-        CHECK(ps.weaponstate == (offset ? WEAPON_BOLTING : WEAPON_READY));
+        CHECK(ps.weaponstate == (offset <= 0 ? WEAPON_BOLTING : WEAPON_READY));
+        if (offset <= 0) CHECK(ps.weaponAnimTime == 0 && ps.weaponTime == BG_WeaponFireLength(WP_SHOTGUN));
     }
 }
 

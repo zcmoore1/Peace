@@ -103,17 +103,18 @@ source for MW2 behaviour; the owner rejects it.
   is simply abandoned, its debt still owed. An empty gun reloads itself out of
   the action, never out of the shot.
 - **The bolt cancel is the reload cancel.** `WNOTE_BOLT_CLOSED` on the fire
-  animation carries no rounds, so it clears the lock and the unchambered bit —
-  the same note, in the same place, that opens the reload's window. Never write
-  a second cancel.
+  animation carries no rounds. It releases the lock and queues chamber
+  completion for the shared commit point after completed transitions return.
+  An exact-note holster, sprint or ladder cancel skips that completion, just
+  as a reload cancel skips the queued rounds. Never write a second cancel.
 - **An open action is a debt, and it is never resumed.** Firing sets the
-  weapon's bit in `STAT_UNCHAMBERED`; only the close note clears it. A gun that
+  weapon's bit in `STAT_UNCHAMBERED`; a committed close note or reload delayed
+  action clears it. A gun that
   reaches `WEAPON_READY` with its bit set re-enters `WEAPON_BOLTING` from
   elapsed 0 — the whole cycle, exactly like a reload, which never resumes
-  either. This is what makes the cancel window a window: miss it and the swap
-  costs you the full bolt when you come back. Never add a partial-bolt state,
-  and never clear the bit anywhere but the fire cycle's close note or the
-  reload's delayed action (spawn is the one exception).
+  either. Early and exact-note swaps retain the debt; late swaps keep the
+  committed completion. Never add a partial-bolt state or clear the debt
+  before that shared commit point (spawn is the one exception).
 - **The reload's delayed action is MW2's (owner's rule: do what MW2 does).**
   When a reload starts on a gun that still owes its pump or bolt, the action is
   settled after the gun's OWN action length (fire-cycle open to close, MW2's
@@ -130,6 +131,16 @@ source for MW2 behaviour; the owner rejects it.
   are read by `CG_WeapAnim_RegisterClips`. Re-exporting a model must never mean
   editing C, and no weapon may be named in that loader.
 - **cgame is picture only.** It never touches ammo or weapon state.
+- **Aim belongs to the player, not a weapon or attachment.** `PM_CheckADS`
+  runs before `PM_Weapon`. An instant swap may therefore select a scoped gun
+  while the outgoing aim permission is still live. The next movement update
+  sees its raise and revokes permission; cgame clears aim then using the same
+  physical `BG_CanAimDownSights` gate. Voluntary aim release still blends out.
+  No handoff event, frame counter, forced scope flash or NAC detector. Several
+  movement updates before a render may pass through the overlap unseen.
+  Keep the current held-sprint/scoped-breath input rule and ADS out of sprint;
+  the helper must not blacklist the sprint weapon states themselves.
+  Game version **-12** requires matching client/server modules for these rules.
 - **Movement modifiers are per-command values.** `PM_CmdScale` must not write
   sprint/ADS multipliers into `ps.speed`: prediction replay and pmove substeps
   would apply them repeatedly, making speed depend on latency or command count.

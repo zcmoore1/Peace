@@ -363,14 +363,15 @@ static void TestSprintCancelsThePump( void ) {
 static void SwapAwayAndBack( void ) {
 	int t;
 	testMove.cmd.weapon = WP_MACHINEGUN;
-	for ( t = 0; t < 1200 && testPs.weapon != WP_MACHINEGUN; t++ ) Step( 1 );
-	for ( t = 0; t < 800; t++ ) Step( 1 );
+	for ( t = 0; t < SettleTime() &&
+	      !(testPs.weapon == WP_MACHINEGUN && testPs.weaponstate == WEAPON_READY); t++ ) Step( 1 );
+	CHECK( testPs.weapon == WP_MACHINEGUN && testPs.weaponstate == WEAPON_READY );
 	testMove.cmd.weapon = WP_SHOTGUN;
-	for ( t = 0; t < 2000 &&
+	for ( t = 0; t < SettleTime() &&
 	      !( testPs.weapon == WP_SHOTGUN && testPs.weaponstate == WEAPON_READY ); t++ ) {
 		Step( 1 );
 	}
-	CHECK( testPs.weapon == WP_SHOTGUN );
+	CHECK( testPs.weapon == WP_SHOTGUN && testPs.weaponstate == WEAPON_READY );
 }
 
 static void TestEarlyCancelCostsTheWholeCycle( void ) {
@@ -398,20 +399,42 @@ static void TestEarlyCancelCostsTheWholeCycle( void ) {
 	CHECK( shots == 1 );
 }
 
-static void TestLateCancelKeepsTheRound( void ) {
-	/* Swap out ON the think the action shuts. The note chambers the round and
-	   clears the lock in the same think, so the holster is free AND the gun
-	   comes back ready. Both halves out of the one note. */
+static void TestExactCancelCostsTheWholeCycle( void ) {
+	/* The close note releases the holster lock, but completing that holster
+	   returns before the chamber commit. Coming back owes the entire cycle. */
 	ReadyToFire();
 	testMove.cmd.buttons = 0;
 	RunFor( FireNote( WNOTE_BOLT_CLOSED ) - 1, 1 );
 	testMove.cmd.weapon = WP_MACHINEGUN;
 	Step( 1 );
-	CHECK( !( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN) ) );
+	CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN) );
 	CHECK( testPs.weapon == WP_MACHINEGUN );	/* free: holster completed */
 	CHECK( testPs.weaponstate == WEAPON_RAISING );
 
 	testMove.cmd.weapon = WP_SHOTGUN;
+	SwapAwayAndBack();
+	shots = 0;
+	testMove.cmd.buttons = BUTTON_ATTACK;
+	Step( 1 );
+	CHECK( shots == 0 && testPs.weaponstate == WEAPON_BOLTING );
+	CHECK( testPs.weaponAnimTime == 0 );
+	RunFor( BG_WeaponFireLength( WP_SHOTGUN ) - 1, 1 );
+	CHECK( shots == 0 );
+	Step( 1 );
+	CHECK( shots == 1 );
+}
+
+static void TestLateCancelKeepsTheRound( void ) {
+	/* One think late, chamber completion is already committed. The outgoing
+	   holster keeps its real duration and returning does not owe another pump. */
+	ReadyToFire();
+	testMove.cmd.buttons = 0;
+	RunFor( FireNote( WNOTE_BOLT_CLOSED ), 1 );
+	testMove.cmd.weapon = WP_MACHINEGUN;
+	Step( 1 );
+	CHECK( !(testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN)) );
+	CHECK( testPs.weapon == WP_SHOTGUN && testPs.weaponstate == WEAPON_DROPPING );
+	CHECK( testPs.weaponTime == BG_WeaponDropTime( WP_SHOTGUN ) );
 	SwapAwayAndBack();
 	shots = 0;
 	testMove.cmd.buttons = BUTTON_ATTACK;
@@ -443,6 +466,91 @@ static void TestChamberDebtIsPerWeapon( void ) {
 	RunFor( FireNote( WNOTE_BOLT_CLOSED ) - 2, 1 );
 	CHECK(  ( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN)    ) );
 	CHECK( !( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_MACHINEGUN) ) );
+}
+
+/* Early, exact and late refer to one whole simulation think. Exercise both
+ * worked actions, ordinary/same-base slot switches, sprint and ladder ownership. */
+static void TestChamberCompletionOrdering( int weapon, int mode, int offset, int step, int perk ) {
+	bg_weaponInstance_t original, other;
+	int sameBase = mode == 3;
+	int close = NoteTime( weapon, ASEQ_FIRE, WNOTE_BOLT_CLOSED );
+	int owesCycle = offset <= 0;
+	int originalAmmo = BG_WeaponMagSize( weapon ) - 1;
+	int otherWeapon = sameBase ? weapon : WP_MACHINEGUN;
+	memset( &testPs, 0, sizeof(testPs) );
+	memset( &testMove, 0, sizeof(testMove) );
+	memset( &pml, 0, sizeof(pml) );
+	BG_ApplyLoadout( &testPs, 0 );
+	BG_SetSlotWeapon( &testPs, SLOT_PRIMARY, weapon );
+	BG_SetSlotWeapon( &testPs, SLOT_SECONDARY, otherWeapon );
+	testPs.weapon = weapon;
+	testPs.stats[STAT_HEALTH] = 100;
+	if ( perk != PERK_NONE ) testPs.perks |= 1 << (perk - 1);
+	testMove.ps = &testPs;
+	testMove.cmd.weapon = BG_SlotCommand( &testPs, SLOT_PRIMARY );
+	pm = &testMove;
+	shots = 0;
+	testMove.cmd.buttons = BUTTON_ATTACK;
+	Step( 1 );
+	testMove.cmd.buttons = 0;
+	CHECK( shots == 1 && testPs.ammo[weapon] == originalAmmo );
+	CHECK( close > 2 * step );
+	RunFor( close - (1 - offset) * step, 1 );
+	if ( mode == 1 ) testPs.pm_flags |= PMF_SPRINTING;
+	else if ( mode == 2 ) testPs.stats[STAT_LADDER] = LADDER_ATTACHED;
+	else testMove.cmd.weapon = BG_SlotCommand( &testPs, SLOT_SECONDARY );
+	Step( step );
+	BG_GetSlot( &testPs, SLOT_PRIMARY, &original );
+	BG_GetSlot( &testPs, SLOT_SECONDARY, &other );
+	CHECK( !!(original.flags & BG_GUN_UNCHAMBERED) == owesCycle );
+	CHECK( original.ammo == originalAmmo && original.reserve == BG_WeaponMaxReserve( weapon ) );
+	CHECK( !(other.flags & BG_GUN_UNCHAMBERED) );
+	CHECK( other.ammo == BG_WeaponMagSize( otherWeapon ) );
+	CHECK( shots == 1 );
+	CHECK( !(testPs.pm_flags & PMF_PENDING_MAG) );
+	if ( mode == 1 ) {
+		CHECK( testPs.weaponstate == (offset == 0 ? WEAPON_SPRINTING : WEAPON_SPRINT_IN) );
+		CHECK( testPs.weaponTime == (offset == 0 ? 0 : BG_WeaponSprintInTime( weapon )) );
+		if ( offset != 0 ) RunFor( testPs.weaponTime, 1 );
+		testPs.pm_flags &= ~PMF_SPRINTING;
+		Step( 1 );
+		RunFor( BG_WeaponSprintOutTime( weapon ), 1 );
+	} else if ( mode == 2 ) {
+		CHECK( testPs.weaponstate == (offset == 0 ? WEAPON_LADDER : WEAPON_DROPPING) );
+		CHECK( testPs.weaponTime == (offset == 0 ? 0 : BG_LADDER_DROP_TIME) );
+		if ( offset != 0 ) RunFor( testPs.weaponTime, 1 );
+		testPs.stats[STAT_LADDER] = 0;
+		Step( 1 );
+		RunFor( BG_WeaponRaiseTime( weapon ), 1 );
+	} else {
+		CHECK( testPs.weaponstate == (offset == 0 ? WEAPON_RAISING : WEAPON_DROPPING) );
+		CHECK( testPs.weaponTime == (offset == 0 ? BG_WeaponRaiseTime( otherWeapon ) : BG_WeaponDropTime( weapon )) );
+		if ( offset != 0 ) RunFor( testPs.weaponTime, 1 );
+		RunFor( BG_WeaponRaiseTime( otherWeapon ), 1 );
+		CHECK( testPs.weaponstate == WEAPON_READY && testPs.stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY );
+		testMove.cmd.weapon = BG_SlotCommand( &testPs, SLOT_PRIMARY );
+		Step( 1 );
+		RunFor( BG_WeaponDropTime( otherWeapon ) + BG_WeaponRaiseTime( weapon ), 1 );
+	}
+	CHECK( testPs.weapon == weapon && testPs.stats[STAT_ACTIVE_SLOT] == SLOT_PRIMARY );
+	CHECK( testPs.ammo[weapon] == originalAmmo );
+	CHECK( !!(testPs.stats[STAT_UNCHAMBERED] & (1 << weapon)) == owesCycle );
+	if ( owesCycle ) {
+		/* Sprint-out reaches the debt gate on its completion think; a raise
+		   reaches READY and returns, so it reaches that gate next think. */
+		if ( testPs.weaponstate == WEAPON_READY ) Step( 1 );
+		CHECK( testPs.weaponstate == WEAPON_BOLTING && testPs.weaponAnimTime == 0 );
+		testMove.cmd.buttons = BUTTON_ATTACK;
+		RunFor( BG_WeaponFireLength( weapon ) - 1, 1 );
+		CHECK( shots == 1 && testPs.ammo[weapon] == originalAmmo );
+	} else {
+		CHECK( testPs.weaponstate == WEAPON_READY );
+		testMove.cmd.buttons = BUTTON_ATTACK;
+	}
+	Step( 1 );
+	CHECK( shots == 2 && testPs.ammo[weapon] == originalAmmo - 1 );
+	BG_GetSlot( &testPs, SLOT_SECONDARY, &other );
+	CHECK( !(other.flags & BG_GUN_UNCHAMBERED) && other.ammo == BG_WeaponMagSize( otherWeapon ) );
 }
 
 static void TestUnpumpedWeaponUnchanged( int step ) {
@@ -709,7 +817,7 @@ static void TestTriggerAndReloadHeld( int step ) {
 }
 
 int main( void ) {
-	int i, offset;
+	int i, offset, weapon, mode, perk;
 	const int steps[] = { 1, 8, 16, 33, 66 };
 	for ( i = 0; i < 5; i++ ) {
 		TestAttackInterrupt( steps[i] );
@@ -726,6 +834,7 @@ int main( void ) {
 	TestADSPermission();
 	TestPumpCannotBeShortCircuited();
 	TestEarlyCancelCostsTheWholeCycle();
+	TestExactCancelCostsTheWholeCycle();
 	TestLateCancelKeepsTheRound();
 	TestReloadChambersTheGun();
 	TestChamberDebtIsPerWeapon();
@@ -736,6 +845,13 @@ int main( void ) {
 		TestSwapSprintPreserved( 0, offset );
 		TestSwapSprintPreserved( 1, offset );
 	}
+	for ( weapon = 0; weapon < 2; weapon++ )
+		for ( mode = 0; mode < 4; mode++ )
+			for ( offset = -1; offset <= 1; offset++ )
+				for ( i = 0; i < ARRAY_LEN(steps); i++ )
+					for ( perk = 0; perk < 2; perk++ )
+						TestChamberCompletionOrdering( weapon ? WP_M40A3 : WP_SHOTGUN,
+							mode, offset, steps[i], perk ? PERK_QUICK_RELOAD : PERK_NONE );
 	printf( "PASS: reload interruption, ammo conservation, magazine reload, swap/sprint ordering, the fire cycle and shoot-reload resets (%d checks).\n", checks );
 	return 0;
 }

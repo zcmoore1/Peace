@@ -1,4 +1,4 @@
-# SPAS-12 on dev-gpt
+# SPAS-12 on dev
 
 - The existing animated SPAS mesh now wears a 1024px gunmetal/polymer diffuse
   skin. Its triangle winding is corrected for Quake's culling; the old export
@@ -13,6 +13,14 @@
   prediction-owned teleport flag can remain set during synchronous play,
   `cg_nopredict`, or demos, repeatedly resetting aim to hipfire despite ADS
   being allowed by gameplay. This fix changes presentation only.
+- The bolt-close note releases the busy lock before chamber completion commits.
+  Swapping on that note skips the commit, so returning to the SPAS restarts the
+  full pump. An early swap also owes the pump; a late swap keeps its completion.
+- ADS progress follows the player across weapon changes. With ADS held, an
+  instant SPAS-to-sniper swap can expose the scope using the outgoing aim
+  permission. The next movement update revokes aim during the sniper's raise.
+  This is a simulation-order overlap, not a scheduled one-frame flash; multiple
+  movement updates before rendering can pass through it without showing it.
 
 ## Texture asset
 

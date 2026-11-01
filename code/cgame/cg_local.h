@@ -528,9 +528,9 @@ typedef struct {
 	int			zoomTime;
 	float		zoomSensitivity;
 
-	// ADS (aim down sights): 0 = hipfire, 1 = fully aimed; eased each frame
+	// Player aim progress: 0 = hipfire, 1 = fully aimed, shared across weapons.
 	float		adsFrac;
-	int			adsTime, adsWeapon, adsClientNum, adsSight;
+	int			adsTime, adsClientNum;
 	int			adsTeleportBit;
 
 	// information screen text during loading

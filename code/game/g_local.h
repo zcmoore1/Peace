@@ -307,7 +307,8 @@ struct gclient_s {
 	int			lasthurt_mod;		// type of damage the client did
 
 	// timers
-	int			respawnTime;		// can respawn when time > this, force after g_forcerespwan
+	int			respawnTime;		// can respawn when time > this, force after g_forcerespwan;
+									// while alive, the spawn time (BG_USE_SPAWN_DELAY)
 	int			inactivityTime;		// kick players when time > this
 	qboolean	inactivityWarning;	// qtrue if the five seoond warning has been given
 	int			rewardTime;			// clear the EF_AWARD_IMPRESSIVE, etc when time > this
@@ -484,7 +485,7 @@ gentity_t *Drop_Item( gentity_t *ent, gitem_t *item, float angle );
 gentity_t *LaunchItem( gitem_t *item, vec3_t origin, vec3_t velocity );
 gentity_t *G_DropWeapon(gentity_t *owner, int slot);
 const entityState_t *G_FindWeaponPickup(gentity_t *player);
-void G_CommitWeaponPickup(gentity_t *player);
+void G_CommitWeaponPickup(gentity_t *player, int buttons);
 void G_UpdateCursorHint(gentity_t *player);
 void G_ClearCursorHintRefs(gentity_t *ent);
 qboolean G_UseThink(gentity_t *player, usercmd_t *cmd);

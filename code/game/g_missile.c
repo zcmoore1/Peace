@@ -878,7 +878,7 @@ gentity_t *fire_throwingknife(gentity_t *self, vec3_t start, vec3_t dir) {
 	bolt->methodOfDeath = MOD_GAUNTLET;
 	bolt->clipmask = MASK_SHOT;
 	bolt->target_ent = NULL;
-	bolt->timestamp = level.time;		// BG_USE_SPAWN_DELAY counts from here
+	bolt->timestamp = level.time;		// identifies this knife to a use hold (knifeHoldSpawn)
 
 	bolt->s.pos.trType = TR_GRAVITY;
 	bolt->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;

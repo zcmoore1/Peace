@@ -87,7 +87,7 @@ static void Place(gentity_t *e,float x,float y) {
 static void Spawn(gentity_t *e,float x,float y) {
  e->health=e->client->ps.stats[STAT_HEALTH]=100; e->client->ps.persistant[PERS_SPAWN_COUNT]++;
  VectorSet(e->r.mins,-15,-15,-24); VectorSet(e->r.maxs,15,15,32); e->r.contents=CONTENTS_BODY;
- e->s.groundEntityNum=ENTITYNUM_WORLD; Place(e,x,y);
+ e->s.groundEntityNum=ENTITYNUM_WORLD; e->client->respawnTime=level.time; Place(e,x,y);	/* as ClientSpawn */
 }
 /* one server frame for everything that runs */
 static void Frame(void) {
@@ -138,7 +138,8 @@ int main(void) {
  /* thrown into the victim: one hit, buried at the hit and carried by them */
  k=Throw();
  CHECK(damageCalls==1 && Carried(k,&g_entities[1]) && k->r.currentOrigin[0]<85);
- /* a player walking to it sees it, on the victim, wherever they go */
+ /* a player walking to it sees it, on the victim, wherever they go; the
+  * thrower is past g_useholdspawndelay, which counts from their own spawn */
  level.time+=BG_USE_SPAWN_DELAY;
  g_entities[1].r.currentOrigin[0]+=20; Frame();
  CHECK(Carried(k,&g_entities[1]) && k->r.currentOrigin[0]>85 && Hinted(k,60,0));
@@ -150,13 +151,13 @@ int main(void) {
  /* taken from the corpse with a held use, as the server runs it: freed, and
   * nothing is left pointing at it */
  slot=k->s.number; memset(&cmd,0,sizeof(cmd)); cmd.buttons=BUTTON_USE;
- for(i=0;i<=BG_PICKUP_HOLD_TIME && k->inuse;i++) {
+ for(i=0;i<=BG_UseHoldTime(cmd.buttons) && k->inuse;i++) {
   qboolean used;
   level.time++;
   used=G_UseThink(&g_entities[0],&cmd);
   BG_UpdateActivate(&cl[0].ps,&cl[0].activate,cmd.buttons,!used && G_HoldUsable(&g_entities[0]),used);
  }
- CHECK(i==BG_PICKUP_HOLD_TIME+1);
+ CHECK(i==BG_UseHoldTime(cmd.buttons)+1);
  CHECK(!k->inuse && !k->enemy && cl[0].ps.ammo[WP_THROWING_KNIFE]==1 && cl[0].ps.cursorHintEntIndex==ENTITYNUM_NONE);
  BodySink(body); Frame();
  CHECK(!k->inuse);
@@ -170,7 +171,7 @@ int main(void) {
  CHECK(!k->enemy && k->s.pos.trType==TR_STATIONARY && VectorCompare(at,k->r.currentOrigin) && body->r.linked);
  while (body->r.linked) { Frame(); CHECK(body->r.linked ? k->s.pos.trType==TR_STATIONARY : 1); }
  Lands(k);
- level.time+=BG_USE_SPAWN_DELAY; CHECK(Hinted(k,k->r.currentOrigin[0]-30,0));
+ CHECK(Hinted(k,k->r.currentOrigin[0]-30,0));	/* however fresh */
  /* the thrower is never in its way: it falls through them to the floor */
  G_FreeEntity(k); k=Throw(); g_entities[1].s.groundEntityNum=ENTITYNUM_WORLD;
  Place(&g_entities[0],k->r.currentOrigin[0],0); n=damageCalls;

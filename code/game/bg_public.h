@@ -213,7 +213,6 @@ typedef enum {
 #define BG_KNIFE_PICKUP_RADIUS    90.0f	// player_throwbackInnerRadius, flat, from the origin
 #define BG_KNIFE_PICKUP_REACH     160.0f	// player_throwbackOuterRadius, from the eye
 #define BG_KNIFE_PICKUP_STILL     100.0f	// bg_maxGrenadeIndicatorSpeed: moving faster is no pickup
-#define BG_USE_SPAWN_DELAY        500	// g_useholdspawndelay: no pickup this soon after it spawns
 #define BG_LADDER_REACH           4.0f
 #define BG_LADDER_SPEED           160.0f
 #define BG_LADDER_FRICTION        5.0f
@@ -546,7 +545,18 @@ int BG_WeaponAttachmentMask(int weapon);
 #define BG_GUN_UNCHAMBERED 2
 #define BG_GUN_GENERATION 4	// slotFlags only: flipped each time a pickup replaces the slot
 #define BG_PICKUP_RANGE 128.0f	// MW2's player_useRadius, eye to item
-#define BG_PICKUP_HOLD_TIME 1000
+// MW2's Player_ActivateHoldCmd, one rule for every hold-to-use usable, the
+// throwing knife and the floor gun alike, in ms from the press: a use from
+// +activate is used once g_useholdtime has passed (0 in the exe: on the press);
+// one from use/reload also needs IW4x's gpad_use_hold_time (its controller
+// rule, hooked into that same check at 0x5FE396), and a shorter tap reloads.
+// Peace's plain reload holds for a floor gun the same way (owner's rule). No
+// use at all this soon after the PLAYER spawns (g_useholdspawndelay, 500 in
+// the exe). Nothing counts from an item's age. BG_UseHoldTime picks the hold.
+#define BG_USE_HOLD_TIME 0		// g_useholdtime, the exe's default
+#define BG_USE_RELOAD_HOLD_TIME 250	// IW4x's gpad_use_hold_time
+#define BG_USE_SPAWN_DELAY 500
+int BG_UseHoldTime(int buttons);
 #define BG_PICKUP_OWNER_DELAY 1000	// MW2: your own dropped gun waits this long
 typedef struct {
 	int weapon, attachments, ammo, reserve, flags;

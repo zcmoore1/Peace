@@ -182,8 +182,11 @@ source for MW2 behaviour; the owner rejects it.
   variants of the same base gun must keep separate magazines and chamber debt.
   Do not replace a floor pickup with a full-mag grant. Death drops the held
   slot, not the requested destination. Exact weapon+attachment matches scavenge
-  to reserve on touch (capacity-capped) and consume the item; other guns need a
-  continuous 1000ms reload or use/reload hold. A short tap still reloads: a
+  to reserve on touch (capacity-capped) and consume the item; other guns, and a
+  resting throwing knife, take MW2's use hold (`BG_UseHoldTime`): `+activate`
+  at once (g_useholdtime 0), use/reload (and, for guns, the owner's plain
+  reload) held 250ms (IW4x's gpad_use_hold_time), nothing in the first 500ms
+  after the PLAYER spawns, never an item's age. A short tap still reloads: a
   reload tap in pmove, a use/reload tap through the server's bit (`pickupHeld`
   3 marks a use/reload hold so pmove does not also reload). S&D use is separate.
 - **Pickup does not own selection.** The reload hold latches its replacement
@@ -442,7 +445,13 @@ source for MW2 behaviour; the owner rejects it.
   where the scripts do every trick with `+usereload`. A reload request beats the
   trigger on the same command, as MW2 checks reload before it fires. Never
   predict the bit on the client, never hold the gun back after a quick action,
-  and never name a trick. `dev/FAKE_RELOAD.md` has the measured windows.
+  and never name a trick. How wide the window is comes only from the client's
+  clock, which is MW2's (`CL_DriftTimeDelta`, 0x5a1ad0): it sits one snapshot
+  interval plus 16ms behind the newest snapshot, and prediction replays from
+  the time-selected `cg.nextSnap`, so on your own host a release up to ~16ms
+  before the gun is up always fakes and up to ~66ms sometimes does (sv_fps 20,
+  MW2's fixed frame). Never move that clock toward the newest snapshot.
+  `dev/FAKE_RELOAD.md` has the measured windows.
 - **The gun never un-plays an action it showed (owner's rule).**
   `cg_weappicture.c` draws the viewmodel from its own run of the client's
   commands through the real `Pmove` once prediction is corrected away from a
@@ -591,8 +600,9 @@ window (with the client's selection lagging the snapshot), throwing-knife
 pickup and sea lion checks, and `cursor_hint_wiring_test.c`, which links the
 real `ClientEndFrame`, `G_FreeEntity` and hint pass.
 
-`dev/tests/run-fakereload.cmd` (or `.sh`) models ioquake3's client/server
-clocks (snapshot drift, sv_fps frames, ping) with the real `Pmove` on both
+`dev/tests/run-fakereload.cmd` (or `.sh`) models the client/server clocks
+(MW2's client time base through the real `CL_DriftTimeDelta`, snapshot
+selection by the client clock, sv_fps frames, ping) with the real `Pmove` on both
 sides, the server's use/reload step after each command, and the real `cg_anim`
 + `cg_weappicture.c` on the client. On the SPAS and the M300 it checks the fake
 reload after knife/frag/Semtex cancel, tap vs hold, aiming/shooting/real reload

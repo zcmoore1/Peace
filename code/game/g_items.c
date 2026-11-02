@@ -662,20 +662,33 @@ static qboolean G_KnifeHinted(gentity_t *player) {
 }
 
 /*
+G_UseSpawnDelayed
+
+MW2's g_useholdspawndelay (Player_ActivateHoldCmd): nothing is used this soon
+after the PLAYER spawned. It is never an item's age. respawnTime is the spawn
+time for as long as the player is alive (ClientSpawn), and the dead use nothing.
+*/
+static qboolean G_UseSpawnDelayed(gentity_t *player) {
+	return level.time - player->client->respawnTime < BG_USE_SPAWN_DELAY;
+}
+
+/*
 G_UseKnife
 
 MW2's Player_ActivateCmd and Player_ActivateHoldCmd for a throwing knife. A
 new use press while the hint is a knife takes that knife as its hold. The
-knife is taken once the button has been held for the same hold a floor gun
-needs (BG_PICKUP_HOLD_TIME: MW2 runs both through ActivateHoldCmd and its one
-g_useholdtime) and the knife is g_useholdspawndelay old. Released early, a
-use/reload press asks for the reload, as over a floor gun (BG_UpdateActivate).
-A press made while sprinting or with equipment out uses nothing. *held says
-whether a press is the knife's this command. A knife that only becomes the hint
-during a hold for something else takes nothing from it: MW2 holds for what the
-press chose.
+knife is taken once the button has been held BG_UseHoldTime from the press -
+at once from +activate, after IW4x's gpad_use_hold_time from use/reload - the
+one hold a floor gun needs too (MW2 runs both through ActivateHoldCmd), and
+the player is BG_USE_SPAWN_DELAY past their spawn.
+However fresh the knife, its age is never asked. Released early, a use/reload
+press asks for the reload, as over a floor gun (BG_UpdateActivate). A press made
+while sprinting or with equipment out uses nothing. *held says whether a press
+is the knife's this command. A knife that only becomes the hint during a hold
+for something else takes nothing from it: MW2 holds for what the press chose.
+Returns whether the knife was used this command.
 */
-static void G_UseKnife(gentity_t *player, usercmd_t *cmd, qboolean *held) {
+static qboolean G_UseKnife(gentity_t *player, usercmd_t *cmd, qboolean *held) {
 	gclient_t *client = player->client;
 	playerState_t *ps = &client->ps;
 	const int useButtons = BUTTON_USE | BUTTON_USE_RELOAD;
@@ -690,21 +703,22 @@ static void G_UseKnife(gentity_t *player, usercmd_t *cmd, qboolean *held) {
 	}
 	if (!(cmd->buttons & useButtons) || client->knifeHold == ENTITYNUM_NONE) {
 		client->knifeHold = ENTITYNUM_NONE;
-		return;
+		return qfalse;
 	}
 	knife = &g_entities[client->knifeHold];
 	if (!G_IsThrowingKnife(knife) || knife->timestamp != client->knifeHoldSpawn) {
 		client->knifeHold = ENTITYNUM_NONE;
-		return;
+		return qfalse;
 	}
 	*held = qtrue;
-	if (level.time - knife->timestamp >= BG_USE_SPAWN_DELAY &&
-		level.time - client->knifeHoldStart >= BG_PICKUP_HOLD_TIME) {
-		client->knifeHold = ENTITYNUM_NONE;
-		client->activate.hold = qfalse;	// the hold was used: its release is not a reload
-		if (ps->stats[STAT_HEALTH] > 0 && ps->ammo[WP_THROWING_KNIFE] < client->knifeMax)
-			G_TakeKnife(player, knife);
-	}
+	if (G_UseSpawnDelayed(player) || level.time - client->knifeHoldStart < BG_UseHoldTime(cmd->buttons))
+		return qfalse;
+	client->knifeHold = ENTITYNUM_NONE;
+	client->activate.hold = qfalse;	// the hold was used: its release is not a reload
+	if (ps->stats[STAT_HEALTH] <= 0 || ps->ammo[WP_THROWING_KNIFE] >= client->knifeMax)
+		return qfalse;
+	G_TakeKnife(player, knife);
+	return qtrue;
 }
 
 /*
@@ -725,29 +739,32 @@ uses one thing per use/reload press, and the bomb comes first: a press at a
 site or the case is never a floor-gun hold too, and a press already used there
 cannot become one. A knife outranks any gun in MW2's use list, so a press on a
 knife's hint is held for the knife, never the gun. Returns whether a press is
-used at once (the bomb), for BG_UpdateActivate; G_HoldUsable says whether it
-is held.
+used at once, for BG_UpdateActivate: the bomb, or a knife taken on this command
+(MW2's Player_ActivateCmd returning true), which is a use and never a reload
+even though the freed knife no longer hints by then. G_HoldUsable says whether
+a press is held.
 */
 qboolean G_UseThink(gentity_t *player, usercmd_t *cmd) {
 	gclient_t *client = player->client;
 	qboolean sndUsable = G_SNDUsable(player);
-	qboolean knifeHeld = qfalse;
+	qboolean knifeHeld = qfalse, knifeUsed = qfalse;
 	G_SNDUse(player, cmd);
-	if (!sndUsable) G_UseKnife(player, cmd, &knifeHeld);
+	if (!sndUsable) knifeUsed = G_UseKnife(player, cmd, &knifeHeld);
 	if (sndUsable) client->activate.hold = qfalse;
 	if (client->ps.pickupHeld == 3 &&
 		(sndUsable || knifeHeld || (client->activate.done && !client->activate.hold)))
 		client->ps.pickupHeld = 2;
-	G_CommitWeaponPickup(player);
-	return sndUsable;
+	G_CommitWeaponPickup(player, cmd->buttons);
+	return sndUsable || knifeUsed;
 }
 
-void G_CommitWeaponPickup(gentity_t *player) {
+void G_CommitWeaponPickup(gentity_t *player, int buttons) {
 	playerState_t *ps = &player->client->ps;
 	bg_weaponInstance_t gun;
 	gentity_t *item;
 	int slot;
-	if ((ps->pickupHeld != 1 && ps->pickupHeld != 3) || ps->pickupTime < BG_PICKUP_HOLD_TIME) return;
+	if ((ps->pickupHeld != 1 && ps->pickupHeld != 3) || ps->pickupTime < BG_UseHoldTime(buttons) ||
+		G_UseSpawnDelayed(player)) return;	// the hold runs on until the gate opens
 	ps->pickupHeld = 2;
 	player->client->activate.hold = qfalse; // the hold was used: its release is not a reload
 	if (ps->pickupTarget < MAX_CLIENTS || ps->pickupTarget >= level.num_entities) return;
@@ -793,8 +810,9 @@ G_UpdateCursorHint
 MW2's Player_UpdateCursorHints, once per end-frame: the use hint names the
 usable thing in reach, and is sticky. With nothing usable in reach, while
 sprinting, with equipment out, or dead, it is not written at all, so it keeps
-naming the last thing it named, and spawn leaves it 0. Only freeing what it
-names (G_ClearCursorHintRefs) turns it into ENTITYNUM_NONE. Pmove reads it.
+naming the last thing it named, and spawn leaves it 0. Here only freeing what
+it names (G_ClearCursorHintRefs) turns it into ENTITYNUM_NONE; MW2's pass also
+writes that itself for usables Peace does not have yet. Pmove reads it.
 */
 void G_UpdateCursorHint(gentity_t *player) {
 	playerState_t *ps = &player->client->ps;

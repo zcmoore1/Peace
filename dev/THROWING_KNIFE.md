@@ -83,16 +83,25 @@ item's model in `bg_misc.c` and the missile model in `cg_weapons.c`.
   knife in a player or corpse counts (it has no velocity of its own), so it can
   be taken out of them, as in MW2. The lowest `128 * (1 - dot) + distance`
   wins, and a knife outranks any gun.
-- **Use.** A use or use/reload press while the last end-frame's hint is a knife
-  is held for it, exactly as a floor gun is: MW2 runs both through
-  ActivateHoldCmd and its one `g_useholdtime`. The executable's default for it
-  is 0, but MW2 as played needs a hold for both, so the knife takes
-  `BG_PICKUP_HOLD_TIME`, the gun's hold, and only once the knife is
-  `g_useholdspawndelay` old (500ms). Let go early, use/reload asks for the
-  reload, as over a gun. A press while sprinting or with equipment out does
-  nothing. Walking over a knife never collects it. The HUD shows no progress
-  for a knife hold yet (the gun's bar is predicted in pmove; the knife's hold
-  is the server's). A knife that only
+- **Use.** A use (`+activate`) or use/reload (`+usereload`) press while the
+  last end-frame's hint is a knife is held for it, exactly as a floor gun is:
+  MW2 runs both through Player_ActivateHoldCmd (0x5FE350). How long is
+  `BG_UseHoldTime`, from the press: `+activate` takes it at once (MW2's
+  `g_useholdtime`, 0 in the executable); use/reload must be held
+  `BG_USE_RELOAD_HOLD_TIME`, 250ms, IW4x's `gpad_use_hold_time` (its controller
+  rule, hooked into that same check at 0x5FE396: the "Press and Hold" of X),
+  and a shorter tap reloads. The reload button alone never takes a knife. Nothing is used in the first
+  `BG_USE_SPAWN_DELAY` (500ms, `g_useholdspawndelay`) after the PLAYER spawns;
+  the knife's own age is never asked, so a knife may be taken back as soon as
+  it is hinted. A button held before the knife comes to rest asks for the
+  reload on every command, and its hold starts on the first command after the
+  hint names the knife (MW2 latches a press that used nothing again). The
+  command that takes the knife is a use, never a reload (MW2's ActivateCmd
+  returning true, 0x5FE34C), and a completed hold is never followed by one.
+  Let go early, use/reload asks for the reload, as over a gun. A press while
+  sprinting or with equipment out does nothing. Walking over a knife never
+  collects it. The HUD shows no progress for a knife hold yet (the gun's bar
+  is predicted in pmove; the knife's hold is the server's). A knife that only
   becomes the hint during a hold for a floor gun takes nothing from that hold:
   MW2 holds for what the press chose.
 - **Take.** One more knife and the pickup sound. The hands are not touched.
@@ -145,9 +154,14 @@ Not yet done:
   `TestKnifeOutOfReloadSettle` and `TestKnifeOutOfAction` the pull out of a busy
   gun on the SPAS and the M300; `TestLethalFromEmptyHand` every lethal from an
   empty hand.
-- `TestKnifePickup` and `TestKnifeSeaLion` (pickup suite) cover the hint,
-  reach, speed, sight, room, the spawn delay, use-only pickup, the knife
-  outranking a gun, a knife arriving during a gun hold, busy presses, entity
-  reuse, and the end-to-end sea lion.
+- `TestUseHold` (pickup suite) pins the one hold: knife and gun taken
+  `BG_USE_HOLD_TIME` after the press, the player's spawn gate on both, no
+  reload after a completed hold, and the reload button collecting a gun but
+  never a knife. `TestKnifePickup` and `TestKnifeSeaLion` cover the hint,
+  reach, speed, sight, room, no age gate, a button held before the knife
+  rests, use-only pickup, the knife outranking a gun, a knife arriving during
+  a gun hold, busy presses, entity reuse, and the end-to-end sea lion with
+  use and with use/reload (the owner's chain: take the knife back, then a
+  flash pressed in a later quick raise comes straight out).
 - `cursor_hint_wiring_test.c` checks that the real `ClientEndFrame` names a
   knife and that the real `G_FreeEntity` empties the hint.

@@ -13,13 +13,17 @@
  * A plain reload (+reload) is read by the weapon itself on both sides, so it
  * is predicted exactly and none of this happens with it.
  *
- * The network is ioquake3's: the server ticks level.time in sv_fps frames and
- * snapshots each frame; the client keeps cl.serverTime just behind the newest
- * snapshot (CL_SetCGameTime / CL_AdjustTimeDelta) and stamps commands with it;
- * the server runs each command on arrival (ClientThink_real clamps), then the
- * use code. Both sides run the REAL Pmove; the client draws with the REAL
- * cg_anim through the REAL picture rule. Gameplay timings come from the
- * shipped tables; only the network (frame rate, ping, offsets) is set here.
+ * The network is ioquake3's transport with MW2's client clock: the server
+ * ticks level.time in sv_fps frames and snapshots each frame; the client keeps
+ * cl.serverTime one snapshot interval plus 16ms behind the newest snapshot
+ * (CL_SetCGameTime, and CL_AdjustTimeDelta through the REAL CL_DriftTimeDelta
+ * of code/client/cl_timedelta.c) and stamps commands with it; cgame keeps the
+ * snapshots either side of that time and predicts from the later one, nextSnap
+ * (CG_ProcessSnapshots, CG_PredictPlayerState); the server runs each command
+ * on arrival (ClientThink_real clamps), then the use code. Both sides run the
+ * REAL Pmove; the client draws with the REAL cg_anim through the REAL picture
+ * rule. Gameplay timings come from the shipped tables; only the network (frame
+ * rate, ping, offsets) and MW2's clock constants are set here.
  *
  * FAKERELOAD_PROBE=1 prints the outcome of every tap time instead of checking.
  * FAKERELOAD_PHASES=1 prints the fake reload success rate against when X is
@@ -27,7 +31,8 @@
  * FAKERELOAD_TRACE="action rtt-index tap knife-delay" (FAKERELOAD_GUN=m300 for
  * the rifle) prints one reload-then-knife chain frame by frame, both sides.
  * FAKERELOAD_SVFPS sets the server frame and snapshot rate (MW2's is 20, the
- * default, which is also what a client gets with ioquake3's default snaps 20).
+ * default and the shipped autoexec's sv_fps).
+ * FAKERELOAD_CLOCK=1 prints the client's clock frame by frame, with no input.
  * FAKERELOAD_MAXPACKETS batches commands as cl_maxpackets does over the
  * internet; by default every frame sends, as on loopback and LAN. */
 #include "../../code/qcommon/q_shared.h"
@@ -42,6 +47,8 @@ void FakeReloadPictureInit(void);
 int  FakeReloadPicture(playerState_t *ps, int now, int msec);
 int  FakeReloadIsReloadClip(int clip);
 void CG_WeapPicture_Reset(void);
+int  CL_TimeDeltaGap(int delta, int newest, int prev, int realtime);
+int  CL_DriftTimeDelta(int delta, int newest, int prev, int realtime, qboolean *extrapolated);
 void CG_WeapPicture_BeginReplay(const playerState_t *base);
 void CG_WeapPicture_ReplayStep(const playerState_t *before, const playerState_t *after, const entityState_t *item);
 void CG_WeapPicture_Update(const playerState_t *predicted, const pmove_t *model, int first, int last,
@@ -54,7 +61,16 @@ void QDECL Com_Printf(const char *fmt, ...) { (void)fmt; }
 void QDECL Com_Error(int level, const char *fmt, ...) { (void)level; fprintf(stderr, "Com_Error %s\n", fmt); exit(1); }
 
 static int SV_FRAME = 50;	/* sv_fps 20, MW2's; FAKERELOAD_SVFPS overrides */
+#define SV_FRAME_FAST	8	/* sv_fps 125 with snaps 125 */
 #define CL_FRAME	8		/* 125 fps, one command per frame */
+/* MW2's client clock (iw4x.exe), kept here so the engine is checked against
+ * MW2 and not against itself. */
+#define CL_TIME_BACKOFF	16	/* target behind newest - interval, CL_AdjustTimeDelta 0x5a1aee */
+#define CL_EXTRAP_GUARD	8	/* extrapolating at newest - 8, CL_SetCGameTime 0x5031ed */
+#define CL_TIME_RESET	500	/* reset beyond this gap, 0x5a1b8a */
+#define CL_TIME_FAST	100	/* halve beyond this gap, 0x5a1bcc */
+#define CL_EXTRAP_BACK	2	/* back this much after an extrapolation, 0x5a1b36 */
+#define RS_BACKUP	32		/* received snapshots kept (ioquake3's PACKET_BACKUP) */
 #define MAXQ		4096
 static int GUN = WP_SHOTGUN;	/* the gun in hand; the SPAS and the M300 have authored clips */
 #define X			BUTTON_USE_RELOAD
@@ -93,8 +109,17 @@ static struct { int arrive; usercmd_t cmd; } cq[MAXQ];
 static struct { int arrive, serverTime; playerState_t ps; } sq[MAXQ];
 static usercmd_t cmds[MAXQ];
 static int cqHead, cqTail, sqHead, sqTail, numCmds;
-static int clDelta, clServerTime, clOldServerTime, clExtrap, clHaveSnap, clNewSnap, clSnapTime;
-static playerState_t clSnapPs;
+static int clDelta, clServerTime, clOldServerTime, clActive, clNewSnap, clSnapTime, clPrevSnapTime;
+static qboolean clExtrap;
+/* The client's received snapshots, numbered from 1, and cgame's snap and
+ * nextSnap among them (0: none). */
+static struct { int serverTime; playerState_t ps; } rs[RS_BACKUP];
+static int rsLatest, cgProcessed, cgSnap, cgNext;
+static const playerState_t *clBase;		/* what prediction starts from */
+static int settle;						/* ms for the clock to reach its target */
+static int snapInterval;				/* measured between received snapshots */
+/* The clock seen at every client frame once it has settled. */
+static struct { int leadMin, leadMax, ageMin, ageMax, intervalMin, intervalMax; } clk;
 static int pictureDetached, sawGunActionInPicture;
 
 static int Buttons(int now) {
@@ -146,12 +171,40 @@ static void ServerThink(usercmd_t *ucmd) {
 	BG_UpdateActivate(&svPs, &svUse, ucmd->buttons, qfalse, qfalse);	/* nothing to use here */
 }
 
-static void AdjustTimeDelta(int realtime) {
-	int newDelta = clSnapTime - realtime, dd = abs(newDelta - clDelta);
-	clNewSnap = 0;
-	if (dd > 500) { clDelta = newDelta; clOldServerTime = clServerTime = clSnapTime; }
-	else if (dd > 100) clDelta = (clDelta + newDelta) >> 1;
-	else if (clExtrap) { clExtrap = 0; clDelta -= 2; } else clDelta++;
+/* CL_SetCGameTime: the clock, then the drift when a snapshot came in. */
+static void SetCGameTime(int realtime) {
+	if (!clActive) {	/* CL_FirstSnapshot (MW2 0x5a1cd0): exactly on it */
+		clActive = 1; clNewSnap = 0;
+		clDelta = clSnapTime - realtime; clOldServerTime = clSnapTime;
+	}
+	clServerTime = realtime + clDelta;
+	if (clServerTime < clOldServerTime) clServerTime = clOldServerTime;
+	clOldServerTime = clServerTime;
+	if (realtime + clDelta >= clSnapTime - CL_EXTRAP_GUARD) clExtrap = qtrue;
+	if (clNewSnap) {	/* CL_AdjustTimeDelta */
+		int gap = CL_TimeDeltaGap(clDelta, clSnapTime, clPrevSnapTime, realtime);
+		clNewSnap = 0;
+		clDelta = CL_DriftTimeDelta(clDelta, clSnapTime, clPrevSnapTime, realtime, &clExtrap);
+		if (gap > CL_TIME_RESET) clOldServerTime = clServerTime = clSnapTime;
+	}
+}
+/* CG_ProcessSnapshots with cg.time = cl.serverTime: read snapshots in order,
+ * one at a time, until nextSnap is past the clock; predict from nextSnap, or
+ * from snap when there is none yet (CG_PredictPlayerState). */
+static void ProcessSnapshots(void) {
+	if (!cgSnap) {
+		if (cgProcessed >= rsLatest) return;
+		cgSnap = ++cgProcessed;
+	}
+	for (;;) {
+		if (!cgNext) {
+			if (cgProcessed >= rsLatest) break;
+			cgNext = ++cgProcessed;
+		}
+		if (clServerTime >= rs[cgSnap % RS_BACKUP].serverTime && clServerTime < rs[cgNext % RS_BACKUP].serverTime) break;
+		cgSnap = cgNext; cgNext = 0;
+	}
+	clBase = &rs[(cgNext ? cgNext : cgSnap) % RS_BACKUP].ps;
 }
 static qboolean GetCmd(int n, usercmd_t *out) {
 	if (n < 0 || n >= numCmds) return qfalse;
@@ -159,7 +212,7 @@ static qboolean GetCmd(int n, usercmd_t *out) {
 }
 static void Predict(void) {
 	int i; pmove_t model;
-	clPred = clSnapPs;
+	clPred = *clBase;
 	CG_WeapPicture_BeginReplay(&clPred);
 	for (i = 0; i < numCmds; i++) {
 		pmove_t pm; playerState_t before;
@@ -207,13 +260,16 @@ static void Record(const playerState_t *pic, int clip) {
 
 static void Run(int rtt, const script_t *sc, int at) {
 	bg_class_t cl = *BG_Class(0);
-	int now, end = 9000, seen = 0;
+	int now, end, seen = 0;
 	memset(&O, 0, sizeof(O)); O.anchor = NONE; O.svMinAmmo = 1000; S = *sc; base = at;
 	/* From well before the gun is back, so a press that changes when it comes back is still seen. */
 	recordFrom = base != NONE ? base - 400 : 1 << 30; lastPacket = -1000;
-	oneWay = rtt / 2; startPress = 1500 + startShift;
+	/* Pressed once the client's clock has settled, and run as long after. */
+	oneWay = rtt / 2; startPress = (settle > 1500 ? settle : 1500) + startShift; end = startPress + 7500;
 	cqHead = cqTail = sqHead = sqTail = numCmds = 0;
-	clDelta = clServerTime = clOldServerTime = clExtrap = clHaveSnap = clNewSnap = 0;
+	clDelta = clServerTime = clOldServerTime = clActive = clNewSnap = clSnapTime = clPrevSnapTime = 0;
+	clExtrap = qfalse; rsLatest = cgProcessed = cgSnap = cgNext = 0; clBase = NULL;
+	clk.leadMin = clk.ageMin = clk.intervalMin = 1 << 30; clk.leadMax = clk.ageMax = clk.intervalMax = -(1 << 30);
 	pictureDetached = sawGunActionInPicture = 0;
 	CG_WeapPicture_Reset();
 	memset(&svPs, 0, sizeof(svPs)); memset(&svUse, 0, sizeof(svUse));
@@ -228,16 +284,19 @@ static void Run(int rtt, const script_t *sc, int at) {
 		curNow = now;
 		while (cqHead < cqTail && cq[cqHead].arrive != PENDING && cq[cqHead].arrive <= now) ServerThink(&cq[cqHead++].cmd);
 		while (sqHead < sqTail && sq[sqHead].arrive <= now) {
-			if (!clHaveSnap) { clHaveSnap = 1; clSnapTime = sq[sqHead].serverTime; clSnapPs = sq[sqHead].ps;
-				clDelta = clSnapTime - now; clOldServerTime = clSnapTime; }
-			else if (sq[sqHead].serverTime > clSnapTime) { clSnapTime = sq[sqHead].serverTime; clSnapPs = sq[sqHead].ps; clNewSnap = 1; }
+			/* CL_ParseSnapshot: keep it, and the time of the one before (MW2 0x5ac0ce) */
+			if (!rsLatest || sq[sqHead].serverTime > clSnapTime) {
+				rsLatest++;
+				rs[rsLatest % RS_BACKUP].serverTime = sq[sqHead].serverTime; rs[rsLatest % RS_BACKUP].ps = sq[sqHead].ps;
+				clPrevSnapTime = clSnapTime; clSnapTime = sq[sqHead].serverTime; clNewSnap = 1;
+			}
 			sqHead++;
 		}
 		if (now % SV_FRAME == 0) {
 			levelTime += SV_FRAME;
 			sq[sqTail].arrive = now + oneWay; sq[sqTail].serverTime = levelTime; sq[sqTail].ps = svPs; sqTail++;
 		}
-		if (now % CL_FRAME == 0 && clHaveSnap) {
+		if (now % CL_FRAME == 0 && rsLatest) {
 			usercmd_t *c = &cmds[numCmds++];
 			const playerState_t *pic; playerState_t copy; int clip;
 			memset(c, 0, sizeof(*c));
@@ -249,12 +308,20 @@ static void Run(int rtt, const script_t *sc, int at) {
 				for (q = cqTail - 1; q >= cqHead && cq[q].arrive == PENDING; q--) cq[q].arrive = now + oneWay;
 				lastPacket = now;
 			}
-			clServerTime = now + clDelta;
-			if (clServerTime < clOldServerTime) clServerTime = clOldServerTime;
-			clOldServerTime = clServerTime;
-			if (now + clDelta >= clSnapTime - 5) clExtrap = 1;
-			if (clNewSnap) AdjustTimeDelta(now);
+			SetCGameTime(now);
+			ProcessSnapshots();
 			Predict();
+			if (getenv("FAKERELOAD_CLOCK") && base == NONE)
+				printf("clock t%5d lead %3d age %3d delta %d\n", now, clSnapTime - clServerTime, clServerTime - clBase->commandTime, clDelta);
+			if (now >= settle) {
+				int lead = clSnapTime - clServerTime, age = clServerTime - clBase->commandTime, iv = clSnapTime - clPrevSnapTime;
+				if (lead < clk.leadMin) clk.leadMin = lead;
+				if (lead > clk.leadMax) clk.leadMax = lead;
+				if (age < clk.ageMin) clk.ageMin = age;
+				if (age > clk.ageMax) clk.ageMax = age;
+				if (iv < clk.intervalMin) clk.intervalMin = iv;
+				if (iv > clk.intervalMax) clk.intervalMax = iv;
+			}
 			if (!seen && clPred.weapon != GUN) seen = 1;
 			if (S.action == ACT_NONE ? now >= startPress : seen && GunAtRest(&clPred)) {
 				if (O.anchor == NONE) O.anchor = now;
@@ -266,7 +333,7 @@ static void Run(int rtt, const script_t *sc, int at) {
 				printf("t%+5d st%d b%06x | cl w%2d s%2d A%d act%03x ws%d | pic w%2d s%2d %s | sv w%2d s%2d A%d act%03x wf%d | snap ct%d\n",
 					now - base, c->serverTime, Buttons(now), clPred.weapon, clPred.weaponstate, !!(clPred.pm_flags & PMF_ADS), clPred.weaponAction & 0x107,
 					clPred.weapFlags, pic->weapon, pic->weaponstate, pic != &clPred ? "DET" : "   ",
-					svPs.weapon, svPs.weaponstate, !!(svPs.pm_flags & PMF_ADS), svPs.weaponAction & 0x107, svPs.weapFlags, clSnapPs.commandTime);
+					svPs.weapon, svPs.weaponstate, !!(svPs.pm_flags & PMF_ADS), svPs.weaponAction & 0x107, svPs.weapFlags, clBase->commandTime);
 		}
 	}
 	CHECK(O.anchor != NONE);
@@ -427,7 +494,7 @@ static void FakeReloads(void) {
 static void FakeBullets(void) {
 	int r, x, bullets[4];
 	for (r = 0; r < 4; r++) {
-		int button, lastBullet = 0;
+		int button, lastBullet = 0, firstBullet = NONE;
 		bullets[r] = 0;
 		for (button = 0; button < 2; button++) for (x = -40; x <= 300; x += 8) {
 			script_t s = Script(ACT_NONE, button ? R : X);
@@ -443,11 +510,14 @@ static void FakeBullets(void) {
 				CHECK(O.svShot == (x < 0 || (!button && x == 0)));
 			} else if (FakeBullet()) {
 				bullets[r]++; lastBullet = x;
+				if (firstBullet == NONE) firstBullet = x;
 			} else {
 				CHECK(!O.predShot && !O.svShot);	/* later: the reload is on screen first */
 			}
 		}
 		CHECK(bullets[r] > 0 && (!r || bullets[r] >= bullets[r - 1]));
+		/* from the very next command after the tap */
+		CHECK(firstBullet == CL_FRAME);
 		printf("  %-4s fake bullet RTT %3d: a shot 8..%dms after the use/reload tap\n",
 			GUN == WP_M40A3 ? "M300" : "SPAS", rtts[r], lastBullet);
 	}
@@ -461,7 +531,7 @@ static void FakeBullets(void) {
 static void WildScopes(void) {
 	int a, r, t, e;
 	for (a = 0; a < ACT_NONE; a++) for (r = 0; r < 4; r++) {
-		int lastKnife = NONE, fakeTaps = 0;
+		int lastKnife = NONE, firstKnife = NONE, fakeTaps = 0;
 		for (t = -400; t <= -48; t += 8) {
 			script_t s = Script(a, X);
 			int shown;
@@ -474,10 +544,11 @@ static void WildScopes(void) {
 				s.knifeAt = e; s.knifeLen = TAP; Run(rtts[r], &s, anchorAt[a][r]);
 				CHECK(O.converged);
 				/* On the command the gun is back, aim is not in yet: a real knife. */
-				if (O.svKnife) { CHECK(e < 16); continue; }
+				if (O.svKnife) { CHECK(e < 2 * CL_FRAME); continue; }
 				if (O.knifePicMs > 0 && O.adsUnderKnifeMs > 0) {
 					CHECK(!O.svReload);
 					if (lastKnife == NONE || e > lastKnife) lastKnife = e;
+					if (firstKnife == NONE || e < firstKnife) firstKnife = e;
 				} else {
 					/* refused on both sides: the reload you saw plays out in full */
 					CHECK(!O.knifePicMs && O.reloadPicMs == shown);
@@ -487,6 +558,8 @@ static void WildScopes(void) {
 		CHECK(fakeTaps > 0);
 		/* Snapshots every 8ms on your own host leave no room for it at all. */
 		CHECK(lastKnife != NONE || (rtts[r] == 0 && SV_FRAME < 50));
+		/* from the command aim is in, the one after the gun is back */
+		CHECK(lastKnife == NONE || firstKnife == 2 * CL_FRAME);
 		if (lastKnife == NONE) printf("  M300 wild scope after %-13s RTT %3d: none\n", actName[a], rtts[r]);
 		else printf("  M300 wild scope after %-13s RTT %3d: a knife up to %3dms after the gun is back\n",
 			actName[a], rtts[r], lastKnife);
@@ -579,8 +652,10 @@ static void TestPictureHandsBack(void) {
 /* How often a use/reload tap released d ms before the gun is at rest gives a
  * fake reload, over every phase of the server's snapshots against the quick
  * action (the player cannot see that phase, so this is the success rate). */
+static int allReal;	/* every run of the last SuccessRate reloaded on the server */
 static int SuccessRate(int a, int r, int d, int hold, int step) {
 	int ok = 0, n = 0, phase;
+	allReal = 1;
 	for (phase = 0; phase < 50; phase += step) {
 		script_t s = Script(a, X);
 		int at;
@@ -590,12 +665,13 @@ static int SuccessRate(int a, int r, int d, int hold, int step) {
 		Run(rtts[r], &s, at);
 		CHECK(O.converged);
 		ok += Fake(); n++;
+		allReal &= O.svReload;
 	}
 	startShift = 0;
 	return 100 * ok / n;
 }
 static void Phases(void) {
-	const int ds[] = { -8, 0, 8, 16, 24, 32, 40, 48, 56, 72 };
+	const int ds[] = { -8, 0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88 };
 	int a, r, i, hold = 64;
 	printf("fake reload success over snapshot phases: %dms X tap released d ms before the gun is at rest\n", hold);
 	for (a = 0; a < ACT_NONE; a++) for (r = 0; r < 4; r++) {
@@ -605,24 +681,125 @@ static void Phases(void) {
 		putchar('\n');
 	}
 }
-/* The owner's MW2: tight on your own host but doable almost every time if you
- * let go as the gun comes up, and easy with ping. The player cannot see the
- * snapshot phase, so this is over all of them. */
+/* MW2's window on your own host, from MW2's clock alone. The client predicts
+ * from a snapshot one interval plus CL_TIME_BACKOFF behind, so a tap let go
+ * within the backoff of the gun being up always fakes; earlier, the chance
+ * falls across one snapshot interval, and past the clock's whole lag it is
+ * gone. The player cannot see the snapshot phase, so this is over all of them.
+ * With ping the base is older still, so the windows only widen. */
 static void Windows(void) {
-	int a;
+	int a, d, rate, expect;
+	/* The phase sweep is of snapshots against a packet every frame (your own
+	 * host and LAN ignore cl_maxpackets); batched packets add a phase of their
+	 * own that it does not cover. */
+	if (maxPackets) return;
 	for (a = 0; a < ACT_NONE; a++) {
-		CHECK(SuccessRate(a, 0, 0, 64, 5) >= 80);
-		CHECK(SuccessRate(a, 0, 48, 64, 5) == 0);
-		CHECK(SuccessRate(a, 0, -8, 64, 5) == 0);	/* let go after it is up: a real reload */
 		CHECK(SuccessRate(a, 1, 40, 64, 5) == 100);
 		CHECK(SuccessRate(a, 2, 72, 64, 5) == 100);
+		for (d = 0; d <= CL_TIME_BACKOFF - CL_FRAME; d += CL_FRAME) CHECK(SuccessRate(a, 0, d, 64, 5) == 100);
+		/* the fall, where an interval spans more than a couple of commands */
+		if (snapInterval > 2 * CL_FRAME) {
+			d = CL_TIME_BACKOFF + snapInterval / 2;
+			rate = SuccessRate(a, 0, d, 64, 5);
+			expect = 100 * (CL_TIME_BACKOFF + snapInterval - d) / snapInterval;
+			CHECK(rate >= expect - 20 && rate <= expect + 20);
+		}
+		for (d = CL_TIME_BACKOFF + snapInterval + 2 * CL_FRAME; d <= CL_TIME_BACKOFF + 2 * snapInterval; d += snapInterval / 2)
+			CHECK(SuccessRate(a, 0, d, 64, 5) == 0);
+		/* let go after it is up: a real reload */
+		CHECK(SuccessRate(a, 0, -CL_FRAME, 64, 5) == 0 && allReal);
 	}
+}
+
+/* MW2's CL_AdjustTimeDelta (0x5a1ad0), branch by branch, on the engine's own
+ * CL_DriftTimeDelta. */
+static void TestDriftTimeDelta(void) {
+	const int newest = 20000, prev = newest - 50, realtime = 9000;
+	int interval = newest - prev, target = newest - realtime - interval - CL_TIME_BACKOFF;
+	int reset = newest - realtime - CL_TIME_BACKOFF, odd;
+	qboolean ex;
+	/* behind the target: the whole gap counts */
+	ex = qtrue; CHECK(CL_DriftTimeDelta(target + CL_TIME_RESET + 1, newest, prev, realtime, &ex) == reset && ex);
+	ex = qtrue; CHECK(CL_DriftTimeDelta(target + CL_TIME_RESET, newest, prev, realtime, &ex) == target + CL_TIME_RESET / 2 && ex);
+	ex = qtrue; CHECK(CL_DriftTimeDelta(target + CL_TIME_FAST + 1, newest, prev, realtime, &ex) == target + (CL_TIME_FAST + 1) / 2 && ex);
+	ex = qfalse; CHECK(CL_DriftTimeDelta(target + CL_TIME_FAST, newest, prev, realtime, &ex) == target + CL_TIME_FAST - 1 && !ex);
+	/* ahead of it: one interval of lead is free */
+	ex = qtrue; CHECK(CL_DriftTimeDelta(target - interval - CL_TIME_RESET - 1, newest, prev, realtime, &ex) == reset && ex);
+	odd = target - interval - CL_TIME_RESET;
+	ex = qtrue; CHECK(CL_DriftTimeDelta(odd, newest, prev, realtime, &ex) == (odd + target) >> 1 && ex);
+	odd = target - interval - CL_TIME_FAST - 1;
+	ex = qfalse; CHECK(CL_DriftTimeDelta(odd, newest, prev, realtime, &ex) == (odd + target) >> 1);
+	ex = qfalse; CHECK(CL_DriftTimeDelta(target - interval - CL_TIME_FAST, newest, prev, realtime, &ex) == target - interval - CL_TIME_FAST + 1);
+	ex = qfalse; CHECK(CL_DriftTimeDelta(target - interval, newest, prev, realtime, &ex) == target - interval + 1);
+	/* ... unless the interval is not sane (over the reset, or negative) */
+	{
+		int prevs[2], i;
+		prevs[0] = newest - CL_TIME_RESET - 1; prevs[1] = newest + interval;
+		for (i = 0; i < 2; i++) {
+			int t = newest - realtime - (newest - prevs[i]) - CL_TIME_BACKOFF;
+			ex = qfalse; CHECK(CL_DriftTimeDelta(t - CL_TIME_FAST - 1, newest, prevs[i], realtime, &ex) == (t - CL_TIME_FAST - 1 + t) >> 1);
+			ex = qfalse; CHECK(CL_DriftTimeDelta(t - CL_TIME_FAST, newest, prevs[i], realtime, &ex) == t - CL_TIME_FAST + 1);
+		}
+	}
+	/* slow: back after an extrapolation, whichever side, clearing it ... */
+	ex = qtrue; CHECK(CL_DriftTimeDelta(target - 1, newest, prev, realtime, &ex) == target - 1 - CL_EXTRAP_BACK && !ex);
+	ex = qtrue; CHECK(CL_DriftTimeDelta(target + 1, newest, prev, realtime, &ex) == target + 1 - CL_EXTRAP_BACK && !ex);
+	/* ... else one toward the target, or none on it */
+	ex = qfalse; CHECK(CL_DriftTimeDelta(target + 1, newest, prev, realtime, &ex) == target);
+	ex = qfalse; CHECK(CL_DriftTimeDelta(target - 1, newest, prev, realtime, &ex) == target);
+	ex = qfalse; CHECK(CL_DriftTimeDelta(target, newest, prev, realtime, &ex) == target && !ex);
+	/* no slow drift without the flag (timescaled): reset and fast still run */
+	CHECK(CL_DriftTimeDelta(target + 1, newest, prev, realtime, NULL) == target + 1);
+	CHECK(CL_DriftTimeDelta(target + CL_TIME_RESET + 1, newest, prev, realtime, NULL) == reset);
+	CHECK(CL_DriftTimeDelta(target + CL_TIME_FAST + 1, newest, prev, realtime, NULL) == target + (CL_TIME_FAST + 1) / 2);
+	/* the reset is the gap the caller puts the clock on the newest snapshot for */
+	CHECK(CL_TimeDeltaGap(target + CL_TIME_RESET + 1, newest, prev, realtime) > CL_TIME_RESET);
+	CHECK(CL_TimeDeltaGap(target - interval - CL_TIME_RESET, newest, prev, realtime) <= CL_TIME_RESET);
+}
+
+/* The model of CL_SetCGameTime: a frame at newest - CL_EXTRAP_GUARD counts as
+ * extrapolated (MW2 0x5031ed), one a millisecond earlier does not. */
+static void TestExtrapolationGuard(void) {
+	const int newest = 20000, realtime = 9000;
+	int early;
+	for (early = 0; early < 2; early++) {
+		clActive = 1; clNewSnap = 0; clExtrap = qfalse; clOldServerTime = 0;
+		clSnapTime = newest; clDelta = newest - CL_EXTRAP_GUARD - early - realtime;
+		SetCGameTime(realtime);
+		CHECK(clExtrap == !early && clServerTime == newest - CL_EXTRAP_GUARD - early);
+	}
+}
+
+/* MW2's clock at rest: from one snapshot interval plus the backoff behind the
+ * newest snapshot to the backoff behind it, and the snapshot prediction starts
+ * from as old. Snapshots every frame do not take the floor away. */
+static void TestClockBase(void) {
+	int i, keep = SV_FRAME, keepSettle = settle;
+	for (i = 0; i < 2; i++) {
+		script_t s = Script(ACT_NONE, X);
+		SV_FRAME = i ? SV_FRAME_FAST : keep;
+		settle = (CL_TIME_BACKOFF + SV_FRAME) * SV_FRAME;
+		Run(0, &s, NONE);
+		printf("  clock at sv_fps %d: %d..%dms behind the newest snapshot, predicting from %d..%dms back\n",
+			1000 / SV_FRAME, clk.leadMin, clk.leadMax, clk.ageMin, clk.ageMax);
+		CHECK(clk.intervalMin == SV_FRAME && clk.intervalMax == SV_FRAME);
+		CHECK(clk.leadMin >= CL_TIME_BACKOFF && clk.leadMax <= CL_TIME_BACKOFF + clk.intervalMax + CL_FRAME);
+		/* plus a command's way to the server: a frame, or a packet (in whole frames) when batched */
+		CHECK(clk.ageMin >= CL_TIME_BACKOFF && clk.ageMax <= CL_TIME_BACKOFF + clk.intervalMax + CL_FRAME +
+			(maxPackets ? (1000 / maxPackets + CL_FRAME - 1) / CL_FRAME * CL_FRAME : CL_FRAME));
+		if (!i) snapInterval = clk.intervalMax;	/* the shipped rate, for the windows */
+	}
+	SV_FRAME = keep; settle = keepSettle;
 }
 
 int main(void) {
 	FakeReloadPictureInit();
 	if (getenv("FAKERELOAD_SVFPS")) SV_FRAME = 1000 / atoi(getenv("FAKERELOAD_SVFPS"));
 	if (getenv("FAKERELOAD_MAXPACKETS")) maxPackets = atoi(getenv("FAKERELOAD_MAXPACKETS"));
+	/* The slow drift moves the delta at least 1ms a snapshot, from exactly on
+	 * the first snapshot to one interval plus the backoff behind. */
+	settle = (CL_TIME_BACKOFF + SV_FRAME) * SV_FRAME;
+	if (getenv("FAKERELOAD_CLOCK")) { script_t sc = Script(ACT_NONE, X); Run(0, &sc, NONE); return 0; }
 	MeasureAnchors();
 	if (getenv("FAKERELOAD_PROBE")) { Probe(); return 0; }
 	if (getenv("FAKERELOAD_PHASES")) { Phases(); return 0; }
@@ -634,11 +811,15 @@ int main(void) {
 		Run(rtts[r], &sc, anchorAt[a][r]);
 		return 0;
 	}
+	TestDriftTimeDelta();
+	TestExtrapolationGuard();
+	TestClockBase();
 	TestSwapOnlyCorrection();
 	TestPictureHandsBack();
 	Windows();
 	FakeReloads(); FakeBullets();
 	GUN = WP_M40A3; MeasureAnchors();
+	Windows();
 	FakeReloads(); FakeBullets(); WildScopes();
 	printf("PASS: %d fake reload, fake bullet and wild scope checks\n", checks);
 	return 0;

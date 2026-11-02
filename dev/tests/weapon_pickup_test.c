@@ -8,6 +8,7 @@ vmCvar_t g_gametype, g_weaponRespawn, g_weaponTeamRespawn;
 static gclient_t clients[2];
 static pmove_t move;
 static int checks, pickups, usedTargets;
+static qboolean lastUsed;	/* G_UseThink's "used at once" on the last command */
 static qboolean blocked, bombUsable;
 #define CHECK(x) do { checks++; if (!(x)) { fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x); exit(1); } } while(0)
 void QDECL Com_Printf(const char *fmt,...) { (void)fmt; }
@@ -78,7 +79,7 @@ static void Step(int msec) {
   move.cmd.weapon=BG_SlotCommand(&seen[(seenCount-1-MIN(selectionLag,seenCount-1))%256],
    BG_RequestedSlot(move.ps,move.cmd.weapon));
  move.pickupItem=G_FindWeaponPickup(&g_entities[0]); PickupWeaponStep(&move,msec);
- G_CommitWeaponPickup(&g_entities[0]);
+ G_CommitWeaponPickup(&g_entities[0],move.cmd.buttons);
 }
 static void Run(int msec) { while(msec-->0) Step(1); }
 static void TestDrops(void) {
@@ -119,9 +120,10 @@ static void TestHold(void) {
   playerState_t *ps=Reset(); gentity_t *item=Floor(WP_RAILGUN,1,2,9,BG_GUN_UNCHAMBERED);
   int elapsed=0;
   ps->ammo[WP_MACHINEGUN]=7; ps->ammoReserve[WP_MACHINEGUN]=19;
-  move.cmd.buttons=BUTTON_RELOAD;
-  while(elapsed+step<1000) { Step(step); elapsed+=step; CHECK(pickups==0); }
-  Step(1000-elapsed);
+  /* MW2's one use hold, from the press: the press command starts the clock */
+  move.cmd.buttons=BUTTON_RELOAD; Step(step); CHECK(ps->pickupHeld==1 && ps->pickupTime==0);
+  while(elapsed+step<BG_USE_RELOAD_HOLD_TIME) { Step(step); elapsed+=step; CHECK(pickups==0 && ps->pickupTime==elapsed); }
+  Step(BG_USE_RELOAD_HOLD_TIME-elapsed);
   CHECK(pickups==1 && !item->r.contents && ps->stats[STAT_SLOT_PRIMARY]==WP_RAILGUN);
   CHECK(ps->ammo[WP_RAILGUN]==2 && ps->ammoReserve[WP_RAILGUN]==9);
   /* MW2's take: no gun in hand until the client's selection names the new
@@ -135,20 +137,21 @@ static void TestHold(void) {
   CHECK(ps->stats[STAT_UNCHAMBERED]&(1<<WP_RAILGUN));
   { bg_weaponInstance_t gun; CHECK(BG_WeaponItem(&g_entities[MAX_CLIENTS+1].s,&gun));
     CHECK(gun.weapon==WP_MACHINEGUN && gun.ammo==7 && gun.reserve==19); }
-  Run(1100); CHECK(pickups==1);
+  Run(2*BG_USE_RELOAD_HOLD_TIME); CHECK(pickups==1);
  }
  { playerState_t *ps=Reset(); gentity_t *item=Floor(WP_RAILGUN,0,1,2,0);
-   ps->ammo[WP_MACHINEGUN]=4; move.cmd.buttons=BUTTON_RELOAD; Run(400);
+   ps->ammo[WP_MACHINEGUN]=4; move.cmd.buttons=BUTTON_RELOAD; Run(BG_USE_RELOAD_HOLD_TIME/2);
    CHECK(ps->weaponstate==WEAPON_READY && pickups==0);
    move.cmd.buttons=0; Step(1); CHECK(ps->weaponstate==WEAPON_RELOADING && ps->pickupTime==0);
-   move.cmd.buttons=BUTTON_RELOAD; Run(600); CHECK(pickups==0);
-   item->s.time++; Step(1); CHECK(ps->pickupTime==1);
-   blocked=qtrue; Run(1100); CHECK(pickups==0 && ps->pickupTime==0);
+   move.cmd.buttons=BUTTON_RELOAD; Run(BG_USE_RELOAD_HOLD_TIME); CHECK(pickups==0 && ps->pickupTime==BG_USE_RELOAD_HOLD_TIME-1);
+   item->s.time++; Step(1); CHECK(ps->pickupTime==0);	/* a new item: a new hold */
+   Step(1); CHECK(ps->pickupTime==1);
+   blocked=qtrue; Run(2*BG_USE_RELOAD_HOLD_TIME); CHECK(pickups==0 && ps->pickupTime==0);
  }
 }
 static void TestSwap(void) {
  int offset;
- for(offset=0;offset<=1100;offset+=25) {
+ for(offset=0;offset<=BG_USE_RELOAD_HOLD_TIME+BG_USE_RELOAD_HOLD_TIME/10;offset+=MAX(1,BG_USE_RELOAD_HOLD_TIME/40)) {
   playerState_t *ps=Reset(); bg_weaponInstance_t gun;
   Floor(WP_RAILGUN,0,3,7,0); move.cmd.buttons=BUTTON_RELOAD;
   Run(offset); move.cmd.weapon=BG_SLOT_COMMAND+1; Run(4000-offset);
@@ -167,7 +170,7 @@ static void TestDuplicateBase(void) {
  playerState_t *ps=Reset(); bg_weaponInstance_t a,b;
  Floor(WP_SHOTGUN,1,1,6,BG_GUN_UNCHAMBERED);
  ps->ammo[WP_SHOTGUN]=5; ps->ammoReserve[WP_SHOTGUN]=27;
- move.cmd.buttons=BUTTON_RELOAD; Run(1000);
+ move.cmd.buttons=BUTTON_RELOAD; Run(BG_USE_RELOAD_HOLD_TIME+1);
  BG_GetSlot(ps,0,&a); BG_GetSlot(ps,1,&b);
  CHECK(a.weapon==b.weapon && a.attachments==1 && b.attachments==0);
  CHECK(a.ammo==1 && b.ammo==5 && a.reserve==6 && b.reserve==27);
@@ -184,7 +187,7 @@ static void UseStep(int buttons) {
  qboolean snd;
  move.cmd.buttons=buttons; level.time++; move.cmd.serverTime++;
  move.pickupItem=G_FindWeaponPickup(&g_entities[0]); PickupWeaponStep(&move,1);
- snd=G_UseThink(&g_entities[0],&move.cmd);
+ snd=lastUsed=G_UseThink(&g_entities[0],&move.cmd);
  BG_UpdateActivate(move.ps,&clients[0].activate,buttons,!snd && G_HoldUsable(&g_entities[0]),snd);
 }
 static void TestUseReload(void) {
@@ -213,13 +216,13 @@ static void TestUseReload(void) {
  CHECK(ps->weaponstate==WEAPON_READY && !(ps->weapFlags&PWF_USE_RELOAD)); /* full magazine */
  /* Over a floor gun, a hold collects it and asks for nothing ... */
  ps=Reset(); Floor(WP_RAILGUN,0,2,8,0); ps->ammo[WP_MACHINEGUN]=4;
- for(i=0;i<1000;i++) { UseStep(BUTTON_USE_RELOAD); CHECK(!(ps->weapFlags&PWF_USE_RELOAD)); }
+ for(i=0;i<=BG_USE_RELOAD_HOLD_TIME;i++) { UseStep(BUTTON_USE_RELOAD); CHECK(!(ps->weapFlags&PWF_USE_RELOAD)); }
  CHECK(pickups==1 && ps->stats[STAT_SLOT_PRIMARY]==WP_RAILGUN);
  UseStep(0); CHECK(!(ps->weapFlags&PWF_USE_RELOAD) && ps->weaponstate!=WEAPON_RELOADING);
  /* ... and an early release is a reload, on the server's word alone. */
  ps=Reset(); Floor(WP_RAILGUN,0,2,8,0); ps->ammo[WP_MACHINEGUN]=4;
- for(i=0;i<400;i++) UseStep(BUTTON_USE_RELOAD);
- CHECK(ps->pickupHeld==3 && ps->pickupTime==400 && !(ps->weapFlags&PWF_USE_RELOAD));
+ for(i=0;i<BG_USE_RELOAD_HOLD_TIME;i++) UseStep(BUTTON_USE_RELOAD);
+ CHECK(ps->pickupHeld==3 && ps->pickupTime==BG_USE_RELOAD_HOLD_TIME-1 && !(ps->weapFlags&PWF_USE_RELOAD));
  UseStep(0); CHECK(ps->weaponstate==WEAPON_READY && (ps->weapFlags&PWF_USE_RELOAD) && !ps->pickupHeld);
  UseStep(0); CHECK(ps->weaponstate==WEAPON_RELOADING && !(ps->weapFlags&PWF_USE_RELOAD) && pickups==0);
  /* A use at once (a bomb site) is a use: no reload, held or released. */
@@ -255,7 +258,7 @@ static void TestUseBusy(void) {
  move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
  for(i=0;i<4000;i++) UseStep(BUTTON_USE_RELOAD);
  CHECK(!(ps->weaponAction&WA_TYPE_MASK) && pickups==0 && ps->stats[STAT_SLOT_PRIMARY]==WP_MACHINEGUN);
- UseStep(0); for(i=0;i<1500;i++) UseStep(BUTTON_USE_RELOAD);
+ UseStep(0); for(i=0;i<=BG_USE_RELOAD_HOLD_TIME;i++) UseStep(BUTTON_USE_RELOAD);
  CHECK(pickups==1 && ps->stats[STAT_SLOT_PRIMARY]==WP_RAILGUN);
  /* Use/reload pressed while the grenade is out asks for nothing, held or not;
   * pressed again once the gun is coming back, it does. */
@@ -277,34 +280,36 @@ static void TestBombFirst(void) {
  /* At a site with a dropped gun in range, a hold plants: it collects nothing
   * and its release reloads nothing. */
  ps=Reset(); Floor(WP_RAILGUN,0,2,8,0); ps->ammo[WP_MACHINEGUN]=4; bombUsable=qtrue;
- for(i=0;i<1500;i++) UseStep(BUTTON_USE_RELOAD);
+ for(i=0;i<2*BG_USE_RELOAD_HOLD_TIME;i++) UseStep(BUTTON_USE_RELOAD);
  CHECK(pickups==0 && ps->stats[STAT_SLOT_PRIMARY]==WP_MACHINEGUN && ps->weaponstate==WEAPON_READY);
  UseStep(0); UseStep(0);
  CHECK(!(ps->weapFlags&PWF_USE_RELOAD) && ps->weaponstate==WEAPON_READY);
  /* A press begun over the gun and carried onto the site is the bomb's. */
  ps=Reset(); Floor(WP_RAILGUN,0,2,8,0); ps->ammo[WP_MACHINEGUN]=4;
- for(i=0;i<200;i++) UseStep(BUTTON_USE_RELOAD);
+ for(i=0;i<BG_USE_RELOAD_HOLD_TIME/2;i++) UseStep(BUTTON_USE_RELOAD);
  CHECK(ps->pickupHeld==3);
- bombUsable=qtrue; for(i=0;i<2000;i++) UseStep(BUTTON_USE_RELOAD);
+ bombUsable=qtrue; for(i=0;i<2*BG_USE_RELOAD_HOLD_TIME;i++) UseStep(BUTTON_USE_RELOAD);
  UseStep(0); UseStep(0);
  CHECK(pickups==0 && !(ps->weapFlags&PWF_USE_RELOAD) && ps->weaponstate==WEAPON_READY);
  /* A press used at the site and carried onto a gun collects nothing. */
  ps=Reset(); ps->ammo[WP_MACHINEGUN]=4; bombUsable=qtrue;
- for(i=0;i<300;i++) UseStep(BUTTON_USE_RELOAD);
+ for(i=0;i<BG_USE_RELOAD_HOLD_TIME/2;i++) UseStep(BUTTON_USE_RELOAD);
  bombUsable=qfalse; item=Floor(WP_RAILGUN,0,2,8,0);
- for(i=0;i<1500;i++) UseStep(BUTTON_USE_RELOAD);
+ for(i=0;i<2*BG_USE_RELOAD_HOLD_TIME;i++) UseStep(BUTTON_USE_RELOAD);
  CHECK(pickups==0 && item->r.contents && ps->stats[STAT_SLOT_PRIMARY]==WP_MACHINEGUN);
  UseStep(0); CHECK(!(ps->weapFlags&PWF_USE_RELOAD));
  /* A press that used nothing still finds the gun, as MW2 asks again. */
  ps=Reset(); ps->ammo[WP_MACHINEGUN]=BG_WeaponMagSize(WP_MACHINEGUN);
- for(i=0;i<100;i++) UseStep(BUTTON_USE_RELOAD);
+ for(i=0;i<BG_USE_RELOAD_HOLD_TIME/2;i++) UseStep(BUTTON_USE_RELOAD);
  Floor(WP_RAILGUN,0,2,8,0);
- for(i=0;i<1100;i++) UseStep(BUTTON_USE_RELOAD);
+ for(i=0;i<BG_USE_RELOAD_HOLD_TIME;i++) UseStep(BUTTON_USE_RELOAD);
+ CHECK(pickups==0);	/* the gun's hold starts on the first command it is found */
+ UseStep(BUTTON_USE_RELOAD);
  CHECK(pickups==1 && ps->stats[STAT_SLOT_PRIMARY]==WP_RAILGUN);
  /* A tap over a gun leaves nothing held: the next hold, after a knife,
   * still asks on every command and reloads once the gun is back. */
  ps=Reset(); item=Floor(WP_RAILGUN,0,2,8,0); ps->ammo[WP_MACHINEGUN]=4;
- for(i=0;i<100;i++) UseStep(BUTTON_USE_RELOAD);
+ for(i=0;i<BG_USE_RELOAD_HOLD_TIME/2;i++) UseStep(BUTTON_USE_RELOAD);
  UseStep(0); UseStep(0);
  CHECK(ps->weaponstate==WEAPON_RELOADING && !clients[0].activate.hold);
  for(i=0;i<4000;i++) UseStep(0);
@@ -319,10 +324,10 @@ static void TestContestedPickup(void) {
  playerState_t *other=&clients[1].ps;
  BG_ApplyClass(other,BG_Class(0)); other->stats[STAT_HEALTH]=100;
  level.time+=501;
- ps->pickupHeld=other->pickupHeld=1; ps->pickupTime=other->pickupTime=1000;
+ ps->pickupHeld=other->pickupHeld=1; ps->pickupTime=other->pickupTime=BG_USE_RELOAD_HOLD_TIME;
  ps->pickupTarget=other->pickupTarget=item->s.number;
  ps->pickupSerial=other->pickupSerial=item->s.time;
- G_CommitWeaponPickup(&g_entities[0]); G_CommitWeaponPickup(&g_entities[1]);
+ G_CommitWeaponPickup(&g_entities[0],BUTTON_RELOAD); G_CommitWeaponPickup(&g_entities[1],BUTTON_RELOAD);
  CHECK(pickups==1 && ps->stats[STAT_SLOT_PRIMARY]==WP_RAILGUN);
  CHECK(other->stats[STAT_SLOT_PRIMARY]==WP_MACHINEGUN);
  CHECK(level.num_entities==MAX_CLIENTS+2);
@@ -440,7 +445,7 @@ static void TestTakeKeepsDrop(void) {
   playerState_t *ps=Reset(); int t,left;
   selectionLag=lag ? drop+20 : 0;
   Floor(WP_RAILGUN,0,2,8,0); move.cmd.buttons=BUTTON_RELOAD;
-  Run(BG_PICKUP_HOLD_TIME-drop/2);
+  Run(BG_USE_RELOAD_HOLD_TIME-drop/2);
   move.cmd.weapon=BG_SLOT_COMMAND+1;
   for(t=0;t<drop && !pickups;t++) Step(1);
   CHECK(pickups==1 && ps->weapon==WP_NONE && ps->weaponstate==WEAPON_DROPPING);
@@ -483,72 +488,152 @@ static void EndFrame(void) { G_UpdateCursorHint(&g_entities[0]); }
 static void UseOnly(int buttons) {
  qboolean used;
  move.cmd.buttons=buttons; level.time++;
- used=G_UseThink(&g_entities[0],&move.cmd);
+ used=lastUsed=G_UseThink(&g_entities[0],&move.cmd);
  BG_UpdateActivate(move.ps,&clients[0].activate,buttons,!used && G_HoldUsable(&g_entities[0]),used);
 }
 /* Hold a button for n commands, one end-frame hint pass after each. */
 static void HoldUse(int buttons,int n) { int i; for(i=0;i<n;i++) { UseStep(buttons); EndFrame(); } }
+/* Hold a button over whatever is in reach until something is taken: the time
+ * from the press to the take. */
+static int HoldToTake(int buttons) {
+ int press=level.time+1, before=pickups, t;
+ for(t=0;t<4*BG_USE_RELOAD_HOLD_TIME+4 && pickups==before;t++) HoldUse(buttons,1);
+ CHECK(pickups==before+1);
+ return level.time-press;
+}
+/* MW2's use hold (Player_ActivateHoldCmd) with IW4x's controller rule: the
+ * throwing knife and the floor gun are taken by the same rule, BG_UseHoldTime
+ * after the press - on the press from +activate (g_useholdtime 0), after
+ * gpad_use_hold_time from use/reload, and from Peace's reload for a gun - and
+ * neither is taken until the PLAYER is BG_USE_SPAWN_DELAY past their spawn
+ * (g_useholdspawndelay). A completed hold asks for no reload. The reload
+ * button collects a gun (Peace's own) but never a knife. */
+static void TestUseHold(void) {
+ static const int gunButtons[3]={BUTTON_USE_RELOAD,BUTTON_RELOAD,BUTTON_USE}, knifeButtons[3]={BUTTON_USE_RELOAD,BUTTON_USE,BUTTON_USE|BUTTON_USE_RELOAD};
+ playerState_t *ps; gentity_t *item; int b;
+ CHECK(BG_UseHoldTime(BUTTON_USE)==BG_USE_HOLD_TIME && BG_UseHoldTime(BUTTON_USE_RELOAD)==BG_USE_RELOAD_HOLD_TIME);
+ CHECK(BG_USE_RELOAD_HOLD_TIME>BG_USE_HOLD_TIME);	/* a use/reload tap must stay a reload */
+ for(b=0;b<3;b++) {
+  ps=Reset(); item=Floor(WP_RAILGUN,0,2,8,0); EndFrame();
+  CHECK(HoldToTake(gunButtons[b])==BG_UseHoldTime(gunButtons[b]));
+  CHECK(!item->inuse && ps->stats[STAT_SLOT_PRIMARY]==WP_RAILGUN);
+  UseStep(0); UseStep(0); CHECK(ps->weaponstate!=WEAPON_RELOADING && !(ps->weapFlags&PWF_USE_RELOAD));
+  ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0; ps->ammo[WP_MACHINEGUN]=4;
+  item=GroundKnife(10,0,0); EndFrame();
+  CHECK(HoldToTake(knifeButtons[b])==BG_UseHoldTime(knifeButtons[b]));
+  CHECK(!item->inuse && ps->ammo[WP_THROWING_KNIFE]==1);
+  UseStep(0); UseStep(0); CHECK(ps->weaponstate==WEAPON_READY && !(ps->weapFlags&PWF_USE_RELOAD));
+ }
+ /* the reload button alone never takes a knife */
+ ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0;
+ item=GroundKnife(10,0,0); EndFrame();
+ HoldUse(BUTTON_RELOAD,2*BG_USE_RELOAD_HOLD_TIME+1); UseStep(0);
+ CHECK(item->inuse && pickups==0 && ps->cursorHintEntIndex==item->s.number);
+ /* The spawn gate is the player's. A hold that completes inside it takes
+  * nothing up to the last ms, and is taken on the command the gate opens. (A press made
+  * after the spawn cannot meet it while the two times are equal, so the
+  * spawn is placed.) Released inside it, use/reload asks for the reload. */
+ for(b=0;b<4;b++) {
+  if(b&1) { ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0; item=GroundKnife(10,0,0); }
+  else { ps=Reset(); item=Floor(WP_RAILGUN,0,2,8,0); }
+  ps->ammo[WP_MACHINEGUN]=4; EndFrame();
+  clients[0].respawnTime=level.time+1+BG_USE_RELOAD_HOLD_TIME-(BG_USE_SPAWN_DELAY-2);
+  HoldUse(BUTTON_USE_RELOAD,BG_USE_RELOAD_HOLD_TIME+2);	/* complete, and one more command */
+  CHECK(item->inuse && pickups==0 && !lastUsed && level.time-clients[0].respawnTime==BG_USE_SPAWN_DELAY-1);
+  CHECK((b&1) || (ps->pickupHeld==3 && ps->pickupTime==BG_USE_RELOAD_HOLD_TIME));	/* the gun's clock waits, capped */
+  if(b<2) {
+   HoldUse(BUTTON_USE_RELOAD,1);
+   CHECK(!item->inuse && pickups==1 && level.time-clients[0].respawnTime==BG_USE_SPAWN_DELAY);
+  } else {
+   UseStep(0); UseStep(0);
+   CHECK(item->inuse && pickups==0 && ps->weaponstate==WEAPON_RELOADING);
+  }
+ }
+}
 /* MW2's throwing knife on the ground (its use list, Player_ActivateCmd,
  * Player_ActivateHoldCmd and Touch_Item): never collected by walking over it.
  * A use or use/reload press while the hint names it is held for it, as a floor
- * gun is, through the same hold: the knife is taken once the button has been
- * held BG_PICKUP_HOLD_TIME and the knife is g_useholdspawndelay old, then freed,
- * which empties the hint. Let go early, use/reload asks for the reload, as over
- * a gun. The hands are not touched. The player must carry knives and have room
- * for one more. Anyone's knife will do, and a knife outranks any gun. */
+ * gun is, through the same hold (TestUseHold): the knife is taken
+ * BG_USE_RELOAD_HOLD_TIME after the press, however fresh it is, then freed, which
+ * empties the hint. That command is a use, never a reload. Let go early,
+ * use/reload asks for the reload, as over a gun. The hands are not touched.
+ * The player must carry knives and have room for one more. Anyone's knife will
+ * do, and a knife outranks any gun. */
 static void TestKnifePickup(void) {
- playerState_t *ps; gentity_t *knife,*gun; int i,weapon,state; vec3_t at;
+ playerState_t *ps; gentity_t *knife,*gun; int i,weapon,state,press; vec3_t at;
  ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0; BG_RebuildWeaponMask(ps);
  CHECK(!(ps->stats[STAT_WEAPONS]&(1<<WP_THROWING_KNIFE)));
- knife=GroundKnife(10,0,0); level.time+=BG_USE_SPAWN_DELAY;
+ knife=GroundKnife(10,0,0);
  HoldUse(0,100);
  CHECK(knife->inuse && pickups==0 && ps->cursorHintEntIndex==knife->s.number && (knife->flags&FL_CURSOR_HINT));
  ps->ammo[WP_MACHINEGUN]=4; weapon=ps->weapon; state=ps->weaponstate;
- HoldUse(BUTTON_USE_RELOAD,BG_PICKUP_HOLD_TIME);
- CHECK(knife->inuse && pickups==0 && !(ps->weapFlags&PWF_USE_RELOAD));	/* one command short */
+ HoldUse(BUTTON_USE_RELOAD,BG_USE_RELOAD_HOLD_TIME);
+ CHECK(knife->inuse && pickups==0 && !lastUsed && !(ps->weapFlags&PWF_USE_RELOAD));	/* one command short */
  HoldUse(BUTTON_USE_RELOAD,1);
+ CHECK(lastUsed);	/* MW2's ActivateCmd returning true: a use, not a reload */
  CHECK(!knife->inuse && pickups==1 && ps->ammo[WP_THROWING_KNIFE]==1 && ps->cursorHintEntIndex==ENTITYNUM_NONE);
  CHECK((ps->stats[STAT_WEAPONS]&(1<<WP_THROWING_KNIFE)) && BG_LethalWeapon(ps)==WP_THROWING_KNIFE);
  CHECK(ps->weapon==weapon && ps->weaponstate==state && !(ps->weapFlags&PWF_USE_RELOAD));
  HoldUse(BUTTON_USE_RELOAD,50);
  UseStep(0); UseStep(0); CHECK(ps->weaponstate==WEAPON_READY && pickups==1);	/* a used hold is no reload */
- /* A tap is no pickup: use/reload's early release is the reload, +activate's
-  * is nothing. */
+ /* A use/reload tap is no pickup: its early release is the reload (IW4x's
+  * should_use). +activate takes it on the press (g_useholdtime 0), a use and
+  * no reload; the reload button alone never takes it. */
  ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0; ps->ammo[WP_MACHINEGUN]=4;
- knife=GroundKnife(10,0,0); level.time+=BG_USE_SPAWN_DELAY; EndFrame();
- HoldUse(BUTTON_USE_RELOAD,BG_PICKUP_HOLD_TIME/2); UseStep(0); UseStep(0);
+ knife=GroundKnife(10,0,0); EndFrame();
+ HoldUse(BUTTON_USE_RELOAD,BG_USE_RELOAD_HOLD_TIME/2); UseStep(0); UseStep(0);
  CHECK(knife->inuse && ps->weaponstate==WEAPON_RELOADING && pickups==0);
  ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0; ps->ammo[WP_MACHINEGUN]=4;
- knife=GroundKnife(10,0,0); level.time+=BG_USE_SPAWN_DELAY; EndFrame();
- HoldUse(BUTTON_USE,BG_PICKUP_HOLD_TIME/2); UseStep(0); UseStep(0);
- CHECK(knife->inuse && ps->weaponstate==WEAPON_READY && !(ps->weapFlags&PWF_USE_RELOAD));
- /* +activate held takes it as well; the reload button alone never does */
- HoldUse(BUTTON_RELOAD,2*BG_PICKUP_HOLD_TIME); UseStep(0); CHECK(knife->inuse);
- HoldUse(BUTTON_USE,BG_PICKUP_HOLD_TIME+1); CHECK(!knife->inuse && ps->ammo[WP_THROWING_KNIFE]==1);
- /* A knife hinted the moment it stops is taken on the hold, never before it
-  * is g_useholdspawndelay old. */
+ knife=GroundKnife(10,0,0); EndFrame();
+ UseStep(BUTTON_USE); EndFrame();
+ CHECK(!knife->inuse && ps->ammo[WP_THROWING_KNIFE]==1 && lastUsed);
+ UseStep(0); UseStep(0); CHECK(ps->weaponstate==WEAPON_READY && !(ps->weapFlags&PWF_USE_RELOAD));
  ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0;
  knife=GroundKnife(10,0,0); EndFrame();
- for(i=0;i<4*BG_PICKUP_HOLD_TIME && knife->inuse;i++) HoldUse(BUTTON_USE_RELOAD,1);
- CHECK(!knife->inuse && pickups==1 && i==BG_PICKUP_HOLD_TIME+1);
- CHECK(level.time-knife->timestamp>=BG_USE_SPAWN_DELAY);
+ HoldUse(BUTTON_RELOAD,2*BG_USE_RELOAD_HOLD_TIME); UseStep(0); CHECK(knife->inuse);
+ /* A knife hinted the moment it stops is taken BG_USE_RELOAD_HOLD_TIME after the
+  * press. Nothing times off its age: its timestamp only names it to the hold,
+  * and one stamped later than the hold completes is taken on time too. */
+ for(i=0;i<2;i++) {
+  ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0;
+  knife=GroundKnife(10,0,0); if(i) knife->timestamp=level.time+BG_USE_RELOAD_HOLD_TIME+1;
+  EndFrame(); press=level.time+1;
+  HoldUse(BUTTON_USE_RELOAD,BG_USE_RELOAD_HOLD_TIME); CHECK(knife->inuse);
+  HoldUse(BUTTON_USE_RELOAD,1);
+  CHECK(!knife->inuse && pickups==1 && level.time-press==BG_USE_RELOAD_HOLD_TIME);
+ }
+ /* Held before the knife rests, the press finds nothing and asks for the
+  * reload on every command (MW2 latches it again while it is not done); the
+  * first command after the hint names the knife starts its hold. */
+ ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0;
+ knife=GroundKnife(10,0,0); VectorSet(knife->s.pos.trDelta,BG_KNIFE_PICKUP_STILL+1,0,0); EndFrame();
+ for(i=0;i<BG_USE_RELOAD_HOLD_TIME;i++) {
+  UseStep(BUTTON_USE_RELOAD); EndFrame();
+  CHECK((ps->weapFlags&PWF_USE_RELOAD) && ps->cursorHintEntIndex==0);
+ }
+ VectorClear(knife->s.pos.trDelta); EndFrame(); CHECK(ps->cursorHintEntIndex==knife->s.number);
+ UseStep(BUTTON_USE_RELOAD); EndFrame(); press=level.time;
+ CHECK(!(ps->weapFlags&PWF_USE_RELOAD) && clients[0].knifeHold==knife->s.number && clients[0].knifeHoldStart==press);
+ HoldUse(BUTTON_USE_RELOAD,BG_USE_RELOAD_HOLD_TIME-1); CHECK(knife->inuse);
+ HoldUse(BUTTON_USE_RELOAD,1);
+ CHECK(!knife->inuse && pickups==1 && level.time-press==BG_USE_RELOAD_HOLD_TIME);
  /* No room for another, or no knives in the class: no hint, and the press is
   * the reload it would be anywhere. */
  ps=KnifeThrower(1); ps->ammo[WP_MACHINEGUN]=4;
- knife=GroundKnife(10,0,0); level.time+=BG_USE_SPAWN_DELAY; EndFrame();
+ knife=GroundKnife(10,0,0); EndFrame();
  CHECK(ps->cursorHintEntIndex==0);
  UseStep(BUTTON_USE_RELOAD); UseStep(0);
  CHECK(knife->inuse && ps->weaponstate==WEAPON_RELOADING && ps->ammo[WP_THROWING_KNIFE]==1);
  ps=Reset(); ps->ammo[WP_MACHINEGUN]=4; clients[0].knifeHold=ENTITYNUM_NONE;
  CHECK(BG_LethalWeapon(ps)!=WP_THROWING_KNIFE);
- knife=GroundKnife(10,0,0); level.time+=BG_USE_SPAWN_DELAY; EndFrame();
+ knife=GroundKnife(10,0,0); EndFrame();
  UseStep(BUTTON_USE_RELOAD); UseStep(0);
  CHECK(knife->inuse && ps->weaponstate==WEAPON_RELOADING && ps->cursorHintEntIndex==0 && !ps->ammo[WP_THROWING_KNIFE]);
  /* The reach: a new knife must come within the inner radius of the feet; one
   * the hint names keeps its place out to the eye reach. Out of reach it is
   * still named but not usable: the press is a reload. */
  ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0; ps->ammo[WP_MACHINEGUN]=4;
- knife=GroundKnife(BG_KNIFE_PICKUP_RADIUS+1,0,0); level.time+=BG_USE_SPAWN_DELAY; EndFrame();
+ knife=GroundKnife(BG_KNIFE_PICKUP_RADIUS+1,0,0); EndFrame();
  CHECK(ps->cursorHintEntIndex==0);
  VectorSet(at,BG_KNIFE_PICKUP_RADIUS-1,0,0); G_SetOrigin(knife,at); EndFrame();
  CHECK(ps->cursorHintEntIndex==knife->s.number);
@@ -560,7 +645,7 @@ static void TestKnifePickup(void) {
  CHECK(knife->inuse && ps->weaponstate==WEAPON_RELOADING);
  /* still moving faster than bg_maxGrenadeIndicatorSpeed, or out of sight: not yet */
  ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0;
- knife=GroundKnife(10,0,0); level.time+=BG_USE_SPAWN_DELAY;
+ knife=GroundKnife(10,0,0);
  VectorSet(knife->s.pos.trDelta,BG_KNIFE_PICKUP_STILL+1,0,0); EndFrame();
  CHECK(ps->cursorHintEntIndex==0);
  VectorSet(knife->s.pos.trDelta,BG_KNIFE_PICKUP_STILL,0,0); blocked=qtrue; EndFrame();
@@ -571,9 +656,9 @@ static void TestKnifePickup(void) {
   * nothing. */
  ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0; ps->ammo[WP_MACHINEGUN]=4;
  gun=Floor(WP_RAILGUN,0,2,8,0); VectorSet(at,0,0,ps->viewheight); G_SetOrigin(gun,at);
- knife=GroundKnife(60,0,0); level.time+=BG_USE_SPAWN_DELAY; EndFrame();
+ knife=GroundKnife(60,0,0); EndFrame();
  CHECK(ps->cursorHintEntIndex==knife->s.number);
- HoldUse(BUTTON_USE_RELOAD,2*BG_PICKUP_HOLD_TIME);
+ HoldUse(BUTTON_USE_RELOAD,2*BG_USE_RELOAD_HOLD_TIME);
  CHECK(!knife->inuse && gun->r.contents && pickups==1 && ps->stats[STAT_SLOT_PRIMARY]==WP_MACHINEGUN);
  UseStep(0); UseStep(0); CHECK(ps->weaponstate==WEAPON_READY && !(ps->weapFlags&PWF_USE_RELOAD));
  CHECK(ps->cursorHintEntIndex==gun->s.number); /* the gun is the hint after the knife */
@@ -582,41 +667,42 @@ static void TestKnifePickup(void) {
   * left for a press of its own. */
  ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0; ps->ammo[WP_MACHINEGUN]=4;
  gun=Floor(WP_RAILGUN,0,2,8,0); VectorSet(at,0,0,ps->viewheight); G_SetOrigin(gun,at); EndFrame();
- HoldUse(BUTTON_USE_RELOAD,BG_PICKUP_HOLD_TIME/2);
+ HoldUse(BUTTON_USE_RELOAD,BG_USE_RELOAD_HOLD_TIME/2);
  CHECK(ps->pickupHeld==3 && clients[0].activate.hold && pickups==0);
- level.time-=BG_USE_SPAWN_DELAY; knife=GroundKnife(10,0,0); level.time+=BG_USE_SPAWN_DELAY; EndFrame();
+ knife=GroundKnife(10,0,0); EndFrame();
  CHECK(ps->cursorHintEntIndex==knife->s.number);
- for(i=0;i<BG_PICKUP_HOLD_TIME && !pickups;i++) HoldUse(BUTTON_USE_RELOAD,1);
+ for(i=0;i<BG_USE_RELOAD_HOLD_TIME && !pickups;i++) HoldUse(BUTTON_USE_RELOAD,1);
  CHECK(pickups==1 && ps->stats[STAT_SLOT_PRIMARY]==WP_RAILGUN && knife->inuse && ps->ammo[WP_THROWING_KNIFE]==0);
- CHECK(i<=BG_PICKUP_HOLD_TIME-BG_PICKUP_HOLD_TIME/2);
+ CHECK(i==BG_USE_RELOAD_HOLD_TIME+1-BG_USE_RELOAD_HOLD_TIME/2);
  UseStep(0); UseStep(0); CHECK(!(ps->weapFlags&PWF_USE_RELOAD) && knife->inuse);
- HoldUse(BUTTON_USE,BG_PICKUP_HOLD_TIME+1); CHECK(!knife->inuse && ps->ammo[WP_THROWING_KNIFE]==1);
+ HoldUse(BUTTON_USE,BG_USE_RELOAD_HOLD_TIME+1); CHECK(!knife->inuse && ps->ammo[WP_THROWING_KNIFE]==1);
  /* A press while sprinting uses nothing, held on or not; a new one does. */
  ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0;
- knife=GroundKnife(10,0,0); level.time+=BG_USE_SPAWN_DELAY; EndFrame();
+ knife=GroundKnife(10,0,0); EndFrame();
  ps->pm_flags|=PMF_SPRINTING; UseOnly(BUTTON_USE); EndFrame();
  ps->pm_flags&=~PMF_SPRINTING;
- for(i=0;i<2*BG_PICKUP_HOLD_TIME;i++) { UseOnly(BUTTON_USE); EndFrame(); }
+ for(i=0;i<2*BG_USE_RELOAD_HOLD_TIME;i++) { UseOnly(BUTTON_USE); EndFrame(); }
  CHECK(knife->inuse);
- UseOnly(0); for(i=0;i<=BG_PICKUP_HOLD_TIME;i++) UseOnly(BUTTON_USE);
+ UseOnly(0); for(i=0;i<=BG_USE_RELOAD_HOLD_TIME;i++) UseOnly(BUTTON_USE);
  CHECK(!knife->inuse && ps->ammo[WP_THROWING_KNIFE]==1);
- /* A knife freed under a held press (another player took it) is not taken,
-  * nor is whatever reuses its number. */
+ /* A knife freed under a held use/reload press (another player took it) is
+  * not taken, nor is whatever reuses its number later. */
  ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0;
  knife=GroundKnife(10,0,0); EndFrame();
- UseOnly(BUTTON_USE); G_FreeEntity(knife);
- level.num_entities--; knife=GroundKnife(10,0,0); knife->timestamp-=BG_USE_SPAWN_DELAY;
- for(i=0;i<2*BG_PICKUP_HOLD_TIME;i++) UseOnly(BUTTON_USE);
+ UseOnly(BUTTON_USE_RELOAD); G_FreeEntity(knife);
+ level.num_entities--; level.time++; knife=GroundKnife(10,0,0);
+ for(i=0;i<2*BG_USE_RELOAD_HOLD_TIME;i++) UseOnly(BUTTON_USE_RELOAD);
  CHECK(knife->inuse && ps->ammo[WP_THROWING_KNIFE]==0);
 }
-/* The sea lion by the knife, end to end in ClientThink's order: the knife comes
- * straight out, is thrown and lands; once the gun is back the hint names it; a
- * held use takes it back and the free empties the hint. Equipment pressed in a
+/* The sea lion by the knife, end to end in ClientThink's order (the owner's
+ * MW2 chain): the knife comes straight out, is thrown and lands; once the gun
+ * is back the hint names it; a use held BG_UseHoldTime takes it back, as a
+ * use and never a reload, and the free empties the hint. Equipment pressed in a
  * quick raise then comes straight out, chain after chain, until a gun in reach
  * becomes the hint. */
-static void TestKnifeSeaLion(void) {
- playerState_t *ps=KnifeThrower(1); gentity_t *knife=NULL,*gun; int t,i;
- ps->ammo[WP_FLASH]=3; BG_RebuildWeaponMask(ps);
+static void SeaLion(int use) {
+ playerState_t *ps=KnifeThrower(1); gentity_t *knife=NULL,*gun; int t,i,press;
+ ps->ammo[WP_FLASH]=5; ps->ammo[WP_MACHINEGUN]=4; BG_RebuildWeaponMask(ps);
  EndFrame(); CHECK(ps->cursorHintEntIndex==0);
  UseStep(BUTTON_LETHAL); EndFrame();
  CHECK(ps->weapon==WP_THROWING_KNIFE && ps->weaponstate==WEAPON_RAISING);
@@ -628,24 +714,36 @@ static void TestKnifeSeaLion(void) {
  }
  CHECK((ps->weaponAction&(WA_TYPE_MASK|WA_FIRED))==(WA_LETHAL|WA_FIRED));
  CHECK(ps->cursorHintEntIndex==knife->s.number);
- for(t=0;t<4*BG_PICKUP_HOLD_TIME && knife->inuse;t++) HoldUse(BUTTON_USE,1);
- UseStep(0); EndFrame();
- CHECK(!knife->inuse && ps->ammo[WP_THROWING_KNIFE]==1 && ps->cursorHintEntIndex==ENTITYNUM_NONE);
- CHECK(ps->weapon==WP_MACHINEGUN && !(ps->weapFlags&PWF_USE_RELOAD));
+ press=level.time+1;
+ for(t=0;t<4*BG_USE_RELOAD_HOLD_TIME+4 && knife->inuse;t++) { HoldUse(use,1); CHECK(ps->weaponstate!=WEAPON_RELOADING); }
+ CHECK(!knife->inuse && level.time-press==BG_UseHoldTime(use));	/* no age term: rest to taken is the hold */
+ UseStep(0); EndFrame(); UseStep(0); EndFrame();
+ CHECK(ps->ammo[WP_THROWING_KNIFE]==1 && ps->cursorHintEntIndex==ENTITYNUM_NONE);
+ CHECK(ps->weapon==WP_MACHINEGUN && ps->weaponstate!=WEAPON_RELOADING && !(ps->weapFlags&PWF_USE_RELOAD));
  /* thrown again (its pull never lowers the gun), and in the gun's quick raise
   * after it the flash comes straight out, chain after chain */
  for(t=0;t<12000 && ps->weaponstate!=WEAPON_READY;t++) { UseStep(0); EndFrame(); }
  UseStep(BUTTON_LETHAL); EndFrame();
- CHECK(ps->weapon==WP_THROWING_KNIFE && ps->weaponstate==WEAPON_RAISING);
+ CHECK(ps->weapon==WP_THROWING_KNIFE && ps->weaponstate==WEAPON_RAISING && ps->weaponTime==BG_THROWING_KNIFE_PULL_MS);
  for(t=0;t<12000 && !(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_RAISING);t++) { UseStep(0); EndFrame(); }
  CHECK(ps->ammo[WP_THROWING_KNIFE]==0 && ps->cursorHintEntIndex==ENTITYNUM_NONE);
  for(i=0;i<3;i++) {
   UseStep(BUTTON_TACTICAL); EndFrame();
-  CHECK(ps->weapon==WP_FLASH && ps->weaponstate==WEAPON_RAISING);	/* the gun never went down */
+  CHECK(ps->weapon==WP_FLASH && ps->weaponstate==WEAPON_RAISING && ps->weaponTime==BG_WeaponDrawTime(ps));	/* the gun never went down */
   for(t=0;t<12000 && !(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_RAISING);t++) { UseStep(0); EndFrame(); }
-  CHECK(ps->cursorHintEntIndex==ENTITYNUM_NONE && ps->ammo[WP_FLASH]==2-i);
+  CHECK(ps->cursorHintEntIndex==ENTITYNUM_NONE && ps->ammo[WP_FLASH]==4-i);
  }
+ /* From a gun at rest the flash pays its quick drop; a second one pressed in
+  * that flash's quick raise comes straight out. */
  for(t=0;t<12000 && ps->weaponstate!=WEAPON_READY;t++) { UseStep(0); EndFrame(); }
+ UseStep(BUTTON_TACTICAL); EndFrame();
+ CHECK(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_DROPPING &&
+  ps->weaponTime==BG_WeaponQuickDropTime(WP_MACHINEGUN));
+ for(t=0;t<12000 && !(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_RAISING);t++) { UseStep(0); EndFrame(); }
+ CHECK(ps->ammo[WP_FLASH]==1);
+ UseStep(BUTTON_TACTICAL); EndFrame();
+ CHECK(ps->weapon==WP_FLASH && ps->weaponstate==WEAPON_RAISING && ps->weaponTime==BG_WeaponDrawTime(ps));
+ for(t=0;t<12000 && !(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_READY);t++) { UseStep(0); EndFrame(); }
  /* a gun in reach ends it */
  gun=Floor(WP_RAILGUN,0,2,8,0); EndFrame();
  CHECK(ps->cursorHintEntIndex==gun->s.number);
@@ -657,8 +755,9 @@ static void TestKnifeSeaLion(void) {
  CHECK(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_DROPPING &&
   ps->weaponTime==BG_WeaponQuickDropTime(WP_MACHINEGUN));
 }
+static void TestKnifeSeaLion(void) { SeaLion(BUTTON_USE_RELOAD); SeaLion(BUTTON_USE); }
 int main(void) {
  TestDrops(); TestScavenge(); TestHold(); TestSwap(); TestDuplicateBase(); TestUseReload(); TestUseBusy(); TestBombFirst(); TestContestedPickup(); TestReach(); TestCursorHint();
- TestTakeWindow(); TestTakeKeepsDrop(); TestKnifePickup(); TestKnifeSeaLion();
+ TestTakeWindow(); TestTakeKeepsDrop(); TestUseHold(); TestKnifePickup(); TestKnifeSeaLion();
  printf("PASS: %d death/drop/pickup/slot-intent checks\n",checks); return 0;
 }

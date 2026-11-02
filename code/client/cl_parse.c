@@ -302,7 +302,9 @@ void CL_ParseSnapshot( msg_t *msg ) {
 		cl.snapshots[oldMessageNum & PACKET_MASK].valid = qfalse;
 	}
 
-	// copy to the current good spot
+	// copy to the current good spot, keeping the previous one's time for
+	// the clock's snapshot interval (MW2 0x5ac0be-0x5ac0ce)
+	cl.prevSnapServerTime = cl.snap.serverTime;
 	cl.snap = newSnap;
 	cl.snap.ping = 999;
 	// calculate ping time

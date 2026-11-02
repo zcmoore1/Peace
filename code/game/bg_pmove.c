@@ -2440,17 +2440,28 @@ float BG_WeaponPickupDistance(const playerState_t *ps, const entityState_t *item
 	return distance <= BG_PICKUP_RANGE * BG_PICKUP_RANGE ? distance : -1;
 }
 
+// How long a use held with these buttons must last, from the press: IW4x's
+// should_use asks gpad_use_hold_time of any hold with use/reload down, and
+// MW2's own g_useholdtime of the rest.
+int BG_UseHoldTime(int buttons) {
+	return (buttons & (BUTTON_USE_RELOAD | BUTTON_RELOAD)) ? BG_USE_RELOAD_HOLD_TIME : BG_USE_HOLD_TIME;
+}
+
 qboolean BG_UpdateWeaponPickup(playerState_t *ps, const usercmd_t *cmd,
 	const entityState_t *item, int msec) {
 	int target = item ? item->number : ENTITYNUM_NONE;
 	int serial = item ? item->time : 0;
-	// Reload and use/reload both hold to collect. Only reload is a reload press
-	// here: a use/reload tap is answered by the server (BG_UpdateActivate), so
-	// its hold is marked 3 and its early release reloads nothing in pmove.
-	qboolean held = (cmd->buttons & (BUTTON_RELOAD | BUTTON_USE_RELOAD)) != 0;
+	// +activate, use/reload and reload all hold to collect (+activate and
+	// use/reload reach MW2's use code; reload is the owner's), for MW2's use
+	// hold (BG_UseHoldTime), counted from the press: the command that starts
+	// the hold adds nothing, as MW2 stamps useHoldTime on the press. Only
+	// reload is a reload press here: a use/reload tap is answered by the server
+	// (BG_UpdateActivate), so its hold is marked 3 and its early release
+	// reloads nothing in pmove.
+	qboolean held = (cmd->buttons & (BUTTON_RELOAD | BUTTON_USE_RELOAD | BUTTON_USE)) != 0;
 	qboolean reload = (cmd->buttons & BUTTON_RELOAD) != 0;
 	if (!held) {
-		reload = ps->pickupHeld == 1 && ps->pickupTime < BG_PICKUP_HOLD_TIME;
+		reload = ps->pickupHeld == 1 && ps->pickupTime < BG_UseHoldTime(BUTTON_RELOAD);
 		ps->pickupHeld = 0;
 		ps->pickupTime = 0;
 	} else if (ps->pickupHeld == 2) {
@@ -2459,9 +2470,10 @@ qboolean BG_UpdateWeaponPickup(playerState_t *ps, const usercmd_t *cmd,
 		if (!ps->pickupHeld || ps->pickupTarget != target || ps->pickupSerial != serial) {
 			ps->pickupSlot = ps->stats[STAT_ACTIVE_SLOT];
 			ps->pickupTime = 0;
+		} else {
+			ps->pickupTime = MIN(BG_UseHoldTime(cmd->buttons), ps->pickupTime + msec);
 		}
 		ps->pickupHeld = reload ? 1 : 3;
-		ps->pickupTime = MIN(BG_PICKUP_HOLD_TIME, ps->pickupTime + msec);
 		reload = qfalse;
 	} else if (ps->pickupHeld) {
 		ps->pickupTime = 0;

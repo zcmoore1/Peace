@@ -811,12 +811,11 @@ CL_AdjustTimeDelta
 
 Adjust the clients view of server time.
 
-We attempt to have cl.serverTime exactly equal the server's view
-of time plus the timeNudge, but with variable latencies over
-the internet it will often need to drift a bit to match conditions.
-
-Our ideal time would be to have the adjusted time approach, but not pass,
-the very latest snapshot.
+The clock is MW2's (CL_DriftTimeDelta, iw4x.exe 0x5a1ad0): it drifts toward
+one snapshot interval plus TIMEDELTA_BACKOFF behind the newest snapshot, not
+toward the newest snapshot itself as ioquake3's did. cgame interpolates and
+predicts from the snapshots either side of that time, so the client replays
+its own commands over a base as old as MW2's.
 
 Adjustments are only made when a new snapshot arrives with a rational
 latency, which keeps the adjustment process framerate independent and
@@ -824,12 +823,9 @@ prevents massive overadjustment during times of significant packet loss
 or bursted delayed packets.
 =================
 */
-
-#define	RESET_TIME	500
-
 void CL_AdjustTimeDelta( void ) {
-	int		newDelta;
-	int		deltaDelta;
+	int			gap;
+	qboolean	*extrapolated;
 
 	cl.newSnapshots = qfalse;
 
@@ -838,36 +834,26 @@ void CL_AdjustTimeDelta( void ) {
 		return;
 	}
 
-	newDelta = cl.snap.serverTime - cls.realtime;
-	deltaDelta = abs( newDelta - cl.serverTimeDelta );
+	gap = CL_TimeDeltaGap( cl.serverTimeDelta, cl.snap.serverTime, cl.prevSnapServerTime, cls.realtime );
 
-	if ( deltaDelta > RESET_TIME ) {
-		cl.serverTimeDelta = newDelta;
+	// the granularity of +1 / -2 is too high for timescale modified frametimes,
+	// so the slow drift only runs at normal speed
+	extrapolated = NULL;
+	if ( com_timescale->value == 0 || com_timescale->value == 1 ) {
+		extrapolated = &cl.extrapolatedSnapshot;
+	}
+	cl.serverTimeDelta = CL_DriftTimeDelta( cl.serverTimeDelta, cl.snap.serverTime,
+		cl.prevSnapServerTime, cls.realtime, extrapolated );
+
+	if ( gap > TIMEDELTA_RESET ) {
 		cl.oldServerTime = cl.snap.serverTime;	// FIXME: is this a problem for cgame?
 		cl.serverTime = cl.snap.serverTime;
 		if ( cl_showTimeDelta->integer ) {
 			Com_Printf( "<RESET> " );
 		}
-	} else if ( deltaDelta > 100 ) {
-		// fast adjust, cut the difference in half
+	} else if ( gap > TIMEDELTA_FAST ) {
 		if ( cl_showTimeDelta->integer ) {
 			Com_Printf( "<FAST> " );
-		}
-		cl.serverTimeDelta = ( cl.serverTimeDelta + newDelta ) >> 1;
-	} else {
-		// slow drift adjust, only move 1 or 2 msec
-
-		// if any of the frames between this and the previous snapshot
-		// had to be extrapolated, nudge our sense of time back a little
-		// the granularity of +1 / -2 is too high for timescale modified frametimes
-		if ( com_timescale->value == 0 || com_timescale->value == 1 ) {
-			if ( cl.extrapolatedSnapshot ) {
-				cl.extrapolatedSnapshot = qfalse;
-				cl.serverTimeDelta -= 2;
-			} else {
-				// otherwise, move our sense of time forward to minimize total latency
-				cl.serverTimeDelta++;
-			}
 		}
 	}
 
@@ -889,7 +875,9 @@ void CL_FirstSnapshot( void ) {
 	}
 	clc.state = CA_ACTIVE;
 
-	// set the timedelta so we are exactly on this first frame
+	// set the timedelta so we are exactly on this first frame, as MW2's
+	// CL_FirstSnapshot does (0x5a1cd0, no backoff): CL_AdjustTimeDelta then
+	// drifts it back to its target over the next snapshots
 	cl.serverTimeDelta = cl.snap.serverTime - cls.realtime;
 	cl.oldServerTime = cl.snap.serverTime;
 
@@ -1016,7 +1004,8 @@ void CL_SetCGameTime( void ) {
 
 		// note if we are almost past the latest frame (without timeNudge),
 		// so we will try and adjust back a bit when the next snapshot arrives
-		if ( cls.realtime + cl.serverTimeDelta >= cl.snap.serverTime - 5 ) {
+		// (MW2's guard, 0x5031ed)
+		if ( cls.realtime + cl.serverTimeDelta >= cl.snap.serverTime - TIMEDELTA_EXTRAPOLATE ) {
 			cl.extrapolatedSnapshot = qtrue;
 		}
 	}

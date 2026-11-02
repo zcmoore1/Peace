@@ -2409,12 +2409,14 @@ static void CG_DrawWeaponPickup(void) {
 	if (ps->pickupTarget < MAX_CLIENTS || ps->pickupTarget >= ENTITYNUM_MAX_NORMAL ||
 		ps->pickupHeld == 2 || CG_SNDUseInRange() ||
 		!BG_WeaponItem(&cg_entities[ps->pickupTarget].currentState, &gun)) return;
-	Com_sprintf(prompt, sizeof(prompt), "Hold RELOAD (1s): %s%s",
+	Com_sprintf(prompt, sizeof(prompt), "Hold RELOAD: %s%s",
 		BG_FindItemForWeapon(gun.weapon)->pickup_name, gun.attachments & BG_ATTACHMENT_REDDOT ? " + Red Dot" : "");
 	CG_DrawSmallString(320 - CG_DrawStrlen(prompt) * SMALLCHAR_WIDTH / 2, 300, prompt, 1);
 	if (ps->pickupTime > 0) {
 		CG_FillRect(220, 320, 200, 5, back);
-		CG_FillRect(220, 320, 200 * Com_Clamp(0, 1, (float)ps->pickupTime / BG_PICKUP_HOLD_TIME), 5, fill);
+		// the reload hold (BG_UseHoldTime); an +activate hold is done on the press
+		CG_FillRect(220, 320, 200 * (BG_UseHoldTime(BUTTON_RELOAD) > 0 ?
+			Com_Clamp(0, 1, (float)ps->pickupTime / BG_UseHoldTime(BUTTON_RELOAD)) : 1), 5, fill);
 	}
 }
 

@@ -24,7 +24,9 @@ scripts do every one of these with `+usereload`.
   skips the quick raise). Once the gun is back it is a real knife hip-fired, and
   nothing aimed through a scope (MW2 starts no knife while a scoped gun is
   aimed).
-- Every window is precise on your own host and much wider with ping.
+- On your own host every window is tight, with MW2's sure zone: let go of X
+  within about 16ms of the gun coming up and the fake reload always happens
+  (MW2's client clock, below). With ping every window is much wider.
 
 ## The rules that make it
 
@@ -59,56 +61,114 @@ scripts do every one of these with `+usereload`.
    A correction that only removes a swap is followed at once. Aim, camera, HUD
    and gameplay read the predicted state.
 
+## The clock (MW2's)
+
+How wide these windows are is set by one thing: how old the snapshot is that
+the client replays its own commands over. Peace's client keeps MW2's time
+base, read from MW2's executable (`iw4x.exe`), in the engine:
+
+- **The target.** `cl.serverTime = cls.realtime + delta`, and the delta drifts
+  toward *newest snapshot - (newest - previous snapshot) - 16ms*
+  (`CL_AdjustTimeDelta` 0x5a1ad0; `CL_DriftTimeDelta` in
+  `code/client/cl_timedelta.c`, with the previous snapshot's time kept as each
+  new one is copied in, `cl.prevSnapServerTime`, 0x5ac0ce). ioquake3's clock
+  aimed at the newest snapshot itself.
+- **The drift.** One millisecond a snapshot toward the target; two back after a
+  frame that came within 8ms of the newest snapshot (`CL_SetCGameTime`'s
+  extrapolation guard, 0x5031ed; ioquake3's was 5); half the gap when it is
+  more than 100ms; a reset to newest - 16ms beyond 500ms. Ahead of the target,
+  one snapshot interval of lead is free before a gap counts. No time nudge
+  (`cl_timeNudge` stays 0). The first snapshot starts the clock exactly on it,
+  as MW2's `CL_FirstSnapshot` (0x5a1cd0) does, and the drift takes it back to
+  the target in about two seconds. Demos never drift.
+- **The base.** cgame reads snapshots in order and keeps the two either side of
+  its time; prediction starts from the later one, `cg.nextSnap`
+  (`CG_PredictPlayerState`, as MW2 at 0x48f1cc), which is the newest snapshot
+  only for the last part of each interval.
+
+At sv_fps 20 on your own host the clock runs 19..68ms behind the newest
+snapshot and prediction starts from 31..82ms back (`TestClockBase`). The 16ms
+is a floor that no snapshot rate takes away: with snapshots every 8ms the
+clock is still 24ms behind and the base 38..40ms old. That age, and nothing
+else, is the window: no gameplay timer, bit or picture rule changed for it.
+
+The cost, as in MW2: `cg.time`, other players and command timestamps sit
+about 11ms further behind than under ioquake3's clock. Peace has no antilag,
+so moving targets need about 11ms more lead.
+
 ## Measured (dev/tests/run-fakereload.sh)
 
-The SPAS and the M300 in hand, 125 fps client, sv_fps 20 (MW2's rate). Times
-are from the moment the client sees the gun at rest.
+The SPAS and the M300 in hand, 125 fps client, sv_fps 20 (MW2's fixed 50ms
+frame, and the shipped autoexec's). Times are from the moment the client sees
+the gun at rest.
 
 Fake reload. What matters is when X is let go: by the moment the gun is fully
 up, and as close to it as you can. The X press must also be held across the
-server's last snapshot before that moment, which falls anywhere in the last
-50ms and which you cannot see, so the window is a success rate. A 64ms tap,
-SPAS, every snapshot phase, after a knife, a frag and a Semtex cancel
-(`FAKERELOAD_PHASES=1`):
+snapshot the client predicts from as the gun comes up, which you cannot see,
+so the window is a success rate. A 64ms tap, SPAS, every snapshot phase, after
+a knife, a frag and a Semtex cancel (`FAKERELOAD_PHASES=1`):
 
-| let go of X, before the gun is up | 0 ms  | 8 ms  | 16 ms | 24 ms | 32 ms | 40 ms | 48 ms | 72 ms |
-|-----------------------------------|-------|-------|-------|-------|-------|-------|-------|-------|
-| own host (0 ms ping)              | 84–92% | 64–80% | 48–64% | 32–48% | 16–32% | 0–16% | 0% | 0% |
-| 50 ms ping                        | 100%  | 100%  | 100%  | 100%  | 100%  | 100%  | 84–100% | 36–52% |
-| 100 ms ping and up                | 100%  | 100%  | 100%  | 100%  | 100%  | 100%  | 100%  | 100%  |
+| let go of X, before the gun is up | 0 ms | 8 ms | 16 ms   | 24 ms  | 32 ms  | 40 ms  | 48 ms  | 56 ms  | 64 ms   | 72 ms  | 80 ms  | 88 ms  |
+|-----------------------------------|------|------|---------|--------|--------|--------|--------|--------|---------|--------|--------|--------|
+| own host (0 ms ping)              | 100% | 100% | 84–100% | 68–84% | 52–68% | 36–52% | 20–36% | 12–16% | 0%      | 0%     | 0%     | 0%     |
+| 50 ms ping                        | 100% | 100% | 100%    | 100%   | 100%   | 100%   | 100%   | 100%   | 84–100% | 68–84% | 60–68% | 48–52% |
+| 100 ms ping and up                | 100% | 100% | 100%    | 100%   | 100%   | 100%   | 100%   | 100%   | 100%    | 100%   | 100%   | 100%   |
 
 Let go after the gun is up (even 8ms) and it is a real reload, at any ping.
-So on your own host it is tight but nearly certain if you let go right as the
-gun comes up; with ping it is easy. The recovery is the gun's MW2 quick raise
-(SPAS 0.75s, M300 0.25s), so "up" is the end of that raise. The harness checks
-these edges (`Windows`).
+So on your own host it is certain if you let go within the clock's 16ms of
+the gun coming up, likely up to about 40ms early, and gone by about 64ms: the
+chance falls across one snapshot interval, as the base's age runs over one.
+With ping it is easy. The recovery is the gun's MW2 quick raise (SPAS 0.75s,
+M300 0.25s), so "up" is the end of that raise. The harness checks these edges
+on both guns by formula from the clock (`Windows`): 100% for every release up
+to 16ms - one frame, within 20 points of the straight fall at 16ms + half an
+interval, and 0% from 16ms + an interval + two frames.
 
-Fake bullet: a shot this long after a 16ms X tap is fake, on both guns:
+A 48ms tap at one snapshot phase fakes when pressed this many ms before the
+gun is at rest (the suite's summary; `FAKERELOAD_PROBE=1` prints every tap
+time and tap length on the SPAS, and shows `+reload` never fakes):
+
+| after         | gun  | 0 ms     | 50 ms     | 100 ms    | 200 ms    |
+|---------------|------|----------|-----------|-----------|-----------|
+| knife         | SPAS | 96–48    | 120–48    | 192–56    | 296–56    |
+| knife         | M300 | 96–48    | 120–48    | 200–48    | 296–48    |
+| frag          | SPAS | 80–48    | 152–48    | 168–48    | 264–48    |
+| frag          | M300 | 80–48    | 104–48    | 168–48    | 256–48    |
+| Semtex cancel | SPAS | 104–48   | 128–48    | 200–48    | 280–48    |
+| Semtex cancel | M300 | 104–48   | 128–48    | 152–48    | 256–48    |
+
+Fake bullet: a shot this long after a 16ms X tap is fake, on both guns, from
+the very next command:
 
 | 0 ms  | 50 ms | 100 ms | 200 ms |
 |-------|-------|--------|--------|
-| 8–40  | 8–64  | 8–144  | 8–240  |
+| 8–64  | 8–88  | 8–160  | 8–256  |
 
 Fired first, or on the same command, the shot is real and the reload follows
 at once.
 
-Wild scope (M300, aim held): a knife this long after the gun is back:
+Wild scope (M300, aim held): a knife this long after the gun is back, from
+16ms (the command aim is in; a knife before that is a real hip-fired one):
 
 | after         | 0 ms  | 50 ms | 100 ms | 200 ms |
 |---------------|-------|-------|--------|--------|
-| knife         | ≤40   | ≤64   | ≤144   | ≤240   |
-| frag          | ≤16   | ≤96   | ≤120   | ≤208   |
-| Semtex cancel | ≤48   | ≤72   | ≤136   | ≤224   |
+| knife         | ≤64   | ≤88   | ≤160   | ≤256   |
+| frag          | ≤32   | ≤104  | ≤136   | ≤232   |
+| Semtex cancel | ≤56   | ≤80   | ≤152   | ≤224   |
 
-These are measured with a packet every frame (loopback and LAN) and 20
-snapshots a second. That is also what you get on your own host with the shipped
-autoexec: it sets `sv_fps 125`, but a client is sent at most `snaps` snapshots
-a second, and `snaps` defaults to 20, MW2's rate. Raising `snaps` to 125
-(modelled with `FAKERELOAD_SVFPS=125`) shrinks every own-host window to about
-one 8ms command and leaves no wild scope at 0 ping; with ping the windows stay
-about the same. Over the internet `cl_maxpackets` (default 30) batches
-commands, which shifts the edges by a packet or so (`FAKERELOAD_MAXPACKETS=30`);
-every check still holds.
+These are measured with a packet every frame (loopback and LAN) and a
+snapshot every 50ms: the shipped autoexec's `sv_fps 20` with the default
+`snaps 20`, MW2's rate. (The old autoexec's `sv_fps 125` with `snaps 20` sent
+a snapshot on the first 8ms frame after 50ms, every 56ms.) Snapshots every 8ms
+(`FAKERELOAD_SVFPS=125`, as with `snaps 125`) narrow the own-host fake reload
+to the clock's floor alone: 100% let go up to 16ms early, none from 24ms (50ms
+ping: 100% to 64ms); the 16ms floor keeps the sure zone. Over the internet `cl_maxpackets`
+(default 30) batches commands, which shifts the edges by a packet or so
+(`FAKERELOAD_MAXPACKETS=30`). Every per-tap check still holds then; the
+success-rate edges are swept over snapshot phase with a packet every frame
+(your own host and LAN ignore `cl_maxpackets`), so `Windows` is skipped there,
+and `TestClockBase` allows a batched packet's wait in the base's age.
+`FAKERELOAD_CLOCK=1` prints the clock frame by frame.
 
 ## The cost to ordinary play (as in MW2)
 
@@ -131,8 +191,9 @@ every check still holds.
   the order above (fake reload, then knife) gives the wild scope. Which order
   MW2 players use is still open; the pack also ships a modified client.
 - **The IW4x fake shot script** (X for one frame at 57 fps, shot two frames
-  later) needs some ping in Peace: on your own host the shot lands about 53ms
-  after X, past the window.
+  later) puts the shot about 53ms after X. With MW2's clock that is inside the
+  own-host fake bullet window measured above at 125 fps (8–64ms); under
+  ioquake3's clock it needed ping. A 57 fps client is not modelled.
 - **Aiming.** MW2's knife rule reads its ADS fraction, so its knife also waits
   for the scope to ease out; Peace has no gameplay ADS fraction and uses the
   aim state.

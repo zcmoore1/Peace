@@ -27,6 +27,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../ui/ui_public.h"
 #include "keys.h"
 #include "snd_public.h"
+#include "cl_timedelta.h"
 #include "../cgame/cg_public.h"
 #include "../game/bg_public.h"
 
@@ -95,6 +96,8 @@ typedef struct {
 									// to disconnect, preventing debugging breaks from
 									// causing immediate disconnects on continue
 	clSnapshot_t	snap;			// latest received from server
+	int			prevSnapServerTime;	// serverTime of the snapshot before cl.snap
+									// (MW2 0x5ac0ce), for CL_DriftTimeDelta
 
 	int			serverTime;			// may be paused during play
 	int			oldServerTime;		// to prevent time from flowing bakcwards

@@ -12,9 +12,15 @@ The floor item is consumed, including when already full. This does not load
 the held magazine, clear an open action, change slots or select a weapon.
 
 For a non-matching gun within 128 units of the eye (MW2's player_useRadius) and
-unobstructed reach, hold the reload
-button (`+reload`) or use/reload (`+usereload`, the gamepad's X) continuously for
-1000 ms. A gun you dropped yourself is not a candidate for its first 1000 ms
+unobstructed reach, press use (`+activate`, taken at once) or hold use/reload
+(`+usereload`, the gamepad's X) or reload (`+reload`) for
+`BG_USE_RELOAD_HOLD_TIME` (250 ms, counted from the press); a shorter tap reloads.
+That is MW2's use hold (`g_useholdtime`, 0 in the executable) with IW4x's
+controller rule (`gpad_use_hold_time`, 250) for use/reload, shared with the
+throwing knife (`BG_UseHoldTime`). `+reload` collecting a gun is Peace's own:
+MW2 reads only use and use/reload there. Nothing is collected in the first
+`BG_USE_SPAWN_DELAY` (500 ms, MW2's `g_useholdspawndelay`) after the player
+spawns. A gun you dropped yourself is not a candidate for its first 1000 ms
 (`BG_PICKUP_OWNER_DELAY`, MW2's). The HUD shows the item and progress.
 Swapping the gun in hand empties the hand, as MW2's take does: the new gun is
 drawn once your selection names it, about a round trip later (each slot's
@@ -68,7 +74,8 @@ After pickup, the carried gun's networked attachment mask controls its sight.
 
 Run `sh dev/tests/run-pickups.sh`, also with `PICKUP_TEST_FLAGS=-DMISSIONPACK`.
 It exercises death selection, empty guns, exact-match scavenging, ammo caps,
-partial/restarted holds, blocked reach, variable command lengths, replacement
+partial/restarted holds, the hold shared with the throwing knife and the
+player's spawn gate (`TestUseHold`), blocked reach, variable command lengths, replacement
 payloads, Y throughout pickup/draw, and duplicate-base attachment variants.
 `run-loadouts.sh` covers wire fields and first-draw animation retention alongside
 the existing reload/YY/quick-action tests. `peacedump` includes each inventory

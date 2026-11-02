@@ -147,6 +147,20 @@ the very next command:
 Fired first, or on the same command, the shot is real and the reload follows
 at once.
 
+The 8ms is one command at 125 fps. The window opens one command after X at
+any frame rate: 16ms at `com_maxfps 60`, about 12ms at MW2's default 85. MW2
+is the same. Its server runs `Pmove` (0x493686) and fires the bullet that
+command (the event loop, 0x5d7000) before `Player_UpdateActivate` (0x4939a1,
+the only writer of the flag) looks at X. The flag is read on the next command
+(0x5786E3). So X and RT in one command give a real shot in both games. The
+input side matches too. IW4x polls the pad once a frame and sends X and RT in
+the same pass, in that order (`Controller/Engine/Key.cpp`). Its trigger engages
+at 13% of travel, Peace's at 15% (`joy_threshold`). The IW4x fake shot script
+below leaves two frames between X and the shot.
+
+`cl_debugButtons 1` prints, for each X and RT press, the command it went out
+in and the gap between them ("SAME command" means a real shot).
+
 Wild scope (M300, aim held): a knife this long after the gun is back, from
 16ms (the command aim is in; a knife before that is a real hip-fired one):
 

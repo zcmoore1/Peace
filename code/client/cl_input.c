@@ -591,6 +591,66 @@ void CL_FinishMove( usercmd_t *cmd ) {
 
 /*
 =================
+CL_DebugButtons
+
+cl_debugButtons 1 prints, for each X (+usereload) and RT (+attack) press, the
+command it went out in and how far apart the two were. It only reports; it
+changes nothing.
+
+Why it matters: the server asks for X's reload after it has run the command
+X went out in, and the gun takes it on the next command (MW2's
+Player_UpdateActivate). So X reloads before a shot only when X went out at
+least one command before RT. In the same command the server fires first. One
+command is one client frame: 16ms at com_maxfps 60, 11ms at MW2's 85.
+=================
+*/
+static cvar_t *cl_debugButtons;
+
+static void CL_DebugButtons( const usercmd_t *cmd ) {
+	static int lastButtons;
+	static int xCmd = -1, rtCmd = -1;
+	static unsigned xTime, rtTime;
+	int risen = cmd->buttons & ~lastButtons;
+
+	lastButtons = cmd->buttons;
+	if ( !cl_debugButtons || !cl_debugButtons->integer ) {
+		return;
+	}
+	// cl.cmdNumber starts again at each connection
+	if ( xCmd > cl.cmdNumber ) xCmd = -1;
+	if ( rtCmd > cl.cmdNumber ) rtCmd = -1;
+
+	if ( risen & BUTTON_USE_RELOAD ) {
+		xCmd = cl.cmdNumber;
+		xTime = in_buttons[21].downtime;
+		if ( !( risen & BUTTON_ATTACK ) && rtCmd >= 0 && xTime - rtTime <= 100 ) {
+			Com_Printf( "^3buttons:^7 cmd %i (frame %ims): X down, %i command(s) / %ims AFTER RT\n",
+				cl.cmdNumber, (int)frame_msec, cl.cmdNumber - rtCmd, (int)( xTime - rtTime ) );
+		} else if ( !( risen & BUTTON_ATTACK ) ) {
+			Com_Printf( "^3buttons:^7 cmd %i (frame %ims): X down\n", cl.cmdNumber, (int)frame_msec );
+		}
+	}
+
+	if ( risen & BUTTON_ATTACK ) {
+		rtCmd = cl.cmdNumber;
+		rtTime = in_buttons[0].downtime;
+		if ( risen & BUTTON_USE_RELOAD ) {
+			Com_Printf( "^3buttons:^7 cmd %i (frame %ims): X and RT in the SAME command "
+				"(input %ims apart): the server fires before it sees X\n",
+				cl.cmdNumber, (int)frame_msec, (int)( rtTime - xTime ) );
+		} else if ( xCmd >= 0 && ( ( cmd->buttons & BUTTON_USE_RELOAD ) || rtTime - xTime <= 250 ) ) {
+			Com_Printf( "^3buttons:^7 cmd %i (frame %ims): RT down, X went %i command(s) / %ims "
+				"earlier%s: the server sees X first\n",
+				cl.cmdNumber, (int)frame_msec, cl.cmdNumber - xCmd, (int)( rtTime - xTime ),
+				( cmd->buttons & BUTTON_USE_RELOAD ) ? " and is held" : " (released)" );
+		} else {
+			Com_Printf( "^3buttons:^7 cmd %i (frame %ims): RT down, no X\n", cl.cmdNumber, (int)frame_msec );
+		}
+	}
+}
+
+/*
+=================
 CL_CreateCmd
 =================
 */
@@ -625,6 +685,8 @@ usercmd_t CL_CreateCmd( void ) {
 
 	// store out the final values
 	CL_FinishMove( &cmd );
+
+	CL_DebugButtons( &cmd );
 
 	// draw debug graphs of turning for mouse testing
 	if ( cl_debugMove->integer ) {
@@ -1038,6 +1100,7 @@ void CL_InitInput( void ) {
 
 	cl_nodelta = Cvar_Get ("cl_nodelta", "0", 0);
 	cl_debugMove = Cvar_Get ("cl_debugMove", "0", 0);
+	cl_debugButtons = Cvar_Get ("cl_debugButtons", "0", 0);
 }
 
 /*

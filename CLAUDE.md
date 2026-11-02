@@ -508,10 +508,16 @@ source for MW2 behaviour; the owner rejects it.
   third argument: picture state that only the client's look input reads,
   never gameplay. No pad look while anything catches keys
   (CG_ShouldUpdateViewAngles). Not ported: aim assist slowdown;
-  `fovTurnRateScale` (MW2's AimAssist_UpdateTweakables 0x569950, which IW4x
-  only reads) is 1; MW2's graph 3 knots (aaInputGraph 0x7A2FC0) are unread, so
-  `aim_input_graph` is empty and the look is linear in the stick until they
-  are set there with `aim_input_graph_scale` (GraphFloat's own layout). Never
+  `fovTurnRateScale` (aaGlob +288, set by MW2's per-frame aim assist; IW4x
+  only reads it) is 1; MW2's graph 3 knots (aaInputGraph 0x7A2FC0) are unread,
+  so `aim_input_graph` is empty and the look is linear in the stick until they
+  are set there with `aim_input_graph_scale` (GraphFloat's own layout).
+  `dev/tools/mw2_aimdump.ps1`, run beside a live IW4x match, reads both out of
+  MW2 itself: the graphs, the live aim globals, the code of
+  AimAssist_UpdateTweakables/UpdateAdsLerp with every global it names, and
+  every instruction naming fovTurnRateScale, fovScaleInv, adsLerp,
+  fWeaponPosFrac or the graphs; `dev/tools/mw2_aimdump_disasm.sh` disassembles
+  its report. Never
   invent a graph, a FOV scale or a second turn-rate rule. `j_mw2Aim 0` and
   `j_mw2Move 0` hand the look or the move back to Quake's linear `j_*`
   values; with them on, only the signs of `j_yaw`, `j_pitch`, `j_forward`

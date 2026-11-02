@@ -33,8 +33,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // drives the real rule.
 //
 // Not here: aim assist slowdown (Peace has no aim assist) and
-// aaGlob.fovTurnRateScale, which MW2's AimAssist_UpdateTweakables (0x569950)
-// computes and IW4x only ever reads; it is 1 until that function is read.
+// aaGlob.fovTurnRateScale, which MW2's per-frame aim assist sets and IW4x
+// only ever reads; it is 1 until MW2's code for it is read
+// (dev/tools/mw2_aimdump.ps1).
 
 #include "../qcommon/q_shared.h"
 #include "cl_gamepadaim.h"

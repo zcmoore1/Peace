@@ -485,12 +485,19 @@ source for MW2 behaviour; the owner rejects it.
   hands back to prediction.
   Aim, camera and HUD always read the predicted state. Run
   `dev/tests/run-fakereload.sh`; `dev/FAKE_RELOAD.md` has the measured windows.
-- **The game pad aims the MW2 way (owner's rule: do what MW2 does).**
-  `code/client/cl_gamepadaim.c` is MW2's console aim as IW4x ported it
-  (iw4x-client e49e17d6, Gamepad.cpp), as pure functions. `CL_StickDeadzone`
+- **The game pad moves and aims the MW2 way (owner's rule: do what MW2 does).**
+  `code/client/cl_gamepadaim.c` is MW2's console pad code as IW4x ported it
+  (iw4x-client e49e17d6, Gamepad.cpp; the stick mapping is iw4x-rawfiles'
+  thumbstick_default.cfg), as pure functions. `CL_StickDeadzone`
   is GPad_ConvertStickToFloat: radial per stick (`gpad_stick_deadzone_min`
   0.2 / `_max` 0.01), applied in `IN_GamepadMove`; the triggers and older
   joysticks keep `joy_threshold` (0.13, IW4x's `gpad_button_deadzone`).
+  `CL_StickMove` is CL_GamepadMove's move with the move stick MAP_SQUARED:
+  each axis times the stick's length (half a stick, a quarter of the speed),
+  stretched from the circle onto the move square by sqrt(1 + (minor/major)^2)
+  and floored, so a full diagonal is the corner and a sprint needs forward
+  over `BG_SPRINT_FORWARD_MINIMUM` (about 91% of the stick past the
+  deadzone). It moves while a menu is up; only the look waits.
   `CL_AimTurn` is AimAssist_CalcAdjustedAxis + AimAssist_ApplyTurnRates: the
   aim graph over the stick's length, the dominant-axis scale, then
   `aim_turnrate_*` (MW2's exe dvars, 260/90 hip, 90/55 ADS) lerped by the aim
@@ -505,8 +512,10 @@ source for MW2 behaviour; the owner rejects it.
   only reads) is 1; MW2's graph 3 knots (aaInputGraph 0x7A2FC0) are unread, so
   `aim_input_graph` is empty and the look is linear in the stick until they
   are set there with `aim_input_graph_scale` (GraphFloat's own layout). Never
-  invent a graph, a FOV scale or a second turn-rate rule. `j_mw2Aim 0` is
-  Quake's linear `j_yaw`/`j_pitch` look; with it on, only their signs count.
+  invent a graph, a FOV scale or a second turn-rate rule. `j_mw2Aim 0` and
+  `j_mw2Move 0` hand the look or the move back to Quake's linear `j_*`
+  values; with them on, only the signs of `j_yaw`, `j_pitch`, `j_forward`
+  and `j_side` count.
 
 ## Capacity limits
 
@@ -652,7 +661,9 @@ and the M300 wild scope at 0/50/100/200 ms. `FAKERELOAD_PROBE=1` prints every
 tap timing; `FAKERELOAD_SVFPS` changes the server rate.
 
 `dev/tests/run-gamepad-aim.cmd` (or `.sh`) drives the real `cl_gamepadaim.c`:
-the radial deadzone, full-tilt hip/ADS rates at sensitivity 10, the aim
+the radial deadzone, the squared move with its diagonal stretch, floor
+rounding and the sprint threshold (read from `BG_SPRINT_FORWARD_MINIMUM`),
+full-tilt hip/ADS rates at sensitivity 10, the aim
 fraction lerp and clamp, the 217ms ramp at any sensitivity, instant slowdown,
 the flip keeping speed, the 281ms 180, the dominant-axis scale, and graph
 evaluation and validation. Its expectations are worked out by hand from MW2's

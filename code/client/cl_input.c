@@ -294,8 +294,9 @@ cvar_t	*cl_run;
 
 cvar_t	*cl_anglespeedkey;
 
-// MW2's game pad look (CL_JoystickAim)
+// MW2's game pad look (CL_JoystickAim) and move (CL_JoystickWalk)
 static cvar_t	*j_mw2Aim;
+static cvar_t	*j_mw2Move;
 static cvar_t	*input_viewSensitivity;
 static cvar_t	*aim_turnrate_yaw;
 static cvar_t	*aim_turnrate_pitch;
@@ -471,6 +472,31 @@ static void CL_JoystickAim( void ) {
 
 /*
 =================
+CL_JoystickWalk
+
+MW2's game pad move (CL_GamepadMove, see CL_StickMove): the speed follows
+the square of the push, and a full diagonal reaches the corner of the move
+square. Like MW2 it moves while a menu is up; only the look waits. The signs
+of j_forward and j_side still give each axis its direction; their size is
+unused.
+=================
+*/
+static void CL_JoystickWalk( usercmd_t *cmd ) {
+	float	forward = cl.joystickAxis[j_forward_axis->integer] / 32767.0f;
+	float	side = cl.joystickAxis[j_side_axis->integer] / 32767.0f;
+	int		forwardMove, rightMove;
+
+	forward = j_forward->value > 0.0f ? forward : j_forward->value < 0.0f ? -forward : 0.0f;
+	side = j_side->value > 0.0f ? side : j_side->value < 0.0f ? -side : 0.0f;
+
+	CL_StickMove( forward, side, &forwardMove, &rightMove );
+
+	cmd->forwardmove = ClampChar( cmd->forwardmove + forwardMove );
+	cmd->rightmove = ClampChar( cmd->rightmove + rightMove );
+}
+
+/*
+=================
 CL_JoystickMove
 =================
 */
@@ -487,20 +513,30 @@ void CL_JoystickMove( usercmd_t *cmd ) {
 		cmd->buttons |= BUTTON_WALKING;
 	}
 
-	// MW2 has no strafe or mlook modifier on the pad and no angle speed key:
-	// each stick keeps its own job.
-	if ( j_mw2Aim->integer ) {
-		CL_JoystickAim();
-		cmd->rightmove = ClampChar( cmd->rightmove + (int)right );
-		cmd->forwardmove = ClampChar( cmd->forwardmove + (int)forward );
-		cmd->upmove = ClampChar( cmd->upmove + (int)up );
-		return;
-	}
-
 	if ( in_speed.active ) {
 		anglespeed = 0.001 * cls.frametime * cl_anglespeedkey->value;
 	} else {
 		anglespeed = 0.001 * cls.frametime;
+	}
+
+	// MW2 has no strafe or mlook modifier on the pad: each stick keeps its
+	// own job. It turns (CL_JoystickAim) and walks (CL_JoystickWalk) as MW2's
+	// CL_GamepadMove does; either one alone leaves the other Quake's.
+	if ( j_mw2Aim->integer || j_mw2Move->integer ) {
+		if ( j_mw2Aim->integer ) {
+			CL_JoystickAim();
+		} else {
+			cl.viewangles[YAW] += anglespeed * yaw;
+			cl.viewangles[PITCH] += anglespeed * pitch;
+		}
+		if ( j_mw2Move->integer ) {
+			CL_JoystickWalk( cmd );
+		} else {
+			cmd->rightmove = ClampChar( cmd->rightmove + (int)right );
+			cmd->forwardmove = ClampChar( cmd->forwardmove + (int)forward );
+		}
+		cmd->upmove = ClampChar( cmd->upmove + (int)up );
+		return;
 	}
 
 	if ( !in_strafe.active ) {
@@ -1121,12 +1157,14 @@ void CL_InitInput( void ) {
 	cl_nodelta = Cvar_Get ("cl_nodelta", "0", 0);
 	cl_debugMove = Cvar_Get ("cl_debugMove", "0", 0);
 
-	// MW2's game pad look. The aim_* defaults and ranges are MW2's own dvars
+	// MW2's game pad look and move (j_mw2Aim, j_mw2Move; 0 is Quake's
+	// joystick for that stick). The aim_* defaults and ranges are MW2's own dvars
 	// as IW4x registers them; input_viewSensitivity is the console menu's
 	// multiplier: 1 at "Medium" (2), 4 at "Insane" (10). aim_input_graph holds
 	// MW2's graph knots once read from the game ("fraction value" pairs, with
 	// GraphFloat's scale in aim_input_graph_scale); empty turns without one.
 	j_mw2Aim = Cvar_Get( "j_mw2Aim", "1", CVAR_ARCHIVE );
+	j_mw2Move = Cvar_Get( "j_mw2Move", "1", CVAR_ARCHIVE );
 	input_viewSensitivity = Cvar_Get( "input_viewSensitivity", "1", CVAR_ARCHIVE );
 	aim_turnrate_yaw = Cvar_Get( "aim_turnrate_yaw", "260", CVAR_ARCHIVE );
 	aim_turnrate_pitch = Cvar_Get( "aim_turnrate_pitch", "90", CVAR_ARCHIVE );

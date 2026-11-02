@@ -1,13 +1,14 @@
 /*
- * MW2's game pad aim (code/client/cl_gamepadaim.c): the stick deadzone,
- * the aim graph, the dominant axis scale, the hip/ADS turn rates times
- * input_viewSensitivity and the turn-rate acceleration, through the real
- * functions the client calls.
+ * MW2's game pad (code/client/cl_gamepadaim.c): the stick deadzone, the
+ * squared move and its diagonal stretch, the aim graph, the dominant axis
+ * scale, the hip/ADS turn rates times input_viewSensitivity and the
+ * turn-rate acceleration, through the real functions the client calls.
  *
  * The tuning is MW2's defaults as CL_InitInput registers them. Expectations
  * are worked out by hand from those numbers, not by the code's formula.
  */
 #include "../../code/qcommon/q_shared.h"
+#include "../../code/game/bg_public.h"
 #include "../../code/client/cl_gamepadaim.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,6 +67,53 @@ static void TestDeadzone( void ) {
 	CHECK( NEAR( x, 0.45390f, 1e-4 ) && NEAR( x, y, 1e-7 ) );
 	CL_StickDeadzone( 0.3f, -0.4f, 0.2f, 0.01f, &x, &y );	// length 0.5
 	CHECK( NEAR( x / y, -0.75f, 1e-5 ) );
+}
+
+static void TestMove( void ) {
+	int f, r;
+	float threshold;
+
+	CL_StickMove( 0.0f, 0.0f, &f, &r );
+	CHECK( f == 0 && r == 0 );
+
+	// A full push is the edge of the move square, in every direction.
+	CL_StickMove( 1.0f, 0.0f, &f, &r );
+	CHECK( f == 127 && r == 0 );
+	CL_StickMove( -1.0f, 0.0f, &f, &r );
+	CHECK( f == -127 && r == 0 );
+	CL_StickMove( 0.0f, 1.0f, &f, &r );
+	CHECK( f == 0 && r == 127 );
+	CL_StickMove( 0.0f, -1.0f, &f, &r );
+	CHECK( f == 0 && r == -127 );
+
+	// The speed is the square of the push: half a stick is a quarter,
+	// 0.25 * 127 = 31.75, floored (so -31.75 is -32, not -31).
+	CL_StickMove( 0.5f, 0.0f, &f, &r );
+	CHECK( f == 31 && r == 0 );
+	CL_StickMove( -0.5f, 0.0f, &f, &r );
+	CHECK( f == -32 && r == 0 );
+
+	// (0.3, 0.4) is length 0.5, so (0.15, 0.2), stretched by
+	// sqrt(1 + 0.75^2) = 1.25 onto the square: 23.81 and 31.75.
+	CL_StickMove( 0.3f, 0.4f, &f, &r );
+	CHECK( f == 23 && r == 31 );
+
+	// A full diagonal reaches the corner, as both keys held would.
+	CL_StickMove( 0.70710678f, 0.70710678f, &f, &r );
+	CHECK( f == r && f >= 126 && f <= 127 );
+
+	// Past a full stick the axis stays full (IW4x's clamp).
+	CL_StickMove( 1.2f, 0.0f, &f, &r );
+	CHECK( f == 127 );
+
+	// Sprint wants more than BG_SPRINT_FORWARD_MINIMUM forward
+	// (PM_CheckSprint), so about 91% of the stick past the deadzone.
+	threshold = sqrt( ( BG_SPRINT_FORWARD_MINIMUM + 1 ) / 127.0 );
+	CHECK( threshold > 0.91f && threshold < 0.92f );
+	CL_StickMove( threshold - 0.001f, 0.0f, &f, &r );
+	CHECK( f <= BG_SPRINT_FORWARD_MINIMUM );
+	CL_StickMove( threshold + 0.001f, 0.0f, &f, &r );
+	CHECK( f > BG_SPRINT_FORWARD_MINIMUM );
 }
 
 static void TestTurnRates( void ) {
@@ -233,6 +281,7 @@ static void TestGraph( void ) {
 
 int main( void ) {
 	TestDeadzone();
+	TestMove();
 	TestTurnRates();
 	TestAcceleration();
 	TestDominantAxis();

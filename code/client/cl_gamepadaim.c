@@ -19,16 +19,18 @@ along with Quake III Arena source code; if not, write to the Free Software
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
-// cl_gamepadaim.c -- how MW2 turns the view from a game pad's right stick
+// cl_gamepadaim.c -- how MW2 moves and turns the view from a game pad's sticks
 //
 // PC MW2 keeps the console game's aim code: the aim_turnrate_*,
 // aim_accel_turnrate_*, aim_input_graph_* and aim_scale_view_axis dvars are
 // in iw4mp.exe (IW4x's controller support first looked them all up with
 // Dvar_FindVar), and so are its input graphs (aaInputGraph, 0x7A2FC0). IW4x
 // ported the functions that read them, AimAssist_CalcAdjustedAxis and
-// AimAssist_ApplyTurnRates, and the stick deadzone, GPad_ConvertStickToFloat
-// (iw4x-client e49e17d6, Gamepad.cpp). These are those functions, as pure
-// functions of their inputs so a harness drives the real rule.
+// AimAssist_ApplyTurnRates, the stick deadzone, GPad_ConvertStickToFloat,
+// and the move, CL_GamepadMove with the console's thumbstick_default.cfg
+// axis mapping (iw4x-client e49e17d6, Gamepad.cpp; iw4x-rawfiles 403ef82).
+// These are those functions, as pure functions of their inputs so a harness
+// drives the real rule.
 //
 // Not here: aim assist slowdown (Peace has no aim assist) and
 // aaGlob.fovTurnRateScale, which MW2's AimAssist_UpdateTweakables (0x569950)
@@ -68,6 +70,37 @@ void CL_StickDeadzone( float x, float y, float inner, float outer, float *outX, 
 
 	*outX = x / len * scaled;
 	*outY = y / len * scaled;
+}
+
+/*
+=================
+CL_StickMove
+
+CL_GamepadMove's move. thumbstick_default.cfg maps the move stick
+MAP_SQUARED (CL_GamepadAxisValue): each axis times the stick's length, so
+the speed follows the square of the push. The pair is then stretched from
+the stick's circle onto the move square by sqrt(1 + (minor / major)^2), so
+a full diagonal reaches the corner as a full push reaches the edge, and
+floored into the command's units.
+=================
+*/
+void CL_StickMove( float forward, float side, int *forwardMove, int *rightMove ) {
+	float	length = sqrt( forward * forward + side * side );
+	float	moveScale = 127.0f;
+
+	forward *= length;
+	side *= length;
+	forward = forward < -1.0f ? -1.0f : forward > 1.0f ? 1.0f : forward;
+	side = side < -1.0f ? -1.0f : side > 1.0f ? 1.0f : side;
+
+	if ( fabs( side ) > 0.0f || fabs( forward ) > 0.0f ) {
+		float	ratio = fabs( side ) <= fabs( forward ) ? side / forward : forward / side;
+
+		moveScale = sqrt( ratio * ratio + 1.0f ) * moveScale;
+	}
+
+	*forwardMove = (int)floor( forward * moveScale );
+	*rightMove = (int)floor( side * moveScale );
 }
 
 /*

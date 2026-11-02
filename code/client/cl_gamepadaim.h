@@ -19,7 +19,7 @@ along with Quake III Arena source code; if not, write to the Free Software
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
-// cl_gamepadaim.h -- MW2's game pad aim: stick deadzone and turn rates
+// cl_gamepadaim.h -- MW2's game pad: stick deadzone, move and turn rates
 
 #ifndef CL_GAMEPADAIM_H
 #define CL_GAMEPADAIM_H
@@ -50,6 +50,7 @@ typedef struct {
 } aimState_t;
 
 void		CL_StickDeadzone( float x, float y, float inner, float outer, float *outX, float *outY );
+void		CL_StickMove( float forward, float side, int *forwardMove, int *rightMove );
 qboolean	CL_ParseAimGraph( const char *knots, float scale, aimGraph_t *graph );
 float		CL_AimGraphValue( const aimGraph_t *graph, float fraction );
 void		CL_AimTurn( const aimTuning_t *tuning, aimState_t *state, float yawAxis, float pitchAxis,

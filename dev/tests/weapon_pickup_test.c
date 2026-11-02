@@ -206,11 +206,12 @@ static void TestUseReload(void) {
  for(i=0;i<3000 && (ps->weaponAction&WA_TYPE_MASK);i++) { Step(1); CHECK(ps->weapFlags&PWF_USE_RELOAD); }
  CHECK(i<3000 && ps->weaponstate==WEAPON_READY);
  Step(1); CHECK(ps->weaponstate==WEAPON_RELOADING && !(ps->weapFlags&PWF_USE_RELOAD));
- /* Asked on the knife's own command, it is taken and the knife wins. */
+ /* Asked on the knife's own command, it is taken and the knife wins: the
+  * knife is out on that command, the gun never reloads. */
  ps=Reset(); ps->ammo[WP_MACHINEGUN]=4; ps->weapFlags=PWF_USE_RELOAD;
  move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
  CHECK((ps->weaponAction&WA_TYPE_MASK)==WA_MELEE && !(ps->weapFlags&PWF_USE_RELOAD) &&
-  ps->weaponstate==WEAPON_DROPPING);
+  ps->weapon==WP_KNIFE && ps->weaponstate==WEAPON_RAISING);
  /* Anywhere else it is taken at once, and a gun that cannot reload drops it. */
  ps=Reset(); ps->weapFlags=PWF_USE_RELOAD; Step(1);
  CHECK(ps->weaponstate==WEAPON_READY && !(ps->weapFlags&PWF_USE_RELOAD)); /* full magazine */

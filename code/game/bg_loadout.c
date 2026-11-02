@@ -100,6 +100,14 @@ qboolean BG_OffhandPreparesAtOnce( int weapon ) {
 	return weapon == WP_THROWING_KNIFE;
 }
 
+// MW2's knife is no weapon change: MeleeInit writes the melee state straight
+// over the gun's, and MeleeEnd writes the gun's quick raise straight over the
+// knife's. So the knife comes out on its press and puts nothing down after it;
+// its draw is meleeDelay, and it ends in the hit (MeleeFire) on that same think.
+qboolean BG_QuickActionInPlace( int weapon ) {
+	return weapon == WP_KNIFE;
+}
+
 // MW2's holdButtonToThrow and offhandHoldIsCancelable (weapon data, the owner's
 // choice): the Semtex and the throwing knife stay raised while the lethal button
 // is held, are thrown on its release, and a Y before that release cancels them

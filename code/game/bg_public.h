@@ -189,13 +189,17 @@ typedef enum {
 // initial feel values, not measured MW2 constants. A grab always pays a positive,
 // weapon-independent holster; animation notes still own the busy lock.
 #define BG_LADDER_DROP_TIME       100
-// One rapid holster for every gun, same value as the minimum swap. Used for the
-// gun going down for melee, and for any quick action going away at the
-// start of every recovery.
+// One rapid drop, same value as the minimum swap: thrown equipment going away
+// at the start of its recovery. The knife has none (BG_QuickActionInPlace).
 #define BG_RAPID_DROP_TIME        50
-// How long a swung knife or a thrown grenade is held before recovery starts.
-// One value: recovering from melee and from equipment is the same thing.
+// How long thrown equipment is held before its recovery starts.
 #define BG_QUICK_ACTION_HOLD      500
+// MW2's melee (weapon data: meleeDelay 0.079 and meleeTime 0.8, identical for
+// every MW2 MP gun in the dump). MeleeInit writes the melee state straight over
+// the gun's, the hit lands meleeDelay after the press (MeleeFire), and the knife
+// is over meleeTime after it (MeleeEnd), where the gun's quick raise starts.
+#define BG_MELEE_DELAY            79
+#define BG_MELEE_TIME             800
 // MW2's throwing knife times are weapon data (fastfiles), not code: these are
 // placeholders until the owner supplies throwingknife_mp's values.
 #define BG_THROWING_KNIFE_PULL_MS 150	// iHoldFireTime: in hand, ready to throw
@@ -566,6 +570,7 @@ int BG_SlotCommand(const playerState_t *ps, int slot);
 qboolean BG_SlotCommandCurrent(const playerState_t *ps, int selection);
 qboolean BG_OffhandOut(const playerState_t *ps);
 qboolean BG_OffhandPreparesAtOnce( int weapon );
+qboolean BG_QuickActionInPlace( int weapon );
 qboolean BG_OffhandHeldToThrow( int weapon );
 #define BG_EMPTY_HAND_OFFHAND_TIME 100	// MW2's OffHandInit with no gun in hand
 void BG_GetSlot(const playerState_t *ps, int slot, bg_weaponInstance_t *gun);

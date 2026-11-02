@@ -244,45 +244,64 @@ source for MW2 behaviour; the owner rejects it.
   hand step) and restarts from 0, and an open action stays owed in
   `STAT_UNCHAMBERED` and is worked from 0 when the gun is back. It stamps no
   drop, so the NAC ordering is untouched.
-- **Melee is its own kind of swap.** Equipment pressed on the knife's own
-  command wins (MW2 checks its offhands first), and equipment cuts the knife at
-  any point (MW2's offhand check takes every melee state): pressed before the
-  knife lands, it never lands. A knife is started only from no quick action,
-  and never in a raise or drop (MW2's knife check refuses states 1-5), so a
-  knife pressed during a swap, a draw or a quick action's return is lost -
+- **The knife is MW2's: no drop, the hit at meleeDelay, over at meleeTime
+  (owner's rule: MW2's MeleeInit, MeleeFire and MeleeEnd).** On the press the
+  gun is never lowered: the knife is in hand on the press command itself,
+  through the same no-drop path as the throwing knife's pull
+  (`PM_UpdateWeaponAction`'s prepare, `PM_FinishWeaponChange` on the press).
+  No drop happens at all - it is not a zero drop time - as MW2's MeleeInit
+  writes the melee state straight over the gun's. The knife's draw is
+  `BG_MELEE_DELAY` (79ms, MW2's meleeDelay) and ends in the hit
+  (`EV_FIRE_WEAPON`, the server's knife trace) on the think it runs out; the
+  knife is over `BG_MELEE_TIME` (800ms, MW2's meleeTime) after the press, and
+  on that command the gun's quick raise starts with nothing put down in
+  between (`PM_BeginWeaponChange` draws straight from the knife, as from an
+  empty hand). Both are MW2 weapon data, identical for every MW2 MP gun in the
+  dump; everything else follows from them. The only knife data is
+  `BG_QuickActionInPlace` and the knife's table rows: no knife-named branch,
+  no glitch branch. Every knife gate stays: equipment pressed on the knife's
+  own command wins (MW2 checks its offhands first), and equipment cuts the
+  knife at any point (MW2's offhand check takes every melee state): pressed
+  before the hit, it never lands. A knife is started only from no quick
+  action, and never in a raise or drop (MW2's knife check refuses states 1-5),
+  so a knife pressed during a swap, a draw or a quick action's return is lost -
   except on the command YY returns the drop to the held gun, as MW2 readies
-  the gun before its knife. For the same reason Y and the knife on one
-  command is the swap: its holster starts and the knife is lost. A knife or
+  the gun before its knife (the knife is out on that command). For the same
+  reason Y and the knife on one command is the swap: its holster starts and
+  the knife is lost. No knife while a scoped gun is aimed, nor while a pump or
+  bolt is still open: a press before `WNOTE_BOLT_CLOSED` is lost. A knife or
   grenade pressed during a gun's fire lock starts at once (MW2's melee and
   offhand checks take FIRING; only a Y swap waits out the shot,
   `PM_WeaponChangeOpen`), and a pump or bolt still owed is redone from 0 when
-  the gun is back. Whatever gun is out, it goes down for the
-  knife in the one universal `BG_RAPID_DROP_TIME` (50ms, the minimum swap), not
-  its own holster. `BG_HolsterTime` is the single rule — gun's own
-  drop, quick drop, rapid, or the ladder's — used by pmove to stamp and by
-  cgame to fit the drop clip, so the two cannot disagree. Every grenade (frag,
-  flash, Semtex) sends the gun, or the knife it cuts, away on the gun's MW2
+  the gun is back. Whatever the gun was doing is abandoned on the press, as by
+  the throwing knife's pull. `BG_HolsterTime` is the single drop rule - gun's
+  own drop, quick drop, rapid, or the ladder's; the knife has no line in it,
+  since nothing is put down for it - used by pmove to stamp and by cgame to
+  fit the drop clip, so the two cannot disagree. Every grenade (frag, flash,
+  Semtex) sends the gun, or the knife it cuts, away on the gun's MW2
   `quickDropTime` (`BG_WeaponQuickDropTime`, 250ms), as MW2's OffHandInit
-  (owner's rule: MW2's numbers). A grenade pressed during a running holster
-  keeps it, as OffHandInit keeps a drop already going: while more of the
-  gun's own drop is left than a quick drop, `BG_HolsterTime` answers that
-  drop, so nothing shortens it. Out of the knife it is the whole quick
-  drop from the press: the knife's hold after its hit ends there
-  (`PM_WeaponChangeOpen`), and a rapid drop already running for or after it
-  is restamped, never kept. cgame re-anchors a drop that is restamped or whose
-  `BG_HolsterTime` changes where the old fit has it (`CG_WeapAnim_ReanchorDrop`),
-  so the picture never jumps; the fit is still `BG_HolsterTime`. Do
-  not add a second timing rule in the renderer.
-- **Recovering from melee and from equipment is ONE thing, in time and
-  function** - with one MW2 difference: only equipment's return is
-  OFFHAND_END, so with no use hint at all, equipment pulled during it comes
-  straight out, while the knife's return still quick-drops (the sea lion).
-  Knife, frag, flash and a released Semtex use `BG_QUICK_ACTION_HOLD` (500ms),
-  go away in `BG_RAPID_DROP_TIME`, then the gun comes back on its MW2 quick
-  raise (`BG_WeaponQuickRaiseTime`: 750ms for rifles, shotguns and launchers,
-  250ms for the M300, as the Intervention), a Semtex cancel's return included
-  (owner's rule: MW2's MeleeEnd and OffHandEnd). `BG_WeaponDrawTime` is the
-  single draw rule, used by pmove to stamp and by cgame to fit the raise clip.
+  (owner's rule: MW2's numbers). Out of the knife, in hand or in the gun's
+  quick raise after it, that is the whole quick drop from the press: no drop
+  is running there to keep or restamp, and the knife's time after its hit
+  ends on the press (`PM_WeaponChangeOpen`). A grenade pressed during a
+  running holster keeps it, as OffHandInit keeps a drop already going: while
+  more of the gun's own drop is left than a quick drop, `BG_HolsterTime`
+  answers that drop, so nothing shortens it. cgame re-anchors a drop whose
+  lock is restamped or whose `BG_HolsterTime` changes where the old fit has it
+  (`CG_WeapAnim_ReanchorDrop`), so the picture never jumps; the fit is still
+  `BG_HolsterTime`. Do not add a second timing rule in the renderer.
+- **Recovering from equipment is ONE thing, in time and function, and the
+  knife ends in the same quick raise.** Frag, flash, a released Semtex and the
+  throwing knife are held `BG_QUICK_ACTION_HOLD` (500ms) and go away in
+  `BG_RAPID_DROP_TIME` (50ms); the knife has neither, and goes straight from
+  `BG_MELEE_TIME` into the raise. Either way the gun comes back on its MW2
+  quick raise (`BG_WeaponQuickRaiseTime`: 750ms for rifles, shotguns and
+  launchers, 250ms for the M300, as the Intervention), a Semtex cancel's
+  return included (owner's rule: MW2's MeleeEnd and OffHandEnd). Only
+  equipment's return is OFFHAND_END, so with no use hint at all, equipment
+  pulled during it comes straight out, while the knife's return still
+  quick-drops (the sea lion). `BG_WeaponDrawTime` is the single draw rule,
+  used by pmove to stamp and by cgame to fit the raise clip.
   **You cannot sprint through it**: the `weaponAction` latch lasts until the
   gun is fully drawn, and the latch is what blocks sprint. No weapon change
   happens during a knife, a grenade or the gun's quick raise after one (owner's

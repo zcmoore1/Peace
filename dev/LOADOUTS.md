@@ -148,9 +148,21 @@ set. It does not manufacture missing animations for legacy placeholder models.
 
 ## Quick actions and networking
 
-A press latches melee/lethal/tactical through normal holster and deploy timing,
-fires the action once without requiring the trigger, then returns to the selected
-gun. A held action button does not repeat. Empty equipment does nothing; a ladder
+A press latches melee/lethal/tactical, fires the action once without requiring
+the trigger, then returns to the selected gun. A held action button does not
+repeat.
+
+The knife is MW2's (MeleeInit, MeleeFire, MeleeEnd). It never lowers the gun:
+the knife is out on the press command itself, the hit lands
+`BG_MELEE_DELAY` (79ms, MW2's meleeDelay) after the press, and the knife is
+over `BG_MELEE_TIME` (800ms, MW2's meleeTime) after it, where the gun's quick
+raise (`BG_WeaponQuickRaiseTime`) starts with nothing put down in between. Both
+numbers are MW2 weapon data, the same for every MW2 MP gun. Equipment (frag,
+flash, Semtex, throwing knife) goes the other way: the gun goes down on its
+quick drop (250ms; the throwing knife comes straight out), the grenade is held
+`BG_QUICK_ACTION_HOLD` (500ms) after the throw and goes away in
+`BG_RAPID_DROP_TIME` (50ms), then the same quick raise. Neither can be sprinted
+through: the latch holds until the gun is fully back. Empty equipment does nothing; a ladder
 grab clears queued actions. Every knife and grenade defers a Y until the gun it
 left is fully back on its quick raise (MW2's CheckForChangeWeapon); YY cannot
 cancel that raise. Semtex adds hold/release and a pre-throw cancel; see

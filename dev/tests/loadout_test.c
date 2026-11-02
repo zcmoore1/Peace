@@ -167,7 +167,8 @@ static void TestActions(void) {
   ps.pm_flags|=PMF_ADS;
   move.cmd.buttons=buttons[i]; Step(1);
   CHECK(!(ps.pm_flags&PMF_ADS));
-  CHECK(ps.weaponstate==WEAPON_DROPPING);
+  /* the knife is out on the press; equipment waits for the gun to go down */
+  CHECK(i ? ps.weaponstate==WEAPON_DROPPING : ps.weapon==WP_KNIFE && ps.weaponstate==WEAPON_RAISING);
   if(!hold) move.cmd.buttons=0;
   Returned();
   CHECK(fired[weapons[i]]==1 && fired[WP_MACHINEGUN]==0);
@@ -187,22 +188,23 @@ static void TestActions(void) {
  ps.stats[STAT_LADDER]=LADDER_ATTACHED; Step(1);
  CHECK(!(ps.weaponAction&WA_TYPE_MASK) && fired[WP_KNIFE]==0);
 }
-/* Melee is its own kind of swap. Whatever gun is out, it goes down in the one
- * universal BG_RAPID_DROP_TIME - never its own holster - and asking for melee
- * part way through a heavy gun's holster finishes that holster as a melee one.
- * Equipment and ordinary swaps keep the gun's own holster. Every time here is
- * read from the shipped constants and tables. */
-static void TestMeleeHolster(void) {
+/* MW2's knife puts nothing down: MeleeInit writes the melee state straight
+ * over the gun's. Whatever gun is out, the knife is in hand on the press
+ * command itself, never the gun's drop or a rapid one. Equipment keeps the
+ * gun's quick drop and an ordinary swap the gun's own holster. Every time here
+ * is read from the shipped constants and tables. */
+static void TestMeleeNoDrop(void) {
  int i, n = BG_ClassWeaponCount(), t;
  for (i = 0; i < n; i++) {
   int gun = BG_ClassWeapon(i), other = gun == WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN;
   if (gun <= WP_NONE) continue;
-  /* melee: the universal holster, not the gun's */
+  /* melee: no drop at all, the knife is up on the press */
   Ready(gun, other);
   move.cmd.buttons = BUTTON_MELEE; Step(1); move.cmd.buttons = 0;
-  CHECK(ps.weaponstate == WEAPON_DROPPING);
-  CHECK(ps.weaponTime == BG_RAPID_DROP_TIME && BG_HolsterTime(&ps) == BG_RAPID_DROP_TIME);
-  for (t = 0; t < BG_RAPID_DROP_TIME + BG_WeaponRaiseTime(WP_KNIFE) + 5 && !fired[WP_KNIFE]; t++) Step(1);
+  CHECK((ps.weaponAction & WA_TYPE_MASK) == WA_MELEE && ps.weapon == WP_KNIFE);
+  CHECK(ps.weaponstate == WEAPON_RAISING && ps.weaponTime == BG_MELEE_DELAY &&
+   BG_WeaponDrawTime(&ps) == BG_MELEE_DELAY);
+  for (t = 0; t < BG_MELEE_TIME && !fired[WP_KNIFE]; t++) { Step(1); CHECK(ps.weaponstate != WEAPON_DROPPING); }
   CHECK(fired[WP_KNIFE] == 1);
   /* equipment: the gun's quick drop (MW2's OffHandInit), not its holster */
   Ready(gun, other);
@@ -231,18 +233,20 @@ static void TestMeleeHolster(void) {
   CHECK(ps.weapon == other && ps.weaponstate == WEAPON_READY && !fired[WP_KNIFE]);
   Step(1);	/* the last refused press let go */
   move.cmd.buttons = BUTTON_MELEE; Step(1); move.cmd.buttons = 0;
-  CHECK((ps.weaponAction & WA_TYPE_MASK) == WA_MELEE);
-  for (t = 0; t < BG_RAPID_DROP_TIME + BG_WeaponRaiseTime(WP_KNIFE) + 5 && !fired[WP_KNIFE]; t++) Step(1);
+  CHECK((ps.weaponAction & WA_TYPE_MASK) == WA_MELEE && ps.weapon == WP_KNIFE && ps.weaponstate == WEAPON_RAISING);
+  for (t = 0; t < BG_MELEE_TIME && !fired[WP_KNIFE]; t++) Step(1);
   CHECK(fired[WP_KNIFE] == 1);
   /* a knife pressed on the command YY returns the drop to the held gun is
-   * taken, as MW2's weapon change readies the gun before its knife */
+   * taken, as MW2's weapon change readies the gun before its knife: out on
+   * that same command, the rest of the drop never played */
   Ready(gun, other);
   move.cmd.weapon = other; Step(1); Run(1);
   CHECK(ps.weaponstate == WEAPON_DROPPING);
   move.cmd.weapon = gun; move.cmd.buttons = BUTTON_MELEE; Step(1); move.cmd.buttons = 0;
-  CHECK((ps.weaponAction & WA_TYPE_MASK) == WA_MELEE);
-  for (t = 0; t < BG_WeaponDropTime(gun) + BG_WeaponRaiseTime(WP_KNIFE) + 5 && !fired[WP_KNIFE]; t++) Step(1);
-  CHECK(fired[WP_KNIFE] == 1);
+  CHECK((ps.weaponAction & WA_TYPE_MASK) == WA_MELEE && ps.weapon == WP_KNIFE &&
+   ps.weaponstate == WEAPON_RAISING && ps.weaponTime == BG_MELEE_DELAY);
+  for (t = 0; t < BG_MELEE_TIME && !fired[WP_KNIFE]; t++) Step(1);
+  CHECK(fired[WP_KNIFE] == 1 && t == BG_MELEE_DELAY);
  }
  /* a ladder holster keeps its own universal time */
  Ready(WP_SHOTGUN, WP_MACHINEGUN);
@@ -250,19 +254,66 @@ static void TestMeleeHolster(void) {
  CHECK(BG_HolsterTime(&ps) == BG_LADDER_DROP_TIME);
 }
 
-/* Recovering from melee and from equipment is ONE thing, in time and function:
- * the knife or grenade is held BG_QUICK_ACTION_HOLD, goes away in the universal
- * BG_RAPID_DROP_TIME, then the gun comes back with its own normal draw - MW2's
- * recovery is the normal draw, except you cannot sprint through it. YY cancels
- * the recovery draw like any draw, and a quick action pressed during it starts
- * the next one. Every time comes from the shipped constants and tables. */
+/* MW2's knife from the press (MeleeInit, MeleeFire, MeleeEnd): the hit lands
+ * on the first command meleeDelay after the press, the knife is over on the
+ * first command meleeTime after it, and the gun's quick raise starts on that
+ * command with nothing put down in between. The latch holds until the gun is
+ * fully drawn, so sprint, asked for throughout, never starts until it is back.
+ * Any command length: each step here is 'msec' long. */
+static void KnifeTimeline(int gun, int msec) {
+ int other = gun == WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN, t, now, hit = -1, over = -1, back = -1;
+ Ready(gun, other);
+ pml.groundPlane = qtrue; move.cmd.forwardmove = 127;
+ move.cmd.buttons = BUTTON_MELEE; PM_CheckSprint(); Step(msec);
+ CHECK(ps.weapon == WP_KNIFE && ps.weaponstate == WEAPON_RAISING && ps.weaponTime == BG_MELEE_DELAY);
+ move.cmd.buttons = BUTTON_SPRINT;
+ for (t = 1, now = msec; t < 20000 && back < 0; t++, now += msec) {
+  int before = ps.weapon;
+  pml.groundPlane = qtrue; PM_CheckSprint();
+  CHECK(!(ps.pm_flags & PMF_SPRINTING));	/* never while the knife or its raise runs */
+  Step(msec);
+  CHECK(ps.weaponstate != WEAPON_DROPPING);	/* nothing is ever put down */
+  if (hit < 0 && fired[WP_KNIFE]) hit = now;
+  if (over < 0 && before == WP_KNIFE && ps.weapon != WP_KNIFE) {
+   over = now;
+   CHECK(ps.weapon == gun && ps.weaponstate == WEAPON_RAISING &&
+    ps.weaponTime == BG_WeaponQuickRaiseTime(gun) && (ps.weaponAction & WA_FIRED));
+  }
+  if (ps.weapon == gun && !(ps.weaponAction & WA_TYPE_MASK)) back = now;
+ }
+ /* the first command at or past each MW2 time */
+ CHECK(hit >= BG_MELEE_DELAY && hit - msec < BG_MELEE_DELAY && fired[WP_KNIFE] == 1);
+ CHECK(over >= BG_MELEE_TIME && over - msec < BG_MELEE_TIME);
+ CHECK(back - over >= BG_WeaponQuickRaiseTime(gun) && back - over - msec < BG_WeaponQuickRaiseTime(gun));
+ CHECK(ps.weaponstate == WEAPON_READY);
+ for (t = 0; t < 5 && !(ps.pm_flags & PMF_SPRINTING); t++) { pml.groundPlane = qtrue; PM_CheckSprint(); Step(msec); }
+ CHECK(ps.pm_flags & PMF_SPRINTING);	/* and then sprint is allowed */
+ move.cmd.buttons = 0; move.cmd.forwardmove = 0;
+}
+static void TestKnifeTimeline(void) {
+ const int msecs[] = { 1, 3, 8, 16 };
+ int i, m;
+ for (i = 0; i < BG_ClassWeaponCount(); i++) for (m = 0; m < ARRAY_LEN(msecs); m++) {
+  if (BG_ClassWeapon(i) <= WP_NONE) continue;
+  KnifeTimeline(BG_ClassWeapon(i), msecs[m]);
+ }
+}
+
+/* Recovering from equipment is ONE thing, in time and function: the grenade is
+ * held BG_QUICK_ACTION_HOLD, goes away in the universal BG_RAPID_DROP_TIME,
+ * then the gun comes back on its quick raise - MW2's recovery, which you
+ * cannot sprint through. The knife has no hold or drop of its own; it ends at
+ * BG_MELEE_TIME straight into the same quick raise (TestKnifeTimeline). A swap
+ * asked for during the recovery draw waits, and a quick action pressed during
+ * it starts the next one. Every time comes from the shipped constants and
+ * tables. */
 static int sprintNow;
 static void RStep(void) {
  pml.groundPlane = qtrue;
  PM_CheckSprint(); sprintNow = !!(ps.pm_flags & PMF_SPRINTING);
  Step(1);
 }
-static int RecoverPhases(int gun, int button, int special, int *hold, int *down, int *draw) {
+static int RecoverPhases(int gun, int button, int special, int *out, int *hold, int *down, int *draw) {
  int t, act, d = -1, u = -1, back = -1, other = gun == WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN;
  Ready(gun, other);
  if(special==WP_SEMTEX) {
@@ -274,6 +325,7 @@ static int RecoverPhases(int gun, int button, int special, int *hold, int *down,
  for (t = 1; t < 9000 && !fired[special]; t++) { RStep(); if (t == 1) move.cmd.buttons = 0; }
  CHECK(fired[special] == 1);
  act = t;
+ *out = act - 2;                       /* commands after the press (t is one past the throw's) */
  move.cmd.buttons = BUTTON_SPRINT; move.cmd.forwardmove = 127;     /* asking to sprint throughout */
  for (; t < 12000 && back < 0; t++) {
   int w = ps.weapon;
@@ -291,19 +343,21 @@ static int RecoverPhases(int gun, int button, int special, int *hold, int *down,
  return back - act;
 }
 static void TestRecovery(void) {
- const int buttons[] = { BUTTON_MELEE, BUTTON_LETHAL, BUTTON_TACTICAL, BUTTON_LETHAL };
- const int specials[] = { WP_KNIFE, WP_FRAG, WP_FLASH, WP_SEMTEX };
+ const int buttons[] = { BUTTON_LETHAL, BUTTON_TACTICAL, BUTTON_LETHAL };
+ const int specials[] = { WP_FRAG, WP_FLASH, WP_SEMTEX };
  int i, a, n = BG_ClassWeaponCount();
  for (i = 0; i < n; i++) {
   int gun = BG_ClassWeapon(i), first = -1;
   if (gun <= WP_NONE) continue;
   for (a = 0; a < ARRAY_LEN(specials); a++) {
-   int hold, down, draw, total = RecoverPhases(gun, buttons[a], specials[a], &hold, &down, &draw);
+   int out, hold, down, draw, total = RecoverPhases(gun, buttons[a], specials[a], &out, &hold, &down, &draw);
+   /* the gun's quick drop, the grenade's own raise, thrown the command after */
+   CHECK(out == BG_WeaponQuickDropTime(gun) + BG_WeaponRaiseTime(specials[a]) + 1);
    CHECK(hold >= BG_QUICK_ACTION_HOLD - 1 && hold <= BG_QUICK_ACTION_HOLD + 1);
    CHECK(down == BG_RAPID_DROP_TIME);
    CHECK(draw == BG_WeaponQuickRaiseTime(gun));	/* MW2's quick raise */
    if (first < 0) first = total;
-   CHECK(total == first);                         /* all quick actions recover alike */
+   CHECK(total == first);                         /* all equipment recovers alike */
   }
  }
  /* A swap asked for during the recovery draw waits (MW2's CheckForChangeWeapon
@@ -582,32 +636,34 @@ static void TestAirSprintDuringAction(void) {
  }
 }
 /* Equipment cuts the knife at any point, as MW2's offhand check takes every
- * melee state: pressed while the gun goes down for the knife or while the
- * knife comes up, the knife never lands; pressed after it, the throw follows.
- * At every stage the gun's whole quickDropTime starts on the press (MW2's
- * OffHandInit): the knife's hold after its hit, and the rapid drops either
- * side of it, are not kept. */
+ * melee state: pressed before the hit, the knife never lands; pressed after
+ * it, or in the gun's quick raise after the knife, the throw follows. Nothing
+ * was put down for the knife, so at every stage the gun's whole quickDropTime
+ * starts on the press (MW2's OffHandInit), from the knife in hand or from the
+ * gun coming back. */
 static void TestEquipmentCutsKnife(void) {
- int stage,t,lethal;
- for(stage=0;stage<4;stage++) {
-  Ready(WP_MACHINEGUN,WP_SHOTGUN); lethal=BG_LethalWeapon(&ps);
-  CHECK(ps.ammo[lethal]>0);
+ const int guns[]={WP_MACHINEGUN,WP_SHOTGUN,WP_M40A3};
+ const int buttons[]={BUTTON_LETHAL,BUTTON_TACTICAL};
+ int g,b,stage,t,special;
+ for(g=0;g<ARRAY_LEN(guns);g++) for(b=0;b<ARRAY_LEN(buttons);b++) for(stage=0;stage<5;stage++) {
+  int gun=guns[g], other=gun==WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN;
+  const int when[5]={1,BG_MELEE_DELAY-1,BG_MELEE_DELAY+1,BG_MELEE_TIME-1,
+   BG_MELEE_TIME+BG_WeaponQuickRaiseTime(gun)/2};
+  Ready(gun,other); ps.ammo[WP_FLASH]=1;
+  special=b ? WP_FLASH : BG_LethalWeapon(&ps);
+  CHECK(ps.ammo[special]>0);
   move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
-  CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_MELEE && ps.weaponstate==WEAPON_DROPPING);
-  if(stage==0) Step(1);
-  if(stage>=1) for(t=0;t<5000 && !(ps.weapon==WP_KNIFE && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
-  if(stage>=2) for(t=0;t<5000 && !fired[WP_KNIFE];t++) Step(1);
-  if(stage==2) { Step(1); CHECK(ps.weaponstate==WEAPON_FIRING && ps.weaponTime>BG_QUICK_ACTION_HOLD/2); }
-  if(stage==3) { for(t=0;t<5000 && ps.weaponstate!=WEAPON_DROPPING;t++) Step(1); Step(1); }
-  CHECK(ps.weapon==(stage ? WP_KNIFE : WP_MACHINEGUN) && fired[WP_KNIFE]==(stage>=2));
-  CHECK(stage==1 || stage==2 || (ps.weaponstate==WEAPON_DROPPING && ps.weaponTime<BG_RAPID_DROP_TIME));
-  move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
-  CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_LETHAL);
-  /* The gun, or the knife in hand, goes away on the gun's quick drop. */
-  CHECK(ps.weapon==(stage ? WP_KNIFE : WP_MACHINEGUN) && ps.weaponstate==WEAPON_DROPPING &&
-   ps.weaponTime==BG_WeaponQuickDropTime(WP_MACHINEGUN));
+  CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_MELEE && ps.weapon==WP_KNIFE && ps.weaponstate==WEAPON_RAISING);
+  Run(when[stage]-1);
+  CHECK(ps.weapon==(stage<4 ? WP_KNIFE : gun) && fired[WP_KNIFE]==(stage>=2));
+  CHECK(ps.weaponstate==(stage<2 ? WEAPON_RAISING : stage<4 ? WEAPON_FIRING : WEAPON_RAISING));
+  move.cmd.buttons=buttons[b]; Step(1); move.cmd.buttons=0;
+  CHECK((ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==(b ? WA_TACTICAL : WA_LETHAL));
+  /* The knife in hand, or the gun coming back, goes away on the gun's quick drop. */
+  CHECK(ps.weapon==(stage<4 ? WP_KNIFE : gun) && ps.weaponstate==WEAPON_DROPPING &&
+   ps.weaponTime==BG_WeaponQuickDropTime(gun) && BG_HolsterTime(&ps)==BG_WeaponQuickDropTime(gun));
   for(t=0;t<12000 && (ps.weaponAction&WA_TYPE_MASK);t++) Step(1);
-  CHECK(fired[WP_KNIFE]==(stage>=2) && fired[lethal]==1);
+  CHECK(fired[WP_KNIFE]==(stage>=2) && fired[special]==1 && ps.weapon==gun);
  }
 }
 /* Y and the knife on one command: MW2's weapon change runs before its knife,
@@ -956,6 +1012,7 @@ static void TestSeaLion(void) {
    CHECK(t<12000 && (ps.weapon==WP_NONE || !(ps.weaponAction&WA_TYPE_MASK)));
   }
   CHECK(w[0]==w[1] && state[0]==state[1] && time[0]==time[1]);
+  CHECK(w[0]==WP_KNIFE && state[0]==WEAPON_RAISING && time[0]==BG_MELEE_DELAY);	/* out on the press */
  }
  /* MW2's OffHandEnd with weapon 0: equipment pulled from an empty hand goes
   * back to an empty hand, never into a gun's quick raise. While the selection
@@ -1243,14 +1300,16 @@ static void TestKnifeInBolt(void) {
   for(t=0;t<5000 && (ps.stats[STAT_UNCHAMBERED]&(1<<gun));t++) Step(1);
   CHECK(ps.weaponstate==WEAPON_BOLTING);	/* the cycle's tail, after the close */
   move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
-  CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_MELEE);
+  CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_MELEE && ps.weapon==WP_KNIFE &&
+   ps.weaponstate==WEAPON_RAISING && ps.weaponTime==BG_MELEE_DELAY);	/* out on the press */
   for(t=0;t<9000 && (ps.weaponAction&WA_TYPE_MASK);t++) Step(1);
   CHECK(fired[WP_KNIFE]==1 && !(ps.stats[STAT_UNCHAMBERED]&(1<<gun)));
  }
 }
 /* A knife or grenade pressed in a shot's fire lock starts at once: MW2's melee
- * and offhand checks take FIRING, so the drop is stamped on the press, on the
- * one BG_HolsterTime. Only MW2's weapon change refuses FIRING, so a plain Y
+ * and offhand checks take FIRING, so the knife is in hand on the press, and a
+ * grenade's drop is stamped on it, on the one BG_HolsterTime. Only MW2's
+ * weapon change refuses FIRING, so a plain Y
  * waits out the lock. A worked action cut this way stays owed and is bolted
  * from 0 once the gun is back, as MW2's needsRechamber. Every class gun. */
 static void TestActionOutOfShot(void) {
@@ -1275,8 +1334,9 @@ static void TestActionOutOfShot(void) {
    continue;
   }
   move.cmd.buttons=buttons[b]; Step(1); move.cmd.buttons=0;
-  CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_HolsterTime(&ps));
-  CHECK(ps.weaponTime==(b ? BG_WeaponQuickDropTime(gun) : BG_RAPID_DROP_TIME));
+  if(b) CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_HolsterTime(&ps) &&
+   ps.weaponTime==BG_WeaponQuickDropTime(gun));
+  else CHECK(ps.weapon==WP_KNIFE && ps.weaponstate==WEAPON_RAISING && ps.weaponTime==BG_MELEE_DELAY);
   for(t=0;t<12000 && (ps.weaponAction&WA_TYPE_MASK);t++) Step(1);
   CHECK(fired[specials[b]]==1 && ps.weapon==gun);
   CHECK(!!(ps.stats[STAT_UNCHAMBERED]&(1<<gun))==owed);
@@ -1661,10 +1721,11 @@ static void TestHeldThroughRespawn(void) {
   RespawnMove(buttons[i],PM_NORMAL);
   CHECK(!(ps.pm_flags&PMF_RESPAWNED));
   CHECK(!(ps.weaponAction&WA_TYPE_MASK));
-  holdMs=BG_WeaponDropTime(WP_MACHINEGUN)+BG_WeaponRaiseTime(specials[i])+
-   BG_QUICK_ACTION_HOLD+BG_RAPID_DROP_TIME+BG_WeaponRaiseTime(WP_MACHINEGUN);
-  for(t=0;t<holdMs;t+=8) RespawnMove(buttons[i],PM_NORMAL);
-  CHECK(!(ps.weaponAction&WA_TYPE_MASK));
+  /* held for as long as the whole action would take: never latched at all */
+  holdMs=specials[i]==WP_KNIFE ? BG_MELEE_TIME+BG_WeaponQuickRaiseTime(WP_MACHINEGUN) :
+   BG_WeaponQuickDropTime(WP_MACHINEGUN)+BG_WeaponRaiseTime(specials[i])+
+   BG_QUICK_ACTION_HOLD+BG_RAPID_DROP_TIME+BG_WeaponQuickRaiseTime(WP_MACHINEGUN);
+  for(t=0;t<holdMs;t+=8) { RespawnMove(buttons[i],PM_NORMAL); CHECK(!(ps.weaponAction&WA_TYPE_MASK)); }
   CHECK(ps.weapon==WP_MACHINEGUN && ps.ammo[specials[i]]==count);
   /* Release and press again: this is a new action, not a permanently blocked button. */
   RespawnMove(0,PM_NORMAL); RespawnMove(buttons[i],PM_NORMAL);
@@ -1673,7 +1734,7 @@ static void TestHeldThroughRespawn(void) {
 }
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
- TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestNoSwapInQuickAction(); TestSemtexCancelKeepsLock(); TestThrowingKnife(); TestSeaLion(); TestLethalFromEmptyHand(); TestKnifeOutOfReload(); TestKnifeOutOfReloadSettle(); TestKnifeOutOfAction(); TestKnifeInKnife(); TestMeleeHolster(); TestRecovery();
+ TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestNoSwapInQuickAction(); TestSemtexCancelKeepsLock(); TestThrowingKnife(); TestSeaLion(); TestLethalFromEmptyHand(); TestKnifeOutOfReload(); TestKnifeOutOfReloadSettle(); TestKnifeOutOfAction(); TestKnifeInKnife(); TestMeleeNoDrop(); TestKnifeTimeline(); TestRecovery();
  TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestAirSprintSwap(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;

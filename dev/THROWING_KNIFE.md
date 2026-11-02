@@ -20,8 +20,9 @@ item's model in `bg_misc.c` and the missile model in `cg_weapons.c`.
   or spent (`BG_OffhandHeldToThrow`: MW2's holdButtonToThrow and
   offhandHoldIsCancelable, the owner's choice). Pulled again in that raise it
   comes straight out. A Y after the throw only queues the swap.
-- **Recovery** is the ONE quick-action recovery: `BG_QUICK_ACTION_HOLD`, the
-  rapid drop, then the gun's quick raise (OFFHAND_END). From an empty hand it
+- **Recovery** is the ONE equipment recovery: `BG_QUICK_ACTION_HOLD`, the
+  rapid drop, then the gun's quick raise (OFFHAND_END). (The melee knife has
+  no hold or drop: it ends at `BG_MELEE_TIME` straight into the quick raise.) From an empty hand it
   goes back to an empty hand. With no knives left, `BG_LethalWeapon` falls back
   to the frag, which has none, so a press asks for nothing.
 - **Out of a busy gun.** The pull also comes straight out of a reload, a shot

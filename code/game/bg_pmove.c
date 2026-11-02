@@ -2065,7 +2065,7 @@ static const int bg_weaponDropTime[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	250, 250, 250,
 #endif
-	BG_RAPID_DROP_TIME,	// WP_KNIFE
+	WEAPON_MIN_SWAP_TIME,	// WP_KNIFE: unread, it puts nothing down (BG_QuickActionInPlace)
 	BG_RAPID_DROP_TIME,	// WP_FRAG
 	BG_RAPID_DROP_TIME,	// WP_FLASH
 	BG_RAPID_DROP_TIME,	// WP_SEMTEX
@@ -2088,7 +2088,7 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	300, 300, 300,
 #endif
-	120,	// WP_KNIFE
+	BG_MELEE_DELAY,	// WP_KNIFE: MW2's meleeDelay, out on the press and ending in the hit
 	150,	// WP_FRAG
 	150,	// WP_FLASH
 	350,    // WP_SEMTEX pull back into held pose
@@ -2100,13 +2100,14 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 // away for a grenade (PM_Weapon_OffHandInit), and coming back after a knife or
 // a grenade (MeleeEnd, OffHandEnd). Every MW2 gun quick-drops in 250; rifles,
 // shotguns and launchers quick-raise in 750, pistols and the Intervention in
-// 250. Equipment and the knife never quick-raise themselves.
+// 250. Equipment and the knife never quick-drop or quick-raise themselves:
+// their rows are unread.
 static const int bg_weaponQuickDropTime[MAX_WEAPONS] = {
 	250, 250, 250, 250, 250, 250, 250, 250, 250, 250, 250,
 #ifdef MISSIONPACK
 	250, 250, 250,
 #endif
-	250, 250, 250, 250,
+	250, 250, 250, 250,	// WP_KNIFE, WP_FRAG, WP_FLASH, WP_SEMTEX
 	M40_QUICK_DROP_MS,
 	250,	// WP_THROWING_KNIFE
 };
@@ -2125,7 +2126,7 @@ static const int bg_weaponQuickRaiseTime[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	750, 750, 750,
 #endif
-	250, 250, 250, 250,
+	250, 250, 250, 250,	// WP_KNIFE, WP_FRAG, WP_FLASH, WP_SEMTEX
 	M40_QUICK_RAISE_MS,	// MW2's Intervention
 	250,	// WP_THROWING_KNIFE
 };
@@ -2208,14 +2209,12 @@ drop clip, so the picture can never disagree with the timer.
   ladder grab - the universal BG_LADDER_DROP_TIME
   equipment   - the gun (or the knife it cuts) going away for a grenade not
                 yet thrown: the gun's quickDropTime, as MW2's OffHandInit
-  recovery    - any quick action going away: the universal BG_RAPID_DROP_TIME
-  melee       - the gun going down for a knife not yet swung: the same rapid
-                time. Melee is its own kind of swap and never waits on a
-                heavy gun's holster
+  recovery    - thrown equipment going away: the universal BG_RAPID_DROP_TIME
   otherwise   - the weapon's own BG_WeaponDropTime
 
-Every answer is a real, nonzero time, so the NAC is untouched: a melee pressed
-on the mag-in frame is cancelled by the same note-and-lock collision as any swap.
+The knife has no line here: nothing is put down for it or after it (MW2's
+MeleeInit and MeleeEnd write over the gun's state, BG_QuickActionInPlace).
+Every answer is a real, nonzero time, so the NAC is untouched.
 ==============
 */
 int BG_HolsterTime( const playerState_t *ps ) {
@@ -2237,9 +2236,6 @@ int BG_HolsterTime( const playerState_t *ps ) {
 		return quick;
 	}
 	if ( BG_IsActionWeapon(ps->weapon) ) {
-		return BG_RAPID_DROP_TIME;
-	}
-	if ( action == WA_MELEE && !( ps->weaponAction & WA_FIRED ) ) {
 		return BG_RAPID_DROP_TIME;
 	}
 	return BG_WeaponDropTime( ps->weapon );
@@ -3062,13 +3058,17 @@ static void PM_AdvanceReloadSegments( void ) {
 	}
 }
 
-static int PM_ActionWeapon( void ) {
-	switch ( pm->ps->weaponAction & WA_TYPE_MASK ) {
+static int PM_QuickActionWeapon( int action ) {
+	switch ( action & WA_TYPE_MASK ) {
 	case WA_MELEE: return WP_KNIFE;
 	case WA_LETHAL: return BG_LethalWeapon(pm->ps);
 	case WA_TACTICAL: return WP_FLASH;
 	default: return WP_NONE;
 	}
+}
+
+static int PM_ActionWeapon( void ) {
+	return PM_QuickActionWeapon( pm->ps->weaponAction );
 }
 
 // Melee, lethal and tactical in weaponAction's three held-button bits.
@@ -3112,7 +3112,6 @@ static void PM_UpdateWeaponAction( void ) {
 	qboolean swap = (pm->cmd.buttons & BUTTON_WEAPON_SWAP) != 0;
 	qboolean swapPressed = swap && !(pm->ps->weaponAction & WA_SWAP_HELD);
 	qboolean cancelDraw = qfalse;
-	qboolean cutDrop = qfalse;
 	// MW2's OFFHAND_END: the gun's quick raise after equipment, a Semtex
 	// cancel's included, read before the latch clears on its last command.
 	qboolean offhandEnd = ( ( action & WA_TYPE_MASK ) == WA_LETHAL || ( action & WA_TYPE_MASK ) == WA_TACTICAL ) &&
@@ -3171,23 +3170,22 @@ static void PM_UpdateWeaponAction( void ) {
 				!( (pm->ps->pm_flags & PMF_ADS) && BG_WeaponScopeOverlay( pm->ps->weapon ) ) )
 				nextAction = WA_MELEE;
 			if (nextAction) {
+				int nextWeapon = PM_QuickActionWeapon( nextAction );
 				// MW2's OffHandInit out of a melee state stamps the gun's whole
-				// quickDropTime: a drop running for the knife, or the knife's
-				// own after its hit, is not kept.
-				// The gun's own holster out of the knife's recovery draw is a
-				// running drop like any other, kept by step 1.
-				cutDrop = ( action & WA_TYPE_MASK ) == WA_MELEE &&
-					pm->ps->weaponstate == WEAPON_DROPPING &&
-					( BG_IsActionWeapon( pm->ps->weapon ) || !( action & WA_FIRED ) );
+				// quickDropTime. Nothing was put down for the knife, so that is
+				// simply the drop step 1 stamps: the knife in hand, or the gun's
+				// quick raise after it, goes away on the gun's quick drop.
 				// MW2's CheckForOffHand (5791b0-5791ce): with no use hint at
 				// all and either no gun in hand or the gun's quick raise after
 				// equipment, the equipment comes straight out (OffHandPrepare)
 				// and the gun is never lowered. The hint is server state; pmove
-				// only reads it.
+				// only reads it. The throwing knife comes out at once anyway,
+				// and so does the knife, which never reads the hint: MW2's
+				// MeleeInit writes the melee state straight over the gun's.
 				prepare = ( nextAction != WA_MELEE &&
 					pm->ps->cursorHintEntIndex == ENTITYNUM_NONE &&
 					( pm->ps->weapon == WP_NONE || offhandEnd ) ) ||
-					( nextAction == WA_LETHAL && BG_OffhandPreparesAtOnce( BG_LethalWeapon( pm->ps ) ) );
+					BG_OffhandPreparesAtOnce( nextWeapon ) || BG_QuickActionInPlace( nextWeapon );
 				action = nextAction;
 				returning = recovering = 0;
 				leftEmpty = pm->ps->weapon == WP_NONE ? WA_LEFT_EMPTY : 0;
@@ -3217,9 +3215,6 @@ static void PM_UpdateWeaponAction( void ) {
 		pm->ps->pm_flags &= ~PMF_PENDING_MAG;
 	} else if ( cancelDraw ) {
 		BG_BeginWeaponDraw( pm->ps );
-	}
-	if ( cutDrop ) {
-		pm->ps->weaponTime = BG_HolsterTime( pm->ps );
 	}
 	if ( prepare ) {
 		PM_FinishWeaponChange();
@@ -3292,8 +3287,10 @@ finished its swing/throw, then fall back to cmd.weapon - which is still pointing
 at the slot weapon, so the gun comes back on its own.
 
 This only chooses a NUMBER. The switch itself still goes through
-PM_BeginWeaponChange unchanged, so the holster always stamps a real drop time
-and the NAC is untouched.
+PM_BeginWeaponChange unchanged, so a holster always stamps a real drop time
+and the NAC is untouched. What puts nothing down - the knife, coming out on
+its press and going after its meleeTime, and equipment pulled straight out -
+stamps no holster at all, rather than a zero one.
 ===============
 */
 // MW2's CheckForChangeWeapon refuses every melee and offhand state, the gun's
@@ -3365,9 +3362,11 @@ static void PM_BeginWeaponChange( int weapon ) {
 		return;
 	}
 
-	// No gun in hand (MW2's weapon 0, after a pickup's swap): a gun is simply
-	// drawn, there is nothing to put down (MW2 stamps no drop for it).
-	if ( pm->ps->weapon == WP_NONE && !BG_IsActionWeapon( weapon ) ) {
+	// Nothing to put down: no gun in hand (MW2's weapon 0, after a pickup's
+	// swap), or the knife, whose end MW2's MeleeEnd writes the gun's quick raise
+	// straight over. The gun is simply drawn (MW2 stamps no drop for either).
+	if ( ( pm->ps->weapon == WP_NONE || BG_QuickActionInPlace( pm->ps->weapon ) ) &&
+	     !BG_IsActionWeapon( weapon ) ) {
 		PM_FinishWeaponChange();
 		return;
 	}
@@ -3887,7 +3886,9 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
-	// 6. Stock transitions.
+	// 6. Stock transitions. A raise that ends is ready from the next think. The
+	//    knife's draw is no raise but MW2's meleeDelay, which ends in the hit on
+	//    the think it runs out (MeleeFire), so the knife goes on to fire.
 	if ( pm->ps->weaponstate == WEAPON_RAISING ) {
 		pm->ps->weaponstate = WEAPON_READY;
 		if ( pm->ps->weapon == WP_GAUNTLET ) {
@@ -3895,7 +3896,9 @@ static void PM_Weapon( void ) {
 		} else {
 			PM_StartTorsoAnim( TORSO_STAND );
 		}
-		return;
+		if ( !BG_QuickActionInPlace( pm->ps->weapon ) ) {
+			return;
+		}
 	}
 
 	// 7. The settle note ends a reload, not the busy clock. While the tail is
@@ -4013,11 +4016,13 @@ static void PM_Weapon( void ) {
 		addTime = 400;
 		break;
 	case WP_KNIFE:
+		addTime = BG_MELEE_TIME - BG_MELEE_DELAY;	// MW2's meleeTime runs from the press
+		break;
 	case WP_SEMTEX:
 	case WP_FRAG:
 	case WP_FLASH:
 	case WP_THROWING_KNIFE:
-		addTime = BG_QUICK_ACTION_HOLD;	// one hold: melee and equipment recover alike
+		addTime = BG_QUICK_ACTION_HOLD;	// one hold: equipment recovers alike
 		break;
 	case WP_LIGHTNING:
 		addTime = 50;

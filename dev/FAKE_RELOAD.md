@@ -130,8 +130,8 @@ time and tap length on the SPAS, and shows `+reload` never fakes):
 
 | after         | gun  | 0 ms     | 50 ms     | 100 ms    | 200 ms    |
 |---------------|------|----------|-----------|-----------|-----------|
-| knife         | SPAS | 96–48    | 120–48    | 192–56    | 296–56    |
-| knife         | M300 | 96–48    | 120–48    | 200–48    | 296–48    |
+| knife         | SPAS | 104–48   | 128–48    | 200–48    | 296–48    |
+| knife         | M300 | 104–48   | 128–48    | 152–48    | 256–48    |
 | frag          | SPAS | 80–48    | 152–48    | 168–48    | 264–48    |
 | frag          | M300 | 80–48    | 104–48    | 168–48    | 256–48    |
 | Semtex cancel | SPAS | 104–48   | 128–48    | 200–48    | 280–48    |
@@ -152,7 +152,7 @@ Wild scope (M300, aim held): a knife this long after the gun is back, from
 
 | after         | 0 ms  | 50 ms | 100 ms | 200 ms |
 |---------------|-------|-------|--------|--------|
-| knife         | ≤64   | ≤88   | ≤160   | ≤256   |
+| knife         | ≤56   | ≤80   | ≤152   | ≤256   |
 | frag          | ≤32   | ≤104  | ≤136   | ≤232   |
 | Semtex cancel | ≤56   | ≤80   | ≤152   | ≤224   |
 
@@ -200,7 +200,9 @@ and `TestClockBase` allows a batched packet's wait in the base's age.
 These are read from MW2's own executable (`iw4x.exe`; knife check 0x577670,
 offhand check 0x579030, offhand init/end 0x578E00/0x577A10, knife end 0x578D80).
 
-- **The knife's own timing.** MW2's knife never drops the gun: it plays on the
-  gun's model (meleeTime 800ms, the hit 79ms in), then the quick raise. Peace's
-  knife is its own weapon: a 50ms drop, its raise, `BG_QUICK_ACTION_HOLD`, a
-  50ms drop, then the quick raise.
+- **The knife's own timing** now agrees: as MW2's, it never drops the gun. It
+  is out on the press, hits `BG_MELEE_DELAY` (meleeDelay, 79ms) in, and is over
+  at `BG_MELEE_TIME` (meleeTime, 800ms), straight into the quick raise (MW2's
+  MeleeInit, MeleeFire, MeleeEnd). It still has no art on the gun's model.
+  With no drops left either side, its return times much like a Semtex
+  cancel's, and the knife rows above sit close to that one's.

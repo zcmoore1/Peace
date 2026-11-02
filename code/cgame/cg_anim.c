@@ -265,9 +265,9 @@ static void CG_WeapAnim_BeginHolster(const weapAnimDef_t *def, animLayer_t *move
 	move->targetWeight = 1.0f;
 }
 
-// Pmove restamped the running drop (a grenade cutting the knife takes the
-// gun's whole quick drop), or BG_HolsterTime handed it to another rule (a
-// grenade keeping a heavy holster, once less of it is left than a quick drop).
+// Pmove restamped the running drop (a ladder grabbed during it), or
+// BG_HolsterTime handed it to another rule (a grenade keeping a heavy
+// holster, once less of it is left than a quick drop).
 // Carry on from where the old fit has the picture, so the rest of the clip
 // spans what is left of the lock. The fit stays BG_HolsterTime.
 static float CG_WeapAnim_DropFit(const animLayer_t *move, float f) {
@@ -279,7 +279,7 @@ static float CG_WeapAnim_DropFit(const animLayer_t *move, float f) {
 static void CG_WeapAnim_ReanchorDrop(const playerState_t *ps, animLayer_t *move, int msec) {
 	int duration = BG_HolsterTime(ps);
 	// The old fit runs on by this frame at most: a lock pmove restamped lower
-	// (a ladder grab, a knife on the YY command) must not skip the picture.
+	// (a ladder grab) must not skip the picture.
 	int lock = ps->weaponTime > cg_dropLock - msec ? ps->weaponTime : cg_dropLock - msec;
 	float p, f;
 	if (lock > cg_dropLock) lock = cg_dropLock;

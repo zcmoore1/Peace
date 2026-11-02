@@ -30,8 +30,9 @@ every offhand, and a queued Y draws from it.
 
 The gun goes away on its MW2 quick drop (`BG_WeaponQuickDropTime`, 250ms), as for
 every grenade, followed by 350ms pullback. After release it shares
-`BG_QUICK_ACTION_HOLD` (500ms) and `BG_RAPID_DROP_TIME` (50ms) with
-melee/frag/flash, then the original gun's MW2 quick raise
+`BG_QUICK_ACTION_HOLD` (500ms) and `BG_RAPID_DROP_TIME` (50ms) with frag/flash
+(the knife has neither: it ends at `BG_MELEE_TIME`), then the original gun's MW2
+quick raise
 (`BG_WeaponQuickRaiseTime`; SPAS 750ms, M300 250ms) - a pre-release cancel's
 return too. `BG_HolsterTime` and `BG_WeaponDrawTime` supply the same durations
 to gameplay and presentation. The pullback, hold and fuse are authored Peace

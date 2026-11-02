@@ -512,28 +512,33 @@ static void TestFlow(weapAnimDef_t *def) {
  CHECK(flowPs.weaponstate==WEAPON_FIRING && move->targetWeight==0 && move->fit==MOVE_FIT_NONE);
  CHECK(cg_weapLayers[LAYER_BASE].clip==WANIM_FIRE);
 }
-/* A grenade pressed while the gun goes down for the knife restamps the drop to
- * the gun's whole quick drop (MW2's OffHandInit). The picture carries on from
- * the pose on screen and still lands exactly when the lock runs out. */
-static void TestDropRestamp(weapAnimDef_t *def) {
+/* The knife puts nothing down (MW2's MeleeInit and MeleeEnd write over the
+ * gun's state): the press takes the gun away on that command, no drop is ever
+ * fitted for it or after it, and the gun comes back up its draw clip fitted to
+ * the quick raise pmove stamped at BG_MELEE_TIME, arriving with that lock. */
+static void TestKnifePicture(weapAnimDef_t *def) {
  animLayer_t *move=&cg_weapLayers[LAYER_MOVE];
- float drop=CG_WeapAnim_ClipLength(def,WANIM_DROP),last;
- int t;
+ float raise=CG_WeapAnim_ClipLength(def,WANIM_RAISE),last=0;
+ int t,since;
  FlowBegin(); FlowSlot(SLOT_SECONDARY);
  for(t=0;t<10000 && !(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_READY && move->weight==0);t+=8) FlowStep();
- flow.cmd.buttons=BUTTON_MELEE; FlowStep(); flow.cmd.buttons=0; FlowStep(); FlowStep();
- CHECK(flowPs.weaponstate==WEAPON_DROPPING && (flowPs.weaponAction&WA_TYPE_MASK)==WA_MELEE);
- CHECK(move->clip==WANIM_DROP && move->fit==MOVE_FIT_FORWARD && move->time>drop/8);
- last=move->time;
- flow.cmd.buttons=BUTTON_LETHAL; FlowStep(); flow.cmd.buttons=0;
- CHECK((flowPs.weaponAction&WA_TYPE_MASK)==WA_LETHAL && flowPs.weaponstate==WEAPON_DROPPING &&
-  flowPs.weaponTime>=BG_WeaponQuickDropTime(WP_SHOTGUN)-8);
- CHECK(move->clip==WANIM_DROP && move->time>=last-.01f && move->time-last<=8*drop/BG_HolsterTime(&flowPs)+.01f);
- while(flowPs.weaponstate==WEAPON_DROPPING && flowPs.weapon==WP_SHOTGUN) {
-  last=move->time; FlowStep();
-  if(flowPs.weaponstate==WEAPON_DROPPING) CHECK(move->time>=last-.01f && move->time-last<=8*drop/BG_HolsterTime(&flowPs)+.01f);
+ flow.cmd.buttons=BUTTON_MELEE; FlowStep(); flow.cmd.buttons=0;
+ CHECK(flowPs.weapon==WP_KNIFE && flowPs.weaponstate==WEAPON_RAISING && (flowPs.weaponAction&WA_TYPE_MASK)==WA_MELEE);
+ for(since=0;since<10000 && flowPs.weapon==WP_KNIFE;) {
+  FlowStep(); since+=8;
+  CHECK(flowPs.weaponstate!=WEAPON_DROPPING && !(move->fit==MOVE_FIT_FORWARD && move->clip==WANIM_DROP));
  }
- CHECK(last>=drop*.9f);
+ /* the first 8ms command at or past meleeTime: straight into the quick raise */
+ CHECK(since>=BG_MELEE_TIME && since-8<BG_MELEE_TIME);
+ CHECK(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_RAISING &&
+  flowPs.weaponTime==BG_WeaponQuickRaiseTime(WP_SHOTGUN) && BG_WeaponDrawTime(&flowPs)==flowPs.weaponTime);
+ CHECK(move->clip==WANIM_RAISE && move->fit==MOVE_FIT_FORWARD);
+ while(flowPs.weaponstate==WEAPON_RAISING) {
+  float want=(1.0f-(float)flowPs.weaponTime/BG_WeaponQuickRaiseTime(WP_SHOTGUN))*raise;
+  CHECK(move->clip==WANIM_RAISE && fabs(move->time-want)<=.01f && move->time>=last-.01f);
+  last=move->time; FlowStep();
+ }
+ CHECK(last>=raise*.9f && flowPs.weaponstate==WEAPON_READY);
 }
 /* A grenade pressed during a running holster keeps that drop: the picture runs
  * on at the gun's own rate, across BG_HolsterTime handing over to the quick
@@ -559,14 +564,15 @@ static void TestKeptHolster(weapAnimDef_t *def) {
  CHECK(last>=drop*.95f);
 }
 /* YY flows, never snaps (owner's rule): a lock pmove restamps LOWER inside a
- * running holster (a ladder grab; Y back with the knife on one command, READY then
- * the rapid drop in one think) moves the drop or reversed draw on by one frame
- * of the old fit, then runs to the new lock's end, never ahead to its pose. */
+ * running holster (a ladder grab) moves the drop or reversed draw on by one
+ * frame of the old fit, then runs to the new lock's end, never ahead to its
+ * pose. (Y back with the knife on one command restamps nothing: the knife is
+ * out on that command, TestMeleeNoDrop in the loadout suite.) */
 static void TestRestampLower(weapAnimDef_t *def,int gun) {
  animLayer_t *move=&cg_weapLayers[LAYER_MOVE];
  float len,step,last;
- int reversed,knife,t;
- for(reversed=0;reversed<2;reversed++) for(knife=0;knife<2;knife++) {
+ int reversed,t;
+ for(reversed=0;reversed<2;reversed++) {
   FlowBeginWith(gun); FlowSlot(SLOT_SECONDARY);
   for(t=0;t<10000 && !(flowPs.weapon==gun && (reversed ? flowPs.weaponstate==WEAPON_RAISING &&
    flowPs.weaponTime<=BG_WeaponDrawTime(&flowPs)/2 : flowPs.weaponstate==WEAPON_READY && move->weight==0));t+=8) FlowStep();
@@ -575,12 +581,10 @@ static void TestRestampLower(weapAnimDef_t *def,int gun) {
   CHECK(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_DROPPING && BG_HolsterTime(&flowPs)==BG_WeaponDropTime(gun));
   CHECK(move->fit==(reversed ? MOVE_FIT_REVERSE : MOVE_FIT_FORWARD) && move->weight==1);
   len=CG_WeapAnim_ClipLength(def,move->clip); step=8*len/BG_WeaponDropTime(gun)*1.02f+.01f; last=move->time;
-  if(knife) { FlowSlot(SLOT_SECONDARY); flow.cmd.buttons=BUTTON_MELEE; }
-  else flowPs.stats[STAT_LADDER]|=LADDER_ATTACHED;	/* PM_CheckLadder's grab, ahead of PM_Weapon */
-  FlowStep(); flow.cmd.buttons=0;
+  flowPs.stats[STAT_LADDER]|=LADDER_ATTACHED;	/* PM_CheckLadder's grab, ahead of PM_Weapon */
+  FlowStep();
   CHECK(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_DROPPING &&
-   BG_HolsterTime(&flowPs)==(knife ? BG_RAPID_DROP_TIME : BG_LADDER_DROP_TIME));
-  if(knife) CHECK((flowPs.weaponAction&WA_TYPE_MASK)==WA_MELEE);
+   BG_HolsterTime(&flowPs)==BG_LADDER_DROP_TIME);
   CHECK(fabs(move->time-last)<=step && (reversed ? move->time<=last+.01f : move->time>=last-.01f));
   while(flowPs.weaponstate==WEAPON_DROPPING && flowPs.weapon==gun) {
    last=move->time; FlowStep();
@@ -1069,7 +1073,7 @@ int main(void) {
  TestOwnership(def); TestExclusions(def); TestRelease(def); TestContext(def);
  TestFirstDraw(def,WP_SHOTGUN);
  TestReloadPerk(def,WP_SHOTGUN);
- TestFlow(def); TestDropRestamp(def); TestKeptHolster(def);
+ TestFlow(def); TestKnifePicture(def); TestKeptHolster(def);
  TestRestampLower(def,WP_SHOTGUN); TestRetainedKeptHolster(); TestSnapshotRestamp(def);
  TestShortDropKept();
  TestSprintFlow(def);

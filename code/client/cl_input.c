@@ -294,6 +294,20 @@ cvar_t	*cl_run;
 
 cvar_t	*cl_anglespeedkey;
 
+// MW2's game pad look (CL_JoystickAim)
+static cvar_t	*j_mw2Aim;
+static cvar_t	*input_viewSensitivity;
+static cvar_t	*aim_turnrate_yaw;
+static cvar_t	*aim_turnrate_pitch;
+static cvar_t	*aim_turnrate_yaw_ads;
+static cvar_t	*aim_turnrate_pitch_ads;
+static cvar_t	*aim_accel_turnrate_enabled;
+static cvar_t	*aim_accel_turnrate_lerp;
+static cvar_t	*aim_scale_view_axis;
+static cvar_t	*aim_input_graph_enabled;
+static cvar_t	*aim_input_graph;
+static cvar_t	*aim_input_graph_scale;
+
 
 /*
 ================
@@ -399,6 +413,64 @@ void CL_JoystickEvent( int axis, int value, int time ) {
 
 /*
 =================
+CL_JoystickAim
+
+MW2's game pad look (CL_GamepadMove into AimAssist_ApplyTurnRates, see
+cl_gamepadaim.c): the look stick turns the view at the aim_turnrate_* rates,
+leaned toward the ADS rates by cgame's aim clock, times
+input_viewSensitivity. The signs of j_yaw and j_pitch still give each axis
+its direction, so a negative j_pitch inverts the look; their size is unused.
+=================
+*/
+static void CL_JoystickAim( void ) {
+	static aimState_t	state;
+	static aimGraph_t	graph;
+	static int			graphCount = -1, scaleCount = -1;
+	aimTuning_t	tuning;
+	float	yawAxis, pitchAxis, yawDelta, pitchDelta;
+
+	if ( aim_input_graph->modificationCount != graphCount ||
+		aim_input_graph_scale->modificationCount != scaleCount ) {
+		graphCount = aim_input_graph->modificationCount;
+		scaleCount = aim_input_graph_scale->modificationCount;
+		if ( !CL_ParseAimGraph( aim_input_graph->string, aim_input_graph_scale->value, &graph ) &&
+			aim_input_graph->string[0] ) {
+			Com_Printf( S_COLOR_YELLOW "aim_input_graph needs 2 to 32 \"fraction value\" knots, "
+				"fractions rising within 0..1 and ending at 1; turning without a graph\n" );
+		}
+	}
+
+	// MW2 turns the view from the pad only while nothing catches keys
+	// (CG_ShouldUpdateViewAngles), and a turn held through starts over.
+	if ( Key_GetCatcher() ) {
+		state.yawSpeed = state.pitchSpeed = 0.0f;
+		return;
+	}
+
+	yawAxis = cl.joystickAxis[j_yaw_axis->integer] / 32767.0f;
+	pitchAxis = cl.joystickAxis[j_pitch_axis->integer] / 32767.0f;
+	yawAxis = j_yaw->value > 0.0f ? yawAxis : j_yaw->value < 0.0f ? -yawAxis : 0.0f;
+	pitchAxis = j_pitch->value > 0.0f ? pitchAxis : j_pitch->value < 0.0f ? -pitchAxis : 0.0f;
+
+	tuning.yaw = aim_turnrate_yaw->value;
+	tuning.pitch = aim_turnrate_pitch->value;
+	tuning.yawAds = aim_turnrate_yaw_ads->value;
+	tuning.pitchAds = aim_turnrate_pitch_ads->value;
+	tuning.sensitivity = input_viewSensitivity->value;
+	tuning.accelEnabled = aim_accel_turnrate_enabled->integer != 0;
+	tuning.accel = aim_accel_turnrate_lerp->value;
+	tuning.scaleViewAxis = aim_scale_view_axis->integer != 0;
+	tuning.graph = aim_input_graph_enabled->integer && graph.knotCount ? &graph : NULL;
+
+	CL_AimTurn( &tuning, &state, yawAxis, pitchAxis, cl.cgameAimFraction,
+		0.001f * cls.frametime, &yawDelta, &pitchDelta );
+
+	cl.viewangles[YAW] += yawDelta;
+	cl.viewangles[PITCH] += pitchDelta;
+}
+
+/*
+=================
 CL_JoystickMove
 =================
 */
@@ -413,6 +485,16 @@ void CL_JoystickMove( usercmd_t *cmd ) {
 
 	if ( !(in_speed.active ^ cl_run->integer) ) {
 		cmd->buttons |= BUTTON_WALKING;
+	}
+
+	// MW2 has no strafe or mlook modifier on the pad and no angle speed key:
+	// each stick keeps its own job.
+	if ( j_mw2Aim->integer ) {
+		CL_JoystickAim();
+		cmd->rightmove = ClampChar( cmd->rightmove + (int)right );
+		cmd->forwardmove = ClampChar( cmd->forwardmove + (int)forward );
+		cmd->upmove = ClampChar( cmd->upmove + (int)up );
+		return;
 	}
 
 	if ( in_speed.active ) {
@@ -1038,6 +1120,30 @@ void CL_InitInput( void ) {
 
 	cl_nodelta = Cvar_Get ("cl_nodelta", "0", 0);
 	cl_debugMove = Cvar_Get ("cl_debugMove", "0", 0);
+
+	// MW2's game pad look. The aim_* defaults and ranges are MW2's own dvars
+	// as IW4x registers them; input_viewSensitivity is the console menu's
+	// multiplier: 1 at "Medium" (2), 4 at "Insane" (10). aim_input_graph holds
+	// MW2's graph knots once read from the game ("fraction value" pairs, with
+	// GraphFloat's scale in aim_input_graph_scale); empty turns without one.
+	j_mw2Aim = Cvar_Get( "j_mw2Aim", "1", CVAR_ARCHIVE );
+	input_viewSensitivity = Cvar_Get( "input_viewSensitivity", "1", CVAR_ARCHIVE );
+	aim_turnrate_yaw = Cvar_Get( "aim_turnrate_yaw", "260", CVAR_ARCHIVE );
+	aim_turnrate_pitch = Cvar_Get( "aim_turnrate_pitch", "90", CVAR_ARCHIVE );
+	aim_turnrate_yaw_ads = Cvar_Get( "aim_turnrate_yaw_ads", "90", CVAR_ARCHIVE );
+	aim_turnrate_pitch_ads = Cvar_Get( "aim_turnrate_pitch_ads", "55", CVAR_ARCHIVE );
+	aim_accel_turnrate_enabled = Cvar_Get( "aim_accel_turnrate_enabled", "1", CVAR_ARCHIVE );
+	aim_accel_turnrate_lerp = Cvar_Get( "aim_accel_turnrate_lerp", "1200", CVAR_ARCHIVE );
+	aim_scale_view_axis = Cvar_Get( "aim_scale_view_axis", "1", CVAR_ARCHIVE );
+	aim_input_graph_enabled = Cvar_Get( "aim_input_graph_enabled", "1", CVAR_ARCHIVE );
+	aim_input_graph = Cvar_Get( "aim_input_graph", "", CVAR_ARCHIVE );
+	aim_input_graph_scale = Cvar_Get( "aim_input_graph_scale", "1", CVAR_ARCHIVE );
+	Cvar_CheckRange( input_viewSensitivity, 0.0001f, 5.0f, qfalse );
+	Cvar_CheckRange( aim_turnrate_yaw, 0.0f, 1080.0f, qfalse );
+	Cvar_CheckRange( aim_turnrate_pitch, 0.0f, 1080.0f, qfalse );
+	Cvar_CheckRange( aim_turnrate_yaw_ads, 0.0f, 1080.0f, qfalse );
+	Cvar_CheckRange( aim_turnrate_pitch_ads, 0.0f, 1080.0f, qfalse );
+	Cvar_CheckRange( aim_accel_turnrate_lerp, 0.0f, 4000.0f, qfalse );
 }
 
 /*

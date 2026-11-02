@@ -485,6 +485,28 @@ source for MW2 behaviour; the owner rejects it.
   hands back to prediction.
   Aim, camera and HUD always read the predicted state. Run
   `dev/tests/run-fakereload.sh`; `dev/FAKE_RELOAD.md` has the measured windows.
+- **The game pad aims the MW2 way (owner's rule: do what MW2 does).**
+  `code/client/cl_gamepadaim.c` is MW2's console aim as IW4x ported it
+  (iw4x-client e49e17d6, Gamepad.cpp), as pure functions. `CL_StickDeadzone`
+  is GPad_ConvertStickToFloat: radial per stick (`gpad_stick_deadzone_min`
+  0.2 / `_max` 0.01), applied in `IN_GamepadMove`; the triggers and older
+  joysticks keep `joy_threshold` (0.13, IW4x's `gpad_button_deadzone`).
+  `CL_AimTurn` is AimAssist_CalcAdjustedAxis + AimAssist_ApplyTurnRates: the
+  aim graph over the stick's length, the dominant-axis scale, then
+  `aim_turnrate_*` (MW2's exe dvars, 260/90 hip, 90/55 ADS) lerped by the aim
+  fraction, times `input_viewSensitivity` (IW4x's console presets: 4.0 is
+  "Insane", 10), reached at `aim_accel_turnrate_lerp` * sensitivity deg/s^2
+  and left at once; the speed is the stick's size, so a flip keeps it. cgame
+  sends `cg.adsFrac` (the aim clock's linear base) as `trap_SetUserCmdValue`'s
+  third argument: picture state that only the client's look input reads,
+  never gameplay. No pad look while anything catches keys
+  (CG_ShouldUpdateViewAngles). Not ported: aim assist slowdown;
+  `fovTurnRateScale` (MW2's AimAssist_UpdateTweakables 0x569950, which IW4x
+  only reads) is 1; MW2's graph 3 knots (aaInputGraph 0x7A2FC0) are unread, so
+  `aim_input_graph` is empty and the look is linear in the stick until they
+  are set there with `aim_input_graph_scale` (GraphFloat's own layout). Never
+  invent a graph, a FOV scale or a second turn-rate rule. `j_mw2Aim 0` is
+  Quake's linear `j_yaw`/`j_pitch` look; with it on, only their signs count.
 
 ## Capacity limits
 
@@ -628,6 +650,13 @@ reload after knife/frag/Semtex cancel, tap vs hold, aiming/shooting/real reload
 during it, `+reload` never faking, no fake shot, the lone knife, the fake bullet
 and the M300 wild scope at 0/50/100/200 ms. `FAKERELOAD_PROBE=1` prints every
 tap timing; `FAKERELOAD_SVFPS` changes the server rate.
+
+`dev/tests/run-gamepad-aim.cmd` (or `.sh`) drives the real `cl_gamepadaim.c`:
+the radial deadzone, full-tilt hip/ADS rates at sensitivity 10, the aim
+fraction lerp and clamp, the 217ms ramp at any sensitivity, instant slowdown,
+the flip keeping speed, the 281ms 180, the dominant-axis scale, and graph
+evaluation and validation. Its expectations are worked out by hand from MW2's
+numbers, not by the code's formula, and every rule was mutation-checked.
 
 Do not statically initialize structs with inline char arrays mixed with ints:
 q3asm splits byte literals and word data into different segments. Use word-only

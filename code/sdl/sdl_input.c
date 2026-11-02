@@ -52,6 +52,8 @@ static cvar_t *in_joystick          = NULL;
 static cvar_t *in_joystickThreshold = NULL;
 static cvar_t *in_joystickNo        = NULL;
 static cvar_t *in_joystickUseAnalog = NULL;
+static cvar_t *gpad_stick_deadzone_min = NULL;
+static cvar_t *gpad_stick_deadzone_max = NULL;
 
 static int vidRestartTime = 0;
 
@@ -692,6 +694,7 @@ static void IN_GamepadMove( void )
 	int i;
 	int translatedAxes[MAX_JOYSTICK_AXIS];
 	qboolean translatedAxesSet[MAX_JOYSTICK_AXIS];
+	float values[SDL_CONTROLLER_AXIS_MAX];
 
 	SDL_GameControllerUpdate();
 
@@ -718,19 +721,34 @@ static void IN_GamepadMove( void )
 		}
 	}
 
-	// check axes
+	// read the axes: each stick through MW2's radial deadzone, as one
+	// vector (GPad_ConvertStickToFloat), so a diagonal keeps its direction
 	for (i = 0; i < SDL_CONTROLLER_AXIS_MAX; i++)
-	{
-		int axis = SDL_GameControllerGetAxis(gamepad, SDL_CONTROLLER_AXIS_LEFTX + i);
-		int oldAxis = stick_state.oldaaxes[i];
+		values[i] = SDL_GameControllerGetAxis(gamepad, SDL_CONTROLLER_AXIS_LEFTX + i) / 32767.0f;
 
+	CL_StickDeadzone(values[SDL_CONTROLLER_AXIS_LEFTX], values[SDL_CONTROLLER_AXIS_LEFTY],
+		gpad_stick_deadzone_min->value, gpad_stick_deadzone_max->value,
+		&values[SDL_CONTROLLER_AXIS_LEFTX], &values[SDL_CONTROLLER_AXIS_LEFTY]);
+	CL_StickDeadzone(values[SDL_CONTROLLER_AXIS_RIGHTX], values[SDL_CONTROLLER_AXIS_RIGHTY],
+		gpad_stick_deadzone_min->value, gpad_stick_deadzone_max->value,
+		&values[SDL_CONTROLLER_AXIS_RIGHTX], &values[SDL_CONTROLLER_AXIS_RIGHTY]);
+
+	for (i = SDL_CONTROLLER_AXIS_TRIGGERLEFT; i <= SDL_CONTROLLER_AXIS_TRIGGERRIGHT; i++)
+	{
 		// Smoothly ramp from dead zone to maximum value
-		float f = ((float)abs(axis) / 32767.0f - in_joystickThreshold->value) / (1.0f - in_joystickThreshold->value);
+		float f = (fabs(values[i]) - in_joystickThreshold->value) / (1.0f - in_joystickThreshold->value);
 
 		if (f < 0.0f)
 			f = 0.0f;
 
-		axis = (int)(32767 * ((axis < 0) ? -f : f));
+		values[i] = (values[i] < 0.0f) ? -f : f;
+	}
+
+	// check axes
+	for (i = 0; i < SDL_CONTROLLER_AXIS_MAX; i++)
+	{
+		int axis = (int)(32767 * values[i]);
+		int oldAxis = stick_state.oldaaxes[i];
 
 		if (axis != oldAxis)
 		{
@@ -1306,6 +1324,13 @@ void IN_Init( void *windowData )
 
 	in_joystick = Cvar_Get( "in_joystick", "0", CVAR_ARCHIVE|CVAR_LATCH );
 	in_joystickThreshold = Cvar_Get( "joy_threshold", "0.15", CVAR_ARCHIVE );
+
+	// A game pad's sticks use MW2's radial deadzone (IW4x's defaults); its
+	// triggers and older joysticks keep joy_threshold.
+	gpad_stick_deadzone_min = Cvar_Get( "gpad_stick_deadzone_min", "0.2", CVAR_ARCHIVE );
+	gpad_stick_deadzone_max = Cvar_Get( "gpad_stick_deadzone_max", "0.01", CVAR_ARCHIVE );
+	Cvar_CheckRange( gpad_stick_deadzone_min, 0.0f, 0.9f, qfalse );
+	Cvar_CheckRange( gpad_stick_deadzone_max, 0.0f, 0.5f, qfalse );
 
 #if defined(PROTOCOL_HANDLER) && defined(__APPLE__)
 	SDL_EventState( SDL_DROPFILE, SDL_ENABLE );

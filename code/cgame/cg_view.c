@@ -784,9 +784,12 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	// that is not in a slot.
 	if ( !CG_Killcam_Active() ) CG_ValidateWeaponSelect();
 	// The slot carries the generation the latest snapshot shows for it, so the
-	// server can tell a selection made before a pickup reached us.
+	// server can tell a selection made before a pickup reached us. The aim
+	// clock (its linear base, as MW2's weapon position fraction) leans the
+	// game pad's turn rate toward the ADS rate; it is picture state, read
+	// only by the client's look input, never by gameplay.
 	trap_SetUserCmdValue( cg.snap ? BG_SlotCommand( &cg.snap->ps, cg.weaponSelectSlot ) :
-		BG_SLOT_COMMAND + cg.weaponSelectSlot, cg.zoomSensitivity );
+		BG_SLOT_COMMAND + cg.weaponSelectSlot, cg.zoomSensitivity, cg.adsFrac );
 
 	// this counter will be bumped for every valid scene we generate
 	cg.clientFrame++;

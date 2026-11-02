@@ -28,6 +28,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "keys.h"
 #include "snd_public.h"
 #include "cl_timedelta.h"
+#include "cl_gamepadaim.h"
 #include "../cgame/cg_public.h"
 #include "../game/bg_public.h"
 
@@ -120,6 +121,7 @@ typedef struct {
 	// cgame communicates a few values to the client system
 	int			cgameUserCmdValue;	// current weapon to add to usercmd_t
 	float		cgameSensitivity;
+	float		cgameAimFraction;	// how far into aim down sights, 0..1 (MW2's adsLerp)
 
 	// cmds[cmdNumber] is the predicted command, [cmdNumber-1] is the last
 	// properly generated command

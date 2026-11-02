@@ -1687,7 +1687,7 @@ int			trap_GetCurrentCmdNumber( void );
 qboolean	trap_GetUserCmd( int cmdNumber, usercmd_t *ucmd );
 
 // used for the weapon select and zoom
-void		trap_SetUserCmdValue( int stateValue, float sensitivityScale );
+void		trap_SetUserCmdValue( int stateValue, float sensitivityScale, float aimFraction );
 
 // aids for VM testing
 void		testPrintInt( char *string, int i );

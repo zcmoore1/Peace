@@ -543,6 +543,28 @@ static void CG_PeaceDump_f( void ) {
 		ps->stats[STAT_ACTIVE_SLOT] );
 	CG_Printf("pickup   target %i   progress %i   slot %i   held %i   selection %i   firstDraw %i\n",
 		ps->pickupTarget, ps->pickupTime, ps->pickupSlot, ps->pickupHeld, cg.weaponSelectSlot, ps->weaponDraw);
+	// The server's use hint, as the snapshot gave it (pmove never writes either).
+	// The index is sticky (MW2's cursorHintEntIndex); ENTITYNUM_NONE is the sea
+	// lion: what it named was used and freed, and nothing has replaced it. The
+	// type (MW2's cursorHint) says what is usable right now.
+	if ( ps->cursorHintEntIndex == ENTITYNUM_NONE ) {
+		CG_Printf( "usehint  none: SEA LION (equipment in a quick raise, or from empty hands, comes straight out)" );
+	} else if ( ps->cursorHintEntIndex == ENTITYNUM_WORLD ) {
+		CG_Printf( "usehint  %i: a bomb site or the bomb (no sea lion)", ps->cursorHintEntIndex );
+	} else if ( ps->cursorHintEntIndex == 0 ) {
+		CG_Printf( "usehint  0: nothing hinted this life yet (no sea lion)" );
+	} else {
+		const entityState_t *hint = &cg_entities[ps->cursorHintEntIndex].currentState;
+		bg_weaponInstance_t gun;
+		if ( hint->eType == ET_MISSILE && hint->weapon == WP_THROWING_KNIFE )
+			CG_Printf( "usehint  %i: a throwing knife (no sea lion until it is taken)", ps->cursorHintEntIndex );
+		else if ( BG_WeaponItem( hint, &gun ) )
+			CG_Printf( "usehint  %i: a floor gun, weapon %i (no sea lion)", ps->cursorHintEntIndex, gun.weapon );
+		else
+			CG_Printf( "usehint  %i: last seen as entity type %i (no sea lion)", ps->cursorHintEntIndex, hint->eType );
+	}
+	CG_Printf( "   usable now: %s\n", ps->cursorHint == CURSOR_HINT_KNIFE ? "knife" :
+		ps->cursorHint == CURSOR_HINT_WEAPON ? "gun" : ps->cursorHint == CURSOR_HINT_OBJECTIVE ? "objective" : "nothing" );
 	for (i = 0; i < SLOT_COUNT; i++) {
 		bg_weaponInstance_t gun;
 		BG_GetSlot(ps, i, &gun);

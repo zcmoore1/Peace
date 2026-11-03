@@ -48,14 +48,17 @@ int main(void) {
    BG_PutSlot(&cl[1].ps,SLOT_PRIMARY,&gun); }
  item=G_DropWeapon(&g_entities[1],SLOT_PRIMARY); CHECK(item!=NULL);
  G_SetOrigin(item,ps->origin);
- CHECK(G_FindWeaponPickup(&g_entities[0])!=NULL && ps->cursorHintEntIndex==0);
+ CHECK(G_FindWeaponPickup(&g_entities[0])!=NULL && ps->cursorHintEntIndex==0 && ps->cursorHint==CURSOR_HINT_NONE);
  ClientEndFrame(&g_entities[0]);
- CHECK(ps->cursorHintEntIndex==item->s.number && (item->flags&FL_CURSOR_HINT));
+ CHECK(ps->cursorHintEntIndex==item->s.number && (item->flags&FL_CURSOR_HINT) && ps->cursorHint==CURSOR_HINT_WEAPON);
  G_FreeEntity(item);
  CHECK(ps->cursorHintEntIndex==ENTITYNUM_NONE);
+ /* the type is rewritten every end-frame: nothing in reach, nothing usable */
+ ClientEndFrame(&g_entities[0]);
+ CHECK(ps->cursorHintEntIndex==ENTITYNUM_NONE && ps->cursorHint==CURSOR_HINT_NONE);
  /* a usable site or the bomb: a live hint, never freed, which ends a sea lion */
  bombUsable=qtrue; ClientEndFrame(&g_entities[0]);
- CHECK(ps->cursorHintEntIndex==ENTITYNUM_WORLD);
+ CHECK(ps->cursorHintEntIndex==ENTITYNUM_WORLD && ps->cursorHint==CURSOR_HINT_OBJECTIVE);
  bombUsable=qfalse;
  /* a resting throwing knife, for a player who carries them, is named and its
   * free empties the hint the same way */
@@ -63,8 +66,14 @@ int main(void) {
  knife=G_Spawn(); knife->classname="throwingknife"; knife->s.eType=ET_MISSILE;
  knife->s.weapon=WP_THROWING_KNIFE; knife->timestamp=level.time; G_SetOrigin(knife,ps->origin);
  ClientEndFrame(&g_entities[0]);
- CHECK(ps->cursorHintEntIndex==knife->s.number && (knife->flags&FL_CURSOR_HINT));
+ CHECK(ps->cursorHintEntIndex==knife->s.number && (knife->flags&FL_CURSOR_HINT) && ps->cursorHint==CURSOR_HINT_KNIFE);
+ /* the knife prompt's type is the server's, through the networked field only */
+ cl[0].ps.pm_flags|=PMF_SPRINTING; ClientEndFrame(&g_entities[0]);
+ CHECK(ps->cursorHintEntIndex==knife->s.number && ps->cursorHint==CURSOR_HINT_NONE);
+ cl[0].ps.pm_flags&=~PMF_SPRINTING; ClientEndFrame(&g_entities[0]);
+ CHECK(ps->cursorHint==CURSOR_HINT_KNIFE);
  G_FreeEntity(knife);
  CHECK(ps->cursorHintEntIndex==ENTITYNUM_NONE);
+ ClientEndFrame(&g_entities[0]); CHECK(ps->cursorHint==CURSOR_HINT_NONE);
  printf("PASS: %d cursor-hint wiring checks\n",checks); return 0;
 }

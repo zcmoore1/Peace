@@ -223,7 +223,10 @@ source for MW2 behaviour; the owner rejects it.
   number. Only freeing what it names (`G_ClearCursorHintRefs` in
   `G_FreeEntity`, flagged `FL_CURSOR_HINT`) makes it `ENTITYNUM_NONE`, and a
   pickup frees its dropped gun - or a throwing knife taken back by use - at
-  once. A resting knife outranks any gun as the hint. Pmove only reads it: with no hint at
+  once. A resting knife outranks any gun as the hint. Its type,
+  `ps.cursorHint`, is cleared by every pass and set beside a written index;
+  the server's use test and cgame's knife prompt read it, pmove never does.
+  Pmove only reads the index: with no hint at
   all and either no gun in hand or the gun's quick raise after equipment
   (MW2's OFFHAND_END, a Semtex cancel's included), equipment comes straight
   out and the gun is never lowered (MW2's CheckForOffHand 5791b0-5791ce). So
@@ -502,7 +505,7 @@ source for MW2 behaviour; the owner rejects it.
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 10-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 82 requires client, server
+  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 83 requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
@@ -513,7 +516,11 @@ source for MW2 behaviour; the owner rejects it.
   height, none rebased. Protocol 81 adds `cursorHintEntIndex`
   (`GENTITYNUM_BITS`; an entity number, never rebased) and widens
   `slotFlags` to 3 bits for `BG_GUN_GENERATION`, a slot's bit that never
-  travels with a dropped instance.
+  travels with a dropped instance. Protocol 83 adds `cursorHint`
+  (`PS_CURSOR_HINT_BITS` = 2, `cursorHint_t`, MW2's ps+0x194): the hint's
+  type, rewritten by every end-frame pass where the index is sticky. Server
+  only, never rebased; pmove does not read it; cgame's knife prompt draws from
+  it. It replaced the gclient-only boolean of the same name.
   Dropped ET_ITEM uses `generic1` for attachments, `time2` for packed magazine
   and reserve, `otherEntityNum2` for chamber debt, and `time` as a spawn serial.
 - `perks` is a five-bit spawn-owned playerstate field. All three class perk
@@ -618,8 +625,10 @@ showing the scope on that frame only. On Linux, build the same file list with
 
 `dev/tests/run-pickups.sh` runs the inventory, pickup, use/reload, take
 window (with the client's selection lagging the snapshot), throwing-knife
-pickup and sea lion checks, and `cursor_hint_wiring_test.c`, which links the
-real `ClientEndFrame`, `G_FreeEntity` and hint pass.
+pickup, hint type and sea lion checks, `cursor_hint_wiring_test.c`, which
+links the real `ClientEndFrame`, `G_FreeEntity` and hint pass, and
+`use_hint_test.c`: the knife prompt through the real `cg_draw.c`,
+`cg_usehint.c` and the engine's bind lookup in `cl_keys.c`.
 
 `dev/tests/run-fakereload.cmd` (or `.sh`) models the client/server clocks
 (MW2's client time base through the real `CL_DriftTimeDelta`, snapshot

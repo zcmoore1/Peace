@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-11"
+#define	GAME_VERSION		BASEGAME "-12"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -561,6 +561,21 @@ int BG_WeaponAttachmentMask(int weapon);
 #define BG_USE_RELOAD_HOLD_TIME 250	// IW4x's gpad_use_hold_time
 #define BG_USE_SPAWN_DELAY 500
 int BG_UseHoldTime(int buttons);
+// ps.cursorHint, MW2's playerState.cursorHint (ps+0x194, beside the index at
+// 0x19c): what the use hint pass found usable on the last end-frame. MW2's
+// Player_UpdateCursorHints zeroes it before any of its early returns (4942c8)
+// and writes it only beside an index (49461f, 49438d), so unlike the sticky
+// cursorHintEntIndex it is
+// live: it is what says whether that index can be used now. Written only by
+// the server (G_UpdateCursorHint); pmove never reads or writes it, and cgame
+// only draws from it. PS_CURSOR_HINT_BITS on the wire.
+typedef enum {
+	CURSOR_HINT_NONE,	// nothing usable: dead, sprinting, equipment out, or nothing in reach
+	CURSOR_HINT_OBJECTIVE,	// an S&D site or the bomb (the index is ENTITYNUM_WORLD)
+	CURSOR_HINT_WEAPON,	// a floor gun in reach
+	CURSOR_HINT_KNIFE,	// a resting throwing knife this player can take now
+	CURSOR_HINT_COUNT
+} cursorHint_t;
 #define BG_PICKUP_OWNER_DELAY 1000	// MW2: your own dropped gun waits this long
 typedef struct {
 	int weapon, attachments, ammo, reserve, flags;

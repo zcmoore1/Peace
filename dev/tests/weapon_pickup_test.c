@@ -639,9 +639,9 @@ static void TestKnifePickup(void) {
  VectorSet(at,BG_KNIFE_PICKUP_RADIUS-1,0,0); G_SetOrigin(knife,at); EndFrame();
  CHECK(ps->cursorHintEntIndex==knife->s.number);
  VectorSet(at,BG_KNIFE_PICKUP_REACH-1,0,ps->viewheight); G_SetOrigin(knife,at); EndFrame();
- CHECK(clients[0].cursorHint && ps->cursorHintEntIndex==knife->s.number);
+ CHECK(ps->cursorHint==CURSOR_HINT_KNIFE && ps->cursorHintEntIndex==knife->s.number);
  VectorSet(at,BG_KNIFE_PICKUP_REACH+1,0,ps->viewheight); G_SetOrigin(knife,at); EndFrame();
- CHECK(!clients[0].cursorHint && ps->cursorHintEntIndex==knife->s.number);
+ CHECK(ps->cursorHint==CURSOR_HINT_NONE && ps->cursorHintEntIndex==knife->s.number);
  UseStep(BUTTON_USE_RELOAD); UseStep(0);
  CHECK(knife->inuse && ps->weaponstate==WEAPON_RELOADING);
  /* still moving faster than bg_maxGrenadeIndicatorSpeed, or out of sight: not yet */
@@ -757,8 +757,63 @@ static void SeaLion(int use) {
   ps->weaponTime==BG_WeaponQuickDropTime(WP_MACHINEGUN));
 }
 static void TestKnifeSeaLion(void) { SeaLion(BUTTON_USE_RELOAD); SeaLion(BUTTON_USE); }
+/* ps.cursorHint, the hint's networked type (MW2's playerState.cursorHint),
+ * which the knife prompt draws from. Each end-frame rewrites it, so it is live
+ * where the index is sticky: it is CURSOR_HINT_KNIFE exactly when a +use
+ * press on the next command takes the knife, and never otherwise. */
+enum { KS_TAKE, KS_FULL, KS_NO_KNIVES, KS_MOVING, KS_HIDDEN, KS_OUTSIDE, KS_BEYOND,
+ KS_SPRINT, KS_EQUIPMENT, KS_DEAD, KS_SPECTATOR, KS_BOMB, KS_GUN_TOO, KS_COUNT };
+static void TestCursorHintType(void) {
+ static const int types[KS_COUNT]={CURSOR_HINT_KNIFE,CURSOR_HINT_NONE,CURSOR_HINT_NONE,CURSOR_HINT_NONE,
+  CURSOR_HINT_NONE,CURSOR_HINT_NONE,CURSOR_HINT_NONE,CURSOR_HINT_NONE,CURSOR_HINT_NONE,CURSOR_HINT_NONE,
+  CURSOR_HINT_NONE,CURSOR_HINT_OBJECTIVE,CURSOR_HINT_KNIFE};
+ playerState_t *ps; gentity_t *knife,*gun=NULL; int i,before; vec3_t at;
+ for(i=0;i<KS_COUNT;i++) {
+  ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=i==KS_FULL ? 1 : 0;
+  if(i==KS_NO_KNIVES) { ps=Reset(); clients[0].knifeHold=ENTITYNUM_NONE; }
+  knife=GroundKnife(i==KS_OUTSIDE ? BG_KNIFE_PICKUP_RADIUS+1 : 10,0,0);
+  if(i==KS_GUN_TOO) { gun=Floor(WP_RAILGUN,0,2,8,0); VectorSet(at,0,0,ps->viewheight); G_SetOrigin(gun,at); }
+  if(i==KS_MOVING) VectorSet(knife->s.pos.trDelta,BG_KNIFE_PICKUP_STILL+1,0,0);
+  blocked=i==KS_HIDDEN; bombUsable=i==KS_BOMB;
+  if(i==KS_BEYOND) {	/* named from close by, then out past the eye reach: still named, not usable */
+   EndFrame(); CHECK(ps->cursorHint==CURSOR_HINT_KNIFE);
+   VectorSet(at,BG_KNIFE_PICKUP_REACH+1,0,ps->viewheight); G_SetOrigin(knife,at);
+  }
+  if(i==KS_SPRINT || i==KS_EQUIPMENT || i==KS_DEAD || i==KS_SPECTATOR) {
+   EndFrame(); CHECK(ps->cursorHint==CURSOR_HINT_KNIFE && ps->cursorHintEntIndex==knife->s.number);
+  }
+  if(i==KS_SPRINT) ps->pm_flags|=PMF_SPRINTING;
+  if(i==KS_EQUIPMENT) ps->weaponAction=WA_TACTICAL;
+  if(i==KS_DEAD) ps->stats[STAT_HEALTH]=0;
+  if(i==KS_SPECTATOR) ps->pm_type=PM_SPECTATOR;
+  EndFrame();
+  CHECK(ps->cursorHint==types[i]);
+  /* the sticky index can still name the knife where the type says no */
+  CHECK((i!=KS_BEYOND && i!=KS_SPRINT && i!=KS_EQUIPMENT && i!=KS_DEAD && i!=KS_SPECTATOR) ||
+   ps->cursorHintEntIndex==knife->s.number);
+  before=ps->ammo[WP_THROWING_KNIFE];
+  UseOnly(BUTTON_USE);
+  CHECK((ps->cursorHint==CURSOR_HINT_KNIFE)==!knife->inuse);
+  CHECK(knife->inuse || ps->ammo[WP_THROWING_KNIFE]==before+1);
+  /* once taken, the next end-frame finds what is left: the gun, or nothing */
+  if(!knife->inuse) { EndFrame(); CHECK(ps->cursorHint==(i==KS_GUN_TOO ? CURSOR_HINT_WEAPON : CURSOR_HINT_NONE)); }
+ }
+ blocked=bombUsable=qfalse;
+ /* MW2's pass does not ask g_useholdspawndelay: right after spawning the knife
+  * is the hint, and a press held through the delay takes it. */
+ ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0; clients[0].respawnTime=level.time;
+ knife=GroundKnife(10,0,0); EndFrame(); CHECK(ps->cursorHint==CURSOR_HINT_KNIFE);
+ for(i=0;i<BG_USE_SPAWN_DELAY && knife->inuse;i++) { UseOnly(BUTTON_USE); EndFrame(); }
+ CHECK(!knife->inuse && level.time-clients[0].respawnTime==BG_USE_SPAWN_DELAY);
+ /* each end-frame rewrites it: back to nothing once the knife is out of the
+  * inner radius and was never named */
+ ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=0; knife=GroundKnife(10,0,0);
+ EndFrame(); CHECK(ps->cursorHint==CURSOR_HINT_KNIFE);
+ ps->pm_flags|=PMF_SPRINTING; EndFrame(); CHECK(ps->cursorHint==CURSOR_HINT_NONE);
+ ps->pm_flags&=~PMF_SPRINTING; EndFrame(); CHECK(ps->cursorHint==CURSOR_HINT_KNIFE);
+}
 int main(void) {
  TestDrops(); TestScavenge(); TestHold(); TestSwap(); TestDuplicateBase(); TestUseReload(); TestUseBusy(); TestBombFirst(); TestContestedPickup(); TestReach(); TestCursorHint();
- TestTakeWindow(); TestTakeKeepsDrop(); TestUseHold(); TestKnifePickup(); TestKnifeSeaLion();
+ TestTakeWindow(); TestTakeKeepsDrop(); TestUseHold(); TestKnifePickup(); TestKnifeSeaLion(); TestCursorHintType();
  printf("PASS: %d death/drop/pickup/slot-intent checks\n",checks); return 0;
 }

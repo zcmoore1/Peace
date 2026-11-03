@@ -652,12 +652,13 @@ static void G_TakeKnife(gentity_t *player, gentity_t *knife) {
 G_KnifeHinted
 
 Whether the last end-frame's use hint is a throwing knife (MW2's cursorHint
-naming a weaponClass 9 missile).
+naming a weaponClass 9 missile). A free since then leaves the type but empties
+the index, as MW2's use test asks both (5fe2e3-5fe2f7).
 */
 static qboolean G_KnifeHinted(gentity_t *player) {
-	gclient_t *client = player->client;
-	int hint = client->ps.cursorHintEntIndex;
-	return client->cursorHint && hint >= MAX_CLIENTS && hint < ENTITYNUM_MAX_NORMAL &&
+	playerState_t *ps = &player->client->ps;
+	int hint = ps->cursorHintEntIndex;
+	return ps->cursorHint == CURSOR_HINT_KNIFE && hint >= MAX_CLIENTS && hint < ENTITYNUM_MAX_NORMAL &&
 		G_IsThrowingKnife(&g_entities[hint]);
 }
 
@@ -804,6 +805,8 @@ void G_CommitWeaponPickup(gentity_t *player, int buttons) {
 	if (item->flags & FL_DROPPED_ITEM) G_FreeEntity(item);
 }
 
+typedef char cursorHintFitsWire[(CURSOR_HINT_COUNT <= (1 << PS_CURSOR_HINT_BITS)) ? 1 : -1];
+
 /*
 G_UpdateCursorHint
 
@@ -813,23 +816,26 @@ sprinting, with equipment out, or dead, it is not written at all, so it keeps
 naming the last thing it named, and spawn leaves it 0. Here only freeing what
 it names (G_ClearCursorHintRefs) turns it into ENTITYNUM_NONE; MW2's pass also
 writes that itself for usables Peace does not have yet. Pmove reads it.
+ps.cursorHint, the hint's type, is not sticky: it is cleared first (4942c8)
+and set only beside a written index (49461f), so it says whether the index can
+be used now. cgame's knife prompt draws from it.
 */
 void G_UpdateCursorHint(gentity_t *player) {
 	playerState_t *ps = &player->client->ps;
 	const entityState_t *item;
 	gentity_t *knife;
-	player->client->cursorHint = qfalse;
+	ps->cursorHint = CURSOR_HINT_NONE;
 	if (ps->stats[STAT_HEALTH] <= 0 || ps->pm_type != PM_NORMAL ||
 		(ps->pm_flags & PMF_SPRINTING) || BG_OffhandOut(ps)) return;
 	if (G_SNDUsable(player)) {
 		ps->cursorHintEntIndex = ENTITYNUM_WORLD;	// a site or the bomb: never freed
-		player->client->cursorHint = qtrue;
+		ps->cursorHint = CURSOR_HINT_OBJECTIVE;
 		return;
 	}
 	knife = G_FindKnifePickup(player);	// a missile outranks any gun (-512)
 	item = knife ? &knife->s : G_FindWeaponPickup(player);
 	if (!item) return;
-	player->client->cursorHint = qtrue;
+	ps->cursorHint = knife ? CURSOR_HINT_KNIFE : CURSOR_HINT_WEAPON;
 	ps->cursorHintEntIndex = item->number;
 	g_entities[item->number].flags |= FL_CURSOR_HINT;
 }

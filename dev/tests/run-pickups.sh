@@ -12,3 +12,9 @@ ${CC:-cc} -std=c99 -O0 -g -ffunction-sections -fdata-sections ${PICKUP_TEST_FLAG
  code/game/bg_pmove.c code/game/bg_loadout.c code/game/bg_misc.c code/game/bg_slidemove.c \
  code/qcommon/q_math.c code/qcommon/q_shared.c -Wl,--gc-sections -lm -o out/tests/cursor-hint-wiring-test
 out/tests/cursor-hint-wiring-test
+# The knife prompt as cgame draws it, over the real engine bind lookup (cl_keys.c).
+${CC:-cc} -std=c99 -O0 -g -ffunction-sections -fdata-sections ${PICKUP_TEST_FLAGS:-} \
+ dev/tests/use_hint_test.c code/cgame/cg_usehint.c code/client/cl_keys.c \
+ code/game/bg_pmove.c code/game/bg_loadout.c code/game/bg_misc.c code/game/bg_slidemove.c \
+ code/qcommon/q_math.c code/qcommon/q_shared.c -Wl,--gc-sections -lm -o out/tests/use-hint-test
+out/tests/use-hint-test

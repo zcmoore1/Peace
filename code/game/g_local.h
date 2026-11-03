@@ -281,7 +281,6 @@ struct gclient_s {
 	int			latched_buttons;
 	bg_activate_t	activate;		// MW2's use and use/reload history (BG_UpdateActivate)
 	int				knifeMax;		// throwing knives this life started with: a pickup's room
-	qboolean		cursorHint;		// MW2's cursorHint: the last end-frame found something to use
 	int				knifeHold;		// MW2's useHoldEntity: the knife a held use is taking
 	int				knifeHoldSpawn;	// its timestamp, so a reused entity number is not it
 	int				knifeHoldStart;	// MW2's useHoldTime: when the press latched it

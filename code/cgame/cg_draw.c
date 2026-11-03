@@ -2399,11 +2399,33 @@ decides anything, it just shows what the loadout already is.
 */
 static qboolean CG_SNDUseInRange( void );
 
+/*
+CG_DrawKnifePickup
+
+"Hold [X] to pick up knife" while the server's use hint is a throwing knife this
+player can take now (ps.cursorHint, CG_KnifePromptShown), in the gun prompt's
+place and style. The button is the bound one (CG_UseButtonPrompt). The knife's
+hold is the server's and is not networked, so no bar is drawn for it. Returns
+whether it drew.
+*/
+static qboolean CG_DrawKnifePickup(void) {
+	const playerState_t *ps = &cg.predictedPlayerState;
+	char prompt[96];
+	if (!cg.snap || !CG_KnifePromptShown(ps, &cg.snap->ps)) return qfalse;
+	CG_UseButtonPrompt(cg.time, "pick up knife", prompt, sizeof(prompt));
+	CG_DrawSmallString(320 - CG_DrawStrlen(prompt) * SMALLCHAR_WIDTH / 2, 300, prompt, 1);
+	return qtrue;
+}
+
 static void CG_DrawWeaponPickup(void) {
 	playerState_t *ps = &cg.predictedPlayerState;
 	bg_weaponInstance_t gun;
 	char prompt[128];
 	vec4_t back = {0, 0, 0, .65f}, fill = {.9f, .8f, .45f, 1};
+	// MW2 shows one use hint, and a knife outranks any gun (G_UpdateCursorHint):
+	// a use or use/reload press there is the knife's, so its prompt takes this
+	// place.
+	if (CG_DrawKnifePickup()) return;
 	// Where the bomb is the use target, a use/reload press is the bomb's
 	// (G_UseThink): the bomb's prompt is the one shown.
 	if (ps->pickupTarget < MAX_CLIENTS || ps->pickupTarget >= ENTITYNUM_MAX_NORMAL ||
@@ -2544,6 +2566,15 @@ static void CG_DrawWeaponDebug( void ) {
 		(ps->stats[STAT_LADDER] & LADDER_ATTACHED) ? "ON" : "off",
 		!!(ps->stats[STAT_LADDER] & LADDER_HOLSTER),
 		!!(ps->stats[STAT_LADDER] & LADDER_JUMP_OFF) );
+	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
+	// The server's sticky use hint: ENTITYNUM_NONE is the sea lion (peacedump
+	// says what a live number names).
+	if ( ps->cursorHintEntIndex == ENTITYNUM_NONE ) {
+		Q_strncpyz( line, "usehint: SEA LION", sizeof( line ) );
+	} else {
+		Com_sprintf( line, sizeof( line ), "usehint: %i%s", ps->cursorHintEntIndex,
+			ps->cursorHint != CURSOR_HINT_NONE ? " (in reach)" : "" );
+	}
 	CG_DrawSmallString( 8, y, line, 1.0f );
 }
 

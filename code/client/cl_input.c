@@ -373,6 +373,9 @@ CL_MouseEvent
 =================
 */
 void CL_MouseEvent( int dx, int dy, int time ) {
+	if ( dx || dy ) {
+		CL_NoteInputDevice( qfalse );
+	}
 	if ( Key_GetCatcher( ) & KEYCATCH_UI ) {
 		VM_Call( uivm, UI_MOUSE_EVENT, dx, dy );
 	} else if (Key_GetCatcher( ) & KEYCATCH_CGAME) {
@@ -393,6 +396,9 @@ Joystick values stay set until changed
 void CL_JoystickEvent( int axis, int value, int time ) {
 	if ( axis < 0 || axis >= MAX_JOYSTICK_AXIS ) {
 		Com_Error( ERR_DROP, "CL_JoystickEvent: bad axis %i", axis );
+	}
+	if ( value ) {
+		CL_NoteInputDevice( qtrue );	// a stick past its dead zone
 	}
 	cl.joystickAxis[axis] = value;
 }

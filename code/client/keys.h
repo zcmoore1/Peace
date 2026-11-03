@@ -53,3 +53,7 @@ qboolean Key_GetOverstrikeMode( void );
 void Key_SetOverstrikeMode( qboolean state );
 void Key_ClearStates( void );
 int Key_GetKey(const char *binding);
+qboolean Key_IsGamepadKey( int keynum );
+void CL_NoteInputDevice( qboolean gamepad );
+extern cvar_t *cl_gamepadInUse;
+int Key_GetBindingName( const char *binding, qboolean gamepad, char *name, int nameSize );

@@ -184,7 +184,8 @@ typedef enum {
 	CG_TESTPRINTFLOAT,
 	CG_ACOS,
 	CG_R_BUILDMODELPOSE,
-	CG_R_BLENDMODELPOSES
+	CG_R_BLENDMODELPOSES,
+	CG_KEY_GETBINDINGNAME	// appended: the numbers above stay as they are
 } cgameImport_t;
 
 

@@ -1126,6 +1126,7 @@ netField_t	playerStateFields[] =
 { PSF(pickupSlot), 1 },
 { PSF(pickupHeld), 2 },
 { PSF(cursorHintEntIndex), GENTITYNUM_BITS },
+{ PSF(cursorHint), PS_CURSOR_HINT_BITS },
 { PSF(viewangles[2]), 0 },
 { PSF(grapplePoint[0]), 0 },
 { PSF(grapplePoint[1]), 0 },

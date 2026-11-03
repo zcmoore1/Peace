@@ -1404,6 +1404,18 @@ qboolean CG_Killcam_Active( void );
 void     CG_Killcam_Transition( const snapshot_t *previous, const snapshot_t *next );
 void     CG_Killcam_Draw( void );
 
+// cg_usehint.c
+// ms between bind lookups while a use prompt stays up; one that appears again
+// after being hidden this long looks its binds up at once
+#define CG_USE_BUTTON_REFRESH	1000
+#define CG_USE_BUTTON_GAP		250
+void     CG_ReadableKeyName( const char *bindName, char *out, int outSize );
+qboolean CG_FindUseButton( qboolean gamepad, char *label, int labelSize, qboolean *hold );
+void     CG_UsePromptText( qboolean bound, qboolean hold, const char *label, const char *action,
+	char *out, int outSize );
+void     CG_UseButtonPrompt( int time, const char *action, char *out, int outSize );
+qboolean CG_KnifePromptShown( const playerState_t *ps, const playerState_t *server );
+
 void CG_RegisterWeapon( int weaponNum );
 void CG_RegisterItemVisuals( int itemNum );
 
@@ -1699,6 +1711,8 @@ qboolean	trap_Key_IsDown( int keynum );
 int			trap_Key_GetCatcher( void );
 void		trap_Key_SetCatcher( int catcher );
 int			trap_Key_GetKey( const char *binding );
+// the first gamepad (or keyboard and mouse) key bound to exactly binding, and its bind name
+int			trap_Key_GetBindingName( const char *binding, qboolean gamepad, char *name, int nameSize );
 
 
 typedef enum {

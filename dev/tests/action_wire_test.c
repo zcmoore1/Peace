@@ -29,6 +29,7 @@ int main(void) {
   to.slotAttachments[0]=i&1; to.slotAttachments[1]=j&1;
   to.slotFlags[0]=i&7; to.slotFlags[1]=j&7;	/* with the generation bit */
   { const int hints[4]={0,37,ENTITYNUM_WORLD,ENTITYNUM_NONE}; to.cursorHintEntIndex=hints[(i+j)&3]; }
+  from.cursorHint=i%CURSOR_HINT_COUNT; to.cursorHint=j%CURSOR_HINT_COUNT;	/* every hint type, from every other */
   to.pickupTarget=1023; to.pickupSerial=2147483000; to.pickupTime=1000;
   to.pickupSlot=j&1; to.pickupHeld=j&3;
   from.weapFlags=i&3; to.weapFlags=j&3;	/* PWF_USE_RELOAD and PWF_SPRINT_RELEASE */
@@ -56,6 +57,7 @@ int main(void) {
   CHECK(decoded.jumpLand==to.jumpLand && decoded.jumpWait==to.jumpWait);
   CHECK(decoded.jumpOriginZ==to.jumpOriginZ && decoded.sprintUsed==to.sprintUsed);
   CHECK(decoded.cursorHintEntIndex==to.cursorHintEntIndex);
+  CHECK(decoded.cursorHint==to.cursorHint);
  }
  printf("PASS: %d action wire checks\n",checks); return 0;
 }

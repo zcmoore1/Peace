@@ -21,7 +21,11 @@ throwing knife (`BG_UseHoldTime`). `+reload` collecting a gun is Peace's own:
 MW2 reads only use and use/reload there. Nothing is collected in the first
 `BG_USE_SPAWN_DELAY` (500 ms, MW2's `g_useholdspawndelay`) after the player
 spawns. A gun you dropped yourself is not a candidate for its first 1000 ms
-(`BG_PICKUP_OWNER_DELAY`, MW2's). The HUD shows the item and progress.
+(`BG_PICKUP_OWNER_DELAY`, MW2's). The HUD shows the item and progress,
+except where a throwing knife is the use hint: a knife outranks any gun, and
+its prompt takes the place (`dev/THROWING_KNIFE.md`) unless a hold is
+already running on the gun (a plain reload hold, or a use/reload hold the
+server gave it).
 Swapping the gun in hand empties the hand, as MW2's take does: the new gun is
 drawn once your selection names it, about a round trip later (each slot's
 generation bit, `BG_SlotCommand`). Collecting a dropped gun your use hint named

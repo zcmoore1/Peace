@@ -101,10 +101,42 @@ item's model in `bg_misc.c` and the missile model in `cg_weapons.c`.
   returning true, 0x5FE34C), and a completed hold is never followed by one.
   Let go early, use/reload asks for the reload, as over a gun. A press while
   sprinting or with equipment out does nothing. Walking over a knife never
-  collects it. The HUD shows no progress for a knife hold yet (the gun's bar
-  is predicted in pmove; the knife's hold is the server's). A knife that only
+  collects it. A knife that only
   becomes the hint during a hold for a floor gun takes nothing from that hold:
   MW2 holds for what the press chose.
+- **Prompt.** While the hint is a knife the player can take now, the HUD
+  reads "Hold [X] to pick up knife" in the floor gun's prompt place, instead of
+  the gun's (a knife outranks any gun). The server says so in `ps.cursorHint`,
+  MW2's `playerState.cursorHint` (ps+0x194): the hint's type, cleared at the
+  top of every end-frame pass (MW2 4942c8) and set only beside a written index
+  (49461f), so unlike the sticky `cursorHintEntIndex` it is live. It is
+  `CURSOR_HINT_KNIFE` exactly when a use press on the next command takes the
+  knife (out of reach, no room, moving, out of sight, sprinting, equipment
+  out, dead or not `PM_NORMAL` all leave it `CURSOR_HINT_NONE`; a usable S&D
+  site or bomb makes it `CURSOR_HINT_OBJECTIVE`). As in MW2's pass, the 500ms
+  spawn delay does not hide it: a press held through the delay takes the knife.
+  cgame (`cg_usehint.c`) only draws: it names the key bound to `+usereload`
+  ("Hold", `BG_UseHoldTime`), else the one bound to `+use` ("Press": it takes
+  the knife on the press), on the kind of input used last: the engine sets
+  `cl_gamepadInUse` to 1 on any pad or joystick button or stick and to 0 on any
+  keyboard key, mouse button or mouse movement, as IW4x switches its prompts
+  (`CL_NoteInputDevice`). So a pad player reads "Hold [X]" and a keyboard
+  player "Press [F]" with the shipped configs, whatever `in_joystick` says. The
+  other kind's key is the fallback (`trap_Key_GetBindingName`, the cgame trap
+  appended at 114). Pad keys read as their labels (X, LB, RT, LS, D-PAD UP);
+  with neither command bound it says to bind `+use`. The device is read every
+  frame the prompt shows; binds are looked up when it changes, when the prompt
+  appears, and then once a second. The prompt hides a frame early where the
+  server would refuse the use (sprinting, equipment out, dead, spectating,
+  following), and while a hold already running on a floor gun keeps that gun's
+  prompt and bar: a plain reload hold, or a use/reload hold the server gave the
+  gun. The server's own `pickupHeld` tells that apart (a hold the knife takes
+  is rewritten from 3 to 2 on its first command), so a knife that comes into
+  reach during a gun's hold never claims the prompt for a hold that takes the
+  gun. The bomb needs no test of its own: wherever a site or the bomb owns the
+  use the type is `CURSOR_HINT_OBJECTIVE`. There is no hold bar: the knife's
+  hold is the server's (`knifeHoldStart`) and is not networked, and a guessed
+  bar would disagree with it when the press came before the hint.
 - **Take.** One more knife and the pickup sound. The hands are not touched.
   The knife is then freed, which empties every use hint that named it. That is
   how the throwing knife enters the sea lion: throw it, pick it back up, and
@@ -165,4 +197,11 @@ Not yet done:
   use and with use/reload (the owner's chain: take the knife back, then a
   flash pressed in a later quick raise comes straight out).
 - `cursor_hint_wiring_test.c` checks that the real `ClientEndFrame` names a
-  knife and that the real `G_FreeEntity` empties the hint.
+  knife, writes the hint's type, and that the real `G_FreeEntity` empties the
+  hint.
+- `TestCursorHintType` (pickup suite) checks that `ps.cursorHint` is
+  `CURSOR_HINT_KNIFE` exactly when a use press takes the knife, case by case.
+- `use_hint_test.c` (`run-pickups.sh`) drives the real `CG_DrawWeaponPickup`,
+  the prompt gate, the key-name formatter and the button choice over the real
+  engine bind lookup (`cl_keys.c`), the bind refresh, and the trap's number in
+  `cg_syscalls.asm`; `action_wire_test.c` round-trips the field.

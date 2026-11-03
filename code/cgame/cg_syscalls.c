@@ -454,3 +454,7 @@ qboolean trap_R_BuildModelPose( qhandle_t hModel, int frame, int oldframe, float
 void trap_R_BlendModelPoses( modelPose_t *out, const modelPose_t *a, float weightA, const modelPose_t *b, float weightB ) {
 	syscall( CG_R_BLENDMODELPOSES, out, a, PASSFLOAT(weightA), b, PASSFLOAT(weightB) );
 }
+
+int trap_Key_GetBindingName( const char *binding, qboolean gamepad, char *name, int nameSize ) {
+	return syscall( CG_KEY_GETBINDINGNAME, binding, gamepad, name, nameSize );
+}

@@ -47,7 +47,7 @@ Each layer has:
 #define LAYER_RETAINED      3
 #define RETAINED_BLEND_SPEED 0.0125f // 80ms picture release; never a gameplay lock
 #define MOVE_BLEND_SPEED     0.025f  // 40ms move-layer crossfade into or out of idle
-#define MOVE_RETURN_MS       250.0f  // longest picture return after a cancelled transition
+#define MOVE_RETURN_MS       250.0f  // longest draw/drop picture return after a cancel
 #define RETURN_BLEND_MSEC    100.0f  // release a completed/interrupted base action
 
 // How the move layer's clip clock is driven. Every mode is picture only: the
@@ -297,30 +297,48 @@ static void CG_WeapAnim_ReanchorDrop(const playerState_t *ps, animLayer_t *move,
 // Gameplay cancelled the transition (YY): the gun is already ready to fire.
 // The picture travels back along the clip it was showing - up the draw, or back
 // up the drop - instead of cutting to idle. It eases in and out, and takes the
-// time that stretch of clip would naturally take, capped at MOVE_RETURN_MS.
-// Sprint posture is already eased in the authored clip. Once gameplay is
-// ready, retrace it at twice its ordinary exit rate without easing it again.
+// time that stretch of clip would naturally take, capped at MOVE_RETURN_MS
+// (a cancelled 829ms SPAS holster must not take most of a second to undo).
+//
+// A sprint posture comes home exactly as the sprint layer's own exit brings it
+// home, only without that exit's lock: the weapon's sprint-out time is the one
+// number, and no return cap applies. A carry plays its authored exit from the
+// carry; an exit already under way keeps its pace; an entry runs back over the
+// whole sprint-out time, as a sprint tap reverses one (pmove stamps the full
+// exit for any reversal), so even a slight entry eases home rather than flicking
+// back in a few frames. The authored clip already eases the pose, so this
+// clock stays linear: it leaves at the exit's pace and settles as the exit does.
 static qboolean CG_WeapAnim_BeginReturn(const weapAnimDef_t *def, const playerState_t *ps, animLayer_t *move) {
-	float len = CG_WeapAnim_ClipLength(def, move->clip);
-	float from = move->time, natural;
+	float len, from, natural;
 
-	if (move->clip == WANIM_SPRINT_IN || move->clip == WANIM_SPRINT_OUT)
-		len = CG_WeapAnim_LastFrameTime(def, move->clip);
-	if (len <= 0.0f || move->weight <= 0.0f || move->targetWeight <= 0.0f) return qfalse;
+	if (move->weight <= 0.0f || move->targetWeight <= 0.0f) return qfalse;
+	// The way home from the carry is its exit, starting on the carry the exit
+	// starts on, as when a sprint stops in its loop.
+	if (move->clip == WANIM_SPRINT_LOOP) {
+		if (CG_WeapAnim_LastFrameTime(def, WANIM_SPRINT_OUT) <= 0.0f) return qfalse;
+		move->clip = WANIM_SPRINT_OUT;
+		move->time = move->startFraction = 0.0f;
+	}
+	len = move->clip == WANIM_SPRINT_IN || move->clip == WANIM_SPRINT_OUT ?
+		CG_WeapAnim_LastFrameTime(def, move->clip) : CG_WeapAnim_ClipLength(def, move->clip);
+	if (len <= 0.0f) return qfalse;
+	from = move->time;
 	if (from < 0.0f) from = 0.0f;
 	if (from > len) from = len;
 	if (move->clip == WANIM_DROP) {
 		move->returnTo = 0.0f;
 		natural = from / len * BG_WeaponDropTime(ps->weapon);
+		if (natural > MOVE_RETURN_MS) natural = MOVE_RETURN_MS;
 	} else if (CG_WeapAnim_IsDrawClip(move->clip)) {
 		move->returnTo = len;
 		natural = (len - from) / len * BG_WeaponDrawTime(ps);
+		if (natural > MOVE_RETURN_MS) natural = MOVE_RETURN_MS;
 	} else if (move->clip == WANIM_SPRINT_IN) {
 		move->returnTo = 0.0f;
-		natural = from / len * BG_WeaponSprintOutTime(ps->weapon) * .5f;
+		natural = from > 0.0f ? BG_WeaponSprintOutTime(ps->weapon) : 0.0f;
 	} else if (move->clip == WANIM_SPRINT_OUT) {
 		move->returnTo = len;
-		natural = (len - from) / len * BG_WeaponSprintOutTime(ps->weapon) * .5f;
+		natural = (len - from) / len * BG_WeaponSprintOutTime(ps->weapon);
 	} else {
 		return qfalse;
 	}
@@ -329,7 +347,7 @@ static qboolean CG_WeapAnim_BeginReturn(const weapAnimDef_t *def, const playerSt
 	if (natural < 1.0f) natural = 1.0f;
 	move->returnFrom = from;
 	move->returnTime = 0.0f;
-	move->returnLength = natural < MOVE_RETURN_MS ? natural : MOVE_RETURN_MS;
+	move->returnLength = natural;
 	move->fit = MOVE_FIT_RETURN;
 	return qtrue;
 }
@@ -362,9 +380,9 @@ static void CG_WeapAnim_UpdateRetention(const weapAnimDef_t *def, const playerSt
 			(!dropping && !def->clips[retained->clip].loop &&
 			 !CG_WeapAnim_TransitionBusy(def, retained))) {
 			cg_retainedActive = qfalse;
-			// A cancelled holster returns the picture it actually carried. The
-			// sprint transition follows the same clip return as a draw or drop;
-			// fading a still-advancing entry directly into idle loses that motion.
+			// A cancelled holster returns the picture it actually carried. A
+			// sprint entry, carry or exit follows the same clip return as a draw
+			// or drop; fading the carry straight into idle loses that motion.
 			if (cg_retainedDrop && ps->weaponstate == WEAPON_READY &&
 				CG_WeapAnim_BeginReturn(def, ps, retained)) {
 				cg_weapLayers[LAYER_MOVE] = *retained;
@@ -627,8 +645,9 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 		move->returnTime += (float)msec;
 		s = move->returnLength > 0.0f ? move->returnTime / move->returnLength : 1.0f;
 		if ( s > 1.0f ) s = 1.0f;
-		// The sprint clip already eases its pose. Easing its clock as well
-		// holds near the carry before rushing home, especially at its endpoint.
+		// The sprint clips already ease their pose, and the sprint layer plays
+		// them on a linear clock. Easing this clock as well would hold near the
+		// carry and then rush home. Linear, it is the ordinary exit's own motion.
 		eased = move->clip == WANIM_SPRINT_IN || move->clip == WANIM_SPRINT_OUT ?
 			s : s * s * ( 3.0f - 2.0f * s );
 		move->time = move->returnFrom + ( move->returnTo - move->returnFrom ) * eased;

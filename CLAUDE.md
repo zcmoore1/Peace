@@ -95,10 +95,16 @@ source for MW2 behaviour; the owner rejects it.
   not a gameplay state. `TestFlow` drives it through the real `PM_Weapon`.
 - **Sprint cancellation returns along the visible transition.** Sprint, Y,
   end the sprint (it latches: a fresh press, aim, letting go of forward), Y
-  transfers the retained sprint entry/exit into the existing move-layer
-  return. It retraces the authored easing at twice the ordinary sprint-out
-  rate (125ms SPAS / 130ms M300 for a full return), without easing the clock
-  a second time; it does not keep advancing away while
+  transfers the retained sprint entry, carry or exit into the existing
+  move-layer return. The picture is the ordinary sprint exit's, minus its
+  lock: a carry (entry finished, or the loop) plays the exit over the whole
+  `BG_WeaponSprintOutTime` (250ms SPAS / 260ms M300), an exit already under
+  way keeps its own pace, and a partial entry runs back over the whole
+  sprint-out time, as a sprint tap's reversal does. No `MOVE_RETURN_MS` cap
+  and no second easing: the clock is linear and the authored clip eases the
+  pose, so it leaves the carry at the exit's pace and settles like it. A loop
+  drops its bob onto the exit's first frame exactly as an ordinary stop in the
+  loop does. The return does not keep advancing away while
   fading to idle. The ready endpoint stays fixed throughout that fade. A new
   sprint may inherit only a posture that is still visible (including a
   move-layer return), never a hidden layer's old clock. A sprint still running
@@ -614,6 +620,9 @@ Pose checks cover source retention, ladder holsters, loop/endpoint semantics,
 reload/action exclusions, ordinary sprint reversal and frame-only crossfades,
 plus YY flow (reversed draw, eased return, fire cut-in) through the real
 `PM_Weapon`, which is why the pose test links `pickup_pmove_driver.c`.
+The glide return is compared frame by frame with the ordinary sprint exit
+from the same posture (carry, loop, exit under way, partial entry), in both
+rendering paths, for SPAS and M300.
 The native/QVM pointer-boundary test links `cl_vm.c` and `vm_ptr.c` directly;
 keep it independent of the full client and VM lifecycle so MSVC can link it.
 Loadouts UI and class definitions are documented in `dev/LOADOUTS.md`.

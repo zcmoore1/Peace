@@ -185,6 +185,15 @@ static qboolean BG_ClassNameValid( const char *name ) {
 	}
 	return qfalse;
 }
+// How many of a class's equipment it may carry. The throwing knife is MW2's
+// throwingknife_mp: startAmmo 1, maxAmmo 1 (weapon data). The frag, Semtex and
+// flash keep Peace's one to three (owner's choice; MW2 gives 1, 1 and 2).
+#define BG_CLASS_EQUIPMENT_LEGACY_MAX 3	// every count a class could save before the cap
+int BG_ClassEquipmentMax( int weapon ) {
+	if ( weapon == WP_NONE ) return 0;
+	return weapon == WP_THROWING_KNIFE ? 1 : BG_CLASS_EQUIPMENT_LEGACY_MAX;
+}
+
 qboolean BG_ValidateClass( const bg_class_t *loadout ) {
 	int i, limit = perks[PERK_NONE].attachmentLimit;
 	if ( !loadout || !BG_ClassNameValid(loadout->name) ) return qfalse;
@@ -193,8 +202,8 @@ qboolean BG_ValidateClass( const bg_class_t *loadout ) {
 	if ( loadout->lethal != WP_NONE && loadout->lethal != WP_FRAG && loadout->lethal != WP_SEMTEX &&
 		loadout->lethal != WP_THROWING_KNIFE ) return qfalse;
 	if ( loadout->tactical != WP_NONE && loadout->tactical != WP_FLASH ) return qfalse;
-	if ( loadout->lethalCount < 0 || loadout->lethalCount > 3 ||
-		loadout->tacticalCount < 0 || loadout->tacticalCount > 3 ) return qfalse;
+	if ( loadout->lethalCount < 0 || loadout->lethalCount > BG_ClassEquipmentMax(loadout->lethal) ||
+		loadout->tacticalCount < 0 || loadout->tacticalCount > BG_ClassEquipmentMax(loadout->tactical) ) return qfalse;
 	if ( (loadout->lethal == WP_NONE) != (loadout->lethalCount == 0) ||
 		(loadout->tactical == WP_NONE) != (loadout->tacticalCount == 0) ) return qfalse;
 	if ( !BG_ClassPerksValid(loadout) ) return qfalse;
@@ -240,6 +249,15 @@ qboolean BG_ParseClass( const char *text, bg_class_t *loadout ) {
 	}
 	if ( strlen(text) >= sizeof(result.name) ) return qfalse;
 	Q_strncpyz(result.name, text, sizeof(result.name));
+	// A class saved before the knife's cap keeps the rest of its loadout: a
+	// count the old 1-3 rule took is clamped to its equipment's carry, never
+	// the class refused or reset. Anything else is still invalid.
+	if ( result.lethal != WP_NONE && result.lethalCount <= BG_CLASS_EQUIPMENT_LEGACY_MAX &&
+		result.lethalCount > BG_ClassEquipmentMax(result.lethal) )
+		result.lethalCount = BG_ClassEquipmentMax(result.lethal);
+	if ( result.tactical != WP_NONE && result.tacticalCount <= BG_CLASS_EQUIPMENT_LEGACY_MAX &&
+		result.tacticalCount > BG_ClassEquipmentMax(result.tactical) )
+		result.tacticalCount = BG_ClassEquipmentMax(result.tactical);
 	if ( !BG_ValidateClass(&result) ) return qfalse;
 	*loadout = result; // invalid data never partly overwrites the live choice
 	return qtrue;

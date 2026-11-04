@@ -640,9 +640,9 @@ static void UI_ClassOpenPicker( int kind, int slot, int category ) {
 		if ( kind == CLASS_LETHAL ) {
 			UI_ClassPageRow(&classPicker, WP_FRAG, "Frag grenade", "A timed explosive grenade. Choose how many to carry on the next screen.", current == WP_FRAG, qfalse);
 			UI_ClassPageRow(&classPicker, WP_SEMTEX, "Semtex", "A sticky explosive grenade. Choose how many to carry on the next screen.", current == WP_SEMTEX, qfalse);
-			UI_ClassPageRow(&classPicker, WP_THROWING_KNIFE, "Throwing knife", "Thrown straight from the hand; kills on a hit, sticks where it lands, pick it back up with use.", current == WP_THROWING_KNIFE, qfalse);
+			UI_ClassPageRow(&classPicker, WP_THROWING_KNIFE, "Throwing knife", "One knife, thrown straight from the hand; kills on a hit, sticks where it lands, pick it back up with use.", current == WP_THROWING_KNIFE, qfalse);
 		} else UI_ClassPageRow(&classPicker, WP_FLASH, "Flash grenade", "Disorients players in its blast. Choose how many to carry on the next screen.", current == WP_FLASH, qfalse);
-		Q_strncpyz(classPicker.note, "Carry one to three of each equipment type. Counts reset on spawn.", sizeof(classPicker.note));
+		Q_strncpyz(classPicker.note, "Carry one to three grenades, or one throwing knife. Counts reset on spawn.", sizeof(classPicker.note));
 	}
 	UI_ClassPagePush(&classPicker);
 	if ( kind == CLASS_ATTACHMENTS ) Q_strncpyz(classPicker.back.title, "DONE", sizeof(classPicker.back.title));
@@ -689,11 +689,17 @@ static void UI_ClassPageEvent( void *ptr, int event ) {
 			UI_PopMenu();
 			break;
 		}
+		if ( BG_ClassEquipmentMax(row->value) == 1 ) {	/* one to carry: nothing to choose */
+			if ( page->kind == CLASS_LETHAL ) { classEdit.draft.lethal = row->value; classEdit.draft.lethalCount = 1; }
+			else { classEdit.draft.tactical = row->value; classEdit.draft.tacticalCount = 1; }
+			UI_PopMenu();
+			break;
+		}
 		Com_sprintf(breadcrumb, sizeof(breadcrumb), "EDIT LOADOUT / %s / %s", page->kind == CLASS_LETHAL ? "LETHAL" : "TACTICAL", row->title);
 		UI_ClassPageInit(&classQuantity, CLASS_QUANTITY, page->kind, "CHOOSE QUANTITY", breadcrumb, UI_ClassQuantityDraw, UI_ClassQuantityKey);
 		classQuantity.choice = row->value;
 		count = page->kind == CLASS_LETHAL ? classEdit.draft.lethalCount : classEdit.draft.tacticalCount;
-		for ( i = 1; i <= 3; i++ ) {
+		for ( i = 1; i <= BG_ClassEquipmentMax(row->value); i++ ) {
 			Com_sprintf(title, sizeof(title), "%i %s", i, i == 1 ? "grenade" : "grenades");
 			UI_ClassPageRow(&classQuantity, i, title, "This quantity will be available each time you spawn with this class.", i == (count ? count : 1), qfalse);
 		}

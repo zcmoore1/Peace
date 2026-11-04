@@ -174,6 +174,13 @@ int main(void) {
  Key(K_PAD0_B); CHECK(classEdit.draft.lethal==WP_FRAG);
  Activate(Option(&classPicker,WP_SEMTEX)); Click(Option(&classQuantity,3)); Screen(&classEdit.menu,2);
  CHECK(classEdit.draft.lethal==WP_SEMTEX && classEdit.draft.lethalCount==3);
+ /* MW2's throwing knife carries one: no quantity to choose, it commits as one */
+ Activate(&classEdit.lethal); Activate(Option(&classPicker,WP_THROWING_KNIFE)); Screen(&classEdit.menu,2);
+ CHECK(classEdit.draft.lethal==WP_THROWING_KNIFE && classEdit.draft.lethalCount==1);
+ CHECK(!strcmp(classEdit.lethal.title,"Throwing knife x1"));
+ Activate(&classEdit.lethal); Activate(Option(&classPicker,WP_SEMTEX)); Screen(&classQuantity.menu,4);
+ CHECK(classQuantity.count==3); Click(Option(&classQuantity,3)); Screen(&classEdit.menu,2);
+ CHECK(classEdit.draft.lethal==WP_SEMTEX && classEdit.draft.lethalCount==3);
  Activate(&classEdit.tactical); Activate(Option(&classPicker,WP_NONE));
  CHECK(classEdit.draft.tactical==WP_NONE && classEdit.draft.tacticalCount==0);
  Activate(&classEdit.tactical); Activate(Option(&classPicker,WP_FLASH)); Activate(Option(&classQuantity,2));
@@ -215,6 +222,16 @@ int main(void) {
   OpenEditor(i); Activate(&classEdit.name); TypeName(va("Saved %i",i+1)); Key(K_ENTER); Activate(&classEdit.save);
   OpenEditor(i); CHECK(!strcmp(classEdit.draft.name,va("Saved %i",i+1))); Key(K_ESCAPE);
  }
+ /* a class saved with three knives opens with one and nothing else lost */
+ { char old[BG_CLASS_STRING_SIZE];
+   Com_sprintf(old,sizeof(old),"2|%i|%i|%i|3|%i|2|%i|0|0|0|%i|Old knives",WP_M40A3,WP_SHOTGUN,
+    WP_THROWING_KNIFE,WP_FLASH,PERK_QUICK_RELOAD,BG_ATTACHMENT_REDDOT);
+   trap_Cvar_Set("peace_class_3",old); OpenEditor(3);
+   CHECK(!strcmp(classEdit.draft.name,"Old knives") && classEdit.draft.slot[0]==WP_M40A3 &&
+    classEdit.draft.slot[1]==WP_SHOTGUN && classEdit.draft.attachments[1]==BG_ATTACHMENT_REDDOT);
+   CHECK(classEdit.draft.lethal==WP_THROWING_KNIFE && classEdit.draft.lethalCount==1);
+   CHECK(classEdit.draft.tactical==WP_FLASH && classEdit.draft.tacticalCount==2 && classEdit.draft.perk[0]==PERK_QUICK_RELOAD);
+   CHECK(!UI_ClassDirty()); Key(K_ESCAPE); }
  trap_Cvar_Set("peace_class_1","corrupt"); OpenEditor(1);
  CHECK(BG_ValidateClass(&classEdit.draft) && !strcmp(classEdit.draft.name,"Custom 2"));
  CHECK(!strcmp(vars[Find("peace_class_1")].value,"corrupt")); Key(K_ESCAPE);

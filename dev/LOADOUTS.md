@@ -12,8 +12,11 @@ and **CREATE A CLASS** entries and the existing console commands remain availabl
    slot is marked **IN USE** and cannot be duplicated. Choosing a gun returns to
    the loadout overview; Back returns one level without changing that choice.
 3. Open a gun's **Attachments** row to fit/remove compatible attachments. Open
-   **LETHAL** or **TACTICAL**, choose equipment, then choose 1–3 charges. Choosing
-   None empties that slot. Back from the quantity screen cancels that selection.
+   **LETHAL** or **TACTICAL**, choose equipment, then choose 1–3 charges. The
+   throwing knife skips that screen: it carries one, as MW2's does
+   (`throwingknife_mp` maxAmmo 1; `BG_ClassEquipmentMax`), and a class saved
+   with more loads with one and the rest unchanged. Choosing None empties that
+   slot. Back from the quantity screen cancels that selection.
 4. Open any **PERK** card to read descriptions and select a perk. Perks already in
    another slot are marked **IN USE**. Choose the name row to rename the class.
 5. **SAVE & EQUIP** saves the class and resumes the match. It applies on the next

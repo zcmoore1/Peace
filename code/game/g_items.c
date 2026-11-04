@@ -239,7 +239,7 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 
 	// Equipment pickups replenish their own count; they cannot replace a gun.
 	if ( BG_IsActionWeapon( wep ) ) {
-		ps->ammo[wep] = wep == WP_KNIFE ? -1 : 3;
+		ps->ammo[wep] = wep == WP_KNIFE ? -1 : BG_ClassEquipmentMax( wep );
 		BG_RebuildWeaponMask( ps );
 		return g_weaponRespawn.integer;
 	}

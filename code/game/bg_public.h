@@ -667,6 +667,7 @@ int					BG_ClassCount( void );
 const bg_class_t	*BG_Class( int index );
 void				BG_ApplyLoadout( playerState_t *ps, int classIndex );
 void                BG_ApplyClass( playerState_t *ps, const bg_class_t *loadout );
+int                 BG_ClassEquipmentMax( int weapon );
 qboolean            BG_ValidateClass( const bg_class_t *loadout );
 qboolean            BG_ParseClass( const char *text, bg_class_t *loadout );
 qboolean            BG_SerializeClass( const bg_class_t *loadout, char *text, int size );

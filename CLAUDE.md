@@ -695,7 +695,11 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   M40's scope is integral, so a red-dot spawn preference cannot invent a
   nonexistent attachment variant. See `dev/M40A3.md`.
 - The throwing knife (`WP_THROWING_KNIFE`) is appended lethal equipment
-  (16 basegame / 19 missionpack), with the frag's grenade as placeholder art.
+  (16 basegame / 19 missionpack), with original Peace knife/hand/icon art from
+  `dev/tools/build_throwingknife.py` (`--check` supported). The world blade
+  points along +X; the hand's `tag_weapon` authors its first-person grip.
+  `CG_EquipmentView` shares Semtex's presentation and hides the held blade on
+  release, without changing gameplay. See `assets/source/throwingknife/README.md`.
   Its flight, stick, pickup by use and world bound are in `dev/THROWING_KNIFE.md`.
   Its speed, damage, bounce and pull time are placeholder weapon data. It
   sticks in players (owner's choice of MW2's `stickToPlayers`), rides them and

@@ -13,6 +13,7 @@ vmCvar_t cg_smoothClients;
 static snapshot_t snap, nextSnap;
 static refEntity_t drawn;
 static int checks, draws, models;
+static char modelNames[256][MAX_QPATH];
 #define CHECK(x) do { checks++; if (!(x)) { fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x); exit(1); } } while(0)
 #define NEAR(a,b) (fabs((a)-(b))<.01f)
 void QDECL Com_Printf(const char *fmt,...) { (void)fmt; }
@@ -22,7 +23,9 @@ void QDECL CG_Error(const char *fmt,...) {
  va_list args; va_start(args,fmt); vfprintf(stderr,fmt,args); va_end(args); exit(1);
 }
 /* The renderer: every name is a model, each its own handle (0 is the null model). */
-qhandle_t trap_R_RegisterModel(const char *name) { (void)name; return ++models; }
+qhandle_t trap_R_RegisterModel(const char *name) {
+ CHECK(models+1<256);Q_strncpyz(modelNames[++models],name,MAX_QPATH);return models;
+}
 qhandle_t trap_R_RegisterShader(const char *name) { (void)name; return 1; }
 sfxHandle_t trap_S_RegisterSound(const char *name,qboolean compressed) { (void)name; (void)compressed; return 1; }
 void trap_R_ModelBounds(clipHandle_t model,vec3_t mins,vec3_t maxs) { (void)model; VectorClear(mins); VectorClear(maxs); }
@@ -88,6 +91,13 @@ static void TestFirstSight(int weapon) {
  Draw(c);
  CHECK(cg_weapons[weapon].registered && cg_weapons[weapon].missileModel);
  CHECK(drawn.hModel==cg_weapons[weapon].missileModel);
+ if(weapon==WP_THROWING_KNIFE) {
+  CHECK(cg_weapons[weapon].missileModel==cg_weapons[weapon].weaponModel);
+  CHECK(!strcmp(modelNames[drawn.hModel],"models/weapons2/throwingknife/knife.md3"));
+  CHECK(!strcmp(modelNames[cg_weapons[weapon].handsModel],"models/weapons2/throwingknife/knife_hand.md3"));
+  CHECK(!strcmp(cg_weapons[weapon].item->icon,"icons/peace_throwingknife"));
+  CHECK(!cg_weapons[weapon].flashModel && !cg_weapons[weapon].barrelModel);
+ }
  /* registered once: later frames cost a flag test */
  registered=models; Draw(c); CHECK(models==registered && drawn.hModel==cg_weapons[weapon].missileModel);
  /* vid_restart re-runs CG_Init, which forgets it: it is registered again */

@@ -620,7 +620,7 @@ static const char *cg_viewModelBase[WP_NUM_WEAPONS] = {
 	"",                                 // WP_FLASH
 	"",                                 // WP_SEMTEX (procedural MD3 hand pose)
 	"models/weapons2/m40a3/view",         // WP_M40A3
-	""                                  // WP_THROWING_KNIFE (frag model until the knife lands)
+	""                                  // WP_THROWING_KNIFE (MD3 hand and tagged knife)
 };
 
 /*
@@ -722,8 +722,8 @@ void CG_RegisterWeapon( int weaponNum ) {
 		cgs.media.grenadeExplosionShader = trap_R_RegisterShader("grenadeExplosion");
 		break;
 	case WP_THROWING_KNIFE:
-		// placeholder art: a thrown knife looks like a thrown frag until its model lands
-		weaponInfo->missileModel = trap_R_RegisterModel( "models/ammo/grenade1.md3" );
+		// +X is the blade tip, matching the server's flight/stick orientation.
+		weaponInfo->missileModel = weaponInfo->weaponModel;
 		weaponInfo->flashModel = 0;
 		weaponInfo->barrelModel = 0;
 		break;
@@ -1420,12 +1420,15 @@ CG_AddViewWeapon
 Add the weapon, and flash for the player's view
 ==============
 */
-static void CG_SemtexView(playerState_t *ps, weaponInfo_t *weapon) {
+// Held MD3 equipment shares pull/release/recovery presentation. An optional
+// tag_weapon authors the grip orientation without rotating the world model.
+// This only reads gameplay state: the throw event still owns ammo and launch.
+static void CG_EquipmentView(const playerState_t *ps, const weaponInfo_t *weapon) {
 	refEntity_t hand;
 	vec3_t angles;
 	float t = 1, x = 18, y = -8, z = -8;
 	if (ps->weaponstate == WEAPON_RAISING) {
-		t = 1.0f - (float)ps->weaponTime / BG_WeaponRaiseTime(WP_SEMTEX);
+		t = 1.0f - (float)ps->weaponTime / BG_WeaponRaiseTime(ps->weapon);
 		if (t < 0) t = 0;
 		if (t > 1) t = 1;
 		t = t*t*(3-2*t);
@@ -1452,8 +1455,17 @@ static void CG_SemtexView(playerState_t *ps, weaponInfo_t *weapon) {
 	hand.hModel = weapon->handsModel;
 	trap_R_AddRefEntityToScene(&hand);
 	if (!(ps->weaponAction & (WA_FIRED | WA_RECOVERING))) {
-		hand.hModel = weapon->weaponModel;
-		trap_R_AddRefEntityToScene(&hand);
+		refEntity_t item = hand;
+		orientation_t grip;
+		int i;
+		if (trap_R_LerpTag(&grip, weapon->handsModel, 0, 0, 1.0f, "tag_weapon")) {
+			for (i = 0; i < 3; i++)
+				VectorMA(item.origin, grip.origin[i], hand.axis[i], item.origin);
+			MatrixMultiply(grip.axis, hand.axis, item.axis);
+			VectorCopy(item.origin, item.oldorigin);
+		}
+		item.hModel = weapon->weaponModel;
+		trap_R_AddRefEntityToScene(&item);
 	}
 }
 
@@ -1518,8 +1530,8 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	cent = &cg.predictedPlayerEntity;	// &cg_entities[cg.snap->ps.clientNum];
 	CG_RegisterWeapon( ps->weapon );
 	weapon = &cg_weapons[ ps->weapon ];
-	if (ps->weapon == WP_SEMTEX) {
-		CG_SemtexView(ps, weapon);
+	if (ps->weapon == WP_SEMTEX || ps->weapon == WP_THROWING_KNIFE) {
+		CG_EquipmentView(ps, weapon);
 		return;
 	}
 

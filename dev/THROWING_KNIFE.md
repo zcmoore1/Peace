@@ -2,9 +2,17 @@
 
 `WP_THROWING_KNIFE` is MW2's throwing knife (`throwingknife_mp`, weaponClass 9)
 as a lethal choice beside the frag and Semtex. All behaviour comes from MW2's
-executable. The art is a placeholder: the frag's grenade model is held and
-thrown until a knife model lands. Swapping the art means editing only the
-item's model in `bg_misc.c` and the missile model in `cg_weapons.c`.
+executable. Original Peace art supplies the held, thrown, stuck and recovered
+knife, with an original gloved hand and a dedicated silhouette icon. The blade
+points along +X for the existing projectile/stick orientation. A hand-model
+`tag_weapon` authors the first-person grip without rotating the world model.
+
+`CG_EquipmentView` shares the existing Semtex pull and follow-through, reading
+each item's own raise time. It draws the hand plus knife while held, and only
+the hand after `WA_FIRED`/`WA_RECOVERING`; it never changes ammo, launch, pickup,
+collision or timing. Semtex's untagged hand keeps its existing placement.
+The source is `dev/tools/build_throwingknife.py` (stdlib, `--check` supported);
+provenance and regeneration are in `assets/source/throwingknife/README.md`.
 
 ## In hand (`bg_pmove.c`)
 
@@ -171,6 +179,11 @@ Not yet done:
 
 ## Tests
 
+- `python3 dev/tests/throwingknife_asset_test.py` checks shipped geometry,
+  winding/normals, culling bounds, GL1 limits, grip axes, materials and icon.
+- `equipment_view_test.c` (`run-loadouts.*`) reads the shipped grip tag and
+  checks the real first-person renderer through pull, hold, cancel and release,
+  including unchanged Semtex placement and no playerstate mutation.
 - `dev/tests/knife_missile_test.c` (in `run-loadouts.*`) covers launch, spin,
   stick, bounce, settle, the damage threshold, the player carry and bury, let
   go, the support rule, the corpse hand-off, a start in solid, the flight

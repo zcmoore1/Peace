@@ -1198,7 +1198,7 @@ void ClientSpawn(gentity_t *ent) {
 	BG_ApplyClass( &client->ps, &client->pers.selectedLoadout );
 	// MW2's room for a knife taken back: the weapon is owned this life, and
 	// throwingknife_mp's maxAmmo (1) less what is carried.
-	client->knifeMax = client->ps.ammo[WP_THROWING_KNIFE] > 0 ? BG_ClassEquipmentMax( WP_THROWING_KNIFE ) : 0;
+	client->knifeMax = client->ps.ammo[WP_THROWING_KNIFE] > 0 ? BG_ClassEquipmentCount( WP_THROWING_KNIFE ) : 0;
 	client->knifeHold = ENTITYNUM_NONE;
 	{
 		int attachments;

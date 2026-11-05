@@ -38,7 +38,7 @@ typedef struct {
 } classEdit_t;
 
 enum { CLASS_CATEGORIES, CLASS_WEAPONS, CLASS_LETHAL, CLASS_TACTICAL,
-	CLASS_QUANTITY, CLASS_PERKS, CLASS_ATTACHMENTS };
+	CLASS_PERKS, CLASS_ATTACHMENTS };
 enum { CATEGORY_RIFLES, CATEGORY_SNIPERS, CATEGORY_SHOTGUNS,
 	CATEGORY_LAUNCHERS, CATEGORY_ENERGY, CATEGORY_COUNT };
 
@@ -63,7 +63,7 @@ typedef struct {
 
 static classSelect_t classSelect;
 static classEdit_t classEdit;
-static classPage_t classCategories, classPicker, classQuantity;
+static classPage_t classCategories, classPicker;
 static className_t className;
 static classDiscard_t classDiscard;
 
@@ -527,7 +527,6 @@ static void UI_ClassPageDraw( classPage_t *page ) {
 }
 static void UI_ClassCategoriesDraw( void ) { UI_ClassPageDraw(&classCategories); }
 static void UI_ClassPickerDraw( void ) { UI_ClassPageDraw(&classPicker); }
-static void UI_ClassQuantityDraw( void ) { UI_ClassPageDraw(&classQuantity); }
 
 static sfxHandle_t UI_ClassPageKey( classPage_t *page, int key ) {
 	if ( key == K_LEFTARROW ) key = K_ESCAPE;
@@ -536,7 +535,6 @@ static sfxHandle_t UI_ClassPageKey( classPage_t *page, int key ) {
 }
 static sfxHandle_t UI_ClassCategoriesKey( int key ) { return UI_ClassPageKey(&classCategories, key); }
 static sfxHandle_t UI_ClassPickerKey( int key ) { return UI_ClassPageKey(&classPicker, key); }
-static sfxHandle_t UI_ClassQuantityKey( int key ) { return UI_ClassPageKey(&classQuantity, key); }
 
 static void UI_ClassPageEvent( void *ptr, int event );
 
@@ -638,11 +636,11 @@ static void UI_ClassOpenPicker( int kind, int slot, int category ) {
 		current = kind == CLASS_LETHAL ? classEdit.draft.lethal : classEdit.draft.tactical;
 		UI_ClassPageRow(&classPicker, WP_NONE, "None", "Leave this equipment slot empty.", current == WP_NONE, qfalse);
 		if ( kind == CLASS_LETHAL ) {
-			UI_ClassPageRow(&classPicker, WP_FRAG, "Frag grenade", "A timed explosive grenade. Choose how many to carry on the next screen.", current == WP_FRAG, qfalse);
-			UI_ClassPageRow(&classPicker, WP_SEMTEX, "Semtex", "A sticky explosive grenade. Choose how many to carry on the next screen.", current == WP_SEMTEX, qfalse);
+			UI_ClassPageRow(&classPicker, WP_FRAG, "Frag grenade", "One timed explosive grenade.", current == WP_FRAG, qfalse);
+			UI_ClassPageRow(&classPicker, WP_SEMTEX, "Semtex", "One sticky explosive grenade. Hold to keep it in hand; Y puts it away.", current == WP_SEMTEX, qfalse);
 			UI_ClassPageRow(&classPicker, WP_THROWING_KNIFE, "Throwing knife", "One knife, thrown straight from the hand; kills on a hit, sticks where it lands, pick it back up with use.", current == WP_THROWING_KNIFE, qfalse);
-		} else UI_ClassPageRow(&classPicker, WP_FLASH, "Flash grenade", "Disorients players in its blast. Choose how many to carry on the next screen.", current == WP_FLASH, qfalse);
-		Q_strncpyz(classPicker.note, "Carry one to three grenades, or one throwing knife. Counts reset on spawn.", sizeof(classPicker.note));
+		} else UI_ClassPageRow(&classPicker, WP_FLASH, "Flash grenade", "Two flash grenades. Disorients players in the blast.", current == WP_FLASH, qfalse);
+		Q_strncpyz(classPicker.note, "MW2's counts: one lethal, two flashes. Refilled each spawn.", sizeof(classPicker.note));
 	}
 	UI_ClassPagePush(&classPicker);
 	if ( kind == CLASS_ATTACHMENTS ) Q_strncpyz(classPicker.back.title, "DONE", sizeof(classPicker.back.title));
@@ -651,8 +649,7 @@ static void UI_ClassOpenPicker( int kind, int slot, int category ) {
 static void UI_ClassPageEvent( void *ptr, int event ) {
 	classRow_t *row = (classRow_t *)ptr;
 	classPage_t *page = (classPage_t *)row->generic.parent;
-	int i, count, mask;
-	char title[32], breadcrumb[80];
+	int i, mask;
 	if ( event != QM_ACTIVATED || row->generic.flags & QMF_GRAYED ) return;
 	if ( row->generic.id == CLASS_BACK ) { UI_PopMenu(); return; }
 	switch ( page->kind ) {
@@ -689,33 +686,15 @@ static void UI_ClassPageEvent( void *ptr, int event ) {
 			UI_PopMenu();
 			break;
 		}
-		if ( BG_ClassEquipmentMax(row->value) == 1 ) {	/* one to carry: nothing to choose */
-			if ( page->kind == CLASS_LETHAL ) { classEdit.draft.lethal = row->value; classEdit.draft.lethalCount = 1; }
-			else { classEdit.draft.tactical = row->value; classEdit.draft.tacticalCount = 1; }
-			UI_PopMenu();
-			break;
-		}
-		Com_sprintf(breadcrumb, sizeof(breadcrumb), "EDIT LOADOUT / %s / %s", page->kind == CLASS_LETHAL ? "LETHAL" : "TACTICAL", row->title);
-		UI_ClassPageInit(&classQuantity, CLASS_QUANTITY, page->kind, "CHOOSE QUANTITY", breadcrumb, UI_ClassQuantityDraw, UI_ClassQuantityKey);
-		classQuantity.choice = row->value;
-		count = page->kind == CLASS_LETHAL ? classEdit.draft.lethalCount : classEdit.draft.tacticalCount;
-		for ( i = 1; i <= BG_ClassEquipmentMax(row->value); i++ ) {
-			Com_sprintf(title, sizeof(title), "%i %s", i, i == 1 ? "grenade" : "grenades");
-			UI_ClassPageRow(&classQuantity, i, title, "This quantity will be available each time you spawn with this class.", i == (count ? count : 1), qfalse);
-		}
-		Q_strncpyz(classQuantity.note, "Back returns to equipment without changing your selection.", sizeof(classQuantity.note));
-		UI_ClassPagePush(&classQuantity);
-		return;
-	case CLASS_QUANTITY:
-		if ( page->slot == CLASS_LETHAL ) {
-			classEdit.draft.lethal = page->choice;
-			classEdit.draft.lethalCount = row->value;
+		/* MW2's count: nothing to choose */
+		if ( page->kind == CLASS_LETHAL ) {
+			classEdit.draft.lethal = row->value;
+			classEdit.draft.lethalCount = BG_ClassEquipmentCount(row->value);
 		} else {
-			classEdit.draft.tactical = page->choice;
-			classEdit.draft.tacticalCount = row->value;
+			classEdit.draft.tactical = row->value;
+			classEdit.draft.tacticalCount = BG_ClassEquipmentCount(row->value);
 		}
-		UI_PopMenu(); /* quantity */
-		UI_PopMenu(); /* equipment */
+		UI_PopMenu();
 		break;
 	}
 	classEdit.error[0] = 0;

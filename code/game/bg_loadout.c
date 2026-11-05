@@ -7,11 +7,11 @@
 // inline char arrays with integers does NOT preserve struct layout in a QVM.
 // Keep the source table word-only and populate the editable definitions at run
 // time, identically in native modules and VMs.
-static const struct { const char *name; int primary, secondary, lethal, tactical; } presets[] = {
-	{ "Assault", WP_MACHINEGUN, WP_SHOTGUN, 2, 2 },
-	{ "Sniper", WP_M40A3, WP_MACHINEGUN, 1, 3 },
-	{ "Demolition", WP_ROCKET_LAUNCHER, WP_SHOTGUN, 3, 1 },
-	{ "Support", WP_PLASMAGUN, WP_LIGHTNING, 2, 2 }
+static const struct { const char *name; int primary, secondary; } presets[] = {
+	{ "Assault", WP_MACHINEGUN, WP_SHOTGUN },
+	{ "Sniper", WP_M40A3, WP_MACHINEGUN },
+	{ "Demolition", WP_ROCKET_LAUNCHER, WP_SHOTGUN },
+	{ "Support", WP_PLASMAGUN, WP_LIGHTNING }
 };
 static bg_class_t bg_classes[ARRAY_LEN(presets)];
 static qboolean classesReady;
@@ -145,9 +145,9 @@ const bg_class_t *BG_Class( int index ) {
 			bg_classes[i].slot[0] = presets[i].primary;
 			bg_classes[i].slot[1] = presets[i].secondary;
 			bg_classes[i].lethal = WP_FRAG;
-			bg_classes[i].lethalCount = presets[i].lethal;
+			bg_classes[i].lethalCount = BG_ClassEquipmentCount(WP_FRAG);
 			bg_classes[i].tactical = WP_FLASH;
-			bg_classes[i].tacticalCount = presets[i].tactical;
+			bg_classes[i].tacticalCount = BG_ClassEquipmentCount(WP_FLASH);
 			bg_classes[i].attachments[0] = bg_classes[i].attachments[1] = -1;
 		}
 		classesReady = qtrue;
@@ -185,13 +185,13 @@ static qboolean BG_ClassNameValid( const char *name ) {
 	}
 	return qfalse;
 }
-// How many of a class's equipment it may carry. The throwing knife is MW2's
-// throwingknife_mp: startAmmo 1, maxAmmo 1 (weapon data). The frag, Semtex and
-// flash keep Peace's one to three (owner's choice; MW2 gives 1, 1 and 2).
-#define BG_CLASS_EQUIPMENT_LEGACY_MAX 3	// every count a class could save before the cap
-int BG_ClassEquipmentMax( int weapon ) {
+// How many of a piece of equipment a class carries each life: MW2's weapon
+// data, startAmmo = maxAmmo (frag_grenade_mp, semtex_mp, throwingknife_mp 1;
+// flash_grenade_mp 2). It is fixed, as in MW2: there is no count to choose.
+#define BG_CLASS_EQUIPMENT_LEGACY_MAX 3	// every count a class could save before MW2's counts
+int BG_ClassEquipmentCount( int weapon ) {
 	if ( weapon == WP_NONE ) return 0;
-	return weapon == WP_THROWING_KNIFE ? 1 : BG_CLASS_EQUIPMENT_LEGACY_MAX;
+	return weapon == WP_FLASH ? 2 : 1;
 }
 
 qboolean BG_ValidateClass( const bg_class_t *loadout ) {
@@ -202,10 +202,8 @@ qboolean BG_ValidateClass( const bg_class_t *loadout ) {
 	if ( loadout->lethal != WP_NONE && loadout->lethal != WP_FRAG && loadout->lethal != WP_SEMTEX &&
 		loadout->lethal != WP_THROWING_KNIFE ) return qfalse;
 	if ( loadout->tactical != WP_NONE && loadout->tactical != WP_FLASH ) return qfalse;
-	if ( loadout->lethalCount < 0 || loadout->lethalCount > BG_ClassEquipmentMax(loadout->lethal) ||
-		loadout->tacticalCount < 0 || loadout->tacticalCount > BG_ClassEquipmentMax(loadout->tactical) ) return qfalse;
-	if ( (loadout->lethal == WP_NONE) != (loadout->lethalCount == 0) ||
-		(loadout->tactical == WP_NONE) != (loadout->tacticalCount == 0) ) return qfalse;
+	if ( loadout->lethalCount != BG_ClassEquipmentCount(loadout->lethal) ||
+		loadout->tacticalCount != BG_ClassEquipmentCount(loadout->tactical) ) return qfalse;
 	if ( !BG_ClassPerksValid(loadout) ) return qfalse;
 	for ( i = 0; i < BG_PERK_SLOTS; i++ )
 		if ( perks[loadout->perk[i]].attachmentLimit > limit ) limit = perks[loadout->perk[i]].attachmentLimit;
@@ -249,15 +247,13 @@ qboolean BG_ParseClass( const char *text, bg_class_t *loadout ) {
 	}
 	if ( strlen(text) >= sizeof(result.name) ) return qfalse;
 	Q_strncpyz(result.name, text, sizeof(result.name));
-	// A class saved before the knife's cap keeps the rest of its loadout: a
-	// count the old 1-3 rule took is clamped to its equipment's carry, never
+	// A class saved when counts were chosen (one to three of each) keeps the
+	// rest of its loadout: any count that rule took becomes MW2's count, never
 	// the class refused or reset. Anything else is still invalid.
-	if ( result.lethal != WP_NONE && result.lethalCount <= BG_CLASS_EQUIPMENT_LEGACY_MAX &&
-		result.lethalCount > BG_ClassEquipmentMax(result.lethal) )
-		result.lethalCount = BG_ClassEquipmentMax(result.lethal);
-	if ( result.tactical != WP_NONE && result.tacticalCount <= BG_CLASS_EQUIPMENT_LEGACY_MAX &&
-		result.tacticalCount > BG_ClassEquipmentMax(result.tactical) )
-		result.tacticalCount = BG_ClassEquipmentMax(result.tactical);
+	if ( result.lethal != WP_NONE && result.lethalCount >= 1 && result.lethalCount <= BG_CLASS_EQUIPMENT_LEGACY_MAX )
+		result.lethalCount = BG_ClassEquipmentCount(result.lethal);
+	if ( result.tactical != WP_NONE && result.tacticalCount >= 1 && result.tacticalCount <= BG_CLASS_EQUIPMENT_LEGACY_MAX )
+		result.tacticalCount = BG_ClassEquipmentCount(result.tactical);
 	if ( !BG_ValidateClass(&result) ) return qfalse;
 	*loadout = result; // invalid data never partly overwrites the live choice
 	return qtrue;

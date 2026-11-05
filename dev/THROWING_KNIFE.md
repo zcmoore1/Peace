@@ -89,7 +89,7 @@ provenance and regeneration are in `assets/source/throwingknife/README.md`.
 
   The player must carry knives this life and have room for one more
   (`knifeMax`: one, MW2's maxAmmo, for a class that carries the knife;
-  `BG_ClassEquipmentMax`). There is no owner or team check, and a
+  `BG_ClassEquipmentCount`). There is no owner or team check, and a
   knife in a player or corpse counts (it has no velocity of its own), so it can
   be taken out of them, as in MW2. The lowest `128 * (1 - dot) + distance`
   wins, and a knife outranks any gun.

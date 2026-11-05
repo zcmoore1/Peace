@@ -21,6 +21,9 @@ static void Ready(int primary, int secondary) {
  memset(&pml,0,sizeof(pml)); memset(fired,0,sizeof(fired));
  cl.slot[0]=primary; cl.slot[1]=secondary;
  BG_ApplyClass(&ps,&cl);
+ /* The mechanics below chain throws, so they carry two of each as the presets
+  * did before MW2's counts (one frag, two flashes; the count test checks those). */
+ ps.ammo[WP_FRAG]=2; ps.ammo[WP_FLASH]=2;
  ps.stats[STAT_HEALTH]=100;
  move.ps=&ps; move.cmd.weapon=primary; pm=&move;
 }
@@ -163,7 +166,8 @@ static void TestActions(void) {
  const int weapons[]={WP_KNIFE,WP_FRAG,WP_FLASH};
  int i,hold,count;
  for(i=0;i<3;i++) for(hold=0;hold<2;hold++) {
-  Ready(WP_MACHINEGUN,WP_SHOTGUN); count=ps.ammo[weapons[i]];
+  Ready(WP_MACHINEGUN,WP_SHOTGUN);
+  count=ps.ammo[weapons[i]];
   ps.pm_flags|=PMF_ADS;
   move.cmd.buttons=buttons[i]; Step(1);
   CHECK(!(ps.pm_flags&PMF_ADS));
@@ -946,33 +950,45 @@ static void TestThrowingKnife(void) {
    cl.lethal=WP_THROWING_KNIFE; cl.lethalCount=1; CHECK(BG_ValidateClass(&cl));
    CHECK(BG_SerializeClass(&cl,text,sizeof(text)));
    memset(&cl,0,sizeof(cl)); CHECK(BG_ParseClass(text,&cl) && cl.lethal==WP_THROWING_KNIFE); }
- /* MW2's throwingknife_mp carries one (startAmmo 1, maxAmmo 1): two or three
-  * is no class, and one saved with them, in either format, loads with one and
-  * the rest of the class intact. Four was never a class. The frag and Semtex
-  * keep one to three. */
- { bg_class_t cl=*BG_Class(0),copy; char text[256]; int v,n;
-   cl.slot[0]=WP_M40A3; cl.slot[1]=WP_SHOTGUN; cl.lethal=WP_THROWING_KNIFE; cl.lethalCount=1;
-   cl.tacticalCount=2; cl.perk[0]=PERK_QUICK_RELOAD; cl.attachments[0]=0; cl.attachments[1]=BG_ATTACHMENT_REDDOT;
-   strcpy(cl.name,"Knife class"); CHECK(BG_ValidateClass(&cl));
-   CHECK(BG_ClassEquipmentMax(WP_THROWING_KNIFE)==1 && BG_ClassEquipmentMax(WP_NONE)==0);
-   for(n=2;n<=3;n++) { cl.lethalCount=n; CHECK(!BG_ValidateClass(&cl) && !BG_SerializeClass(&cl,text,sizeof(text))); }
-   cl.lethalCount=1;
-   for(v=1;v<=2;v++) for(n=1;n<=4;n++) {
-    if(v==1) Com_sprintf(text,sizeof(text),"1|%i|%i|%i|%i|%i|%i|%i|%i|%i|%s",cl.slot[0],cl.slot[1],
-     WP_THROWING_KNIFE,n,cl.tactical,cl.tacticalCount,cl.perk[0],cl.perk[1],cl.perk[2],cl.name);
-    else Com_sprintf(text,sizeof(text),"2|%i|%i|%i|%i|%i|%i|%i|%i|%i|%i|%i|%s",cl.slot[0],cl.slot[1],
-     WP_THROWING_KNIFE,n,cl.tactical,cl.tacticalCount,cl.perk[0],cl.perk[1],cl.perk[2],cl.attachments[0],cl.attachments[1],cl.name);
-    memset(&copy,0,sizeof(copy));
-    if(n==4) { CHECK(!BG_ParseClass(text,&copy)); continue; }
-    CHECK(BG_ParseClass(text,&copy) && BG_ValidateClass(&copy));
-    CHECK(copy.lethal==WP_THROWING_KNIFE && copy.lethalCount==1 && !strcmp(copy.name,cl.name));
-    CHECK(copy.slot[0]==cl.slot[0] && copy.slot[1]==cl.slot[1] && copy.tactical==cl.tactical &&
-     copy.tacticalCount==cl.tacticalCount && !memcmp(copy.perk,cl.perk,sizeof(cl.perk)));
-    CHECK(v==1 ? copy.attachments[0]==-1 && copy.attachments[1]==-1 :
-     copy.attachments[0]==cl.attachments[0] && copy.attachments[1]==cl.attachments[1]);
+ /* MW2's counts, fixed per item (startAmmo = maxAmmo in its weapon data): one
+  * frag, Semtex or throwing knife, two flashes. Any other count is no class,
+  * and a class saved when counts were chosen (one to three), in either format,
+  * loads with MW2's count and the rest of the class intact. Four was never a
+  * class. */
+ { bg_class_t cl=*BG_Class(0),copy; char text[256]; int v,n,e;
+   static const int lethals[]={WP_FRAG,WP_SEMTEX,WP_THROWING_KNIFE};
+   CHECK(BG_ClassEquipmentCount(WP_FRAG)==1 && BG_ClassEquipmentCount(WP_SEMTEX)==1 &&
+    BG_ClassEquipmentCount(WP_THROWING_KNIFE)==1 && BG_ClassEquipmentCount(WP_FLASH)==2 &&
+    BG_ClassEquipmentCount(WP_NONE)==0);
+   for(i=0;i<BG_ClassCount();i++) CHECK(BG_Class(i)->lethalCount==1 && BG_Class(i)->tacticalCount==2);
+   cl.slot[0]=WP_M40A3; cl.slot[1]=WP_SHOTGUN; cl.tactical=WP_FLASH; cl.tacticalCount=2;
+   cl.perk[0]=PERK_QUICK_RELOAD; cl.attachments[0]=0; cl.attachments[1]=BG_ATTACHMENT_REDDOT;
+   strcpy(cl.name,"Counted class");
+   for(e=0;e<3;e++) {
+    cl.lethal=lethals[e]; cl.lethalCount=1; CHECK(BG_ValidateClass(&cl));
+    for(n=0;n<=4;n++) if(n!=1) { cl.lethalCount=n; CHECK(!BG_ValidateClass(&cl) && !BG_SerializeClass(&cl,text,sizeof(text))); }
+    cl.lethalCount=1;
+    for(v=1;v<=2;v++) for(n=1;n<=4;n++) {
+     int t=1+(n&1);	/* the flash saved as one or two */
+     if(v==1) Com_sprintf(text,sizeof(text),"1|%i|%i|%i|%i|%i|%i|%i|%i|%i|%s",cl.slot[0],cl.slot[1],
+      cl.lethal,n,WP_FLASH,t,cl.perk[0],cl.perk[1],cl.perk[2],cl.name);
+     else Com_sprintf(text,sizeof(text),"2|%i|%i|%i|%i|%i|%i|%i|%i|%i|%i|%i|%s",cl.slot[0],cl.slot[1],
+      cl.lethal,n,WP_FLASH,t,cl.perk[0],cl.perk[1],cl.perk[2],cl.attachments[0],cl.attachments[1],cl.name);
+     memset(&copy,0,sizeof(copy));
+     if(n==4) { CHECK(!BG_ParseClass(text,&copy)); continue; }
+     CHECK(BG_ParseClass(text,&copy) && BG_ValidateClass(&copy));
+     CHECK(copy.lethal==cl.lethal && copy.lethalCount==1 && copy.tactical==WP_FLASH && copy.tacticalCount==2);
+     CHECK(copy.slot[0]==cl.slot[0] && copy.slot[1]==cl.slot[1] && !strcmp(copy.name,cl.name) &&
+      !memcmp(copy.perk,cl.perk,sizeof(cl.perk)));
+     CHECK(v==1 ? copy.attachments[0]==-1 && copy.attachments[1]==-1 :
+      copy.attachments[0]==cl.attachments[0] && copy.attachments[1]==cl.attachments[1]);
+    }
    }
-   for(n=1;n<=3;n++) { cl.lethal=n&1 ? WP_FRAG : WP_SEMTEX; cl.lethalCount=n; CHECK(BG_ValidateClass(&cl)); }
-   cl.lethalCount=4; CHECK(!BG_ValidateClass(&cl)); }
+   cl.lethal=WP_FRAG; cl.lethalCount=1;
+   for(n=0;n<=4;n++) { cl.tacticalCount=n; CHECK(BG_ValidateClass(&cl)==(n==2)); }
+   cl.tactical=WP_NONE; cl.tacticalCount=0; CHECK(BG_ValidateClass(&cl));
+   { playerState_t spawned; memset(&spawned,0,sizeof(spawned)); cl=*BG_Class(0); BG_ApplyClass(&spawned,&cl);
+     CHECK(spawned.ammo[WP_FRAG]==1 && spawned.ammo[WP_FLASH]==2); } }
 }
 static void TestSeaLion(void) {
  const int hints[3]={0,MAX_CLIENTS+7,ENTITYNUM_NONE};

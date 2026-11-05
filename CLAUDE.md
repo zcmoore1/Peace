@@ -698,8 +698,14 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   (16 basegame / 19 missionpack), with original Peace knife/hand/icon art from
   `dev/tools/build_throwingknife.py` (`--check` supported). The world blade
   points along +X; the hand's `tag_weapon` authors its first-person grip.
-  `CG_EquipmentView` shares Semtex's presentation and hides the held blade on
-  release, without changing gameplay. See `assets/source/throwingknife/README.md`.
+  `animation.json` beside its source authors the pullout and regular melee's
+  horizontal slash. Both use the same blade and animated hand; `throw.cfg` and
+  `melee.cfg` supply the frame ranges through the existing clip loader.
+  `CG_WeapAnim_ActionFrame` fits the MD3 picture to existing timers only (150ms
+  pull, 79ms melee hit / 800ms melee end). The grip tag is interpolated with the
+  hand, while the blade stays frame 0. `CG_EquipmentView` hides a thrown blade
+  on release but keeps melee's blade through the slash. Semtex's gesture and
+  the throwing follow-through are unchanged. See `assets/source/throwingknife/README.md`.
   Its flight, stick, pickup by use and world bound are in `dev/THROWING_KNIFE.md`.
   Its speed, damage, bounce and pull time are placeholder weapon data. It
   sticks in players (owner's choice of MW2's `stickToPlayers`), rides them and

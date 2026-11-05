@@ -211,9 +211,9 @@ and the weapon-select HUD walks every owned bit.
 	{
 		"weapon_knife",
 		"sound/misc/w_pkup.wav",
-        { "models/weapons2/gauntlet/gauntlet.md3",
+        { "models/weapons2/throwingknife/knife.md3",
 		NULL, NULL, NULL},
-/* icon */		"icons/iconw_gauntlet",
+/* icon */		"icons/peace_throwingknife",
 /* pickup */	"Knife",
 		0,
 		IT_WEAPON,

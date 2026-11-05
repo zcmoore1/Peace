@@ -382,7 +382,7 @@ typedef struct weaponInfo_s {
 	qboolean		registered;
 	gitem_t			*item;
 
-	qhandle_t		handsModel;			// the hands don't actually draw, they just position the weapon
+	qhandle_t		handsModel;			// MD3 parent; quick-action hands also draw their mesh
 	qhandle_t		weaponModel;
 	qhandle_t		viewModel;			// optional IQM with the arms and the gun in one skeleton; when
 										// set it IS the first-person view, drawn instead of hands+gun
@@ -1398,6 +1398,7 @@ void CG_WeapPicture_Update( const playerState_t *predicted, const pmove_t *model
 	int first, int last, qboolean (*getCmd)( int, usercmd_t * ) );
 const playerState_t *CG_WeapPicture_State( const playerState_t *predicted );
 void     CG_WeapAnim_RegisterClips( int weapon, qhandle_t hModel, const char *cfgPath );
+qboolean CG_WeapAnim_ActionFrame( const playerState_t *ps, refEntity_t *entity );
 
 // cg_killcam.c
 qboolean CG_Killcam_Active( void );

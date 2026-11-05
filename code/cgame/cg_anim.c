@@ -718,6 +718,38 @@ static qboolean CG_WeapAnim_SampleFrame( const weapAnimDef_t *def,
 	return qtrue;
 }
 
+// MD3 quick-action hands have authored clips and an animated grip tag. Sample
+// their existing predicted timer directly, without advancing a layer clock.
+// This also makes stereo views, prediction correction and replay deterministic.
+qboolean CG_WeapAnim_ActionFrame(const playerState_t *ps, refEntity_t *entity) {
+	const weapAnimDef_t *def;
+	animLayer_t sample;
+	int duration = 0;
+	float fraction = 0;
+	if (ps->weapon <= WP_NONE || ps->weapon >= WP_NUM_WEAPONS) return qfalse;
+	// Switching to MD3 hands discards the previous gun's picture ownership,
+	// just as the skeletal path does. Its later return starts a fresh draw.
+	if (ps->weapon != cg_weapAnimWeapon) CG_WeapAnim_WeaponChanged(ps->weapon);
+	def = &bg_weapAnimDefs[ps->weapon];
+	memset(&sample, 0, sizeof(sample));
+	sample.clip = WANIM_IDLE;
+	if (ps->weaponstate == WEAPON_RAISING) {
+		sample.clip = WANIM_RAISE;
+		duration = BG_WeaponDrawTime(ps);
+	} else if (ps->weaponstate == WEAPON_FIRING) {
+		sample.clip = WANIM_FIRE;
+		duration = BG_QuickActionInPlace(ps->weapon) ? BG_MELEE_TIME - BG_MELEE_DELAY : BG_QUICK_ACTION_HOLD;
+	} else if (ps->weaponstate == WEAPON_DROPPING) {
+		sample.clip = WANIM_DROP;
+		duration = BG_HolsterTime(ps);
+	}
+	if (duration > 0) fraction = 1.0f - (float)ps->weaponTime / duration;
+	if (fraction < 0) fraction = 0;
+	if (fraction > 1) fraction = 1;
+	sample.time = fraction * CG_WeapAnim_LastFrameTime(def, sample.clip);
+	return CG_WeapAnim_SampleFrame(def, &sample, entity);
+}
+
 static qboolean CG_WeapAnim_SampleLayer( qhandle_t hModel, const weapAnimDef_t *def,
                                       const animLayer_t *layer, modelPose_t *outPose ) {
 	refEntity_t sample;

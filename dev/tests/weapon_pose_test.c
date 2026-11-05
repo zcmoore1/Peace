@@ -1173,6 +1173,28 @@ static void TestPictureContinuity(weapAnimDef_t *def,int weapon,const char *path
  }
  nativePose=qfalse;
 }
+/* The MD3 hand path must announce a real weapon change too: a gun coming back
+ * from melee/equipment cannot inherit its hidden sprint, fire or retained pose. */
+static void TestActionHandoff(int gun) {
+ const int actions[]={WP_KNIFE,WP_THROWING_KNIFE,WP_SEMTEX};
+ const int states[]={WEAPON_FIRING,WEAPON_SPRINTING};
+ playerState_t ps,before; refEntity_t entity; int i,j;
+ CG_WeapAnim_RegisterClips(WP_KNIFE,2,"assets/baseq3/models/weapons2/throwingknife/melee.cfg");
+ CG_WeapAnim_RegisterClips(WP_THROWING_KNIFE,2,"assets/baseq3/models/weapons2/throwingknife/throw.cfg");
+ for(i=0;i<ARRAY_LEN(actions);i++)for(j=0;j<ARRAY_LEN(states);j++) {
+  Ready(&ps,gun); ps.weaponstate=states[j];ps.weaponAnimSeq=ASEQ_FIRE;ps.weaponAnimTime=100;
+  memset(&entity,0,sizeof(entity));entity.hModel=1;CG_WeapAnim_Apply(&ps,&entity,16);
+  ps.weapon=actions[i];ps.weaponstate=WEAPON_RAISING;ps.weaponTime=BG_WeaponRaiseTime(ps.weapon);
+  before=ps;CG_WeapAnim_ActionFrame(&ps,&entity);
+  CHECK(!memcmp(&before,&ps,sizeof(ps)) && cg_weapAnimWeapon==ps.weapon);
+  ps.weapon=gun;ps.weaponstate=WEAPON_RAISING;ps.weaponAction=WA_MELEE|WA_FIRED;
+  ps.weaponTime=BG_WeaponDrawTime(&ps);cg.time+=1000;CG_WeapAnim_Apply(&ps,&entity,16);
+  CHECK(!cg_retainedActive && cg_weapLayers[LAYER_SPRINT].weight==0);
+  CHECK(entity.oldframe==bg_weapAnimDefs[gun].clips[WANIM_RAISE].firstFrame);
+  CHECK(entity.backlerp==1 && cg_weapLayers[LAYER_MOVE].weight==1);
+ }
+}
+
 int main(void) {
  playerState_t ps;
  const int states[]={WEAPON_READY,WEAPON_FIRING,WEAPON_BOLTING};
@@ -1209,6 +1231,7 @@ int main(void) {
  TestSprintReturnUnmoved(WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm");
  TestSprintReentry(def);
  TestPictureContinuity(def,WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm");
+ TestActionHandoff(WP_SHOTGUN);
  CG_WeapAnim_RegisterClips(WP_M40A3,2,"assets/baseq3/models/weapons2/m40a3/view.cfg");
  def=&bg_weapAnimDefs[WP_M40A3];
  TestRestampLower(def,WP_M40A3);
@@ -1218,5 +1241,6 @@ int main(void) {
  TestReloadPerk(def,WP_M40A3);
  TestOwnership(def); TestExclusions(def);
  TestPictureContinuity(def,WP_M40A3,"assets/baseq3/models/weapons2/m40a3/view.iqm");
+ TestActionHandoff(WP_M40A3);
  printf("PASS: %d weapon presentation ownership checks\n",checks); return 0;
 }

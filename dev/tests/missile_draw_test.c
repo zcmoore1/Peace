@@ -14,6 +14,7 @@ static snapshot_t snap, nextSnap;
 static refEntity_t drawn;
 static int checks, draws, models;
 static char modelNames[256][MAX_QPATH];
+static char clipNames[MAX_WEAPONS][MAX_QPATH];
 #define CHECK(x) do { checks++; if (!(x)) { fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x); exit(1); } } while(0)
 #define NEAR(a,b) (fabs((a)-(b))<.01f)
 void QDECL Com_Printf(const char *fmt,...) { (void)fmt; }
@@ -33,7 +34,9 @@ void trap_R_AddRefEntityToScene(const refEntity_t *re) { drawn=*re; draws++; }
 void CG_AddRefEntityWithPowerups(refEntity_t *ent,entityState_t *state,int team) {
  (void)state; (void)team; trap_R_AddRefEntityToScene(ent);
 }
-void CG_WeapAnim_RegisterClips(int weapon,qhandle_t model,const char *path) { (void)weapon; (void)model; (void)path; }
+void CG_WeapAnim_RegisterClips(int weapon,qhandle_t model,const char *path) {
+ (void)model; Q_strncpyz(clipNames[weapon],path ? path : "",MAX_QPATH);
+}
 void CG_Sights_Register(int weapon,const char *path) { (void)weapon; (void)path; }
 /* Trails, brass, lights and sounds are not what is checked here: cg_noProjectileTrail
  * is set, and the rest is only linked because CG_RegisterWeapon names it. */
@@ -182,7 +185,18 @@ static void TestSemtex(void) {
  CHECK(drawn.hModel && drawn.hModel==cg_weapons[WP_SEMTEX].missileModel);
 }
 
+static void TestMeleeModel(void) {
+ Reset(1000,50); CG_RegisterWeapon(WP_KNIFE); CG_RegisterWeapon(WP_THROWING_KNIFE);
+ CHECK(!strcmp(modelNames[cg_weapons[WP_KNIFE].weaponModel],modelNames[cg_weapons[WP_THROWING_KNIFE].weaponModel]));
+ CHECK(!strcmp(modelNames[cg_weapons[WP_KNIFE].handsModel],modelNames[cg_weapons[WP_THROWING_KNIFE].handsModel]));
+ CHECK(!strcmp(cg_weapons[WP_KNIFE].item->icon,"icons/peace_throwingknife"));
+ CHECK(!strcmp(clipNames[WP_KNIFE],"models/weapons2/throwingknife/melee.cfg"));
+ CHECK(!strcmp(clipNames[WP_THROWING_KNIFE],"models/weapons2/throwingknife/throw.cfg"));
+ CHECK(!cg_weapons[WP_KNIFE].flashModel && !cg_weapons[WP_KNIFE].barrelModel && !cg_weapons[WP_KNIFE].flashSound[0]);
+}
+
 int main(void) {
+ TestMeleeModel();
  TestFirstSight(WP_THROWING_KNIFE);
  TestFirstSight(WP_SEMTEX);
  TestFirstSight(WP_GRENADE_LAUNCHER);	/* a frag or a flash: fire_grenade's weapon, held by no one */

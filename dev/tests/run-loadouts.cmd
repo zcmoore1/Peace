@@ -44,7 +44,7 @@ cl %test_flags% /Feout\build\loadout-tests\missile-draw.exe dev\tests\missile_dr
 if errorlevel 1 goto fail
 out\build\loadout-tests\missile-draw.exe
 if errorlevel 1 goto fail
-cl %test_flags% /Feout\build\loadout-tests\equipment-view.exe dev\tests\equipment_view_test.c code\game\bg_pmove.c %test_game% %test_common% /link /OPT:REF
+cl %test_flags% /Feout\build\loadout-tests\equipment-view.exe dev\tests\equipment_view_test.c code\cgame\cg_anim.c dev\tests\pickup_pmove_driver.c %test_game% %test_common% /link /OPT:REF
 if errorlevel 1 goto fail
 out\build\loadout-tests\equipment-view.exe
 if errorlevel 1 goto fail

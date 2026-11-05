@@ -6,6 +6,7 @@ from another game. Coordinates are stylized engine-space art, not fabrication
 dimensions. GPL-2.0-or-later, like the repository. --check writes nothing.
 """
 import argparse
+import json
 import math
 from pathlib import Path
 import struct
@@ -123,8 +124,24 @@ def knife():
     return mesh
 
 
-def hand():
-    mesh = Mesh(held)
+def rotate(p, angles):
+    x, y, z = p
+    a, b, c = map(math.radians, angles)
+    y, z = y*math.cos(a)-z*math.sin(a), y*math.sin(a)+z*math.cos(a)
+    x, z = x*math.cos(b)+z*math.sin(b), -x*math.sin(b)+z*math.cos(b)
+    return (x*math.cos(c)-y*math.sin(c), x*math.sin(c)+y*math.cos(c), z)
+
+
+def pose_point(p, pose):
+    offset, angles = pose
+    return add(add(GRIP_ORIGIN, offset), rotate(sub(p, GRIP_ORIGIN), angles))
+
+
+REST = ((0, 0, 0), (0, 0, 0))
+
+
+def hand(pose=REST):
+    mesh = Mesh(lambda p: pose_point(held(p), pose))
     # The palm and four separately bent fingers wrap the handle. The thumb
     # crosses the fingers; knuckle pads and seams remain original geometry.
     mesh.loft('glove', [(-6.5, .12, -.78, .72, .60), (-5.8, .12, -.72, 1.02, .69),
@@ -141,7 +158,7 @@ def hand():
         mesh.rod('glove', a, b, r, R)
     mesh.loft('pad', [(-6.9, .15, -.85, .80, .65), (-6.25, .15, -.85, .86, .70)])
     # Continue the sleeve below the screen edge without cutting across the eye.
-    wrist = held((-6.6, .15, -.85))
+    wrist = pose_point(held((-6.6, .15, -.85)), pose)
     mesh.transform = lambda p: p
     mesh.rod('sleeve', (-14, 2.8, -21), add(wrist, (-.35, 0, -.3)), 2.05, 1.08, sides=16)
     mesh.rod('seam', (-12.1, 2.9, -18.1), add(wrist, (-.65, .67, -.35)), .075, .055, sides=6)
@@ -165,33 +182,44 @@ def surfaces(mesh):
             yield material, out, faces
 
 
-def md3(mesh, name, grip=False):
-    blobs, points = [], []
-    for index, (material, vertices, triangles) in enumerate(surfaces(mesh)):
-        points.extend(p for p, _ in vertices)
+def md3(mesh, name, poses=None):
+    frames = [list(surfaces(hand(pose))) for pose in poses] if poses else [list(surfaces(mesh))]
+    count = len(frames)
+    blobs, frame_points = [], [[] for _ in frames]
+    for index, (material, vertices, triangles) in enumerate(frames[0]):
         st = 108+12*len(triangles)+68
         xyz = st+8*len(vertices)
-        size = xyz+8*len(vertices)
+        size = xyz+8*len(vertices)*count
         blob = bytearray(struct.pack('<4s64s10i', b'IDP3', f'{material}_{index}'.encode(),
-            0, 1, 1, len(vertices), len(triangles), 108, st-68, st, xyz, size))
+            0, count, 1, len(vertices), len(triangles), 108, st-68, st, xyz, size))
         blob += b''.join(struct.pack('<3i', a, c, b) for a, b, c in triangles)
         blob += struct.pack('<64si', ('peace/throwingknife_'+material).encode(), 0)
         blob += b''.join(struct.pack('<2f', 0, 0) for _ in vertices)
-        for p, n in vertices:
-            polar = round(math.acos(max(-1, min(1, n[2])))*255/math.tau) & 255
-            azimuth = round(math.atan2(n[1], n[0])*255/math.tau) & 255
-            blob += struct.pack('<3hH', *(round(x*64) for x in p), (azimuth << 8) | polar)
+        for f, frame in enumerate(frames):
+            frame_material, frame_vertices, frame_triangles = frame[index]
+            assert frame_material == material and frame_triangles == triangles
+            assert len(frame_vertices) == len(vertices), 'Animated topology changed'
+            frame_points[f].extend(p for p, _ in frame_vertices)
+            for p, n in frame_vertices:
+                polar = round(math.acos(max(-1, min(1, n[2])))*255/math.tau) & 255
+                azimuth = round(math.atan2(n[1], n[0])*255/math.tau) & 255
+                blob += struct.pack('<3hH', *(round(x*64) for x in p), (azimuth << 8) | polar)
         assert len(blob) == size
         blobs.append(blob)
-    lo = [min(p[i] for p in points) for i in range(3)]
-    hi = [max(p[i] for p in points) for i in range(3)]
-    radius = max(math.sqrt(dot(p, p)) for p in points)+.03
-    tag = struct.pack('<64s12f', b'tag_weapon', *GRIP_ORIGIN, *(x for axis in GRIP_AXIS for x in axis)) if grip else b''
-    offset = 164+len(tag)
-    return (struct.pack('<4si64s9i', b'IDP3', 15, name.encode(), 0, 1, int(grip), len(blobs),
-            0, 108, 164, offset, offset+sum(map(len, blobs))) +
-            struct.pack('<10f16s', *(x-.03 for x in lo), *(x+.03 for x in hi), 0, 0, 0, radius, b'idle') +
-            tag+b''.join(blobs))
+    bounds, tags = bytearray(), bytearray()
+    for points in frame_points:
+        lo = [min(p[i] for p in points) for i in range(3)]
+        hi = [max(p[i] for p in points) for i in range(3)]
+        radius = max(math.sqrt(dot(p, p)) for p in points)+.03
+        bounds += struct.pack('<10f16s', *(x-.03 for x in lo), *(x+.03 for x in hi), 0, 0, 0, radius, b'idle')
+    for offset, angles in poses or []:
+        axes = [rotate(axis, angles) for axis in GRIP_AXIS]
+        tags += struct.pack('<64s12f', b'tag_weapon', *add(GRIP_ORIGIN, offset), *(x for axis in axes for x in axis))
+    tag_offset = 108+len(bounds)
+    surface_offset = tag_offset+len(tags)
+    return (struct.pack('<4si64s9i', b'IDP3', 15, name.encode(), 0, count, int(bool(poses)), len(blobs),
+            0, 108, tag_offset, surface_offset, surface_offset+sum(map(len, blobs))) +
+            bounds+tags+b''.join(blobs))
 
 
 def icon(mesh):
@@ -221,8 +249,44 @@ def icon(mesh):
     return struct.pack('<BBBHHBHHHHBB', 0, 0, 2, 0, 0, 0, 0, 0, size, size, 32, 8)+pixels
 
 
+def sample_motion(keys, time):
+    # Cubic Hermite curves keep the wrist moving through the contact key.
+    # Both melee clips sample ONE motion, so the hit is not a visual pause.
+    segment = next((i for i in range(len(keys)-1) if time <= keys[i+1]['ms']), len(keys)-2)
+    a, b = keys[segment:segment+2]
+    duration = b['ms']-a['ms']
+    t = max(0, min(1, (time-a['ms'])/duration))
+    def tangent(i, field, component):
+        if i == 0 or i == len(keys)-1:
+            return 0
+        before, after = keys[i-1], keys[i+1]
+        return (after[field][component]-before[field][component])/(after['ms']-before['ms'])
+    return tuple(tuple((2*t**3-3*t*t+1)*a[field][j]+(t**3-2*t*t+t)*duration*tangent(segment, field, j)
+                       +(-2*t**3+3*t*t)*b[field][j]+(t**3-t*t)*duration*tangent(segment+1, field, j)
+                       for j in range(3)) for field in ('offset', 'angles'))
+
+
+def animations():
+    source = json.loads((ROOT/'assets/source/throwingknife/animation.json').read_text())
+    poses, clips, configs = [REST], {}, {}
+    for name, clip in source['clips'].items():
+        first, count = len(poses), clip['frames']
+        duration = clip['end_ms']-clip['start_ms']
+        assert count >= 2 and duration > 0
+        poses.extend(sample_motion(source['motions'][clip['motion']], clip['start_ms']+duration*i/(count-1))
+                     for i in range(count))
+        clips[name] = f'{first} {count} {count*1000/duration:.6f} 0'
+    for name, mapping in source['configs'].items():
+        text = '// Original Peace animation. Generated by dev/tools/build_throwingknife.py.\n'
+        text += '// Presentation fits the existing gameplay timers; frames never trigger a hit.\nidle 0 1 1 0\n'
+        text += ''.join(f'{slot} {clips[clip]}\n' for slot, clip in mapping.items())
+        configs[PREFIX+name+'.cfg'] = text.encode()
+    return poses, configs
+
+
 def build():
     mesh = knife()
+    poses, configs = animations()
     shader = '// Original Peace materials. Generated by dev/tools/build_throwingknife.py.\n'
     for name, color in COLORS.items():
         shader += f'peace/throwingknife_{name}\n{{\n {{ map $whiteimage\n  rgbGen lightingDiffuse\n }}\n'
@@ -231,8 +295,8 @@ def build():
             shader += ' { map $whiteimage\n  blendFunc GL_SRC_ALPHA GL_ONE\n  rgbGen const ( .18 .18 .18 )\n  alphaGen lightingSpecular\n }\n'
         shader += '}\n'
     shader += 'icons/peace_throwingknife\n{\n nopicmip\n { map icons/peace_throwingknife.tga\n  blendFunc blend\n  rgbGen vertex\n  alphaGen vertex\n }\n}\n'
-    return {PREFIX+'knife.md3': md3(mesh, 'Peace original throwing knife'),
-            PREFIX+'knife_hand.md3': md3(hand(), 'Peace original knife grip', True),
+    return {**configs, PREFIX+'knife.md3': md3(mesh, 'Peace original throwing knife'),
+            PREFIX+'knife_hand.md3': md3(None, 'Peace original knife hand motion', poses),
             'scripts/peace_throwingknife.shader': shader.encode(),
             'icons/peace_throwingknife.tga': icon(mesh)}
 

@@ -29,5 +29,5 @@ out/tests/pose-vm-test
 # Missiles as cgame draws them: the real CG_Missile, lerp and CG_RegisterWeapon.
 ${CC:-cc} $flags dev/tests/missile_draw_test.c code/cgame/cg_weapons.c code/game/bg_misc.c $common -Wl,--gc-sections -lm -o out/tests/missile-draw-test
 out/tests/missile-draw-test
-${CC:-cc} $flags dev/tests/equipment_view_test.c code/game/bg_pmove.c $game $common -Wl,--gc-sections -lm -o out/tests/equipment-view-test
+${CC:-cc} $flags dev/tests/equipment_view_test.c code/cgame/cg_anim.c dev/tests/pickup_pmove_driver.c $game $common -Wl,--gc-sections -lm -o out/tests/equipment-view-test
 out/tests/equipment-view-test

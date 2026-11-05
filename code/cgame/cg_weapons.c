@@ -634,6 +634,7 @@ void CG_RegisterWeapon( int weaponNum ) {
 	weaponInfo_t	*weaponInfo;
 	gitem_t			*item, *ammo;
 	char			path[MAX_QPATH];
+	const char		*handClips = NULL;
 	vec3_t			mins, maxs;
 	int				i;
 
@@ -726,6 +727,12 @@ void CG_RegisterWeapon( int weaponNum ) {
 		weaponInfo->missileModel = weaponInfo->weaponModel;
 		weaponInfo->flashModel = 0;
 		weaponInfo->barrelModel = 0;
+		handClips = "models/weapons2/throwingknife/throw.cfg";
+		break;
+	case WP_KNIFE:
+		// The same blade and hand, with a horizontal melee motion. No gun flash.
+		weaponInfo->flashModel = weaponInfo->barrelModel = 0;
+		handClips = "models/weapons2/throwingknife/melee.cfg";
 		break;
 	case WP_GAUNTLET:
 		MAKERGB( weaponInfo->flashDlightColor, 0.6f, 0.6f, 1.0f );
@@ -872,14 +879,14 @@ void CG_RegisterWeapon( int weaponNum ) {
 	}
 
 	// Clip table lives beside the model it describes, so the two can never drift
-	// apart. No viewmodel means no clips, and the legacy torso path is used.
+	// apart. MD3 quick-action hands use the same clip format and loader.
 	if ( weaponInfo->viewModel ) {
 		Com_sprintf( path, sizeof(path), "%s.cfg", cg_viewModelBase[weaponNum] );
 		CG_WeapAnim_RegisterClips( weaponNum, weaponInfo->viewModel, path );
 		Com_sprintf( path, sizeof(path), "%s.sights", cg_viewModelBase[weaponNum] );
 		CG_Sights_Register( weaponNum, path );
 	} else {
-		CG_WeapAnim_RegisterClips( weaponNum, 0, NULL );
+		CG_WeapAnim_RegisterClips( weaponNum, weaponInfo->handsModel, handClips );
 		CG_Sights_Register( weaponNum, NULL );
 	}
 }
@@ -1420,29 +1427,31 @@ CG_AddViewWeapon
 Add the weapon, and flash for the player's view
 ==============
 */
-// Held MD3 equipment shares pull/release/recovery presentation. An optional
-// tag_weapon authors the grip orientation without rotating the world model.
-// This only reads gameplay state: the throw event still owns ammo and launch.
+// MD3 quick-action hands use authored motion where supplied, with the existing
+// equipment gesture as fallback. tag_weapon carries the SAME blade through all
+// frames without rotating the world model. Gameplay alone owns hits and throws.
 static void CG_EquipmentView(const playerState_t *ps, const weaponInfo_t *weapon) {
 	refEntity_t hand;
 	vec3_t angles;
+	qboolean animated;
 	float t = 1, x = 18, y = -8, z = -8;
-	if (ps->weaponstate == WEAPON_RAISING) {
+	memset(&hand, 0, sizeof(hand));
+	animated = CG_WeapAnim_ActionFrame(ps, &hand);
+	if (!animated && ps->weaponstate == WEAPON_RAISING) {
 		t = 1.0f - (float)ps->weaponTime / BG_WeaponRaiseTime(ps->weapon);
 		if (t < 0) t = 0;
 		if (t > 1) t = 1;
 		t = t*t*(3-2*t);
 		x += 7*(1-t); z -= 19*(1-t);
-	} else if (ps->weaponstate == WEAPON_FIRING) {
+	} else if (!animated && ps->weaponstate == WEAPON_FIRING) {
 		t = 1.0f - (float)ps->weaponTime / BG_QUICK_ACTION_HOLD;
 		if (t < 0) t = 0;
 		if (t > 1) t = 1;
 		x += 18*sin(t*M_PI); z += 8*sin(t*M_PI)-24*t;
-	} else if (ps->weaponstate == WEAPON_DROPPING) {
+	} else if (!animated && ps->weaponstate == WEAPON_DROPPING) {
 		t = 1.0f - (float)ps->weaponTime / BG_HolsterTime(ps);
 		z -= 24*t;
 	}
-	memset(&hand, 0, sizeof(hand));
 	VectorCopy(cg.refdef.vieworg, hand.origin);
 	VectorMA(hand.origin, x, cg.refdef.viewaxis[0], hand.origin);
 	VectorMA(hand.origin, y, cg.refdef.viewaxis[1], hand.origin);
@@ -1454,17 +1463,20 @@ static void CG_EquipmentView(const playerState_t *ps, const weaponInfo_t *weapon
 	hand.renderfx = RF_DEPTHHACK | RF_FIRST_PERSON | RF_MINLIGHT;
 	hand.hModel = weapon->handsModel;
 	trap_R_AddRefEntityToScene(&hand);
-	if (!(ps->weaponAction & (WA_FIRED | WA_RECOVERING))) {
+	if (BG_QuickActionInPlace(ps->weapon) || !(ps->weaponAction & (WA_FIRED | WA_RECOVERING))) {
 		refEntity_t item = hand;
 		orientation_t grip;
 		int i;
-		if (trap_R_LerpTag(&grip, weapon->handsModel, 0, 0, 1.0f, "tag_weapon")) {
+		if (trap_R_LerpTag(&grip, weapon->handsModel, hand.oldframe, hand.frame, 1.0f-hand.backlerp, "tag_weapon")) {
 			for (i = 0; i < 3; i++)
 				VectorMA(item.origin, grip.origin[i], hand.axis[i], item.origin);
 			MatrixMultiply(grip.axis, hand.axis, item.axis);
 			VectorCopy(item.origin, item.oldorigin);
 		}
 		item.hModel = weapon->weaponModel;
+		// The hand animates; the world/pickup blade is a single-frame mesh.
+		item.frame = item.oldframe = 0;
+		item.backlerp = 0;
 		trap_R_AddRefEntityToScene(&item);
 	}
 }
@@ -1530,7 +1542,7 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	cent = &cg.predictedPlayerEntity;	// &cg_entities[cg.snap->ps.clientNum];
 	CG_RegisterWeapon( ps->weapon );
 	weapon = &cg_weapons[ ps->weapon ];
-	if (ps->weapon == WP_SEMTEX || ps->weapon == WP_THROWING_KNIFE) {
+	if (ps->weapon == WP_SEMTEX || ps->weapon == WP_THROWING_KNIFE || ps->weapon == WP_KNIFE) {
 		CG_EquipmentView(ps, weapon);
 		return;
 	}

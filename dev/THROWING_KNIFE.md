@@ -7,11 +7,18 @@ knife, with an original gloved hand and a dedicated silhouette icon. The blade
 points along +X for the existing projectile/stick orientation. A hand-model
 `tag_weapon` authors the first-person grip without rotating the world model.
 
-`CG_EquipmentView` shares the existing Semtex pull and follow-through, reading
-each item's own raise time. It draws the hand plus knife while held, and only
-the hand after `WA_FIRED`/`WA_RECOVERING`; it never changes ammo, launch, pickup,
-collision or timing. Semtex's untagged hand keeps its existing placement.
-The source is `dev/tools/build_throwingknife.py` (stdlib, `--check` supported);
+The throwing pullout is original authored MD3 hand/tag motion, fitted to its
+existing 150 ms pull. Regular melee uses this same knife and hand with a
+horizontal right-to-left slash. Contact remains at `BG_MELEE_DELAY` (79 ms),
+follow-through ends at `BG_MELEE_TIME` (800 ms), and the gun returns on its
+existing quick raise. These are visual clips, not new gameplay events.
+`CG_EquipmentView` samples the generated clip tables through
+`CG_WeapAnim_ActionFrame`. It draws the throwing blade while held, and only
+the hand after `WA_FIRED`/`WA_RECOVERING`; melee keeps its blade through the
+slash. It never changes ammo, launch, pickup, collision or timing. Semtex's
+untagged hand and the throwing follow-through keep their existing gestures.
+The sources are `assets/source/throwingknife/animation.json` and
+`dev/tools/build_throwingknife.py` (stdlib, `--check` supported);
 provenance and regeneration are in `assets/source/throwingknife/README.md`.
 
 ## In hand (`bg_pmove.c`)
@@ -180,11 +187,14 @@ Not yet done:
 
 ## Tests
 
-- `python3 dev/tests/throwingknife_asset_test.py` checks shipped geometry,
-  winding/normals, culling bounds, GL1 limits, grip axes, materials and icon.
-- `equipment_view_test.c` (`run-loadouts.*`) reads the shipped grip tag and
-  checks the real first-person renderer through pull, hold, cancel and release,
-  including unchanged Semtex placement and no playerstate mutation.
+- `python3 dev/tests/throwingknife_asset_test.py` checks every shipped frame's
+  winding/normals, culling bounds, GL1 limits, grip contact, clip seams, materials
+  and icon.
+- `equipment_view_test.c` (`run-loadouts.*`) reads the shipped clips/grip tags
+  and checks the real first-person renderer through pull, hold, slash, cancel
+  and release, including unchanged Semtex placement and no playerstate mutation.
+  Real `PM_Weapon` drives the hit at 79 ms, the gun's return at 800 ms, and
+  equipment interrupting melee before contact without a hit or spent knife.
 - `dev/tests/knife_missile_test.c` (in `run-loadouts.*`) covers launch, spin,
   stick, bounce, settle, the damage threshold, the player carry and bury, let
   go, the support rule, the corpse hand-off, a start in solid, the flight

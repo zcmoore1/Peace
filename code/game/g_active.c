@@ -1196,6 +1196,7 @@ void ClientEndFrame( gentity_t *ent ) {
 
 	ent->client->ps.stats[STAT_HEALTH] = ent->health;	// FIXME: get rid of ent->health...
 
+	G_InsertionSample( ent );	// MW2's TISpawnPosition
 	G_UpdateCursorHint( ent );
 
 	G_SetClientSound (ent);

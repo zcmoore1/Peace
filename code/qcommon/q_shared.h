@@ -1140,7 +1140,7 @@ typedef struct {
 // so if a playerState_t is transmitted, the entityState_t can be fully derived
 // from it.
 #define PS_PERK_BITS 5
-#define PS_CURSOR_HINT_BITS 2	// cursorHint_t (bg_public.h)
+#define PS_CURSOR_HINT_BITS 3	// cursorHint_t (bg_public.h): six types
 
 typedef struct playerState_s {
 	int			commandTime;	// cmd->serverTime of last executed command

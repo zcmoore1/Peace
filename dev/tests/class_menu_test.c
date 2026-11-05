@@ -177,6 +177,18 @@ int main(void) {
  Activate(&classEdit.lethal); Activate(Option(&classPicker,WP_THROWING_KNIFE)); Screen(&classEdit.menu,2);
  CHECK(classEdit.draft.lethal==WP_THROWING_KNIFE && classEdit.draft.lethalCount==1);
  CHECK(!strcmp(classEdit.lethal.title,"Throwing knife x1"));
+ /* MW2's Tactical Insertion is a lethal beside them (isValidEquipment), one
+  * of it, and never a tactical */
+ Activate(&classEdit.lethal); Screen(&classPicker.menu,3);
+ CHECK(classPicker.count==5 && !strcmp(Option(&classPicker,WP_TACTICAL_INSERTION)->title,"Tactical Insertion"));
+ CHECK(!strcmp(Option(&classPicker,WP_TACTICAL_INSERTION)->description,
+  "Plant it where you stand; your next life starts there; pick it back up with use."));
+ Activate(Option(&classPicker,WP_TACTICAL_INSERTION)); Screen(&classEdit.menu,2);
+ CHECK(classEdit.draft.lethal==WP_TACTICAL_INSERTION && classEdit.draft.lethalCount==1 && BG_ValidateClass(&classEdit.draft));
+ CHECK(!strcmp(classEdit.lethal.title,"Tactical Insertion x1"));
+ Activate(&classEdit.tactical); Screen(&classPicker.menu,3);
+ { int k; for(k=0;k<classPicker.count;k++) CHECK(classPicker.rows[k].value!=WP_TACTICAL_INSERTION); }
+ Key(K_ESCAPE); Screen(&classEdit.menu,2);
  Activate(&classEdit.lethal); Activate(Option(&classPicker,WP_SEMTEX)); Screen(&classEdit.menu,2);
  CHECK(classEdit.draft.lethal==WP_SEMTEX && classEdit.draft.lethalCount==1);
  Activate(&classEdit.tactical); Activate(Option(&classPicker,WP_NONE));
@@ -239,6 +251,14 @@ int main(void) {
    CHECK(classEdit.draft.lethal==WP_THROWING_KNIFE && classEdit.draft.lethalCount==1);
    CHECK(classEdit.draft.tactical==WP_FLASH && classEdit.draft.tacticalCount==2 && classEdit.draft.perk[0]==PERK_QUICK_RELOAD);
    CHECK(!UI_ClassDirty()); Key(K_ESCAPE); }
+ { char saved[BG_CLASS_STRING_SIZE];	/* a saved TI class opens as one, and saves back the same */
+   Com_sprintf(saved,sizeof(saved),"2|%i|%i|%i|1|%i|2|0|0|0|0|0|Insertion",WP_SHOTGUN,WP_MACHINEGUN,
+    WP_TACTICAL_INSERTION,WP_FLASH);
+   trap_Cvar_Set("peace_class_4",saved); OpenEditor(4);
+   CHECK(!strcmp(classEdit.draft.name,"Insertion") && classEdit.draft.lethal==WP_TACTICAL_INSERTION &&
+    classEdit.draft.lethalCount==1 && !strcmp(classEdit.lethal.title,"Tactical Insertion x1") && !UI_ClassDirty());
+   Activate(&classEdit.save); cl=ReadClass("peace_class_4");
+   CHECK(cl.lethal==WP_TACTICAL_INSERTION && cl.lethalCount==1 && !strcmp(cl.name,"Insertion")); }
  trap_Cvar_Set("peace_class_1","corrupt"); OpenEditor(1);
  CHECK(BG_ValidateClass(&classEdit.draft) && !strcmp(classEdit.draft.name,"Custom 2"));
  CHECK(!strcmp(vars[Find("peace_class_1")].value,"corrupt")); Key(K_ESCAPE);

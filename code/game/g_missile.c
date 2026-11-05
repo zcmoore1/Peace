@@ -71,7 +71,7 @@ void G_ExplodeMissile( gentity_t *ent ) {
 	gentity_t *attacker = ent->parent;
 	if (!attacker || !attacker->inuse || !attacker->client ||
 		attacker->client->pers.connected != CON_CONNECTED ||
-		(ent->s.weapon == WP_SEMTEX && attacker->client->pers.enterTime != ent->semtexOwnerConnect))
+		(ent->s.weapon == WP_SEMTEX && attacker->client->pers.enterTime != ent->ownerConnect))
 		attacker = &g_entities[ENTITYNUM_WORLD];
 
 	BG_EvaluateTrajectory( &ent->s.pos, level.time, origin );
@@ -714,6 +714,12 @@ void G_RunMissile( gentity_t *ent ) {
 		G_RunThink(ent);
 		return;
 	}
+	// A Tactical Insertion never moves (MW2's script_model): it waits to be
+	// used, shot or spawned on, and thinks only if something asks it to.
+	if (ent->s.weapon == WP_TACTICAL_INSERTION) {
+		G_RunThink(ent);
+		return;
+	}
 
 	// get current position
 	BG_EvaluateTrajectory( &ent->s.pos, level.time, origin );
@@ -834,7 +840,7 @@ gentity_t *fire_semtex(gentity_t *self, vec3_t start, vec3_t dir) {
 	bolt->s.eFlags = 0;
 	bolt->damage = 0;
 	bolt->nextthink = level.time + SEMTEX_FUSE_TIME;
-	bolt->semtexOwnerConnect = self->client ? self->client->pers.enterTime : 0;
+	bolt->ownerConnect = self->client ? self->client->pers.enterTime : 0;
 	return bolt;
 }
 
@@ -878,7 +884,7 @@ gentity_t *fire_throwingknife(gentity_t *self, vec3_t start, vec3_t dir) {
 	bolt->methodOfDeath = MOD_GAUNTLET;
 	bolt->clipmask = MASK_SHOT;
 	bolt->target_ent = NULL;
-	bolt->timestamp = level.time;		// identifies this knife to a use hold (knifeHoldSpawn)
+	bolt->timestamp = level.time;		// identifies this knife to a use hold (useHoldSpawn)
 
 	bolt->s.pos.trType = TR_GRAVITY;
 	bolt->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;

@@ -1,6 +1,7 @@
-/* The knife prompt as cgame draws it: the real CG_DrawWeaponPickup and
- * CG_DrawKnifePickup (cg_draw.c), the real button lookup, formatter and gate
- * (cg_usehint.c), and the real engine side of the new trap (cl_keys.c's
+/* The use prompt as cgame draws it, for a throwing knife and a Tactical
+ * Insertion (yours to pick up, an enemy's to smash): the real
+ * CG_DrawWeaponPickup and CG_DrawUsePrompt (cg_draw.c), the real button
+ * lookup, formatter and gate (cg_usehint.c), and the real engine side of the new trap (cl_keys.c's
  * Key_GetBindingName over its keys[] binds, bound with the real
  * Key_SetBinding), and the engine's last-input-device note. Only the 2D
  * drawing calls, the config strings and the cvar system are stubbed. The trap's number is checked against
@@ -158,40 +159,66 @@ static void TestInputDevice(void) {
  CL_NoteInputDevice(Key_IsGamepadKey(K_MOUSE1)); CHECK(inUse.integer==0 && cvarSets==2);
  cl_gamepadInUse=NULL; CL_NoteInputDevice(qtrue); CHECK(cvarSets==2);	/* before the cvar exists */
 }
+static int liveHint=CURSOR_HINT_KNIFE;
 static playerState_t *Live(void) {
  playerState_t *ps=&cg.predictedPlayerState;
  memset(&cg,0,sizeof(cg)); memset(&cgs,0,sizeof(cgs)); memset(configs,0,sizeof(configs));
  cg.snap=&cg.activeSnapshots[0]; cg.time=10000;
  ps->pm_type=PM_NORMAL; ps->stats[STAT_HEALTH]=100; ps->persistant[PERS_TEAM]=TEAM_FREE;
  ps->weapon=WP_MACHINEGUN; ps->weaponstate=WEAPON_READY;
- ps->cursorHint=CURSOR_HINT_KNIFE; ps->cursorHintEntIndex=MAX_CLIENTS+3; ps->pickupTarget=ENTITYNUM_NONE;
+ ps->cursorHint=liveHint; ps->cursorHintEntIndex=MAX_CLIENTS+3; ps->pickupTarget=ENTITYNUM_NONE;
  cg.snap->ps=*ps; drawnCount=fills=0;
  return ps;
 }
+static qboolean Shown(const playerState_t *ps,const playerState_t *sv) { return CG_UsePromptShown(ps,sv)!=NULL; }
+/* The prompt's action is the server's type: MW2's MP_PICKUP_TI to the owner,
+ * MP_DESTROY_TI to an enemy, and nothing to a teammate, whom the server never
+ * gives the TI as a type (G_InsertionHint). */
+static void TestActions(void) {
+ int i;
+ CHECK(CURSOR_HINT_COUNT==6 && (1<<PS_CURSOR_HINT_BITS)>=CURSOR_HINT_COUNT);
+ CHECK(!strcmp(CG_UsePromptAction(CURSOR_HINT_KNIFE),"pick up knife"));
+ CHECK(!strcmp(CG_UsePromptAction(CURSOR_HINT_INSERTION),"pick up Tactical Insertion"));
+ CHECK(!strcmp(CG_UsePromptAction(CURSOR_HINT_INSERTION_ENEMY),"smash Tactical Insertion"));
+ for(i=CURSOR_HINT_NONE;i<CURSOR_HINT_COUNT;i++)
+  CHECK((CG_UsePromptAction(i)!=NULL)==(i==CURSOR_HINT_KNIFE || i==CURSOR_HINT_INSERTION || i==CURSOR_HINT_INSERTION_ENEMY));
+ CHECK(!strcmp(CG_CursorHintName(CURSOR_HINT_INSERTION),"own insertion") &&
+  !strcmp(CG_CursorHintName(CURSOR_HINT_INSERTION_ENEMY),"enemy insertion") &&
+  !strcmp(CG_CursorHintName(CURSOR_HINT_KNIFE),"knife") && !strcmp(CG_CursorHintName(CURSOR_HINT_NONE),"nothing"));
+}
+/* One gate for every held usable, the knife's as it was. */
 static void TestGate(void) {
- playerState_t *ps, *sv; int i;
+ static const int prompts[3]={CURSOR_HINT_KNIFE,CURSOR_HINT_INSERTION,CURSOR_HINT_INSERTION_ENEMY};
+ playerState_t *ps, *sv; int i,k;
  ShippedBinds(); joystick=1;
- ps=Live(); sv=&cg.snap->ps; CHECK(CG_KnifePromptShown(ps,sv) && CG_KnifePromptShown(ps,NULL));
- for(i=CURSOR_HINT_NONE;i<CURSOR_HINT_COUNT;i++) { ps->cursorHint=i; CHECK(CG_KnifePromptShown(ps,sv)==(i==CURSOR_HINT_KNIFE)); }
- ps=Live(); ps->pm_flags|=PMF_SPRINTING; CHECK(!CG_KnifePromptShown(ps,sv));
- ps=Live(); ps->pm_flags|=PMF_FOLLOW; CHECK(!CG_KnifePromptShown(ps,sv));
- ps=Live(); ps->stats[STAT_HEALTH]=0; CHECK(!CG_KnifePromptShown(ps,sv));
- ps=Live(); ps->pm_type=PM_DEAD; CHECK(!CG_KnifePromptShown(ps,sv));
- ps=Live(); ps->pm_type=PM_SPECTATOR; CHECK(!CG_KnifePromptShown(ps,sv));
- ps=Live(); ps->persistant[PERS_TEAM]=TEAM_SPECTATOR; CHECK(!CG_KnifePromptShown(ps,sv));
- ps=Live(); ps->weaponAction=WA_TACTICAL; CHECK(BG_OffhandOut(ps) && !CG_KnifePromptShown(ps,sv));
- ps=Live(); ps->weaponAction=WA_LETHAL|WA_FIRED; CHECK(!BG_OffhandOut(ps) && CG_KnifePromptShown(ps,sv));	/* the gun is back */
+ for(k=0;k<3;k++) {
+ liveHint=prompts[k];
+ ps=Live(); sv=&cg.snap->ps; CHECK(Shown(ps,sv) && Shown(ps,NULL));
+ CHECK(!strcmp(CG_UsePromptShown(ps,sv),CG_UsePromptAction(liveHint)));
+ for(i=CURSOR_HINT_NONE;i<CURSOR_HINT_COUNT;i++) { ps->cursorHint=i; CHECK(Shown(ps,sv)==(CG_UsePromptAction(i)!=NULL)); }
+ ps=Live(); ps->pm_flags|=PMF_SPRINTING; CHECK(!Shown(ps,sv));
+ ps=Live(); ps->pm_flags|=PMF_FOLLOW; CHECK(!Shown(ps,sv));
+ ps=Live(); ps->stats[STAT_HEALTH]=0; CHECK(!Shown(ps,sv));
+ ps=Live(); ps->pm_type=PM_DEAD; CHECK(!Shown(ps,sv));
+ ps=Live(); ps->pm_type=PM_SPECTATOR; CHECK(!Shown(ps,sv));
+ ps=Live(); ps->persistant[PERS_TEAM]=TEAM_SPECTATOR; CHECK(!Shown(ps,sv));
+ ps=Live(); ps->weaponAction=WA_TACTICAL; CHECK(BG_OffhandOut(ps) && !Shown(ps,sv));
+ ps=Live(); ps->weaponAction=WA_LETHAL|WA_FIRED; CHECK(!BG_OffhandOut(ps) && Shown(ps,sv));	/* the gun is back */
+ /* the TI in hand (its ignite or held) is equipment out */
+ ps=Live(); ps->weapon=WP_TACTICAL_INSERTION; ps->weaponAction=WA_LETHAL; CHECK(BG_OffhandOut(ps) && !Shown(ps,sv));
  /* a plain reload hold on a floor gun keeps the gun's prompt */
- ps=Live(); ps->pickupHeld=1; ps->pickupTime=1; CHECK(!CG_KnifePromptShown(ps,sv));
- ps->pickupTime=0; CHECK(CG_KnifePromptShown(ps,sv));
+ ps=Live(); ps->pickupHeld=1; ps->pickupTime=1; CHECK(!Shown(ps,sv));
+ ps->pickupTime=0; CHECK(Shown(ps,sv));
  /* a use/reload hold the server gave a floor gun (its pickupHeld stays 3) keeps
-  * the gun's prompt, even after a knife comes into reach: that hold takes the gun */
- ps=Live(); sv->pickupHeld=3; sv->pickupTime=100; ps->pickupHeld=3; ps->pickupTime=116; CHECK(!CG_KnifePromptShown(ps,sv));
- sv->pickupTime=0; CHECK(CG_KnifePromptShown(ps,sv));
- /* a hold the knife took is 2 on the server, though prediction still counts it
-  * as a gun's hold until the snapshot says so */
- ps=Live(); sv->pickupHeld=2; ps->pickupHeld=3; ps->pickupTime=48; CHECK(CG_KnifePromptShown(ps,sv));
- ps->pickupHeld=2; CHECK(CG_KnifePromptShown(ps,sv));
+  * the gun's prompt, even after a knife or TI comes into reach: that hold takes the gun */
+ ps=Live(); sv->pickupHeld=3; sv->pickupTime=100; ps->pickupHeld=3; ps->pickupTime=116; CHECK(!Shown(ps,sv));
+ sv->pickupTime=0; CHECK(Shown(ps,sv));
+ /* a hold the knife or TI took is 2 on the server, though prediction still
+  * counts it as a gun's hold until the snapshot says so */
+ ps=Live(); sv->pickupHeld=2; ps->pickupHeld=3; ps->pickupTime=48; CHECK(Shown(ps,sv));
+ ps->pickupHeld=2; CHECK(Shown(ps,sv));
+ }
+ liveHint=CURSOR_HINT_KNIFE;
 }
 /* The real draw: in the gun prompt's place, instead of it; the bomb is the server's type. */
 static void TestDraw(void) {
@@ -224,6 +251,30 @@ static void TestDraw(void) {
  ps->cursorHint=CURSOR_HINT_KNIFE; ps->cursorHintEntIndex=MAX_CLIENTS+3;
  CG_DrawWeaponPickup(); CHECK(drawnCount==1 && !strcmp(drawn[0],"Hold [X] to pick up knife"));
 }
+/* The Tactical Insertion's prompts, owner and enemy, drawn in the same place
+ * and by the same button rule; a teammate (no TI type) sees nothing. */
+static void TestInsertionDraw(void) {
+ playerState_t *ps; entityState_t floor;
+ ShippedBinds(); joystick=1;
+ liveHint=CURSOR_HINT_INSERTION; ps=Live(); CG_DrawWeaponPickup();
+ CHECK(drawnCount==1 && !strcmp(drawn[0],"Hold [X] to pick up Tactical Insertion") && drawnY[0]==300 && !fills);
+ joystick=0; ps=Live(); CG_DrawWeaponPickup();
+ CHECK(drawnCount==1 && !strcmp(drawn[0],"Press [F] to pick up Tactical Insertion"));
+ joystick=1; liveHint=CURSOR_HINT_INSERTION_ENEMY; ps=Live(); CG_DrawWeaponPickup();
+ CHECK(drawnCount==1 && !strcmp(drawn[0],"Hold [X] to smash Tactical Insertion"));
+ joystick=0; ps=Live(); CG_DrawWeaponPickup();
+ CHECK(drawnCount==1 && !strcmp(drawn[0],"Press [F] to smash Tactical Insertion"));
+ /* a teammate's TI: the server writes no TI type, so no prompt at all */
+ joystick=1; liveHint=CURSOR_HINT_NONE; ps=Live(); CG_DrawWeaponPickup(); CHECK(drawnCount==0);
+ /* the TI outranked a floor gun in reach: its prompt, not the gun's; the gun
+  * outranked it: the gun's */
+ memset(&floor,0,sizeof(floor)); floor.eType=ET_ITEM; floor.modelindex=BG_FindItemForWeapon(WP_RAILGUN)-bg_itemlist;
+ liveHint=CURSOR_HINT_INSERTION_ENEMY; ps=Live(); ps->pickupTarget=MAX_CLIENTS+4; cg_entities[MAX_CLIENTS+4].currentState=floor;
+ CG_DrawWeaponPickup(); CHECK(drawnCount==1 && !strcmp(drawn[0],"Hold [X] to smash Tactical Insertion"));
+ ps->cursorHint=CURSOR_HINT_WEAPON; drawnCount=0;
+ CG_DrawWeaponPickup(); CHECK(drawnCount==1 && !strncmp(drawn[0],"Hold RELOAD: ",13));
+ liveHint=CURSOR_HINT_KNIFE;
+}
 static void TestTrapNumber(void) {
  FILE *f=fopen("code/cgame/cg_syscalls.asm","r"); char line[256], name[64]; int number, found=0;
  CHECK(f!=NULL);
@@ -235,6 +286,6 @@ static void TestTrapNumber(void) {
  CHECK(CG_KEY_GETBINDINGNAME==CG_R_BLENDMODELPOSES+1);	/* appended: nothing before it moved */
 }
 int main(void) {
- TestKeyNames(); TestEngineLookup(); TestButtonChoice(); TestCache(); TestInputDevice(); TestGate(); TestDraw(); TestTrapNumber();
+ TestKeyNames(); TestEngineLookup(); TestButtonChoice(); TestCache(); TestInputDevice(); TestActions(); TestGate(); TestDraw(); TestInsertionDraw(); TestTrapNumber();
  printf("PASS: %d use-hint prompt checks\n",checks); return 0;
 }

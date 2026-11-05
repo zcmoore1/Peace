@@ -59,5 +59,16 @@ int main(void) {
   CHECK(decoded.cursorHintEntIndex==to.cursorHintEntIndex);
   CHECK(decoded.cursorHint==to.cursorHint);
  }
+ /* the use hint's six types in PS_CURSOR_HINT_BITS (3, protocol 84): both
+  * Tactical Insertion types, the top one included, each from every other */
+ CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==84);
+ for(i=0;i<CURSOR_HINT_COUNT;i++) for(j=0;j<CURSOR_HINT_COUNT;j++) {
+  memset(&from,0,sizeof(from)); to=from; from.cursorHint=i; to.cursorHint=j;
+  to.cursorHintEntIndex=MAX_CLIENTS+j;
+  MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,&from,&to);
+  CHECK(!msg.overflowed); MSG_BeginReading(&msg);
+  MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
+  CHECK(decoded.cursorHint==j && decoded.cursorHintEntIndex==MAX_CLIENTS+j);
+ }
  printf("PASS: %d action wire checks\n",checks); return 0;
 }

@@ -16,7 +16,7 @@ out/tests/semtex-missile-test
 ${CC:-cc} $flags -UMISSIONPACK dev/tests/knife_missile_test.c code/game/bg_misc.c $common -Wl,--gc-sections -lm -o out/tests/knife-missile-test
 out/tests/knife-missile-test
 # A knife stuck in a player, through the real g_client.c body queue, g_utils.c and g_items.c.
-${CC:-cc} $flags -UMISSIONPACK dev/tests/knife_corpse_test.c code/game/g_missile.c code/game/g_client.c code/game/g_utils.c code/game/g_items.c code/game/bg_pmove.c $game $common -Wl,--gc-sections -lm -o out/tests/knife-corpse-test
+${CC:-cc} $flags -UMISSIONPACK dev/tests/knife_corpse_test.c code/game/g_missile.c code/game/g_client.c code/game/g_utils.c code/game/g_items.c code/game/g_insertion.c code/game/bg_pmove.c $game $common -Wl,--gc-sections -lm -o out/tests/knife-corpse-test
 out/tests/knife-corpse-test
 ${CC:-cc} $flags dev/tests/class_menu_test.c code/q3_ui/ui_atoms.c code/q3_ui/ui_qmenu.c code/q3_ui/ui_mfield.c code/game/bg_loadout.c $common -Wl,--gc-sections -lm -o out/tests/class-menu-test
 out/tests/class-menu-test

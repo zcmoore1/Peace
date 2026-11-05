@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-12"
+#define	GAME_VERSION		BASEGAME "-13"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -217,6 +217,15 @@ typedef enum {
 #define BG_KNIFE_PICKUP_RADIUS    90.0f	// player_throwbackInnerRadius, flat, from the origin
 #define BG_KNIFE_PICKUP_REACH     160.0f	// player_throwbackOuterRadius, from the eye
 #define BG_KNIFE_PICKUP_STILL     100.0f	// bg_maxGrenadeIndicatorSpeed: moving faster is no pickup
+// MW2's Tactical Insertion, flare_mp (weapon data) and _perkfunctions.gsc. Its
+// pull is the ignite, holdFireTime: a release before it ends is queued, and it
+// is planted at the release (MW2's HOLD waits for it; cookOffHold 0, so it
+// never throws itself). The plant is the owner's last good standing spot.
+#define BG_INSERTION_IGNITE_MS    2630	// flare_mp holdFireTime 2.63
+#define BG_INSERTION_HEALTH       5000	// GlowStickDamageListener: health 5000 ...
+#define BG_INSERTION_DESTROY_DAMAGE 20	// ... destroyed once below 4980
+#define BG_INSERTION_HINT_BIAS    192.0f	// MW2's use list: a scriptmover's score less 192
+#define BG_INSERTION_GROUND_DROP  2048.0f	// TIGroundPosition: traced from +16 to -2048
 #define BG_LADDER_REACH           4.0f
 #define BG_LADDER_SPEED           160.0f
 #define BG_LADDER_FRICTION        5.0f
@@ -509,13 +518,16 @@ typedef enum {
 	// Loadout extras. These are weapon_t entries so they reuse the whole pmove
 	// state machine (switch timing, notes, firing) for free, but they are NOT
 	// inventory slots - melee is always available and equipment lives in its
-	// own slots. Basegame indices: KNIFE 11, FRAG 12, FLASH 13, SEMTEX 14.
+	// own slots. Basegame indices: KNIFE 11, FRAG 12, FLASH 13, SEMTEX 14,
+	// M40A3 15, THROWING_KNIFE 16, TACTICAL_INSERTION 17 (missionpack +3).
+	// Append only: saved classes store these numbers.
 	WP_KNIFE,			// melee, always carried
 	WP_FRAG,			// lethal equipment
 	WP_FLASH,			// tactical equipment
 	WP_SEMTEX,           // held lethal equipment; release to throw
 	WP_M40A3,            // scoped bolt-action rifle; appended to preserve class IDs
 	WP_THROWING_KNIFE,   // lethal equipment: thrown, sticks, picked back up (MW2's)
+	WP_TACTICAL_INSERTION,	// lethal equipment: planted where you stand, your next spawn (MW2's)
 
 	WP_NUM_WEAPONS
 } weapon_t;
@@ -574,6 +586,8 @@ typedef enum {
 	CURSOR_HINT_OBJECTIVE,	// an S&D site or the bomb (the index is ENTITYNUM_WORLD)
 	CURSOR_HINT_WEAPON,	// a floor gun in reach
 	CURSOR_HINT_KNIFE,	// a resting throwing knife this player can take now
+	CURSOR_HINT_INSERTION,	// this player's own Tactical Insertion: a use picks it up
+	CURSOR_HINT_INSERTION_ENEMY,	// an enemy's Tactical Insertion: a use smashes it
 	CURSOR_HINT_COUNT
 } cursorHint_t;
 #define BG_PICKUP_OWNER_DELAY 1000	// MW2: your own dropped gun waits this long

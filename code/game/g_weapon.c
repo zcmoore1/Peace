@@ -511,9 +511,12 @@ void weapon_railgun_fire (gentity_t *ent) {
 		unlinked++;
 	} while ( unlinked < MAX_RAIL_HITS );
 
-	// link back in any entities we unlinked
+	// link back in any entities we unlinked, but not one the beam destroyed
+	// (a Tactical Insertion's damage frees it)
 	for ( i = 0 ; i < unlinked ; i++ ) {
-		trap_LinkEntity( unlinkedEntities[i] );
+		if ( unlinkedEntities[i]->inuse ) {
+			trap_LinkEntity( unlinkedEntities[i] );
+		}
 	}
 
 	// the final trace endpos will be the terminal point of the rail trail
@@ -903,6 +906,11 @@ void FireWeapon( gentity_t *ent ) {
 		break;
 	case WP_FLASH:
 		Weapon_ThrowEquipment( ent, qfalse );
+		break;
+	case WP_TACTICAL_INSERTION:
+		// MW2 throws an invisible flare it ignores; the TI is planted at the
+		// owner's last standing spot (monitorTIUse on 'grenade_fire').
+		G_PlantInsertion( ent );
 		break;
 	case WP_LIGHTNING:
 		Weapon_LightningFire( ent );

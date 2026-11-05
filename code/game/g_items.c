@@ -590,6 +590,24 @@ static qboolean G_IsThrowingKnife(const gentity_t *ent) {
 }
 
 /*
+G_UseScore
+
+MW2's use list score for a usable at origin (5fe7e9-5fea88), before its kind's
+bias: 128 * (1 - dot) + eye distance, the facing from the view. Lowest wins.
+*distance is the eye distance.
+*/
+float G_UseScore(gentity_t *player, const vec3_t origin, float *distance) {
+	playerState_t *ps = &player->client->ps;
+	vec3_t eye, forward, delta;
+	VectorCopy(ps->origin, eye);
+	eye[2] += ps->viewheight;
+	AngleVectors(ps->viewangles, forward, NULL, NULL);
+	VectorSubtract(origin, eye, delta);
+	*distance = VectorNormalize(delta);
+	return 128 * (1 - DotProduct(forward, delta)) + *distance;
+}
+
+/*
 G_FindKnifePickup
 
 MW2's use list for a throwing knife: one moving no faster than
@@ -604,13 +622,12 @@ static gentity_t *G_FindKnifePickup(gentity_t *player) {
 	playerState_t *ps = &client->ps;
 	gentity_t *best = NULL;
 	float bestScore = 0;
-	vec3_t eye, forward, origin, delta;
+	vec3_t eye, origin, delta;
 	trace_t trace;
 	int i;
 	if (client->knifeMax <= 0 || ps->ammo[WP_THROWING_KNIFE] >= client->knifeMax) return NULL;
 	VectorCopy(ps->origin, eye);
 	eye[2] += ps->viewheight;
-	AngleVectors(ps->viewangles, forward, NULL, NULL);
 	for (i = MAX_CLIENTS; i < level.num_entities; i++) {
 		gentity_t *knife = &g_entities[i];
 		float distance, score;
@@ -619,12 +636,10 @@ static gentity_t *G_FindKnifePickup(gentity_t *player) {
 		VectorSubtract(origin, ps->origin, delta);
 		if (ps->cursorHintEntIndex != i &&
 			delta[0] * delta[0] + delta[1] * delta[1] > BG_KNIFE_PICKUP_RADIUS * BG_KNIFE_PICKUP_RADIUS) continue;
-		VectorSubtract(origin, eye, delta);
-		distance = VectorNormalize(delta);
+		score = G_UseScore(player, origin, &distance);
 		if (distance > BG_KNIFE_PICKUP_REACH) continue;
 		trap_Trace(&trace, eye, NULL, NULL, origin, player->s.number, MASK_SOLID);
 		if (trace.startsolid || trace.fraction < 1.0f) continue;
-		score = 128 * (1 - DotProduct(forward, delta)) + distance;
 		if (best && score >= bestScore) continue;
 		best = knife;
 		bestScore = score;
@@ -649,17 +664,36 @@ static void G_TakeKnife(gentity_t *player, gentity_t *knife) {
 }
 
 /*
-G_KnifeHinted
+G_HoldTarget
 
-Whether the last end-frame's use hint is a throwing knife (MW2's cursorHint
-naming a weaponClass 9 missile). A free since then leaves the type but empties
-the index, as MW2's use test asks both (5fe2e3-5fe2f7).
+What a use press may latch as MW2's one useHoldEntity: a throwing knife or a
+Tactical Insertion (a floor gun holds through pmove's pickup clock instead).
 */
-static qboolean G_KnifeHinted(gentity_t *player) {
+static qboolean G_HoldTarget(const gentity_t *ent) {
+	return G_IsThrowingKnife(ent) || G_IsInsertion(ent);
+}
+
+/*
+G_HoldHinted
+
+Whether the last end-frame's use hint is one of those, by its type: a throwing
+knife (MW2's cursorHint naming a weaponClass 9 missile), or a Tactical
+Insertion its owner may pick up or an enemy smash. A free since then leaves
+the type but empties the index, as MW2's use test asks both (5fe2e3-5fe2f7).
+*/
+static qboolean G_HoldHinted(gentity_t *player) {
 	playerState_t *ps = &player->client->ps;
 	int hint = ps->cursorHintEntIndex;
-	return ps->cursorHint == CURSOR_HINT_KNIFE && hint >= MAX_CLIENTS && hint < ENTITYNUM_MAX_NORMAL &&
-		G_IsThrowingKnife(&g_entities[hint]);
+	if (hint < MAX_CLIENTS || hint >= ENTITYNUM_MAX_NORMAL) return qfalse;
+	switch (ps->cursorHint) {
+	case CURSOR_HINT_KNIFE:
+		return G_IsThrowingKnife(&g_entities[hint]);
+	case CURSOR_HINT_INSERTION:
+	case CURSOR_HINT_INSERTION_ENEMY:
+		return G_IsInsertion(&g_entities[hint]);
+	default:
+		return qfalse;
+	}
 }
 
 /*
@@ -674,89 +708,92 @@ static qboolean G_UseSpawnDelayed(gentity_t *player) {
 }
 
 /*
-G_UseKnife
+G_UseHeld
 
-MW2's Player_ActivateCmd and Player_ActivateHoldCmd for a throwing knife. A
-new use press while the hint is a knife takes that knife as its hold. The
-knife is taken once the button has been held BG_UseHoldTime from the press -
-at once from +activate, after IW4x's gpad_use_hold_time from use/reload - the
-one hold a floor gun needs too (MW2 runs both through ActivateHoldCmd), and
-the player is BG_USE_SPAWN_DELAY past their spawn.
-However fresh the knife, its age is never asked. Released early, a use/reload
+MW2's Player_ActivateCmd and Player_ActivateHoldCmd for its one hold entity, a
+throwing knife or a Tactical Insertion. A new use press while the hint is one
+takes it as its hold. It is used once the button has been held BG_UseHoldTime
+from the press - at once from +activate, after IW4x's gpad_use_hold_time from
+use/reload - the one hold a floor gun needs too (MW2 runs both through
+ActivateHoldCmd), and the player is BG_USE_SPAWN_DELAY past their spawn.
+However fresh it is, its age is never asked. Released early, a use/reload
 press asks for the reload, as over a floor gun (BG_UpdateActivate). A press made
 while sprinting or with equipment out uses nothing. *held says whether a press
-is the knife's this command. A knife that only becomes the hint during a hold
-for something else takes nothing from it: MW2 holds for what the press chose.
-Returns whether the knife was used this command.
+is the hold's this command. A knife or TI that only becomes the hint during a
+hold for something else takes nothing from it: MW2 holds for what the press
+chose. The use itself: a knife is taken back (with room for it), a TI picked
+up by its owner or smashed by an enemy (G_UseInsertion). Returns whether
+something was used this command.
 */
-static qboolean G_UseKnife(gentity_t *player, usercmd_t *cmd, qboolean *held) {
+static qboolean G_UseHeld(gentity_t *player, usercmd_t *cmd, qboolean *held) {
 	gclient_t *client = player->client;
 	playerState_t *ps = &client->ps;
 	const int useButtons = BUTTON_USE | BUTTON_USE_RELOAD;
 	int old = client->activate.done ? client->activate.buttons : 0;
-	gentity_t *knife;
+	gentity_t *target;
 	*held = qfalse;
-	if (G_KnifeHinted(player) && (cmd->buttons & useButtons & ~old) &&
+	if (G_HoldHinted(player) && (cmd->buttons & useButtons & ~old) &&
 		!(ps->pm_flags & PMF_SPRINTING) && !BG_OffhandOut(ps)) {
-		client->knifeHold = ps->cursorHintEntIndex;
-		client->knifeHoldSpawn = g_entities[client->knifeHold].timestamp;
-		client->knifeHoldStart = level.time;
+		client->useHold = ps->cursorHintEntIndex;
+		client->useHoldSpawn = g_entities[client->useHold].timestamp;
+		client->useHoldStart = level.time;
 	}
-	if (!(cmd->buttons & useButtons) || client->knifeHold == ENTITYNUM_NONE) {
-		client->knifeHold = ENTITYNUM_NONE;
+	if (!(cmd->buttons & useButtons) || client->useHold == ENTITYNUM_NONE) {
+		client->useHold = ENTITYNUM_NONE;
 		return qfalse;
 	}
-	knife = &g_entities[client->knifeHold];
-	if (!G_IsThrowingKnife(knife) || knife->timestamp != client->knifeHoldSpawn) {
-		client->knifeHold = ENTITYNUM_NONE;
+	target = &g_entities[client->useHold];
+	if (!G_HoldTarget(target) || target->timestamp != client->useHoldSpawn) {
+		client->useHold = ENTITYNUM_NONE;
 		return qfalse;
 	}
 	*held = qtrue;
-	if (G_UseSpawnDelayed(player) || level.time - client->knifeHoldStart < BG_UseHoldTime(cmd->buttons))
+	if (G_UseSpawnDelayed(player) || level.time - client->useHoldStart < BG_UseHoldTime(cmd->buttons))
 		return qfalse;
-	client->knifeHold = ENTITYNUM_NONE;
+	client->useHold = ENTITYNUM_NONE;
 	client->activate.hold = qfalse;	// the hold was used: its release is not a reload
-	if (ps->stats[STAT_HEALTH] <= 0 || ps->ammo[WP_THROWING_KNIFE] >= client->knifeMax)
-		return qfalse;
-	G_TakeKnife(player, knife);
+	if (ps->stats[STAT_HEALTH] <= 0) return qfalse;
+	if (G_IsInsertion(target)) return G_UseInsertion(player, target);
+	if (ps->ammo[WP_THROWING_KNIFE] >= client->knifeMax) return qfalse;
+	G_TakeKnife(player, target);
 	return qtrue;
 }
 
 /*
 G_HoldUsable
 
-Whether a use press now is held for something - a throwing knife the hint
-names, else a floor gun in reach - for BG_UpdateActivate.
+Whether a use press now is held for something - a throwing knife or Tactical
+Insertion the hint names, else a floor gun in reach - for BG_UpdateActivate.
 */
 qboolean G_HoldUsable(gentity_t *player) {
-	return G_KnifeHinted(player) || G_FindWeaponPickup(player) != NULL;
+	return G_HoldHinted(player) || G_FindWeaponPickup(player) != NULL;
 }
 
 /*
 G_UseThink
 
-The bomb, the throwing knife and the floor gun, after a command's Pmove. MW2
-uses one thing per use/reload press, and the bomb comes first: a press at a
-site or the case is never a floor-gun hold too, and a press already used there
-cannot become one. A knife outranks any gun in MW2's use list, so a press on a
-knife's hint is held for the knife, never the gun. Returns whether a press is
-used at once, for BG_UpdateActivate: the bomb, or a knife taken on this command
-(MW2's Player_ActivateCmd returning true), which is a use and never a reload
-even though the freed knife no longer hints by then. G_HoldUsable says whether
-a press is held.
+The bomb, the throwing knife or Tactical Insertion, and the floor gun, after a
+command's Pmove. MW2 uses one thing per use/reload press, and the bomb comes
+first: a press at a site or the case is never a floor-gun hold too, and a press
+already used there cannot become one. MW2's use list names one hint, so a
+press on a knife's or a TI's hint is held for it, never the gun. Returns
+whether a press is used at once, for BG_UpdateActivate: the bomb, or a knife
+or TI used on this command (MW2's Player_ActivateCmd returning true), which is
+a use and never a reload even though the freed entity no longer hints by
+then. G_HoldUsable says whether a press is held.
 */
 qboolean G_UseThink(gentity_t *player, usercmd_t *cmd) {
 	gclient_t *client = player->client;
 	qboolean sndUsable = G_SNDUsable(player);
-	qboolean knifeHeld = qfalse, knifeUsed = qfalse;
+	qboolean held = qfalse, used = qfalse;
 	G_SNDUse(player, cmd);
-	if (!sndUsable) knifeUsed = G_UseKnife(player, cmd, &knifeHeld);
+	if (!sndUsable) used = G_UseHeld(player, cmd, &held);
 	if (sndUsable) client->activate.hold = qfalse;
 	if (client->ps.pickupHeld == 3 &&
-		(sndUsable || knifeHeld || (client->activate.done && !client->activate.hold)))
+		(sndUsable || held || (client->activate.done && !client->activate.hold)))
 		client->ps.pickupHeld = 2;
 	G_CommitWeaponPickup(player, cmd->buttons);
-	return sndUsable || knifeUsed;
+	return sndUsable || used;
 }
 
 void G_CommitWeaponPickup(gentity_t *player, int buttons) {
@@ -818,12 +855,20 @@ it names (G_ClearCursorHintRefs) turns it into ENTITYNUM_NONE; MW2's pass also
 writes that itself for usables Peace does not have yet. Pmove reads it.
 ps.cursorHint, the hint's type, is not sticky: it is cleared first (4942c8)
 and set only beside a written index (49461f), so it says whether the index can
-be used now. cgame's knife prompt draws from it.
+be used now. cgame's use prompt draws from it.
+
+MW2's use list ranks by its score, lowest first (G_UseScore and each kind's
+bias, 5fea34-5fea88): a resting throwing knife, a missile (-512), always wins;
+a Tactical Insertion (a scriptmover, -192) and a floor gun are ranked by score,
+so the TI usually but not always beats the gun.
 */
 void G_UpdateCursorHint(gentity_t *player) {
 	playerState_t *ps = &player->client->ps;
 	const entityState_t *item;
-	gentity_t *knife;
+	gentity_t *knife, *insertion;
+	float insertionScore, distance;
+	vec3_t origin;
+	int type = CURSOR_HINT_WEAPON;
 	ps->cursorHint = CURSOR_HINT_NONE;
 	if (ps->stats[STAT_HEALTH] <= 0 || ps->pm_type != PM_NORMAL ||
 		(ps->pm_flags & PMF_SPRINTING) || BG_OffhandOut(ps)) return;
@@ -832,10 +877,24 @@ void G_UpdateCursorHint(gentity_t *player) {
 		ps->cursorHint = CURSOR_HINT_OBJECTIVE;
 		return;
 	}
-	knife = G_FindKnifePickup(player);	// a missile outranks any gun (-512)
-	item = knife ? &knife->s : G_FindWeaponPickup(player);
+	knife = G_FindKnifePickup(player);
+	if (knife) {
+		item = &knife->s;
+		type = CURSOR_HINT_KNIFE;
+	} else {
+		item = G_FindWeaponPickup(player);
+		insertion = G_FindInsertionHint(player, &insertionScore);
+		if (insertion && item) {
+			BG_EvaluateTrajectory(&item->pos, level.time, origin);
+			if (G_UseScore(player, origin, &distance) < insertionScore) insertion = NULL;
+		}
+		if (insertion) {
+			item = &insertion->s;
+			type = G_InsertionHint(player, insertion);
+		}
+	}
 	if (!item) return;
-	ps->cursorHint = knife ? CURSOR_HINT_KNIFE : CURSOR_HINT_WEAPON;
+	ps->cursorHint = type;
 	ps->cursorHintEntIndex = item->number;
 	g_entities[item->number].flags |= FL_CURSOR_HINT;
 }

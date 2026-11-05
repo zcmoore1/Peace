@@ -19,9 +19,20 @@ void QDECL G_LogPrintf(const char *fmt,...) { (void)fmt; }
 void trap_SnapVector(float *v) { v[0] = rintf(v[0]); v[1] = rintf(v[1]); v[2] = rintf(v[2]); }
 void trap_LinkEntity(gentity_t *e) { e->r.linked=qtrue; }
 void trap_Trace(trace_t *t,const vec3_t start,const vec3_t mins,const vec3_t maxs,const vec3_t end,int pass,int mask) {
- (void)start;(void)mins;(void)maxs;(void)pass;(void)mask;
+ (void)maxs;(void)pass;
  memset(t,0,sizeof(*t)); t->fraction=blocked ? .5f : 1; VectorCopy(end,t->endpos);
+ /* the Tactical Insertion's player-box traces (its world-only mask) stand on a
+  * floor at the fixture player's feet, MINS_Z below its origin */
+ if (mask==(CONTENTS_SOLID|CONTENTS_PLAYERCLIP) && mins && end[2]<start[2] && start[2]+mins[2]>=MINS_Z &&
+  end[2]+mins[2]<MINS_Z) {
+  int k; t->fraction=(start[2]+mins[2]-MINS_Z)/(start[2]-end[2]);
+  for(k=0;k<3;k++) t->endpos[k]=start[k]+t->fraction*(end[k]-start[k]);
+ }
 }
+int trap_EntitiesInBox(const vec3_t mins,const vec3_t maxs,int *list,int maxcount) {
+ (void)mins;(void)maxs;(void)list;(void)maxcount; return 0;	/* no trigger_hurt in the fixture */
+}
+qboolean trap_EntityContact(const vec3_t mins,const vec3_t maxs,const gentity_t *e) { (void)mins;(void)maxs;(void)e; return qfalse; }
 qboolean G_EntitiesFree(void) { return qtrue; }
 gentity_t *G_Spawn(void) {
  gentity_t *e=&g_entities[level.num_entities++]; CHECK(level.num_entities<MAX_GENTITIES);
@@ -480,7 +491,7 @@ static playerState_t *KnifeThrower(int count) {
  playerState_t *ps=Reset(); bg_class_t cl=*BG_Class(0);
  cl.lethal=WP_THROWING_KNIFE; cl.lethalCount=count;
  BG_ApplyClass(ps,&cl); ps->stats[STAT_HEALTH]=100;
- clients[0].knifeMax=ps->ammo[WP_THROWING_KNIFE]; clients[0].knifeHold=ENTITYNUM_NONE;
+ clients[0].knifeMax=ps->ammo[WP_THROWING_KNIFE]; clients[0].useHold=ENTITYNUM_NONE;
  return ps;
 }
 /* ClientEndFrame's hint pass, once per server frame. */
@@ -614,7 +625,7 @@ static void TestKnifePickup(void) {
  }
  VectorClear(knife->s.pos.trDelta); EndFrame(); CHECK(ps->cursorHintEntIndex==knife->s.number);
  UseStep(BUTTON_USE_RELOAD); EndFrame(); press=level.time;
- CHECK(!(ps->weapFlags&PWF_USE_RELOAD) && clients[0].knifeHold==knife->s.number && clients[0].knifeHoldStart==press);
+ CHECK(!(ps->weapFlags&PWF_USE_RELOAD) && clients[0].useHold==knife->s.number && clients[0].useHoldStart==press);
  HoldUse(BUTTON_USE_RELOAD,BG_USE_RELOAD_HOLD_TIME-1); CHECK(knife->inuse);
  HoldUse(BUTTON_USE_RELOAD,1);
  CHECK(!knife->inuse && pickups==1 && level.time-press==BG_USE_RELOAD_HOLD_TIME);
@@ -625,7 +636,7 @@ static void TestKnifePickup(void) {
  CHECK(ps->cursorHintEntIndex==0);
  UseStep(BUTTON_USE_RELOAD); UseStep(0);
  CHECK(knife->inuse && ps->weaponstate==WEAPON_RELOADING && ps->ammo[WP_THROWING_KNIFE]==1);
- ps=Reset(); ps->ammo[WP_MACHINEGUN]=4; clients[0].knifeHold=ENTITYNUM_NONE;
+ ps=Reset(); ps->ammo[WP_MACHINEGUN]=4; clients[0].useHold=ENTITYNUM_NONE;
  CHECK(BG_LethalWeapon(ps)!=WP_THROWING_KNIFE);
  knife=GroundKnife(10,0,0); EndFrame();
  UseStep(BUTTON_USE_RELOAD); UseStep(0);
@@ -770,7 +781,7 @@ static void TestCursorHintType(void) {
  playerState_t *ps; gentity_t *knife,*gun=NULL; int i,before; vec3_t at;
  for(i=0;i<KS_COUNT;i++) {
   ps=KnifeThrower(1); ps->ammo[WP_THROWING_KNIFE]=i==KS_FULL ? 1 : 0;
-  if(i==KS_NO_KNIVES) { ps=Reset(); clients[0].knifeHold=ENTITYNUM_NONE; }
+  if(i==KS_NO_KNIVES) { ps=Reset(); clients[0].useHold=ENTITYNUM_NONE; }
   knife=GroundKnife(i==KS_OUTSIDE ? BG_KNIFE_PICKUP_RADIUS+1 : 10,0,0);
   if(i==KS_GUN_TOO) { gun=Floor(WP_RAILGUN,0,2,8,0); VectorSet(at,0,0,ps->viewheight); G_SetOrigin(gun,at); }
   if(i==KS_MOVING) VectorSet(knife->s.pos.trDelta,BG_KNIFE_PICKUP_STILL+1,0,0);
@@ -812,8 +823,194 @@ static void TestCursorHintType(void) {
  ps->pm_flags|=PMF_SPRINTING; EndFrame(); CHECK(ps->cursorHint==CURSOR_HINT_NONE);
  ps->pm_flags&=~PMF_SPRINTING; EndFrame(); CHECK(ps->cursorHint==CURSOR_HINT_KNIFE);
 }
+/* MW2's Tactical Insertion in the use code (GlowStickUseListener,
+ * GlowStickEnemyUseListener): planted by the real G_PlantInsertion, it is a
+ * use hint within player_useRadius of the eye, in sight, at any facing; its
+ * owner picks it up (lethal ammo 1, no room test, the pickup sound, freed),
+ * an enemy smashes it (freed), a teammate can do nothing with it. The hold is
+ * the knife's, one useHoldEntity: BG_UseHoldTime from the press, nothing in
+ * the first BG_USE_SPAWN_DELAY after the player's spawn, a taken hold a use
+ * and never a reload. Either free empties the hint: the TI's sea lion entry. */
+static void Connect(void) {
+ int i;
+ for(i=0;i<2;i++) { clients[i].pers.connected=CON_CONNECTED; clients[i].pers.enterTime=100+i; clients[i].useHold=ENTITYNUM_NONE; }
+}
+static playerState_t *InsertionClass(int gametype) {
+ playerState_t *ps=Reset(); bg_class_t cl=*BG_Class(0);
+ cl.lethal=WP_TACTICAL_INSERTION; cl.lethalCount=1; BG_ApplyClass(ps,&cl);
+ ps->stats[STAT_HEALTH]=100; ps->ammo[WP_MACHINEGUN]=4; ps->groundEntityNum=ENTITYNUM_WORLD;
+ Connect(); g_gametype.integer=gametype;
+ clients[0].sess.sessionTeam=clients[1].sess.sessionTeam=gametype>=GT_TEAM ? TEAM_RED : TEAM_FREE;
+ return ps;
+}
+/* A TI the owner planted standing at x, y: the real plant, from a sampled spot. */
+static gentity_t *Insertion(int owner,float x,float y) {
+ gentity_t *ti;
+ clients[owner].insertionSpotValid=qtrue; VectorSet(clients[owner].insertionSpot,x,y,0);
+ ti=G_PlantInsertion(&g_entities[owner]);
+ CHECK(ti && G_IsInsertion(ti) && G_InsertionOwner(ti)==&g_entities[owner] && ti->r.currentOrigin[2]==MINS_Z+1);
+ return ti;
+}
+/* Hold until the TI is used: the time from the press. */
+static int HoldToUse(gentity_t *ti,int buttons) {
+ int press=level.time+1, t;
+ for(t=0;t<4*BG_USE_RELOAD_HOLD_TIME+4 && ti->inuse;t++) HoldUse(buttons,1);
+ CHECK(!ti->inuse);
+ return level.time-press;
+}
+static void TestInsertionUse(void) {
+ static const int buttons[3]={BUTTON_USE_RELOAD,BUTTON_USE,BUTTON_USE|BUTTON_USE_RELOAD};
+ playerState_t *ps; gentity_t *ti,*gun,*knife; int b,n,i,before; float tiScore,gunScore,d; vec3_t at;
+ for(b=0;b<3;b++) {
+  /* the owner, its TI thrown: picked up at the hold, as a use */
+  ps=InsertionClass(GT_FFA); ps->ammo[WP_TACTICAL_INSERTION]=0; BG_RebuildWeaponMask(ps);
+  ti=Insertion(0,10,0); n=ti->s.number; EndFrame();
+  CHECK(ps->cursorHint==CURSOR_HINT_INSERTION && ps->cursorHintEntIndex==n && (ti->flags&FL_CURSOR_HINT));
+  CHECK(HoldToUse(ti,buttons[b])==BG_UseHoldTime(buttons[b]) && lastUsed);
+  CHECK(ps->ammo[WP_TACTICAL_INSERTION]==1 && (ps->stats[STAT_WEAPONS]&(1<<WP_TACTICAL_INSERTION)) && pickups==1);
+  CHECK(ps->cursorHintEntIndex==ENTITYNUM_NONE && ps->cursorHint==CURSOR_HINT_NONE && BG_LethalWeapon(ps)==WP_TACTICAL_INSERTION);
+  UseStep(0); UseStep(0); CHECK(ps->weaponstate==WEAPON_READY && !(ps->weapFlags&PWF_USE_RELOAD));
+  /* no room test: holding one already, it is still picked up, and still one */
+  ps=InsertionClass(GT_FFA); ti=Insertion(0,10,0); EndFrame();
+  CHECK(HoldToUse(ti,buttons[b])==BG_UseHoldTime(buttons[b]) && ps->ammo[WP_TACTICAL_INSERTION]==1 && pickups==1);
+  /* FFA: anyone else's is an enemy's, smashed with the same hold; nothing gained */
+  ps=InsertionClass(GT_FFA); ps->ammo[WP_TACTICAL_INSERTION]=0; ti=Insertion(1,10,0); EndFrame();
+  CHECK(ps->cursorHint==CURSOR_HINT_INSERTION_ENEMY && ps->cursorHintEntIndex==ti->s.number);
+  CHECK(HoldToUse(ti,buttons[b])==BG_UseHoldTime(buttons[b]) && lastUsed);
+  CHECK(ps->ammo[WP_TACTICAL_INSERTION]==0 && clients[1].ps.ammo[WP_TACTICAL_INSERTION]==0 && pickups==0);
+  CHECK(ps->cursorHintEntIndex==ENTITYNUM_NONE);
+  UseStep(0); UseStep(0); CHECK(ps->weaponstate==WEAPON_READY && !(ps->weapFlags&PWF_USE_RELOAD));
+  /* a team game: the other team's is smashed, your own picked up */
+  ps=InsertionClass(GT_TEAM); clients[1].sess.sessionTeam=TEAM_BLUE; ti=Insertion(1,10,0); EndFrame();
+  CHECK(ti->s.generic1==TEAM_BLUE && ps->cursorHint==CURSOR_HINT_INSERTION_ENEMY);
+  CHECK(HoldToUse(ti,buttons[b])==BG_UseHoldTime(buttons[b]));
+  ps=InsertionClass(GT_TEAM); ps->ammo[WP_TACTICAL_INSERTION]=0; ti=Insertion(0,10,0); EndFrame();
+  CHECK(ti->s.generic1==TEAM_RED && ps->cursorHint==CURSOR_HINT_INSERTION);
+  CHECK(HoldToUse(ti,buttons[b])==BG_UseHoldTime(buttons[b]) && ps->ammo[WP_TACTICAL_INSERTION]==1);
+ }
+ /* a teammate's is no hint and no use: the press is what it would be anywhere */
+ ps=InsertionClass(GT_TEAM); ti=Insertion(1,10,0); EndFrame();
+ CHECK(ps->cursorHint==CURSOR_HINT_NONE && ps->cursorHintEntIndex==0 && !(ti->flags&FL_CURSOR_HINT));
+ CHECK(G_InsertionHint(&g_entities[0],ti)==CURSOR_HINT_NONE && G_InsertionHint(&g_entities[1],ti)==CURSOR_HINT_INSERTION);
+ HoldUse(BUTTON_USE,2*BG_USE_RELOAD_HOLD_TIME); UseStep(0);
+ CHECK(ti->inuse && !lastUsed);
+ UseStep(BUTTON_USE_RELOAD); UseStep(0); CHECK(ti->inuse && ps->weaponstate==WEAPON_RELOADING);
+ /* even with the hint forced onto it, the use asks who is using it */
+ ps=InsertionClass(GT_TEAM); ti=Insertion(1,10,0);
+ CHECK(!G_UseInsertion(&g_entities[0],ti) && ti->inuse);
+ /* the reload button alone never uses it; a use/reload tap is a reload */
+ ps=InsertionClass(GT_FFA); ti=Insertion(1,10,0); EndFrame();
+ HoldUse(BUTTON_RELOAD,2*BG_USE_RELOAD_HOLD_TIME); UseStep(0); CHECK(ti->inuse);
+ ps=InsertionClass(GT_FFA); ti=Insertion(1,10,0); EndFrame();
+ HoldUse(BUTTON_USE_RELOAD,BG_USE_RELOAD_HOLD_TIME/2); UseStep(0); UseStep(0);
+ CHECK(ti->inuse && ps->weaponstate==WEAPON_RELOADING);
+ /* the spawn gate is the player's: nothing used inside it, used as it opens */
+ ps=InsertionClass(GT_FFA); ti=Insertion(1,10,0); EndFrame();
+ clients[0].respawnTime=level.time+1+BG_USE_RELOAD_HOLD_TIME-(BG_USE_SPAWN_DELAY-2);
+ HoldUse(BUTTON_USE_RELOAD,BG_USE_RELOAD_HOLD_TIME+2);
+ CHECK(ti->inuse && !lastUsed && level.time-clients[0].respawnTime==BG_USE_SPAWN_DELAY-1);
+ HoldUse(BUTTON_USE_RELOAD,1); CHECK(!ti->inuse && lastUsed && level.time-clients[0].respawnTime==BG_USE_SPAWN_DELAY);
+ /* refused while sprinting or with equipment out: no hint, and a press uses nothing */
+ ps=InsertionClass(GT_FFA); ti=Insertion(1,10,0);
+ ps->pm_flags|=PMF_SPRINTING; EndFrame(); CHECK(ps->cursorHint==CURSOR_HINT_NONE && ps->cursorHintEntIndex==0);
+ UseOnly(BUTTON_USE); CHECK(ti->inuse);
+ ps->pm_flags&=~PMF_SPRINTING; UseOnly(0); EndFrame(); CHECK(ps->cursorHint==CURSOR_HINT_INSERTION_ENEMY);
+ ps->weaponAction=WA_LETHAL; UseOnly(BUTTON_USE); CHECK(ti->inuse && clients[0].useHold==ENTITYNUM_NONE);
+ ps->weaponAction=0; UseOnly(0);
+ for(i=0;i<=BG_USE_RELOAD_HOLD_TIME;i++) UseOnly(BUTTON_USE);
+ CHECK(!ti->inuse);
+ /* reach: player_useRadius from the eye, in sight, at any facing */
+ ps=InsertionClass(GT_FFA); ti=Insertion(1,0,0);
+ VectorSet(at,0,0,ps->viewheight+BG_PICKUP_RANGE-1); G_SetOrigin(ti,at); EndFrame();
+ CHECK(ps->cursorHint==CURSOR_HINT_INSERTION_ENEMY);
+ VectorSet(at,-(BG_PICKUP_RANGE-1),0,ps->viewheight); G_SetOrigin(ti,at); EndFrame();	/* straight behind */
+ CHECK(ps->cursorHint==CURSOR_HINT_INSERTION_ENEMY);
+ VectorSet(at,BG_PICKUP_RANGE+1,0,ps->viewheight); G_SetOrigin(ti,at); EndFrame();
+ CHECK(ps->cursorHint==CURSOR_HINT_NONE && ps->cursorHintEntIndex==ti->s.number);	/* still named, not usable */
+ VectorSet(at,10,0,MINS_Z+1); G_SetOrigin(ti,at); blocked=qtrue; EndFrame(); CHECK(ps->cursorHint==CURSOR_HINT_NONE);
+ blocked=qfalse; EndFrame(); CHECK(ps->cursorHint==CURSOR_HINT_INSERTION_ENEMY);
+ /* A TI freed under a held press (another took it) is not used, nor what reuses its number. */
+ ps=InsertionClass(GT_FFA); ti=Insertion(1,10,0); EndFrame();
+ UseOnly(BUTTON_USE_RELOAD); G_FreeEntity(ti);
+ level.num_entities--; level.time++; ti=Insertion(1,10,0);
+ for(i=0;i<2*BG_USE_RELOAD_HOLD_TIME;i++) UseOnly(BUTTON_USE_RELOAD);
+ CHECK(ti->inuse);
+ /* Ranking, MW2's use list: a knife always wins; between a TI and a floor gun
+  * the lower 128*(1-dot)+eye distance wins, the TI's less 192. */
+ ps=InsertionClass(GT_FFA); clients[0].knifeMax=1;
+ ti=Insertion(1,10,0); knife=GroundKnife(-60,0,0); EndFrame();
+ CHECK(ps->cursorHint==CURSOR_HINT_KNIFE && ps->cursorHintEntIndex==knife->s.number);
+ HoldUse(BUTTON_USE,1); CHECK(!knife->inuse && ti->inuse && ps->ammo[WP_THROWING_KNIFE]==1);
+ EndFrame(); CHECK(ps->cursorHint==CURSOR_HINT_INSERTION_ENEMY);	/* the TI is next */
+ ps=InsertionClass(GT_FFA);
+ gun=Floor(WP_RAILGUN,0,2,8,0); ti=Insertion(1,10,0);	/* the gun at the feet, the TI just ahead */
+ EndFrame(); CHECK(ps->cursorHint==CURSOR_HINT_INSERTION_ENEMY && ps->cursorHintEntIndex==ti->s.number);
+ tiScore=G_UseScore(&g_entities[0],ti->r.currentOrigin,&d)-BG_INSERTION_HINT_BIAS;
+ gunScore=G_UseScore(&g_entities[0],gun->r.currentOrigin,&d);
+ CHECK(tiScore<gunScore);
+ HoldUse(BUTTON_USE_RELOAD,2*BG_USE_RELOAD_HOLD_TIME);	/* the press is the TI's: the gun is not taken */
+ CHECK(!ti->inuse && gun->r.contents && ps->stats[STAT_SLOT_PRIMARY]==WP_MACHINEGUN);
+ UseStep(0); UseStep(0); CHECK(!(ps->weapFlags&PWF_USE_RELOAD) && ps->weaponstate==WEAPON_READY);
+ EndFrame(); CHECK(ps->cursorHint==CURSOR_HINT_WEAPON && ps->cursorHintEntIndex==gun->s.number);
+ /* a gun straight ahead at eye height and a TI behind: the gun's score is lower */
+ ps=InsertionClass(GT_FFA);
+ gun=Floor(WP_RAILGUN,0,2,8,0); VectorSet(at,20,0,ps->viewheight); G_SetOrigin(gun,at);
+ ti=Insertion(1,-100,0); EndFrame();
+ tiScore=G_UseScore(&g_entities[0],ti->r.currentOrigin,&d)-BG_INSERTION_HINT_BIAS;
+ CHECK(d<=BG_PICKUP_RANGE && G_UseScore(&g_entities[0],at,&d)<tiScore);
+ CHECK(ps->cursorHint==CURSOR_HINT_WEAPON && ps->cursorHintEntIndex==gun->s.number);
+ /* turn round to face the TI: now it wins */
+ ps->viewangles[YAW]=180; EndFrame();
+ CHECK(ps->cursorHint==CURSOR_HINT_INSERTION_ENEMY && ps->cursorHintEntIndex==ti->s.number);
+ g_gametype.integer=GT_FFA;
+ (void)before;
+}
+/* The TI's sea lion, end to end in ClientThink's order: thrown (the plant on
+ * its fire, as FireWeapon does, at the spot ClientEndFrame sampled), it is the
+ * owner's live hint as soon as the gun is back; picked up with a use, it frees
+ * and the hint is empty. In the gun's quick raise the next TI then comes
+ * straight out, and its cancel's quick raise too, chain after chain; from a
+ * gun at rest it still quick-drops. */
+static void ServerFrame(void) { G_InsertionSample(&g_entities[0]); G_UpdateCursorHint(&g_entities[0]); }
+static void Throw(void) {
+ int t, before=clients[0].ps.ammo[WP_TACTICAL_INSERTION];
+ for(t=0;t<12000 && clients[0].ps.ammo[WP_TACTICAL_INSERTION]==before;t++) { UseStep(0); ServerFrame(); }
+ CHECK(t<12000 && (clients[0].ps.weaponAction&WA_FIRED));
+ CHECK(G_PlantInsertion(&g_entities[0])!=NULL);	/* FireWeapon's EV_FIRE_WEAPON */
+}
+static void InsertionSeaLion(int use) {
+ playerState_t *ps=InsertionClass(GT_FFA); gentity_t *ti; int t,n;
+ ServerFrame(); CHECK(ps->cursorHintEntIndex==0 && clients[0].insertionSpotValid);
+ UseStep(BUTTON_LETHAL); ServerFrame();
+ CHECK(ps->weaponstate==WEAPON_DROPPING && ps->weaponTime==BG_WeaponQuickDropTime(WP_MACHINEGUN));
+ UseStep(0); Throw(); ti=G_FindInsertion(&g_entities[0]); CHECK(ti!=NULL);
+ for(t=0;t<12000 && !(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_RAISING);t++) {
+  UseStep(0); CHECK(ps->cursorHintEntIndex==0 || !BG_OffhandOut(ps)); ServerFrame();	/* frozen until the gun is back */
+ }
+ CHECK(ps->cursorHint==CURSOR_HINT_INSERTION && ps->cursorHintEntIndex==ti->s.number);	/* a live hint: no sea lion */
+ /* a lethal pressed now has nothing to pull */
+ UseStep(BUTTON_LETHAL); UseStep(0); CHECK(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_RAISING);
+ for(t=0;t<4*BG_USE_RELOAD_HOLD_TIME && ti->inuse;t++) { HoldUse(use,1); ServerFrame(); }
+ CHECK(!ti->inuse && ps->ammo[WP_TACTICAL_INSERTION]==1 && ps->cursorHintEntIndex==ENTITYNUM_NONE);
+ CHECK(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_RAISING);	/* still in the quick raise */
+ for(n=0;n<4;n++) {
+  UseStep(BUTTON_LETHAL); ServerFrame();
+  CHECK(ps->weapon==WP_TACTICAL_INSERTION && ps->weaponstate==WEAPON_RAISING && ps->weaponTime==BG_INSERTION_IGNITE_MS);
+  UseStep(BUTTON_LETHAL|BUTTON_WEAPON_SWAP); ServerFrame(); UseStep(0); ServerFrame();
+  CHECK(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_RAISING && ps->ammo[WP_TACTICAL_INSERTION]==1);
+  CHECK(ps->cursorHintEntIndex==ENTITYNUM_NONE);
+ }
+ /* the gun at rest: the TI pays its quick drop again */
+ for(t=0;t<12000 && ps->weaponstate!=WEAPON_READY;t++) { UseStep(0); ServerFrame(); }
+ UseStep(BUTTON_LETHAL); ServerFrame();
+ CHECK(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_DROPPING && ps->weaponTime==BG_WeaponQuickDropTime(WP_MACHINEGUN));
+ /* thrown again: a new TI, the owner's one, replaces nothing (the first was taken) */
+ UseStep(0); Throw(); CHECK(G_FindInsertion(&g_entities[0])!=NULL);
+}
+static void TestInsertionSeaLion(void) { InsertionSeaLion(BUTTON_USE_RELOAD); InsertionSeaLion(BUTTON_USE); }
 int main(void) {
  TestDrops(); TestScavenge(); TestHold(); TestSwap(); TestDuplicateBase(); TestUseReload(); TestUseBusy(); TestBombFirst(); TestContestedPickup(); TestReach(); TestCursorHint();
  TestTakeWindow(); TestTakeKeepsDrop(); TestUseHold(); TestKnifePickup(); TestKnifeSeaLion(); TestCursorHintType();
+ TestInsertionUse(); TestInsertionSeaLion();
  printf("PASS: %d death/drop/pickup/slot-intent checks\n",checks); return 0;
 }

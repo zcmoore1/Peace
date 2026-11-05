@@ -12,9 +12,12 @@ and **CREATE A CLASS** entries and the existing console commands remain availabl
    slot is marked **IN USE** and cannot be duplicated. Choosing a gun returns to
    the loadout overview; Back returns one level without changing that choice.
 3. Open a gun's **Attachments** row to fit/remove compatible attachments. Open
-   **LETHAL** or **TACTICAL** and choose equipment. Counts are MW2's weapon
-   data, fixed per item (`BG_ClassEquipmentCount`): one frag, Semtex or
-   throwing knife, two flashes. There is no quantity screen. A class saved
+   **LETHAL** or **TACTICAL** and choose equipment. LETHAL offers MW2's
+   equipment: Frag grenade, Semtex, Throwing knife and **Tactical Insertion**
+   ("Plant it where you stand; your next life starts there; pick it back up
+   with use."); TACTICAL offers the flash. Counts are MW2's weapon data, fixed
+   per item (`BG_ClassEquipmentCount`): one frag, Semtex, throwing knife or
+   Tactical Insertion, two flashes. There is no quantity screen. A class saved
    when counts were chosen (1–3) loads with MW2's count and the rest of the
    class unchanged. Choosing None empties that slot.
 4. Open any **PERK** card to read descriptions and select a perk. Perks already in
@@ -62,9 +65,12 @@ perks/attachments are rejected rather than stacked.
 Class serialization version 2 adds the two attachment masks; version 1 classes
 still load and inherit the old `cg_sight` preference at spawn. New editor saves
 store explicit choices, so changing `cg_sight` will not overwrite them. The active
-perk mask is a predicted/replayed playerstate field. The combined use/reload
-build uses protocol **82**, game **-11**: rebuild the executable, server and all
-modules together. Changing class during a life takes effect only at the next spawn.
+perk mask is a predicted/replayed playerstate field. The current build (the
+Tactical Insertion's 3-bit use hint type) uses protocol **84**, game **-13**:
+rebuild the executable, server and all modules together. A saved class stores
+raw weapon numbers, so a Tactical Insertion class saved in baseq3 (17) is not
+the same number in missionpack (20), as for every appended weapon. Changing
+class during a life takes effect only at the next spawn.
 
 Custom names allow 1–23 letters, numbers, spaces, hyphens and underscores. Leaving
 an edited draft requires confirming discard. Editing an already selected class updates its next-spawn
@@ -82,7 +88,7 @@ in archived cvars; this is local persistence, not cloud account synchronization.
 | Name entry | Keyboard | Keep the default name or use a keyboard |
 | Toggle weapon slots | `weapnext` / `weapprev` | Y |
 | Melee | `+melee` | B |
-| Frag / tactical | `+lethal` / `+tactical` | Existing shoulder bindings |
+| Lethal (frag, Semtex, knife, Tactical Insertion) / tactical | `+lethal` / `+tactical` | Existing shoulder bindings |
 
 Copy the updated `dev/peace-gamepad.cfg` to the build's `baseq3` directory if
 using the supplied controller config. Classes can also be selected with
@@ -173,11 +179,18 @@ quick drop (250ms; the throwing knife comes straight out), the grenade is held
 through: the latch holds until the gun is fully back. Empty equipment does nothing; a ladder
 grab clears queued actions. Every knife and grenade defers a Y until the gun it
 left is fully back on its quick raise (MW2's CheckForChangeWeapon); YY cannot
-cancel that raise. Semtex adds hold/release and a pre-throw cancel; see
+cancel that raise. Semtex adds hold/release and a pre-throw cancel (MW2's:
+in the drop or the pull Y always cancels; once held ready only while lethal is
+still down, so letting go with Y on one command throws); see
 `dev/SEMTEX.md` for controls, timing, art and compatibility notes. The throwing
 knife is a lethal choice too: it comes out without lowering the gun, throws on
 release, sticks where it lands and is taken back with use; see
-`dev/THROWING_KNIFE.md`.
+`dev/THROWING_KNIFE.md`. The Tactical Insertion is MW2's lethal equipment as
+well: the gun's quick drop, a 2.63s ignite no release cuts short, held until
+released, Y-cancelable before the release like the Semtex, then the same
+recovery. It is planted at your last standing spot; your next spawn is there
+(never in S&D), its owner picks it up with use and enemies smash it with use
+or 21 damage; see `dev/TACTICAL_INSERTION.md`.
 
 Only the selected validated definition is sent in `peace_loadout` userinfo.
 `peace_class_0`–`peace_class_4` stay local. The server rejects malformed names,

@@ -109,16 +109,19 @@ qboolean BG_QuickActionInPlace( int weapon ) {
 }
 
 // MW2's holdButtonToThrow and offhandHoldIsCancelable (weapon data, the owner's
-// choice): the Semtex and the throwing knife stay raised while the lethal button
-// is held, are thrown on its release, and a Y before that release cancels them
-// back to the gun with nothing spent.
+// choice): the Semtex, the throwing knife and the Tactical Insertion stay raised
+// while the lethal button is held, are thrown on its release, and a Y before
+// that release cancels them back to the gun with nothing spent. (flare_mp has
+// holdButtonToThrow 0 and cookOffHold 0: its HOLD waits for the release and it
+// never throws itself, which is this same rule.)
 qboolean BG_OffhandHeldToThrow( int weapon ) {
-	return weapon == WP_SEMTEX || weapon == WP_THROWING_KNIFE;
+	return weapon == WP_SEMTEX || weapon == WP_THROWING_KNIFE || weapon == WP_TACTICAL_INSERTION;
 }
 
 qboolean BG_IsActionWeapon( int weapon ) {
 	return weapon == WP_KNIFE || weapon == WP_FRAG ||
-		weapon == WP_FLASH || weapon == WP_SEMTEX || weapon == WP_THROWING_KNIFE;
+		weapon == WP_FLASH || weapon == WP_SEMTEX || weapon == WP_THROWING_KNIFE ||
+		weapon == WP_TACTICAL_INSERTION;
 }
 
 static const struct { int weapon; const char *name; int attachments; } classWeapons[] = {
@@ -186,8 +189,9 @@ static qboolean BG_ClassNameValid( const char *name ) {
 	return qfalse;
 }
 // How many of a piece of equipment a class carries each life: MW2's weapon
-// data, startAmmo = maxAmmo (frag_grenade_mp, semtex_mp, throwingknife_mp 1;
-// flash_grenade_mp 2). It is fixed, as in MW2: there is no count to choose.
+// data, startAmmo = maxAmmo (frag_grenade_mp, semtex_mp, throwingknife_mp and
+// flare_mp, the Tactical Insertion, 1; flash_grenade_mp 2). It is fixed, as in
+// MW2: there is no count to choose.
 #define BG_CLASS_EQUIPMENT_LEGACY_MAX 3	// every count a class could save before MW2's counts
 int BG_ClassEquipmentCount( int weapon ) {
 	if ( weapon == WP_NONE ) return 0;
@@ -199,8 +203,10 @@ qboolean BG_ValidateClass( const bg_class_t *loadout ) {
 	if ( !loadout || !BG_ClassNameValid(loadout->name) ) return qfalse;
 	if ( !BG_IsClassWeapon(loadout->slot[0]) || !BG_IsClassWeapon(loadout->slot[1]) ||
 		loadout->slot[0] == loadout->slot[1] ) return qfalse;
+	// MW2's equipment (isValidEquipment): the Tactical Insertion is a lethal
+	// beside the frag, Semtex and throwing knife, thrown with the same button.
 	if ( loadout->lethal != WP_NONE && loadout->lethal != WP_FRAG && loadout->lethal != WP_SEMTEX &&
-		loadout->lethal != WP_THROWING_KNIFE ) return qfalse;
+		loadout->lethal != WP_THROWING_KNIFE && loadout->lethal != WP_TACTICAL_INSERTION ) return qfalse;
 	if ( loadout->tactical != WP_NONE && loadout->tactical != WP_FLASH ) return qfalse;
 	if ( loadout->lethalCount != BG_ClassEquipmentCount(loadout->lethal) ||
 		loadout->tacticalCount != BG_ClassEquipmentCount(loadout->tactical) ) return qfalse;

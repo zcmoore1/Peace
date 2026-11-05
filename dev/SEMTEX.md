@@ -10,6 +10,19 @@ Before `EV_FIRE_WEAPON` commits the throw, Y / `weapnext` cancels to the **same
 gun**, preserves the grenade, and uses that gun's quick raise, as any return.
 Release and press lethal again to re-arm; holding through cancel never repeats.
 
+The cancel is MW2's offhand state machine's (owner's rule: do what MW2 does).
+During the gun's quick drop (MW2's INIT) and the pullback (PREPARE) Y cancels
+whatever the buttons (`577daa-577dde`). Once the Semtex is in hand and ready
+(HOLD), MW2 throws first (`578f00-578f69`): unless lethal is down on that
+command and was on the one before (`PM_OffhandHeld`), that think is the throw,
+and only then is Y read. So a release and Y on one command throws, a Y on the
+first command after a queued tap's pullback throws, and lethal pressed again on
+that first command throws too; Y with lethal still held cancels. A Y the throw
+wins is eaten (weapnext keeps the slot while the grenade is out, as MW2's
+`59d5f0-59d622` sets only the cancel bit), and the recovery is the ordinary one.
+The throwing knife and the Tactical Insertion share this path
+(`BG_OffhandHeldToThrow`); pmove names none of them.
+
 After emission, Y updates the selected slot/HUD immediately but queues the
 physical swap. The throw completes, the original gun recovers, then the normal
 weapon drop starts on the exact frame its raise lock expires. A second Y toggles

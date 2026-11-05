@@ -221,6 +221,7 @@ static const char *UI_ClassEquipmentName( int weapon ) {
 	case WP_FRAG: return "Frag grenade";
 	case WP_SEMTEX: return "Semtex";
 	case WP_THROWING_KNIFE: return "Throwing knife";
+	case WP_TACTICAL_INSERTION: return "Tactical Insertion";
 	case WP_FLASH: return "Flash grenade";
 	default: return "None";
 	}
@@ -275,7 +276,7 @@ static void UI_ClassSelectDraw( void ) {
 	UI_DrawString(320, 208, BG_ClassWeaponName(loadout->slot[0]), UI_SMALLFONT, color_white);
 	UI_DrawString(320, 236, "SECONDARY", UI_SMALLFONT, classMuted);
 	UI_DrawString(320, 256, BG_ClassWeaponName(loadout->slot[1]), UI_SMALLFONT, color_white);
-	Com_sprintf(line, sizeof(line), "%s x%i / %s x%i", loadout->lethal == WP_SEMTEX ? "Semtex" : loadout->lethal == WP_THROWING_KNIFE ? "Knife" : loadout->lethal ? "Frag" : "None", loadout->lethalCount, loadout->tactical ? "Flash" : "None", loadout->tacticalCount);
+	Com_sprintf(line, sizeof(line), "%s x%i / %s x%i", loadout->lethal == WP_SEMTEX ? "Semtex" : loadout->lethal == WP_THROWING_KNIFE ? "Knife" : loadout->lethal == WP_TACTICAL_INSERTION ? "Insertion" : loadout->lethal ? "Frag" : "None", loadout->lethalCount, loadout->tactical ? "Flash" : "None", loadout->tacticalCount);
 	UI_DrawString(320, 290, line, UI_SMALLFONT, color_white);
 	for ( i = 0; i < BG_PERK_SLOTS; i++ ) {
 		Com_sprintf(line, sizeof(line), "%i  %s", i + 1, BG_Perk(loadout->perk[i])->name);
@@ -639,6 +640,7 @@ static void UI_ClassOpenPicker( int kind, int slot, int category ) {
 			UI_ClassPageRow(&classPicker, WP_FRAG, "Frag grenade", "One timed explosive grenade.", current == WP_FRAG, qfalse);
 			UI_ClassPageRow(&classPicker, WP_SEMTEX, "Semtex", "One sticky explosive grenade. Hold to keep it in hand; Y puts it away.", current == WP_SEMTEX, qfalse);
 			UI_ClassPageRow(&classPicker, WP_THROWING_KNIFE, "Throwing knife", "One knife, thrown straight from the hand; kills on a hit, sticks where it lands, pick it back up with use.", current == WP_THROWING_KNIFE, qfalse);
+			UI_ClassPageRow(&classPicker, WP_TACTICAL_INSERTION, "Tactical Insertion", "Plant it where you stand; your next life starts there; pick it back up with use.", current == WP_TACTICAL_INSERTION, qfalse);
 		} else UI_ClassPageRow(&classPicker, WP_FLASH, "Flash grenade", "Two flash grenades. Disorients players in the blast.", current == WP_FLASH, qfalse);
 		Q_strncpyz(classPicker.note, "MW2's counts: one lethal, two flashes. Refilled each spawn.", sizeof(classPicker.note));
 	}

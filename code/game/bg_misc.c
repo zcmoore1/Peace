@@ -989,6 +989,13 @@ Only in One Flag CTF games
 		{ "models/weapons2/m40a3/world.md3", NULL, NULL, NULL },
 		"icons/peace_m40a3", "M300 Praetorian", 5, IT_WEAPON, WP_M40A3, "", ""
 	},
+	/* Lethal equipment: MW2's Tactical Insertion (flare_mp). Appended so no
+	 * item index moves. Placeholder art: the flash's grenade model and icon. */
+	{
+		"weapon_tacticalinsertion", "sound/misc/w_pkup.wav",
+		{ "models/weapons2/grenadel/grenadel.md3", NULL, NULL, NULL },
+		"icons/iconw_grenade", "Tactical Insertion", 0, IT_WEAPON, WP_TACTICAL_INSERTION, "", ""
+	},
 	{NULL}
 };
 

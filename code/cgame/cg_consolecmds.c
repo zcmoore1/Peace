@@ -558,13 +558,15 @@ static void CG_PeaceDump_f( void ) {
 		bg_weaponInstance_t gun;
 		if ( hint->eType == ET_MISSILE && hint->weapon == WP_THROWING_KNIFE )
 			CG_Printf( "usehint  %i: a throwing knife (no sea lion until it is taken)", ps->cursorHintEntIndex );
+		else if ( hint->eType == ET_MISSILE && hint->weapon == WP_TACTICAL_INSERTION )
+			CG_Printf( "usehint  %i: %s Tactical Insertion (no sea lion until it is picked up or smashed)",
+				ps->cursorHintEntIndex, hint->clientNum == ps->clientNum ? "your" : "another player's" );
 		else if ( BG_WeaponItem( hint, &gun ) )
 			CG_Printf( "usehint  %i: a floor gun, weapon %i (no sea lion)", ps->cursorHintEntIndex, gun.weapon );
 		else
 			CG_Printf( "usehint  %i: last seen as entity type %i (no sea lion)", ps->cursorHintEntIndex, hint->eType );
 	}
-	CG_Printf( "   usable now: %s\n", ps->cursorHint == CURSOR_HINT_KNIFE ? "knife" :
-		ps->cursorHint == CURSOR_HINT_WEAPON ? "gun" : ps->cursorHint == CURSOR_HINT_OBJECTIVE ? "objective" : "nothing" );
+	CG_Printf( "   usable now: %s\n", CG_CursorHintName( ps->cursorHint ) );
 	for (i = 0; i < SLOT_COUNT; i++) {
 		bg_weaponInstance_t gun;
 		BG_GetSlot(ps, i, &gun);
@@ -580,10 +582,18 @@ static void CG_PeaceDump_f( void ) {
 		CG_Printf("floor    entity %i   weapon %i   attachments %i   ammo %i / %i   at %.1f %.1f %.1f\n",
 			item->number, gun.weapon, gun.attachments, gun.ammo, gun.reserve, origin[0], origin[1], origin[2]);
 	}
+	if (cg.snap) for (i = 0; i < cg.snap->numEntities; i++) {
+		const entityState_t *ti = &cg.snap->entities[i];
+		if (ti->eType != ET_MISSILE || ti->weapon != WP_TACTICAL_INSERTION) continue;
+		CG_Printf("insertion entity %i   owner %i%s   team %i   yaw %.1f   at %.1f %.1f %.1f\n",
+			ti->number, ti->clientNum, ti->clientNum == ps->clientNum ? " (you)" : "", ti->generic1,
+			ti->angles[YAW], ti->pos.trBase[0], ti->pos.trBase[1], ti->pos.trBase[2]);
+	}
 	CG_Printf( "ammo     mag %i / reserve %i        owned mask 0x%04x\n",
 		ps->ammo[w], ps->ammoReserve[w], ps->stats[STAT_WEAPONS] );
-	CG_Printf( "equip    lethal %i (weapon %i)   tactical %i   semtex %i\n",
-		ps->ammo[BG_LethalWeapon(ps)], BG_LethalWeapon(ps), ps->ammo[WP_FLASH], ps->ammo[WP_SEMTEX] );
+	CG_Printf( "equip    lethal %i (weapon %i)   tactical %i   semtex %i   knife %i   insertion %i\n",
+		ps->ammo[BG_LethalWeapon(ps)], BG_LethalWeapon(ps), ps->ammo[WP_FLASH], ps->ammo[WP_SEMTEX],
+		ps->ammo[WP_THROWING_KNIFE], ps->ammo[WP_TACTICAL_INSERTION] );
 	CG_Printf( "action   type %i   fired %i   held %i\n",
 		ps->weaponAction & WA_TYPE_MASK, !!(ps->weaponAction & WA_FIRED),
 		(ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT );

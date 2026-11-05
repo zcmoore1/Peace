@@ -190,8 +190,9 @@ source for MW2 behaviour; the owner rejects it.
   variants of the same base gun must keep separate magazines and chamber debt.
   Do not replace a floor pickup with a full-mag grant. Death drops the held
   slot, not the requested destination. Exact weapon+attachment matches scavenge
-  to reserve on touch (capacity-capped) and consume the item; other guns, and a
-  resting throwing knife, take MW2's use hold (`BG_UseHoldTime`): `+activate`
+  to reserve on touch (capacity-capped) and consume the item; other guns, a
+  resting throwing knife and a Tactical Insertion take MW2's use hold
+  (`BG_UseHoldTime`, one hold entity: `useHold`): `+activate`
   at once (g_useholdtime 0), use/reload (and, for guns, the owner's plain
   reload) held 250ms (IW4x's gpad_use_hold_time), nothing in the first 500ms
   after the PLAYER spawns, never an item's age. A short tap still reloads: a
@@ -228,10 +229,13 @@ source for MW2 behaviour; the owner rejects it.
   (`BG_OffhandOut`) or dead it writes nothing; spawn leaves 0, a live entity
   number. Only freeing what it names (`G_ClearCursorHintRefs` in
   `G_FreeEntity`, flagged `FL_CURSOR_HINT`) makes it `ENTITYNUM_NONE`, and a
-  pickup frees its dropped gun - or a throwing knife taken back by use - at
-  once. A resting knife outranks any gun as the hint. Its type,
-  `ps.cursorHint`, is cleared by every pass and set beside a written index;
-  the server's use test and cgame's knife prompt read it, pmove never does.
+  pickup frees its dropped gun - or a throwing knife taken back by use, or a
+  Tactical Insertion picked up by its owner or smashed by an enemy - at once.
+  MW2's use list ranks by score, lowest first: a resting knife outranks
+  anything; a TI (-192) and a floor gun compare by 128 * (1 - dot) + eye
+  distance (`G_UseScore`). Its type, `ps.cursorHint`, is cleared by every pass
+  and set beside a written index; the server's use test and cgame's use
+  prompt read it, pmove never does.
   Pmove only reads the index: with no hint at
   all and either no gun in hand or the gun's quick raise after equipment
   (MW2's OFFHAND_END, a Semtex cancel's included), equipment comes straight
@@ -302,8 +306,9 @@ source for MW2 behaviour; the owner rejects it.
   (`CG_WeapAnim_ReanchorDrop`), so the picture never jumps; the fit is still
   `BG_HolsterTime`. Do not add a second timing rule in the renderer.
 - **Recovering from equipment is ONE thing, in time and function, and the
-  knife ends in the same quick raise.** Frag, flash, a released Semtex and the
-  throwing knife are held `BG_QUICK_ACTION_HOLD` (500ms) and go away in
+  knife ends in the same quick raise.** Frag, flash, a released Semtex, the
+  throwing knife and the Tactical Insertion (not MW2's flare fireTime 0.6 /
+  fireDelay 0.129) are held `BG_QUICK_ACTION_HOLD` (500ms) and go away in
   `BG_RAPID_DROP_TIME` (50ms); the knife has neither, and goes straight from
   `BG_MELEE_TIME` into the raise. Either way the gun comes back on its MW2
   quick raise (`BG_WeaponQuickRaiseTime`: 750ms for rifles, shotguns and
@@ -502,8 +507,9 @@ source for MW2 behaviour; the owner rejects it.
 - `pm_flags` — **full.** All 16 networked bits used. A 17th needs the wire
   format widened.
 - `STAT_WEAPONS` — full 32-bit wire mask at `PS_STAT_WEAPONS`. `MAX_WEAPONS`
-  is 24; the M300 is 15 and the throwing knife 16 in baseq3 (18 and 19 in
-  missionpack). Other
+  is 24; the M300 is 15, the throwing knife 16 and the Tactical Insertion 17
+  in baseq3 (18, 19 and 20 in missionpack; `WP_NUM_WEAPONS` 18 / 21). The
+  networked `ps.weapon` is 5 bits, so no weapon may pass 31. Other
   stats remain signed int16: their bit 15 must stay unused.
 - `weaponAnimSeq` — **full.** 2 bits in `msg.c`; all four values are taken
   (`RSEQ_START/LOOP/END` + `ASEQ_FIRE`). A fifth animation segment has to widen
@@ -511,7 +517,7 @@ source for MW2 behaviour; the owner rejects it.
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 10-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 83 requires client, server
+  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 84 (GAME_VERSION -13) requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
@@ -523,10 +529,13 @@ source for MW2 behaviour; the owner rejects it.
   (`GENTITYNUM_BITS`; an entity number, never rebased) and widens
   `slotFlags` to 3 bits for `BG_GUN_GENERATION`, a slot's bit that never
   travels with a dropped instance. Protocol 83 adds `cursorHint`
-  (`PS_CURSOR_HINT_BITS` = 2, `cursorHint_t`, MW2's ps+0x194): the hint's
-  type, rewritten by every end-frame pass where the index is sticky. Server
-  only, never rebased; pmove does not read it; cgame's knife prompt draws from
-  it. It replaced the gclient-only boolean of the same name.
+  (`cursorHint_t`, MW2's ps+0x194): the hint's type, rewritten by every
+  end-frame pass where the index is sticky. Server only, never rebased; pmove
+  does not read it; cgame's use prompt draws from it. It replaced the
+  gclient-only boolean of the same name. Protocol 84 (GAME_VERSION -13) widens
+  `PS_CURSOR_HINT_BITS` to 3 for the Tactical Insertion's two types (own:
+  pick up; enemy's: smash): six of eight values used, guarded by the static
+  assert in `g_items.c`. A seventh and eighth fit; a ninth needs 4 bits.
   Dropped ET_ITEM uses `generic1` for attachments, `time2` for packed magazine
   and reserve, `otherEntityNum2` for chamber debt, and `time` as a spawn serial.
 - `perks` is a five-bit spawn-owned playerstate field. All three class perk
@@ -615,7 +624,12 @@ all ten action bits through the actual network codec, and pose release. It
 also builds `knife_missile_test.c` (the throwing knife's real launch, impact,
 carry and rest code), `knife_corpse_test.c` (the real `CopyToBodyQue`,
 `BodySink`, `G_FreeEntity` and use code with a carried knife) and
-`missile_draw_test.c` (the real `CG_Missile` and snapshot lerp).
+`missile_draw_test.c` (the real `CG_Missile` and snapshot lerp, a planted
+Tactical Insertion's rest pose and glow included). `TestTacticalInsertion`
+drives the TI's quick drop, 2630ms ignite, queued tap, hold, Y cancels,
+recovery and sea lion chain through the real `PM_Weapon` in both numberings;
+`TestHoldThrowsBeforeCancel` checks MW2's HOLD (throw before Y unless lethal
+is held across both commands) for the TI, Semtex and throwing knife.
 Pose checks cover source retention, ladder holsters, loop/endpoint semantics,
 reload/action exclusions, ordinary sprint reversal and frame-only crossfades,
 plus YY flow (reversed draw, eased return, fire cut-in) through the real
@@ -634,10 +648,17 @@ showing the scope on that frame only. On Linux, build the same file list with
 
 `dev/tests/run-pickups.sh` runs the inventory, pickup, use/reload, take
 window (with the client's selection lagging the snapshot), throwing-knife
-pickup, hint type and sea lion checks, `cursor_hint_wiring_test.c`, which
-links the real `ClientEndFrame`, `G_FreeEntity` and hint pass, and
-`use_hint_test.c`: the knife prompt through the real `cg_draw.c`,
-`cg_usehint.c` and the engine's bind lookup in `cl_keys.c`.
+pickup, Tactical Insertion pickup/smash/ranking, hint type and sea lion checks
+(the TI's end to end through the real plant), `cursor_hint_wiring_test.c`,
+which links the real `ClientEndFrame` (TI spot sampling included),
+`G_FreeEntity` and hint pass, `use_hint_test.c`: the knife and TI prompts
+through the real `cg_draw.c`, `cg_usehint.c` and the engine's bind lookup in
+`cl_keys.c`, and `insertion_test.c`: the TI's plant through the real
+`FireWeapon`, its damage through the real `G_Damage`/`G_RadiusDamage` from real
+shots, the spawn on it inside the real `ClientSpawn` (a corpse there, killed
+through the real `G_Damage`, is left untouched), and cleanup through the
+real `SetTeam` and `ClientDisconnect`. `dev/TACTICAL_INSERTION.md` lists the
+TI's checks in every suite.
 
 `dev/tests/run-fakereload.cmd` (or `.sh`) models the client/server clocks
 (MW2's client time base through the real `CL_DriftTimeDelta`, snapshot
@@ -663,6 +684,9 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   is in `run-snd`). Normal rounds need both teams;
   `exec peace-snd-practice` is a separate cheat-only solo test setup.
 - Run `dev/tests/run-snd.cmd` or `.sh`; see `dev/SEARCH_AND_DESTROY.md`.
+- A Tactical Insertion can be planted, picked up and smashed in S&D but is
+  never spawned on; `SND_StartRound` frees it with every missile and
+  `SND_WaitForPlayers` frees it too (MW2's round restart frees everything).
 - QVM `sscanf` returns zero even after parsing! Do not use its return count
   to validate HUD data. The S&D site reader uses `COM_Parse` instead.
 - Round-winning killcams use a bounded engine snapshot history in
@@ -715,13 +739,35 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   lerps with its carrier. `CG_Missile` registers a missile's weapon on first
   sight: never rely on someone holding it (a frag in flight is
   `WP_GRENADE_LAUNCHER`, which nobody holds).
+- The Tactical Insertion (`WP_TACTICAL_INSERTION`) is appended lethal
+  equipment (17 basegame / 20 missionpack; its item is appended at the end of
+  `bg_itemlist`), MW2's `flare_mp` in the LETHAL slot (owner's choice of MW2's
+  way: equipment, thrown with `BUTTON_LETHAL`, one per class, never a
+  tactical). In pmove it is only data: the gun's quick drop, a 2630ms ignite
+  (`BG_INSERTION_IGNITE_MS`, holdFireTime) as its raise, held to throw and
+  Y-cancelable like the Semtex, the one equipment recovery, the ordinary sea
+  lion gate; no TI-named branch. The server (`g_insertion.c`) plants it on its
+  fire at the last sampled standing spot (MW2's TISpawnPosition), spawns its
+  owner on it (not in S&D; not over another player; that spawn skips
+  `G_KillBox`, so a corpse not yet respawned is never gibbed or credited, as
+  MW2's spawn there has no telefrag), and frees it on pickup,
+  smash, more than 20 counted damage, a new plant, the spawn, a team change,
+  disconnect and S&D resets. Placeholder art: the flash's grenade model and
+  icon. See `dev/TACTICAL_INSERTION.md`.
 
 The enum is not enough. A weapon in `STAT_WEAPONS` with no `bg_itemlist` entry
 crashes on spawn: `CG_RegisterWeapon` calls `CG_Error`, and `BG_FindItemForWeapon`
 calls `Com_Error`. This has already caused one map-load crash. Also check every
 `MAX_WEAPONS` table in `bg_pmove.c` — they are positional.
 
-Semtex and the throwing knife (`BG_OffhandHeldToThrow`): pre-release Y cancels to the same gun using its melee-return raise.
+Semtex, the throwing knife and the Tactical Insertion (`BG_OffhandHeldToThrow`): pre-release Y cancels to the same gun using its melee-return raise.
+As MW2's offhand states: in the drop and the pull (INIT, PREPARE) Y cancels
+whatever the buttons; in hand and ready (HOLD, 578f00-578f69) the throw comes
+first unless lethal is down on that command and the one before
+(`PM_OffhandHeld`, weaponAction's held bits), so a release and Y on one
+command, or Y (or a re-press) on the first command after a queued tap's pull,
+throws and the Y is eaten. weapnext keeps the slot either way (MW2's
+59d5f0-59d622 sets only the cancel bit). No per-weapon or glitch branch.
 Post-release Y queues a normal slot swap behind throw and original-gun recovery,
 as every quick action now does.
 Never treat an emitted throw as a cancellable equip or reset queued selection

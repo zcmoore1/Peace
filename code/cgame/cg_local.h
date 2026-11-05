@@ -1415,7 +1415,14 @@ qboolean CG_FindUseButton( qboolean gamepad, char *label, int labelSize, qboolea
 void     CG_UsePromptText( qboolean bound, qboolean hold, const char *label, const char *action,
 	char *out, int outSize );
 void     CG_UseButtonPrompt( int time, const char *action, char *out, int outSize );
-qboolean CG_KnifePromptShown( const playerState_t *ps, const playerState_t *server );
+const char *CG_UsePromptAction( int cursorHint );
+const char *CG_UsePromptShown( const playerState_t *ps, const playerState_t *server );
+const char *CG_CursorHintName( int cursorHint );
+
+// a planted Tactical Insertion's glow (picture only)
+#define CG_INSERTION_GLOW			100
+#define CG_INSERTION_GLOW_HEIGHT	8
+qboolean CG_InsertionFriendly( const entityState_t *s1 );
 
 void CG_RegisterWeapon( int weaponNum );
 void CG_RegisterItemVisuals( int itemNum );

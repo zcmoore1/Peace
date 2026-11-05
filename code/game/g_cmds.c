@@ -620,6 +620,9 @@ void SetTeam( gentity_t *ent, const char *s ) {
 	if(team == TEAM_SPECTATOR && oldTeam != team)
 		AddTournamentQueue(client);
 
+	// MW2's clearPreviousTISpawnpoint on joined_team and joined_spectators
+	G_FreeInsertion( ent );
+
 	client->sess.sessionTeam = team;
 	client->sess.spectatorState = specState;
 	client->sess.spectatorClient = specClient;

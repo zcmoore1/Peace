@@ -620,7 +620,8 @@ static const char *cg_viewModelBase[WP_NUM_WEAPONS] = {
 	"",                                 // WP_FLASH
 	"",                                 // WP_SEMTEX (procedural MD3 hand pose)
 	"models/weapons2/m40a3/view",         // WP_M40A3
-	""                                  // WP_THROWING_KNIFE (MD3 hand and tagged knife)
+	"",                                 // WP_THROWING_KNIFE (MD3 hand and tagged knife)
+	""                                  // WP_TACTICAL_INSERTION (placeholder: the flash's legacy hands and grenade)
 };
 
 /*
@@ -733,6 +734,13 @@ void CG_RegisterWeapon( int weaponNum ) {
 		// The same blade and hand, with a horizontal melee motion. No gun flash.
 		weaponInfo->flashModel = weaponInfo->barrelModel = 0;
 		handClips = "models/weapons2/throwingknife/melee.cfg";
+		break;
+	case WP_TACTICAL_INSERTION:
+		// Placeholder art until the flare lands: the planted TI is drawn with
+		// its item model (the flash's grenade). CG_Missile adds its glow.
+		weaponInfo->missileModel = weaponInfo->weaponModel;
+		weaponInfo->flashModel = 0;
+		weaponInfo->barrelModel = 0;
 		break;
 	case WP_GAUNTLET:
 		MAKERGB( weaponInfo->flashDlightColor, 0.6f, 0.6f, 1.0f );

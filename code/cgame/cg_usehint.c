@@ -144,28 +144,62 @@ void CG_UseButtonPrompt( int time, const char *action, char *out, int outSize ) 
 }
 
 /*
-CG_KnifePromptShown
+CG_UsePromptAction
 
-Whether the knife prompt shows: the server's last end-frame found a throwing
-knife this player can take now (ps.cursorHint). That type already covers the
+What a use does to a hint of this type, as the prompt says it, for the kinds
+the server holds a use press for (G_UseThink): a throwing knife taken back,
+your own Tactical Insertion picked up (MW2's MP_PICKUP_TI), an enemy's
+smashed (MP_DESTROY_TI). NULL for any other type: a floor gun has its own
+prompt and bar, and the bomb its own HUD.
+*/
+const char *CG_UsePromptAction( int cursorHint ) {
+	switch ( cursorHint ) {
+	case CURSOR_HINT_KNIFE: return "pick up knife";
+	case CURSOR_HINT_INSERTION: return "pick up Tactical Insertion";
+	case CURSOR_HINT_INSERTION_ENEMY: return "smash Tactical Insertion";
+	default: return NULL;
+	}
+}
+
+/*
+CG_UsePromptShown
+
+The use prompt's action when it shows, else NULL: the server's last end-frame
+found a throwing knife or Tactical Insertion this player can use now
+(ps.cursorHint, CG_UsePromptAction). The type is the server's, per player: a
+teammate's TI is never one, so it has no prompt. That type already covers the
 bomb: the server writes CURSOR_HINT_OBJECTIVE wherever a site or the bomb owns
-the use (G_UpdateCursorHint), so a knife type means a press is the knife's.
+the use (G_UpdateCursorHint), so a knife or TI type means a press is its.
 The rest only hides it where the server would refuse the use anyway (dead,
 spectating or following someone, sprinting, equipment out: G_UpdateCursorHint
-and G_UseKnife), a frame sooner than the server's own end-frame would, and
+and G_UseThink), a frame sooner than the server's own end-frame would, and
 while a hold already running on a floor gun keeps that gun's prompt and bar:
-a plain reload hold (pickupHeld 1, predicted; the knife never takes it), or a
-use or use/reload hold the server gave the gun (server's pickupHeld 3 with
-time on it). A use press the knife takes is rewritten to 2 on its first server
-command (G_UseThink), so only the snapshot tells the two apart: prediction
-counts any held use over a floor gun as the gun's until it arrives. A knife
-that comes into reach during a gun's hold is not taken by that hold (MW2
+a plain reload hold (pickupHeld 1, predicted; a knife or TI never takes it),
+or a use or use/reload hold the server gave the gun (server's pickupHeld 3
+with time on it). A use press a knife or TI takes is rewritten to 2 on its
+first server command (G_UseThink), so only the snapshot tells the two apart:
+prediction counts any held use over a floor gun as the gun's until it arrives.
+One that comes into reach during a gun's hold is not taken by that hold (MW2
 holds for what the press chose).
 */
-qboolean CG_KnifePromptShown( const playerState_t *ps, const playerState_t *server ) {
-	return ps->cursorHint == CURSOR_HINT_KNIFE &&
-		ps->persistant[PERS_TEAM] != TEAM_SPECTATOR && ps->stats[STAT_HEALTH] > 0 &&
-		ps->pm_type == PM_NORMAL && !(ps->pm_flags & (PMF_SPRINTING | PMF_FOLLOW)) &&
-		!BG_OffhandOut( ps ) && !(ps->pickupHeld == 1 && ps->pickupTime > 0) &&
-		!(server && server->pickupHeld == 3 && server->pickupTime > 0);
+const char *CG_UsePromptShown( const playerState_t *ps, const playerState_t *server ) {
+	const char *action = CG_UsePromptAction( ps->cursorHint );
+	if ( !action ||
+		ps->persistant[PERS_TEAM] == TEAM_SPECTATOR || ps->stats[STAT_HEALTH] <= 0 ||
+		ps->pm_type != PM_NORMAL || (ps->pm_flags & (PMF_SPRINTING | PMF_FOLLOW)) ||
+		BG_OffhandOut( ps ) || (ps->pickupHeld == 1 && ps->pickupTime > 0) ||
+		(server && server->pickupHeld == 3 && server->pickupTime > 0) ) return NULL;
+	return action;
+}
+
+// What a hint type is, for peacedump and cg_weaponDebug.
+const char *CG_CursorHintName( int cursorHint ) {
+	switch ( cursorHint ) {
+	case CURSOR_HINT_OBJECTIVE: return "objective";
+	case CURSOR_HINT_WEAPON: return "gun";
+	case CURSOR_HINT_KNIFE: return "knife";
+	case CURSOR_HINT_INSERTION: return "own insertion";
+	case CURSOR_HINT_INSERTION_ENEMY: return "enemy insertion";
+	default: return "nothing";
+	}
 }

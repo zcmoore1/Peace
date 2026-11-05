@@ -34,7 +34,11 @@ provenance and regeneration are in `assets/source/throwingknife/README.md`.
   release, sends it back to the gun on the gun's quick raise with nothing thrown
   or spent (`BG_OffhandHeldToThrow`: MW2's holdButtonToThrow and
   offhandHoldIsCancelable, the owner's choice). Pulled again in that raise it
-  comes straight out. A Y after the throw only queues the swap.
+  comes straight out. A Y after the throw only queues the swap. As MW2's HOLD
+  (578f00-578f69), once the pull is over the knife is thrown before Y is read
+  unless lethal is down on that command and the one before (`PM_OffhandHeld`):
+  a release and Y on one command, or Y right after a tap's pull, is the throw.
+  During the pull Y cancels whatever the buttons. See `dev/SEMTEX.md`.
 - **Recovery** is the ONE equipment recovery: `BG_QUICK_ACTION_HOLD`, the
   rapid drop, then the gun's quick raise (OFFHAND_END). (The melee knife has
   no hold or drop: it ends at `BG_MELEE_TIME` straight into the quick raise.) From an empty hand it
@@ -151,7 +155,7 @@ provenance and regeneration are in `assets/source/throwingknife/README.md`.
   reach during a gun's hold never claims the prompt for a hold that takes the
   gun. The bomb needs no test of its own: wherever a site or the bomb owns the
   use the type is `CURSOR_HINT_OBJECTIVE`. There is no hold bar: the knife's
-  hold is the server's (`knifeHoldStart`) and is not networked, and a guessed
+  hold is the server's (`useHoldStart`, the one hold it shares with the Tactical Insertion) and is not networked, and a guessed
   bar would disagree with it when the press came before the hint.
 - **Take.** One more knife and the pickup sound. The hands are not touched.
   The knife is then freed, which empties every use hint that named it. That is

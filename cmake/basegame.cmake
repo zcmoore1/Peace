@@ -59,6 +59,7 @@ set(GAME_SOURCES
     ${SOURCE_DIR}/game/g_cmds.c
     ${SOURCE_DIR}/game/g_combat.c
     ${SOURCE_DIR}/game/g_items.c
+    ${SOURCE_DIR}/game/g_insertion.c
     ${SOURCE_DIR}/game/g_mem.c
     ${SOURCE_DIR}/game/g_misc.c
     ${SOURCE_DIR}/game/g_missile.c

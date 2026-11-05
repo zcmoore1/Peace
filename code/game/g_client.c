@@ -1084,6 +1084,7 @@ void ClientSpawn(gentity_t *ent) {
 	int		accuracy_hits, accuracy_shots;
 	int		eventSequence;
 	char	userinfo[MAX_INFO_STRING];
+	qboolean	insertion = qfalse;
 
 	index = ent - g_entities;
 	client = ent->client;
@@ -1121,6 +1122,14 @@ void ClientSpawn(gentity_t *ent) {
 				client->ps.origin, 
 				spawn_origin, spawn_angles, !!(ent->r.svFlags & SVF_BOT));
 		}
+	}
+	// MW2's Tactical Insertion: a player who owns one spawns on it, and it is
+	// freed here, before the spawn and its first hint pass (G_InsertionSpawn).
+	// The spawn point is then none of the map's, so none of its targets fire.
+	if ( client->sess.sessionTeam != TEAM_SPECTATOR && !level.intermissiontime &&
+		G_InsertionSpawn( ent, spawn_origin, spawn_angles ) ) {
+		spawnPoint = NULL;
+		insertion = qtrue;
 	}
 	client->pers.teamState.state = TEAM_ACTIVE;
 
@@ -1199,7 +1208,7 @@ void ClientSpawn(gentity_t *ent) {
 	// MW2's room for a knife taken back: the weapon is owned this life, and
 	// throwingknife_mp's maxAmmo (1) less what is carried.
 	client->knifeMax = client->ps.ammo[WP_THROWING_KNIFE] > 0 ? BG_ClassEquipmentCount( WP_THROWING_KNIFE ) : 0;
-	client->knifeHold = ENTITYNUM_NONE;
+	client->useHold = ENTITYNUM_NONE;
 	{
 		int attachments;
 		// The existing sight preference seeds the spawn loadout. Thereafter
@@ -1239,7 +1248,11 @@ void ClientSpawn(gentity_t *ent) {
 
 	if (!level.intermissiontime) {
 		if (ent->client->sess.sessionTeam != TEAM_SPECTATOR) {
-			G_KillBox(ent);
+			// A spawn on a Tactical Insertion kills nothing: MW2's spawn there
+			// has no telefrag, and G_InsertionSpawn has already sent anyone
+			// standing in the box to a normal spawn. What is left in it is a
+			// corpse not yet respawned, which must not be gibbed or credited.
+			if ( !insertion ) G_KillBox(ent);
 			// force the base weapon up
 			client->ps.weapon = WP_MACHINEGUN;
 			client->ps.weaponstate = WEAPON_READY;
@@ -1314,6 +1327,7 @@ void ClientDisconnect( int clientNum ) {
 		return;
 	}
 	G_SNDClientDied( ent );
+	G_FreeInsertion( ent );	// MW2's clearPreviousTISpawnpoint on disconnect
 
 	// stop any following clients
 	for ( i = 0 ; i < level.maxclients ; i++ ) {

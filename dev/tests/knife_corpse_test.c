@@ -133,7 +133,7 @@ int main(void) {
   cl[i].pers.connected=CON_CONNECTED; cl[i].pers.enterTime=i+1; cl[i].lastCmdTime=level.time;
   Spawn(e,i*100,0);
  }
- cl[0].knifeMax=BG_ClassEquipmentCount(WP_THROWING_KNIFE); cl[0].ps.ammo[WP_THROWING_KNIFE]=0; cl[0].knifeHold=ENTITYNUM_NONE;
+ cl[0].knifeMax=BG_ClassEquipmentCount(WP_THROWING_KNIFE); cl[0].ps.ammo[WP_THROWING_KNIFE]=0; cl[0].useHold=ENTITYNUM_NONE;
  InitBodyQue();
  /* thrown into the victim: one hit, buried at the hit and carried by them */
  k=Throw();

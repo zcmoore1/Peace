@@ -4786,8 +4786,15 @@ void BotCheckEvents(bot_state_t *bs, entityState_t *state) {
 	if (state->eType > ET_EVENTS) {
 		event = (state->eType - ET_EVENTS) & ~EV_EVENT_BITS;
 	}
-	else {
+	else if (state->event) {
+		// the bot's own playerstate's external event (BotCheckSnapshot)
 		event = state->event & ~EV_EVENT_BITS;
+	}
+	else {
+		// the latest event on the entity's ring (eventTime keeps it once)
+		int slot = (state->eventSequence - 1) & (MAX_ENTITY_EVENTS-1);
+		event = state->eventSequence ? state->events[slot] : 0;
+		state->eventParm = state->eventParms[slot];
 	}
 	//
 	switch(event) {
@@ -5047,6 +5054,7 @@ void BotCheckSnapshot(bot_state_t *bs) {
 	//copy the player state events to the entity state
 	state.event = bs->cur_ps.externalEvent;
 	state.eventParm = bs->cur_ps.externalEventParm;
+	state.eventSequence = 0;	// only that one, not the entity's ring
 	//
 	BotCheckEvents(bs, &state);
 }

@@ -2603,6 +2603,132 @@ int BG_WeaponBaseSpread( int weapon ) {
 
 /*
 ===============
+MW2's view kick (weapon data)
+
+From the IW4 dump's weapons/mp files: hip/adsViewKickPitchMin/Max,
+hip/adsViewKickYawMin/Max and hip/adsViewKickCenterSpeed, in degrees per
+second and per second squared. Each Peace gun has the MW2 gun it already
+models: the machinegun MW2's M4 (m4_mp), the shotgun its SPAS-12
+(spas12_mp), the rocket launcher its RPG and AT4 (rpg_mp and at4_mp, whose
+view kicks are the same), and the M300 the Intervention (cheytac_mp, owner's
+choice; its numbers live in weapon.json). Equipment is MW2's own: frag, flash,
+Semtex, throwing knife and flare all have zero kick and zero centre speed.
+A weapon with no row has no MW2 weapon def: no shot of it kicks, and the
+centre speed is weapon 0's. That is WP_NONE, and every gun with no MW2
+counterpart: the gauntlet, grenade launcher, lightning gun, railgun, plasma
+gun, BFG, grappling hook and missionpack's nailgun, prox launcher and
+chaingun. The knife has none either: MW2's melee is no weapon of its own
+(BG_ViewmodelWeapon). Keyed by weapon, never positional. Word-only, as q3asm
+needs.
+===============
+*/
+static const struct {
+	int weapon;
+	float hipPitchMin, hipPitchMax, hipYawMin, hipYawMax, hipCenterSpeed;
+	float adsPitchMin, adsPitchMax, adsYawMin, adsYawMax, adsCenterSpeed;
+} bg_viewKick[] = {
+	{ WP_MACHINEGUN,	-30,  50,  40, -40, 1500,	-30, 50,  40, -40, 1500 },	// m4_mp
+	{ WP_SHOTGUN,		 85,  95, -45,  45, 1000,	 85, 95, -45,  45, 1000 },	// spas12_mp
+	{ WP_ROCKET_LAUNCHER,	100, 150, -50, -80, 1500,	 20, 95, -10,  30, 2500 },	// rpg_mp, at4_mp
+	{ WP_M40A3,
+		M40_HIP_VIEW_KICK_PITCH_MIN, M40_HIP_VIEW_KICK_PITCH_MAX,
+		M40_HIP_VIEW_KICK_YAW_MIN, M40_HIP_VIEW_KICK_YAW_MAX, M40_HIP_VIEW_KICK_CENTER_SPEED,
+		M40_ADS_VIEW_KICK_PITCH_MIN, M40_ADS_VIEW_KICK_PITCH_MAX,
+		M40_ADS_VIEW_KICK_YAW_MIN, M40_ADS_VIEW_KICK_YAW_MAX, M40_ADS_VIEW_KICK_CENTER_SPEED },	// cheytac_mp
+	{ WP_FRAG,		0, 0, 0, 0, 0,	0, 0, 0, 0, 0 },	// frag_grenade_mp
+	{ WP_FLASH,		0, 0, 0, 0, 0,	0, 0, 0, 0, 0 },	// flash_grenade_mp
+	{ WP_SEMTEX,		0, 0, 0, 0, 0,	0, 0, 0, 0, 0 },	// semtex_mp
+	{ WP_THROWING_KNIFE,	0, 0, 0, 0, 0,	0, 0, 0, 0, 0 },	// throwingknife_mp
+	{ WP_TACTICAL_INSERTION,	0, 0, 0, 0, 0,	0, 0, 0, 0, 0 }	// flare_mp
+};
+
+static int BG_ViewKickRow( int weapon ) {
+	int row;
+	for ( row = 0; row < ARRAY_LEN( bg_viewKick ); row++ ) {
+		if ( bg_viewKick[row].weapon == weapon ) return row;
+	}
+	return -1;
+}
+
+/*
+===============
+BG_ViewmodelWeapon
+
+MW2's BG_GetViewmodelWeaponIndex (0x4be4d0): the offhand from its prepare
+(weapFlags & 2, set in OffHandPrepare at 57781f) to OffHandEnd, otherwise
+the gun. Peace's ps.weapon is that offhand over the same span: a grenade's
+quick drop keeps the gun, and the throwing knife is in hand on its press
+(BG_OffhandPreparesAtOnce, OffHandInit's same-think Prepare). MW2's knife is
+no weapon change (MeleeInit writes over the gun's state,
+BG_QuickActionInPlace), so under it the view reads the gun it was written
+over, or none from an empty hand.
+===============
+*/
+int BG_ViewmodelWeapon( const playerState_t *ps ) {
+	if ( BG_QuickActionInPlace( ps->weapon ) ) {
+		return ( ps->weaponAction & WA_LEFT_EMPTY ) ? WP_NONE : BG_ActiveSlotWeapon( ps );
+	}
+	return ps->weapon;
+}
+
+// MW2's CG_KickAngles (596840-5968a3): the ADS centre speed above half aimed,
+// the hip one otherwise; weapon 0 (no def) 2400. Peace has no perk that
+// scales a scope's centring (MW2's perk_fastSnipeScale).
+float BG_WeaponViewKickCenterSpeed( int weapon, float adsFrac ) {
+	int row = BG_ViewKickRow( weapon );
+	if ( row < 0 ) return BG_KICK_NO_DEF_CENTER_SPEED;
+	return adsFrac > 0.5f ? bg_viewKick[row].adsCenterSpeed : bg_viewKick[row].hipCenterSpeed;
+}
+
+// MW2's random (0x44c590): seed = seed * 0x343fd + 0x269ec3, its top 15 bits over 32768.
+static float BG_KickRandom( unsigned int *holdrand ) {
+	*holdrand = *holdrand * 0x343fdu + 0x269ec3u;
+	return (float)( *holdrand >> 17 ) * ( 1.0f / 32768.0f );
+}
+
+/*
+===============
+BG_WeaponFireRecoil
+
+The view part of MW2's BG_WeaponFireRecoil (0x4a5fe0), for a shot of the
+weapon in hand: the ADS view kick when exactly fully aimed, the hip one
+otherwise, each min + r * (max - min) from the caller's seed, pitch drawn
+before yaw. It ASSIGNS the angular velocity (pitch up, yaw, and a roll of
+-0.5 times the yaw, 0x71a990); it never adds. MW2's reduced kick never applies
+to these guns (ReducedKickBullets 0 and fireDelay 0 leave
+weaponRestrictKickTime 0), and Peace sets neither of the weapFlags that scale
+it (recoil scale, pitch times 5). MW2 has no kick on a melee hit or an
+offhand throw, which are not its gun's fire event; Peace raises EV_FIRE_WEAPON
+for those too, so a quick action's fire (BG_IsActionWeapon, as pmove marks
+it fired) kicks nothing. A weapon with no MW2 def kicks nothing.
+===============
+*/
+qboolean BG_WeaponFireRecoil( const playerState_t *ps, float adsFrac, vec3_t kickAVel, unsigned int *holdrand ) {
+	int row;
+	float pitch, yaw;
+
+	if ( BG_IsActionWeapon( ps->weapon ) ) {
+		return qfalse;
+	}
+	row = BG_ViewKickRow( ps->weapon );
+	if ( row < 0 ) {
+		return qfalse;
+	}
+	if ( adsFrac == 1.0f ) {
+		pitch = BG_KickRandom( holdrand ) * ( bg_viewKick[row].adsPitchMax - bg_viewKick[row].adsPitchMin ) + bg_viewKick[row].adsPitchMin;
+		yaw = BG_KickRandom( holdrand ) * ( bg_viewKick[row].adsYawMax - bg_viewKick[row].adsYawMin ) + bg_viewKick[row].adsYawMin;
+	} else {
+		pitch = BG_KickRandom( holdrand ) * ( bg_viewKick[row].hipPitchMax - bg_viewKick[row].hipPitchMin ) + bg_viewKick[row].hipPitchMin;
+		yaw = BG_KickRandom( holdrand ) * ( bg_viewKick[row].hipYawMax - bg_viewKick[row].hipYawMin ) + bg_viewKick[row].hipYawMin;
+	}
+	kickAVel[PITCH] = -pitch;
+	kickAVel[YAW] = yaw;
+	kickAVel[ROLL] = yaw * -0.5f;
+	return qtrue;
+}
+
+/*
+===============
 BG_SpreadScale
 
 State multiplier applied to a weapon's base spread. Pure function of
@@ -3292,10 +3418,25 @@ static void PM_UpdateWeaponAction( void ) {
 				// only reads it. The throwing knife comes out at once anyway,
 				// and so does the knife, which never reads the hint: MW2's
 				// MeleeInit writes the melee state straight over the gun's.
-				prepare = ( nextAction != WA_MELEE &&
+				qboolean straightOut = nextAction != WA_MELEE &&
 					pm->ps->cursorHintEntIndex == ENTITYNUM_NONE &&
-					( pm->ps->weapon == WP_NONE || offhandEnd ) ) ||
+					( pm->ps->weapon == WP_NONE || offhandEnd );
+				prepare = straightOut ||
 					BG_OffhandPreparesAtOnce( nextWeapon ) || BG_QuickActionInPlace( nextWeapon );
+				// MW2's events for the offhand, in its order: CheckForOffHand's
+				// EV_SWITCH_OFFHAND (579168), then OffHandInit's start of the
+				// switch and its ADS reset (578e10, 578e5e) unless the offhand
+				// comes straight out. OffHandPrepare adds EV_PREP_OFFHAND when
+				// its pull begins (PM_FinishWeaponChange): this think for one
+				// coming straight out or the throwing knife, after the quick
+				// drop for the rest. The knife is MeleeInit, not an offhand.
+				if ( nextAction != WA_MELEE ) {
+					BG_AddPredictableEventToPlayerstate( EV_SWITCH_OFFHAND, nextWeapon, pm->ps );
+					if ( !straightOut ) {
+						BG_AddPredictableEventToPlayerstate( EV_WEAPON_SWITCH_STARTED, nextWeapon, pm->ps );
+						PM_AddEvent( EV_RESET_ADS );
+					}
+				}
 				action = nextAction;
 				returning = recovering = 0;
 				leftEmpty = pm->ps->weapon == WP_NONE ? WA_LEFT_EMPTY : 0;
@@ -3494,7 +3635,11 @@ static void PM_BeginWeaponChange( int weapon ) {
 		return;
 	}
 
-	PM_AddEvent( EV_CHANGE_WEAPON );
+	// The drop for equipment is MW2's OffHandInit, whose events the press
+	// raised (PM_UpdateWeaponAction); it puts nothing else on the ring.
+	if ( !BG_OffhandHeldToThrow( weapon ) ) {
+		PM_AddEvent( EV_CHANGE_WEAPON );
+	}
 	// Read before the state flips: a raise's lock is not a drop to keep.
 	pm->ps->weaponTime  = BG_HolsterTime( pm->ps );
 	pm->ps->weaponstate = WEAPON_DROPPING;
@@ -3533,6 +3678,11 @@ static void PM_FinishWeaponChange( void ) {
 		return;
 	}
 	BG_BeginWeaponDraw(pm->ps);
+	// An offhand's draw is its prepare, MW2's OffHandPrepare (5778e6): its
+	// pullback, with the offhand as the parm.
+	if ( BG_OffhandHeldToThrow( weapon ) ) {
+		BG_AddPredictableEventToPlayerstate( EV_PREP_OFFHAND, weapon, pm->ps );
+	}
 }
 
 // An alternate holster DESTINATION, not an alternate reload or swap. Leave the
@@ -4150,8 +4300,10 @@ static void PM_Weapon( void ) {
 		}
 	}
 
-	// fire weapon
-	PM_AddEvent( EV_FIRE_WEAPON );
+	// fire weapon. The parm names the gun that fired: the ring can still hold
+	// the shot after an offhand has taken the hand (MW2's es.weapon stays the
+	// gun through an offhand; Peace's ps.weapon does not).
+	BG_AddPredictableEventToPlayerstate( EV_FIRE_WEAPON, pm->ps->weapon, pm->ps );
 	if ( BG_IsActionWeapon( pm->ps->weapon ) ) {
 		pm->ps->weaponAction |= WA_FIRED;
 	}

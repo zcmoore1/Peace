@@ -430,8 +430,23 @@ static void TestCleanup(void) {
  CHECK(!ti->inuse && other->inuse && Insertions()==1);
 }
 
+/* A respawn puts none of the last life's events on the entity's ring again:
+ * the real ClientSpawn keeps only the playerstate ring's sequence, so its
+ * copy onto the entity (BG_PlayerStateToEntityState) finds nothing old. */
+static void TestSpawnEvents(void) {
+ entityState_t *es=&g_entities[0].s; int seq, i;
+ Reset(GT_FFA); Stand(0,-300,300,24);
+ BG_AddPredictableEventToPlayerstate(EV_FIRE_WEAPON,WP_SHOTGUN,&cl[0].ps);
+ BG_PlayerStateToEntityState(&cl[0].ps,es,qtrue);
+ seq=es->eventSequence; CHECK(es->events[(seq-1)&(MAX_ENTITY_EVENTS-1)]==EV_FIRE_WEAPON);
+ Die(0); ClientSpawn(&g_entities[0]); EndFrames();
+ for(i=0;i<((es->eventSequence-seq)&ES_EVENT_SEQUENCE_MASK);i++)
+  CHECK(es->events[(seq+i)&(MAX_ENTITY_EVENTS-1)]!=EV_FIRE_WEAPON);
+ CHECK(cl[0].ps.eventSequence>=1 && g_entities[0].health>0);
+}
+
 int main(void) {
- TestPlant(); TestDamage(); TestSpawn(); TestCleanup();
+ TestPlant(); TestDamage(); TestSpawn(); TestCleanup(); TestSpawnEvents();
  printf("PASS: %d Tactical Insertion server checks (plant, damage, spawn, cleanup)\n",checks);
  return 0;
 }

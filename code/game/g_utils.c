@@ -584,20 +584,70 @@ void G_AddEvent( gentity_t *ent, int event, int eventParm ) {
 		return;
 	}
 
-	// clients need to add the event in playerState_t instead of entityState_t
+	// A client sees its own in its playerstate's external event. Everyone else
+	// gets it on the entity's ring, as MW2's G_AddEvent (0x469a50) has every
+	// non-client's (0x4405d0) and copies a client's there too, minus its
+	// serverOnly and singleClient lists (56eab0).
 	if ( ent->client ) {
 		bits = ent->client->ps.externalEvent & EV_EVENT_BITS;
 		bits = ( bits + EV_EVENT_BIT1 ) & EV_EVENT_BITS;
 		ent->client->ps.externalEvent = event | bits;
 		ent->client->ps.externalEventParm = eventParm;
 		ent->client->ps.externalEventTime = level.time;
+		if ( BG_EventReachesOthers( event ) ) {
+			BG_AddEntityEvent( &ent->s, event, eventParm );
+		}
 	} else {
-		bits = ent->s.event & EV_EVENT_BITS;
-		bits = ( bits + EV_EVENT_BIT1 ) & EV_EVENT_BITS;
-		ent->s.event = event | bits;
-		ent->s.eventParm = eventParm;
+		BG_AddEntityEvent( &ent->s, event, eventParm );
 	}
 	ent->eventTime = level.time;
+}
+
+/*
+===============
+G_AgeEntityEvents
+
+Q3's EVENT_VALID_MSEC, kept for each slot of the entity's ring: a slot is
+emptied that long after it was filled, as Q3 cleared its one event. So a
+client that has not seen an entity for that long can play whatever the ring
+still holds (CG_ResetEntity) without hearing anything older. Called once a
+frame for every entity in use; a slot filled since then is stamped now.
+===============
+*/
+void G_AgeEntityEvents( gentity_t *ent ) {
+	int i, added = ( ent->s.eventSequence - ent->eventRingSequence ) & ES_EVENT_SEQUENCE_MASK;
+	if ( added > MAX_ENTITY_EVENTS ) {
+		added = MAX_ENTITY_EVENTS;
+	}
+	for ( i = 1; i <= added; i++ ) {
+		ent->eventRingTime[( ent->s.eventSequence - i ) & (MAX_ENTITY_EVENTS-1)] = level.time;
+	}
+	ent->eventRingSequence = ent->s.eventSequence;
+	for ( i = 0; i < MAX_ENTITY_EVENTS; i++ ) {
+		if ( ent->s.events[i] && level.time - ent->eventRingTime[i] > EVENT_VALID_MSEC ) {
+			ent->s.events[i] = 0;
+			ent->s.eventParms[i] = 0;
+		}
+	}
+}
+
+
+/*
+===============
+G_ClearEntityEvents
+
+An entity made as a copy of another (a body, a podium model) is a new
+entity with no events of its own: its ring starts empty, so its first
+G_AgeEntityEvents stamps nothing and no client plays the original's events
+from it.
+===============
+*/
+void G_ClearEntityEvents( gentity_t *ent ) {
+	ent->s.event = 0;
+	ent->s.eventSequence = 0;
+	memset( ent->s.events, 0, sizeof( ent->s.events ) );
+	memset( ent->s.eventParms, 0, sizeof( ent->s.eventParms ) );
+	ent->eventRingSequence = 0;
 }
 
 

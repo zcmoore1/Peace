@@ -31,6 +31,9 @@ qhandle_t trap_R_RegisterModel(const char *name) {
 }
 qhandle_t trap_R_RegisterShader(const char *name) { (void)name; return 1; }
 sfxHandle_t trap_S_RegisterSound(const char *name,qboolean compressed) { (void)name; (void)compressed; return 1; }
+/* No optional sound is there (CG_RegisterWeapon's MW2 pullbacks). */
+int trap_FS_FOpenFile(const char *path,fileHandle_t *f,fsMode_t mode) { (void)path; (void)mode; *f=0; return -1; }
+void trap_FS_FCloseFile(fileHandle_t f) { (void)f; abort(); }
 void trap_R_ModelBounds(clipHandle_t model,vec3_t mins,vec3_t maxs) { (void)model; VectorClear(mins); VectorClear(maxs); }
 void trap_R_AddRefEntityToScene(const refEntity_t *re) { drawn=*re; draws++; }
 void CG_AddRefEntityWithPowerups(refEntity_t *ent,entityState_t *state,int team) {

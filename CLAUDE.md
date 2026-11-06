@@ -160,7 +160,57 @@ source for MW2 behaviour; the owner rejects it.
 - **Clip frame ranges are data.** They live in the `.cfg` beside the model and
   are read by `CG_WeapAnim_RegisterClips`. Re-exporting a model must never mean
   editing C, and no weapon may be named in that loader.
-- **cgame is picture only.** It never touches ammo or weapon state.
+- **cgame is picture only.** It never touches ammo or weapon state. The one
+  approved exception (owner's decision) is MW2's view kick, and only the kick:
+  cgame authors it and the client adds it into the command's aim.
+- **The view kick is MW2's, and the tilt emerges (owner's rule).** The
+  predicted player's own `EV_FIRE_WEAPON` assigns the kick's angular velocity
+  (`BG_WeaponFireRecoil`'s view part, MW2's 0x4a5fe0, ADS data only at
+  `cg.adsFrac` exactly 1, the client-only `cg_kickSeed`). `CG_KickAngles`
+  (MW2's 0x596790) runs it out once a frame in 5ms steps, at the centre speed
+  of `BG_ViewmodelWeapon` (MW2's viewmodel weapon: `ps.weapon`, but the gun
+  under the melee knife, which MW2 writes over the gun's state), 2400 with no
+  MW2 def, clamped at 10 degrees, a step back cut to 0.06. It is zeroed
+  unless the state is the player's own (no demo, killcam or follow: MW2's
+  `POF_PLAYER`). `trap_SetUserCmdKickAngles` hands it to
+  `cl.cgameKickAngles`, and `CL_FinishMove` adds it into `cmd.angles`, all
+  three axes, never into `cl.viewangles`. The view shows it only through the
+  predicted `ps.viewangles`; the server aims with them and the killcam
+  replays them, so pmove is unchanged and the replay adds no kick. The
+  throwing knife's centre speed is 0, so a knife pulled just after a shot lets
+  the kick run to the clamp: the tilt. Never add a knife, tilt or killcam
+  branch to it, never draw the kick into the refdef, and never let it touch
+  `cl.viewangles`. A quick action's fire kicks nothing (MW2 fires no gun event
+  for it), and a gun with no MW2 counterpart has no row. See
+  `dev/VIEW_KICK.md`.
+- **Bullets are drawn by the clients (MW2's sv_clientSideBullets, owner's
+  decision).** The server traces every hitscan shot for its damage only and
+  sends no impact, tracer, blast or beam for it (`g_weapon.c`: `Bullet_Fire`
+  for the machinegun, M300 and chaingun, the SPAS's pellets, the railgun, the
+  lightning gun). Every client traces the shot again from its fire event and
+  draws them (`CG_FireBullets`, cg_weapons.c). Both build it with the same
+  `bg_misc.c` code: `BG_ShotMuzzle`, MW2's seed (the shot command's time,
+  Bullet_Fire's gameTime, through BG_srand 0x410720 and BG_random 0x44c590:
+  `BG_BulletSeed`, `BG_BulletRandom`) and Peace's own shapes (`BG_BulletEnd`
+  scaled by `BG_WeaponSpread`, `BG_ShotgunAxes`/`BG_ShotgunPelletEnd`), so a
+  shot hurts what it always did. The player's own shot comes from its
+  playerstate event, from the state its command left (`CG_RecordShots`, in
+  the prediction loop): it lands exactly where the server's damage traces
+  went. With nothing predicted (a demo, a followed player, the killcam) it is
+  drawn from the state the event came in, MW2's predictedPlayerState.
+  Everyone else's comes from the shooter's entity event and what the entity
+  carries (its last command's snapped origin, whole-degree aim and
+  `pos.trTime`, no aim state, so the hip's spread): exact only when the entity
+  shows the shot's own think (MW2 seeds others' from the clock). The viewed
+  player is never in their own snapshot, so `CG_ShotTrace` tests their box,
+  but only while they have one: with no health and no `PM_DEAD` corpse (S&D's
+  player out of the round, unlinked on the server) the bullet goes through.
+  Damage, ammo and weapon state stay the server's and pmove's; the fire event's
+  parm names the gun that fired, never a seed or spread. Projectiles, both
+  knives and Team Arena's invulnerability bounces keep their server effects.
+  The fake bullet now shows its tracer and impacts on the shooter's screen,
+  with no damage, as MW2's does; no window moved. Run
+  `dev/tests/run-bullets.sh`.
 - **Aim follows simulation permission, never a scheduled scope flash.** Aim
   progress belongs to the player and survives weapon/slot/attachment changes.
   `BG_CanAimDownSights` is the shared physical rule (no empty hand, no quick
@@ -551,6 +601,64 @@ source for MW2 behaviour; the owner rejects it.
   hands back to prediction.
   Aim, camera and HUD always read the predicted state. Run
   `dev/tests/run-fakereload.sh`; `dev/FAKE_RELOAD.md` has the measured windows.
+- **Events are MW2's rings (owner's rule: do what MW2 does).** The playerstate
+  holds MW2's four predictable events (`MAX_PS_EVENTS`); every entity carries
+  MW2's own ring of four (`eventSequence`, 11 bits, `events[]`,
+  `eventParms[]`). After each command and at each frame's end
+  `BG_PlayerStateToEntityState` copies the player's new events onto its entity
+  (MW2's 56eab0), skipping MW2's serverOnly and singleClient lists
+  (`BG_EventReachesOthers`); `G_AddEvent` puts any entity's on its own ring,
+  and a client's there too beside its external event. There is no temp entity
+  per event: Q3's SendPendingPredictableEvents is gone (MW2 has none, and the
+  ring would play each twice). `CG_CheckEvents` plays every event since the
+  last snapshot, up to four, oldest first, each with its own parm. Each slot
+  is emptied `EVENT_VALID_MSEC` after it was filled (`G_AgeEntityEvents`, Q3's
+  rule per slot), so an entity seen again after that long plays what its ring
+  still holds and one seen just before plays only what is new. A player's
+  entity is MW2's exception (`CG_ResetEntity`'s ET_PLAYER case, 5951f4):
+  whenever it is reset (back in view, teleported, or back after it was
+  followed) its ring counts as played, so a follow switch never replays the
+  shots its playerstate already played. The fire event names the gun that
+  fired (`EV_FIRE_WEAPON`'s parm): the ring can still hold it after an
+  offhand has taken the hand, where MW2's `es.weapon` stays the gun. cgame
+  takes the whole shot from that parm, never from `es.weapon`: the sound, the
+  bullets, and the third-person impulse flash with its light and muzzle tag
+  (`muzzleFlashGun`). A fire with no flash model (a throw) leaves the gun's
+  flash alone. The offhand press raises MW2's events in MW2's order:
+  CheckForOffHand's `EV_SWITCH_OFFHAND`, OffHandInit's
+  `EV_WEAPON_SWITCH_STARTED` and `EV_RESET_ADS` unless the offhand comes
+  straight out (the sea lion's direct
+  prepare, 5791ce), and OffHandPrepare's `EV_PREP_OFFHAND` when its pull
+  begins (`PM_FinishWeaponChange`), the throwing knife's on the press think.
+  So the knife's press is four events, every other offhand's three and later
+  its pullback, straight out two; the offhand's drop raises no
+  `EV_CHANGE_WEAPON` (OffHandInit has none). Each has MW2's function: the
+  HUD's equipped offhand (whatever player is viewed; when the viewed player
+  or their life changes, outside a demo, MW2's snapshot transition takes it
+  from the playerstate and drops the view kick, `CG_ViewedPlayerChanged`),
+  the server's switch-start notice (a
+  `WeaponSwitchStarted:` log line, MW2's script notify), leaving a toggled aim
+  (`leaveads`, client input only, the player's own and never in a killcam or
+  demo; the client has MW2's `toggleads` and `leaveads` on `cl.usingAds`),
+  and the offhand's pullback from its data (MW2's names, under
+  `sound/weapons/offhand/`, played only if the file is there). A killcam that
+  loses the shot of a shot and a knife press in one recorded frame emerges
+  from the four slots: never test for it in game code, never special-case it.
+  A new event is appended to `entity_event_t` and `eventnames`, and handled in
+  `CG_EntityEvent` (its default is an error).
+- **The silent shot emerges; nothing names it (owner's rule).** Shoot, then
+  press the throwing knife: the shooter gets the shot (flash, sound, impacts,
+  kick), live opponents get it with the gun that fired, the victim dies, and
+  the round's killcam shows no shot at all, only the kicked view, exactly when
+  the shot and the press ran in one recorded server frame (under 50ms apart
+  with a packet a frame, under 80ms with `cl_maxpackets 30`). It is the four
+  pieces above working as MW2's: the press's four events overwrite the shot's
+  slot in the one archived playerstate a frame, the bullet is drawn from that
+  event alone, the kick is in the recorded aim and the knife's centre speed
+  of 0 leaves it at the clamp, and the entity ring keeps it for everyone
+  live. Never add a flag, branch, event, state or test hook for it, and never
+  "fix" it in one piece. `dev/tests/run-silentshot.sh` drives it end to end;
+  `dev/SILENT_SHOT.md` has the sources and the measured windows.
 
 ## Capacity limits
 
@@ -567,7 +675,7 @@ source for MW2 behaviour; the owner rejects it.
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 10-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 85 (GAME_VERSION -14) requires client, server
+  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 86 (GAME_VERSION -15) requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
@@ -593,6 +701,29 @@ source for MW2 behaviour; the owner rejects it.
   (MW2's 0x5d) is appended to `entity_event_t`.
   Dropped ET_ITEM uses `generic1` for attachments, `time2` for packed magazine
   and reserve, `otherEntityNum2` for chamber debt, and `time` as a spawn serial.
+- cgame imports are appended after `CG_KEY_GETBINDINGNAME`:
+  `CG_SETUSERCMDKICKANGLES` (115, QVM stub -116 in `cg_syscalls.asm`) passes
+  the view kick as three floats by value, which the engine reads as
+  `VMF(1..3)`. Keep the trap's parameters scalar: a QVM call has no C
+  wrapper, so a `vec3_t` parameter would push one word, the pointer, and the
+  engine would read garbage. `run-kick.sh` checks it through a q3lcc-built
+  QVM. The import numbers above it never change. A new
+  cgame on an older client calls an import that client does not have, which
+  is one more reason protocol 86 needs the client rebuilt with the modules.
+- Event rings: **protocol 86, GAME_VERSION -15** (one bump with the view
+  kick's import and client-side bullets). The playerstate's
+  `events[2..3]` and `eventParms[2..3]` (8 bits) sit beside `[0..1]`; the
+  entity's `eventSequence` (11 bits), `events[0..3]` and `eventParms[0..3]`
+  (8 bits) take Q3's `event`'s place in the netfield order, and `event` moved
+  to the end: it is the cgame's working copy, which the server never sets.
+  `entityState_t` grew by nine ints, so `sharedEntity_t`/`gentity_t` offsets
+  moved: the engine, the server and every native and QVM module are rebuilt
+  together, and older demos do not play. Event numbers are 8 bits on both
+  rings, so `entity_event_t` stays below 256 (it ends at `EV_PREP_OFFHAND`,
+  well under); parms are 8 bits as before (a weapon, a direction byte, a sound
+  index). Client-side bullets add no field: the server simply stops sending
+  hitscan impact, tracer, blast and beam temp entities, so a client older
+  than protocol 86 would draw none.
 - `perks` is a five-bit spawn-owned playerstate field. All three class perk
   slots share the roster in `bg_loadout.c`; duplicate nonzero IDs are invalid.
   Quick Reload retimes authored notes, segment endpoints and presentation via
@@ -704,6 +835,17 @@ plus YY flow (reversed draw, eased return, fire cut-in) through the real
 The glide return is compared frame by frame with the ordinary sprint exit
 from the same posture (carry, loop, exit under way, partial entry), in both
 rendering paths, for SPAS and M300.
+`event_ring_test.c` (with `event_ring_wire.c`) runs MW2's event rings end to
+end: the real Pmove and `BG_PlayerStateToEntityState`, the real codec, and
+the cgame's real snapshot transition, `CG_CheckEvents`, `CG_FireWeapon`,
+`CG_PrepOffhand` and `CG_CheckPlayerstateEvents` - an opponent's shot named
+by its gun after a knife pull, the press's routing, up to four a snapshot
+across the 11-bit wrap, an entity seen again (a player's ring as played), the
+player's own view, and the
+killcam losing the shot only when shot and press share a recorded frame.
+`offhand_server_test.c`'s `TestEventRing` checks every offhand's press events
+and parms through the real `ClientThink`, the entity's ring, the switch-start
+log line, no per-event temp entity, `G_AddEvent` and the ring's aging.
 The native/QVM pointer-boundary test links `cl_vm.c` and `vm_ptr.c` directly;
 keep it independent of the full client and VM lifecycle so MSVC can link it.
 Loadouts UI and class definitions are documented in `dev/LOADOUTS.md`.
@@ -736,6 +878,52 @@ reload after knife/frag/Semtex cancel, tap vs hold, aiming/shooting/real reload
 during it, `+reload` never faking, no fake shot, the lone knife, the fake bullet
 and the M300 wild scope at 0/50/100/200 ms. `FAKERELOAD_PROBE=1` prints every
 tap timing; `FAKERELOAD_SVFPS` changes the server rate.
+
+`dev/tests/run-bullets.sh` (`BULLETS_TEST_FLAGS` for -DMISSIONPACK) runs
+client-side bullets end to end: the real `ClientThink`, `Pmove`, `FireWeapon`
+and `G_Damage` on the server half (`bullets_server.c`), the real
+`CG_PredictPlayerState`, playerstate and entity events and `CG_FireWeapon` on
+the client half (`bullets_client.c`), over one world (`bullets_world.c`). For
+every hitscan gun it checks that no impact or tracer is sent, the damage per
+hit, and that the shooter's client draws every bullet, pellet and beam where
+the server's damage traces ended (hip and aimed, still and moving, aim moving,
+one or several commands a frame, lag), the unpredicted path, other players'
+view from the entity event (the victim's own box included), the sky, a
+projectile and the fake bullet.
+
+`dev/tests/run-kick.sh` (`KICK_TEST_FLAGS=-DMISSIONPACK` for the other
+numbering) runs MW2's view kick through the real `cg_kick.c`, `cg_event.c`,
+`cg_playerstate.c`, cgame's native traps, `CL_FinishMove` and full `Pmove`:
+every weapon's data, kicksim.py's published results, the throwing knife's
+tilt held in the recorded `ps.viewangles`, the melee knife and frag after a
+shot, the demo/killcam/follow gates and the QVM stub's number. It then builds
+the real `cg_kick.c` and `cg_syscalls.asm` into a QVM with q3lcc and q3asm,
+runs it on the real `vm_interpreted.c`, and checks that the real
+`CL_CgameSystemCalls` and `CL_FinishMove` receive exactly the kick cgame holds.
+
+`dev/tests/run-silentshot.sh` (`SILENTSHOT_TEST_FLAGS=-DMISSIONPACK`) models
+the client/server clocks as the fake reload test does and runs the real game
+module (`ClientThink`, `ClientEvents`, `FireWeapon`, `G_AddEvent`,
+`G_AgeEntityEvents`, `ClientEndFrame`), `sv_snapshot.c`'s killcam recording and
+snapshots through the real codec, the real `CL_FinishMove`, and cgame's real
+snapshot pipeline, prediction, events, client-side bullets and kick. It shoots
+(SPAS and M300), presses the throwing knife N ms later, and sweeps N against
+every arrival phase, a packet a frame and `cl_maxpackets 30`, at 0/50/100/200ms:
+the shooter and a live opponent always get the shot (its flash drawn by the
+real `CG_AddPlayerWeapon` from the gun, though the entity may hold the knife
+already), the killcam loses it exactly when the server ran shot and press in
+one frame, the recorded aim is the commands' own, kick and all, held at the
+clamp with the knife, and a frag in the same frame never loses it. A spectator
+who follows the shooter and switches away sees the shot once, and a viewer
+out of an S&D round in the line of fire draws the bullets through their absent
+body. `run-loadouts.sh` checks that a body and a podium model start with an
+empty ring (`body_ring_test.c`).
+
+`run-bullets`, `run-kick` and `run-silentshot` have no `.cmd`. They link
+whole game, cgame and client files and rely on GNU ld's `--gc-sections` to
+drop the functions that reach engine code they do not build, and MSVC's
+linker resolves every external of every object first. Run them under WSL or
+with any gcc or clang.
 
 Do not statically initialize structs with inline char arrays mixed with ints:
 q3asm splits byte literals and word data into different segments. Use word-only
@@ -827,7 +1015,9 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
 The enum is not enough. A weapon in `STAT_WEAPONS` with no `bg_itemlist` entry
 crashes on spawn: `CG_RegisterWeapon` calls `CG_Error`, and `BG_FindItemForWeapon`
 calls `Com_Error`. This has already caused one map-load crash. Also check every
-`MAX_WEAPONS` table in `bg_pmove.c` — they are positional.
+`MAX_WEAPONS` table in `bg_pmove.c` — they are positional. A gun that models
+an MW2 gun also gets that gun's row in `bg_viewKick` (keyed, not positional;
+see `dev/VIEW_KICK.md`), and equipment gets its zero row.
 
 Semtex, the throwing knife and the Tactical Insertion (`BG_OffhandCancelable`): pre-release Y cancels to the same gun using its melee-return raise.
 The frag and flash wait in hand the same way but take no cancel.

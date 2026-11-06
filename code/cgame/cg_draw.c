@@ -2493,15 +2493,20 @@ static void CG_DrawLoadoutHud( void ) {
 		y += SMALLCHAR_HEIGHT + 2;
 	}
 
-	trap_R_SetColor( bright );
-
-	// Equipment counts are just the ammo on those weapon entries.
-	Com_sprintf( line, sizeof( line ), "%s %i   TAC %i",
+	// Equipment counts are just the ammo on those weapon entries. The offhand
+	// last switched to (EV_SWITCH_OFFHAND, MW2's equipped offhand) is the
+	// bright one once there is one.
+	Com_sprintf( line, sizeof( line ), "%s %i   ",
 		BG_LethalWeapon(ps) == WP_SEMTEX ? "SEMTEX" :
 		BG_LethalWeapon(ps) == WP_THROWING_KNIFE ? "KNIFE" :
 		BG_LethalWeapon(ps) == WP_TACTICAL_INSERTION ? "TI" : "LETHAL",
-		ps->ammo[BG_LethalWeapon(ps)], ps->ammo[WP_FLASH] );
-	CG_DrawSmallString( x, y, line, 1.0f );
+		ps->ammo[BG_LethalWeapon(ps)] );
+	trap_R_SetColor( bright );
+	CG_DrawSmallString( x, y, line, cg.equippedOffhand == WP_FLASH ? dim[3] : bright[3] );
+	x += CG_DrawStrlen( line ) * SMALLCHAR_WIDTH;
+	Com_sprintf( line, sizeof( line ), "TAC %i", ps->ammo[WP_FLASH] );
+	CG_DrawSmallString( x, y, line,
+		cg.equippedOffhand && cg.equippedOffhand != WP_FLASH ? dim[3] : bright[3] );
 
 	trap_R_SetColor( NULL );
 }

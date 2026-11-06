@@ -801,6 +801,11 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	// build cg.refdef
 	inwater = CG_CalcViewValues();
 
+	// MW2's view kick, after this frame's fire events and aim clock: it goes
+	// into the next command's angles, so the view above already shows the
+	// last one through the predicted viewangles.
+	CG_KickAngles();
+
 	// first person blend blobs, done after AnglesToAxis
 	if ( !cg.renderingThirdPerson ) {
 		CG_DamageBlendBlob();

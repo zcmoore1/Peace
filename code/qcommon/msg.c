@@ -752,7 +752,17 @@ netField_t	entityStateFields[] =
 { NETF(apos.trBase[1]), 0 },
 { NETF(pos.trDelta[2]), 0 },
 { NETF(apos.trBase[0]), 0 },
-{ NETF(event), 10 },
+// MW2's entity event ring, where Q3's single event was: it changes as often.
+// Event numbers and parms are 8 bits, as in the playerstate's ring.
+{ NETF(eventSequence), ES_EVENT_SEQUENCE_BITS },
+{ NETF(events[0]), 8 },
+{ NETF(eventParms[0]), 8 },
+{ NETF(events[1]), 8 },
+{ NETF(eventParms[1]), 8 },
+{ NETF(events[2]), 8 },
+{ NETF(eventParms[2]), 8 },
+{ NETF(events[3]), 8 },
+{ NETF(eventParms[3]), 8 },
 { NETF(angles2[1]), 0 },
 { NETF(eType), 8 },
 { NETF(torsoAnim), 8 },
@@ -793,7 +803,9 @@ netField_t	entityStateFields[] =
 { NETF(angles2[0]), 0 },
 { NETF(angles2[2]), 0 },
 { NETF(constantLight), 32 },
-{ NETF(frame), 16 }
+{ NETF(frame), 16 },
+// The cgame's working copy only: the server leaves it 0, so it never costs a bit.
+{ NETF(event), 10 }
 };
 
 
@@ -1079,6 +1091,8 @@ netField_t	playerStateFields[] =
 { PSF(events[0]), 8 },
 { PSF(legsAnim), 8 },
 { PSF(events[1]), 8 },
+{ PSF(events[2]), 8 },	// MW2's ring holds four (0x742170-0x7421a0)
+{ PSF(events[3]), 8 },
 { PSF(pm_flags), 16 },
 { PSF(groundEntityNum), GENTITYNUM_BITS },
 { PSF(weaponstate), 4 },
@@ -1100,6 +1114,8 @@ netField_t	playerStateFields[] =
 { PSF(torsoTimer), 12 },
 { PSF(eventParms[0]), 8 },
 { PSF(eventParms[1]), 8 },
+{ PSF(eventParms[2]), 8 },
+{ PSF(eventParms[3]), 8 },
 { PSF(clientNum), 8 },
 { PSF(weapon), 5 },
 { PSF(weaponAnimTime), -16 },

@@ -66,8 +66,10 @@ Class serialization version 2 adds the two attachment masks; version 1 classes
 still load and inherit the old `cg_sight` preference at spawn. New editor saves
 store explicit choices, so changing `cg_sight` will not overwrite them. The active
 perk mask is a predicted/replayed playerstate field. The current build (MW2's
-`grenadeTimeLeft` playerstate field) uses protocol **85**, game **-14**;
-protocol 84 / game -13 was the Tactical Insertion's 3-bit use hint type.
+event rings: four playerstate events and every entity's own ring, with the
+view kick's cgame import and client-side bullets) uses protocol **86**, game
+**-15**; protocol 85 / game -14 was MW2's `grenadeTimeLeft` playerstate field,
+and protocol 84 / game -13 the Tactical Insertion's 3-bit use hint type.
 Rebuild the executable, server and all modules together. A saved class stores
 raw weapon numbers, so a Tactical Insertion class saved in baseq3 (17) is not
 the same number in missionpack (20), as for every appended weapon. Changing

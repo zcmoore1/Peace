@@ -1824,16 +1824,13 @@ void G_RunFrame( int levelTime ) {
 			continue;
 		}
 
+		G_AgeEntityEvents( ent );
+
 		// clear events that are too old
 		if ( level.time - ent->eventTime > EVENT_VALID_MSEC ) {
-			if ( ent->s.event ) {
-				ent->s.event = 0;	// &= EV_EVENT_BITS;
-				if ( ent->client ) {
-					ent->client->ps.externalEvent = 0;
-					// predicted events should never be set to zero
-					//ent->client->ps.events[0] = 0;
-					//ent->client->ps.events[1] = 0;
-				}
+			if ( ent->client ) {
+				ent->client->ps.externalEvent = 0;
+				// predicted events should never be set to zero
 			}
 			if ( ent->freeAfterEvent ) {
 				// tempEntities or dropped items completely go away after their event

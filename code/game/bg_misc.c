@@ -1465,7 +1465,12 @@ char *eventnames[] = {
 	"EV_STEP_DOWN_4",
 	"EV_STEP_DOWN_8",
 
-	"EV_GRENADE_SUICIDE"
+	"EV_GRENADE_SUICIDE",
+
+	"EV_SWITCH_OFFHAND",
+	"EV_WEAPON_SWITCH_STARTED",
+	"EV_RESET_ADS",
+	"EV_PREP_OFFHAND"
 
 };
 
@@ -1497,6 +1502,80 @@ void BG_AddPredictableEventToPlayerstate( int newEvent, int eventParm, playerSta
 	ps->events[ps->eventSequence & (MAX_PS_EVENTS-1)] = newEvent;
 	ps->eventParms[ps->eventSequence & (MAX_PS_EVENTS-1)] = eventParm;
 	ps->eventSequence++;
+}
+
+/*
+===============
+BG_AddEntityEvent
+
+MW2's (0x4405d0): an event on an entity's own ring. Its sequence wraps at 11
+bits, as MW2's does.
+===============
+*/
+void BG_AddEntityEvent( entityState_t *es, int event, int eventParm ) {
+	if ( !event ) {
+		return;
+	}
+	es->events[es->eventSequence & (MAX_ENTITY_EVENTS-1)] = event;
+	es->eventParms[es->eventSequence & (MAX_ENTITY_EVENTS-1)] = eventParm;
+	es->eventSequence = ( es->eventSequence + 1 ) & ES_EVENT_SEQUENCE_MASK;
+}
+
+/*
+===============
+BG_EventReachesOthers
+
+MW2's BG_PlayerStateToEntityState copies a player's events onto its entity
+(56eab0), skipping two lists. Events only the server reacts to (0x739b38):
+EV_RELOAD_ADDAMMO, EV_RELOAD_START_NOTIFY, EV_WEAPON_SWITCH_STARTED,
+EV_OFFHAND_END_NOTIFY and the four EV_SV_FIRE_WEAPON. Events only the player's
+own client plays (0x739af0): the four stance corrections, EV_SWITCH_OFFHAND,
+both EV_EMPTY_OFFHAND, EV_RESET_ADS, EV_MELEE_BLOOD, the five hint events and
+three EV_BULLET_HIT_CLIENT. Peace has a counterpart only for the offhand
+press's three below. Its one shot event, EV_FIRE_WEAPON, is both MW2's
+EV_SV_FIRE_WEAPON (the shooter's own view and server) and the EV_FIRE_WEAPON
+MW2's server sends everyone else, so it is on neither list.
+===============
+*/
+static const int bg_serverOnlyEvents[] = { EV_WEAPON_SWITCH_STARTED };
+static const int bg_singleClientEvents[] = { EV_SWITCH_OFFHAND, EV_RESET_ADS };
+
+qboolean BG_EventReachesOthers( int event ) {
+	int i;
+	if ( !event ) {
+		return qfalse;
+	}
+	for ( i = 0; i < ARRAY_LEN( bg_serverOnlyEvents ); i++ ) {
+		if ( bg_serverOnlyEvents[i] == event ) return qfalse;
+	}
+	for ( i = 0; i < ARRAY_LEN( bg_singleClientEvents ); i++ ) {
+		if ( bg_singleClientEvents[i] == event ) return qfalse;
+	}
+	return qtrue;
+}
+
+/*
+===============
+BG_PlayerEventsToEntity
+
+MW2's copy of the predictable ring onto the entity's (56eab0): every event
+since the last copy, oldest first, except the ones that never reach anyone
+else. Run after each command and at each frame's end, so nothing raised in
+one command is lost; a single command raises at most MAX_PS_EVENTS.
+===============
+*/
+static void BG_PlayerEventsToEntity( playerState_t *ps, entityState_t *s ) {
+	int i;
+	if ( ps->entityEventSequence < ps->eventSequence - MAX_PS_EVENTS ) {
+		ps->entityEventSequence = ps->eventSequence - MAX_PS_EVENTS;
+	}
+	for ( i = ps->entityEventSequence; i < ps->eventSequence; i++ ) {
+		int event = ps->events[i & (MAX_PS_EVENTS-1)];
+		if ( BG_EventReachesOthers( event ) ) {
+			BG_AddEntityEvent( s, event, ps->eventParms[i & (MAX_PS_EVENTS-1)] );
+		}
+	}
+	ps->entityEventSequence = ps->eventSequence;
 }
 
 /*
@@ -1586,20 +1665,8 @@ void BG_PlayerStateToEntityState( playerState_t *ps, entityState_t *s, qboolean 
 		s->eFlags &= ~EF_DEAD;
 	}
 
-	if ( ps->externalEvent ) {
-		s->event = ps->externalEvent;
-		s->eventParm = ps->externalEventParm;
-	} else if ( ps->entityEventSequence < ps->eventSequence ) {
-		int		seq;
-
-		if ( ps->entityEventSequence < ps->eventSequence - MAX_PS_EVENTS) {
-			ps->entityEventSequence = ps->eventSequence - MAX_PS_EVENTS;
-		}
-		seq = ps->entityEventSequence & (MAX_PS_EVENTS-1);
-		s->event = ps->events[ seq ] | ( ( ps->entityEventSequence & 3 ) << 8 );
-		s->eventParm = ps->eventParms[ seq ];
-		ps->entityEventSequence++;
-	}
+	// The external event is the player's own; G_AddEvent puts it on the ring.
+	BG_PlayerEventsToEntity( ps, s );
 
 	s->weapon = ps->weapon;
 	s->groundEntityNum = ps->groundEntityNum;
@@ -1666,20 +1733,7 @@ void BG_PlayerStateToEntityStateExtraPolate( playerState_t *ps, entityState_t *s
 		s->eFlags &= ~EF_DEAD;
 	}
 
-	if ( ps->externalEvent ) {
-		s->event = ps->externalEvent;
-		s->eventParm = ps->externalEventParm;
-	} else if ( ps->entityEventSequence < ps->eventSequence ) {
-		int		seq;
-
-		if ( ps->entityEventSequence < ps->eventSequence - MAX_PS_EVENTS) {
-			ps->entityEventSequence = ps->eventSequence - MAX_PS_EVENTS;
-		}
-		seq = ps->entityEventSequence & (MAX_PS_EVENTS-1);
-		s->event = ps->events[ seq ] | ( ( ps->entityEventSequence & 3 ) << 8 );
-		s->eventParm = ps->eventParms[ seq ];
-		ps->entityEventSequence++;
-	}
+	BG_PlayerEventsToEntity( ps, s );
 
 	s->weapon = ps->weapon;
 	s->groundEntityNum = ps->groundEntityNum;
@@ -1693,4 +1747,146 @@ void BG_PlayerStateToEntityStateExtraPolate( playerState_t *ps, entityState_t *s
 
 	s->loopSound = ps->loopSound;
 	s->generic1 = ps->generic1;
+}
+
+/*
+=============================================================================
+
+CLIENT-SIDE BULLETS
+
+MW2's sv_clientSideBullets: the server traces a hitscan shot for its damage
+and sends no impact or tracer for it; every client traces the same shot again
+from its fire event and draws them (Bullet_Fire 0x4402c0 on the server, the
+cgame's 0x59fdc0 from CG_FireWeapon 4fb2df). Both sides build the shot here,
+from the same numbers.
+
+The randomness is MW2's: a shot is seeded with the time of the command that
+fired it (Bullet_Fire's gameTime, the cgame's predictedPlayerState.commandTime),
+stirred once by BG_srand (0x410720), then drawn from with BG_random
+(0x44c590), one shot's bullets or pellets from one seed. The shapes are the
+ones Peace's guns already had: the bullet's random angle and two random
+lengths scaled by BG_WeaponSpread, and the shotgun's fixed square of
+DEFAULT_SHOTGUN_COUNT pellets. So a shot hurts what it hurt before; only where
+its randomness comes from changed, and the client can now repeat it.
+
+=============================================================================
+*/
+
+/*
+================
+BG_BulletSeed
+
+MW2's BG_srand: four steps of its generator over the shot's command time.
+================
+*/
+int BG_BulletSeed( int gameTime ) {
+	unsigned int seed = (unsigned int)gameTime;
+	int i;
+
+	for ( i = 0; i < 4; i++ ) {
+		seed = seed * 214013u + 2531011u;
+	}
+	return (int)seed;
+}
+
+/*
+================
+BG_BulletRandom
+
+MW2's BG_random: the next step's top 15 bits, in [0, 1).
+================
+*/
+float BG_BulletRandom( int *seed ) {
+	unsigned int next = (unsigned int)*seed * 214013u + 2531011u;
+
+	*seed = (int)next;
+	return (float)( next >> 17 ) * ( 1.0f / 32768.0f );
+}
+
+float BG_BulletCrandom( int *seed ) {
+	return 2.0f * ( BG_BulletRandom( seed ) - 0.5f );
+}
+
+/*
+================
+BG_ShotMuzzle
+
+Where a player's shot starts: the snapped origin the server's entity carries,
+up to the eye, 14 along the aim, snapped (the server's CalcMuzzlePoint).
+================
+*/
+void BG_ShotMuzzle( const vec3_t base, int viewheight, const vec3_t forward, vec3_t muzzle ) {
+	VectorCopy( base, muzzle );
+	muzzle[2] += viewheight;
+	VectorMA( muzzle, 14, forward, muzzle );
+	SnapVector( muzzle );
+}
+
+/*
+================
+BG_PlayerShotBase
+
+The base BG_ShotMuzzle starts from, as BG_PlayerStateToEntityState snaps it
+into the entity the server's FireWeapon reads.
+================
+*/
+void BG_PlayerShotBase( const playerState_t *ps, vec3_t base ) {
+	VectorCopy( ps->origin, base );
+	SnapVector( base );
+}
+
+/*
+================
+BG_BulletEnd
+
+One bullet's end: a random angle around the aim and a random length along
+each of its two sides, at most spread * 16 off at BG_BULLET_RANGE.
+================
+*/
+void BG_BulletEnd( int *seed, float spread, const vec3_t muzzle, const vec3_t forward,
+	const vec3_t right, const vec3_t up, vec3_t end ) {
+	float	angle, r, u;
+
+	angle = BG_BulletRandom( seed ) * M_PI * 2.0f;
+	u = sin( angle ) * BG_BulletCrandom( seed ) * spread * 16;
+	r = cos( angle ) * BG_BulletCrandom( seed ) * spread * 16;
+	VectorMA( muzzle, BG_BULLET_RANGE, forward, end );
+	VectorMA( end, r, right, end );
+	VectorMA( end, u, up, end );
+}
+
+/*
+================
+BG_ShotgunAxes
+
+The pattern's axes: the aim scaled to 4096 and snapped, as the shotgun's
+blast always carried it, with a side and an up derived from it alone.
+================
+*/
+void BG_ShotgunAxes( const vec3_t aim, vec3_t forward, vec3_t right, vec3_t up ) {
+	vec3_t	scaled;
+
+	VectorScale( aim, 4096, scaled );
+	SnapVector( scaled );
+	VectorNormalize2( scaled, forward );
+	PerpendicularVector( right, forward );
+	CrossProduct( forward, right, up );
+}
+
+/*
+================
+BG_ShotgunPelletEnd
+
+The next pellet's end in the fixed square pattern.
+================
+*/
+void BG_ShotgunPelletEnd( int *seed, const vec3_t origin, const vec3_t forward,
+	const vec3_t right, const vec3_t up, vec3_t end ) {
+	float	r, u;
+
+	r = BG_BulletCrandom( seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
+	u = BG_BulletCrandom( seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
+	VectorMA( origin, BG_BULLET_RANGE, forward, end );
+	VectorMA( end, r, right, end );
+	VectorMA( end, u, up, end );
 }

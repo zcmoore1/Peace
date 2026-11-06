@@ -32,6 +32,10 @@ cl %test_flags% /Feout\build\loadout-tests\wire.exe dev\tests\action_wire_test.c
 if errorlevel 1 goto fail
 out\build\loadout-tests\wire.exe
 if errorlevel 1 goto fail
+cl %test_flags% /Feout\build\loadout-tests\event-ring.exe dev\tests\event_ring_test.c dev\tests\event_ring_wire.c dev\tests\fake_reload_pmove.c code\cgame\cg_event.c code\cgame\cg_kick.c code\cgame\cg_weapons.c code\cgame\cg_playerstate.c code\qcommon\msg.c code\qcommon\huffman.c %test_game% %test_common% /link /OPT:REF
+if errorlevel 1 goto fail
+out\build\loadout-tests\event-ring.exe
+if errorlevel 1 goto fail
 cl %test_flags% /Feout\build\loadout-tests\pose.exe dev\tests\weapon_pose_test.c dev\tests\pickup_pmove_driver.c %test_game% %test_common% /link /OPT:REF
 if errorlevel 1 goto fail
 out\build\loadout-tests\pose.exe

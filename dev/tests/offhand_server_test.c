@@ -48,7 +48,8 @@ void QDECL Com_Printf(const char *fmt,...) { (void)fmt; }
 void QDECL Com_Error(int code,const char *fmt,...) { va_list a; (void)code; va_start(a,fmt); vfprintf(stderr,fmt,a); va_end(a); abort(); }
 void QDECL G_Error(const char *fmt,...) { va_list a; va_start(a,fmt); vfprintf(stderr,fmt,a); va_end(a); abort(); }
 void QDECL G_Printf(const char *fmt,...) { (void)fmt; }
-void QDECL G_LogPrintf(const char *fmt,...) { (void)fmt; }
+static char lastLog[256];	/* the game log's last line */
+void QDECL G_LogPrintf(const char *fmt,...) { va_list a; va_start(a,fmt); Q_vsnprintf(lastLog,sizeof(lastLog),fmt,a); va_end(a); }
 
 /* ---- the world: a floor at z = 0 and the linked entities ---- */
 /* a box (mins/maxs) swept from s to e against [lo, hi]: the Minkowski box against the segment */
@@ -618,7 +619,154 @@ static void TestDeathDrop(void) {
  }
 }
 
+/* MW2's event rings, through the real ClientThink (Pmove, then
+ * BG_PlayerStateToEntityState and ClientEvents, 493873-493915). The offhand
+ * press raises MW2's events in MW2's order: CheckForOffHand's EV_SWITCH_OFFHAND
+ * (579168), OffHandInit's EV_WEAPON_SWITCH_STARTED and EV_RESET_ADS (578e10,
+ * 578e5e) unless the offhand comes straight out (5791ce), and OffHandPrepare's
+ * EV_PREP_OFFHAND (5778e6) when the pull begins - for the throwing knife on the
+ * press think (578eec). Each parm is the offhand, the ADS reset's 0. The
+ * entity's ring gets everything but MW2's serverOnly and singleClient events
+ * (56eab0): of the press, only the pullback. */
+static int psSeq, esSeq;
+static void Mark(void) { psSeq=ps->eventSequence; esSeq=g_entities[THROWER].s.eventSequence; }
+/* the playerstate's events since Mark, oldest first */
+static int Raised(int *ev,int *parm) {
+ int i, n=ps->eventSequence-psSeq;
+ CHECK(n>=0 && n<=MAX_PS_EVENTS);
+ for(i=0;i<n;i++) { ev[i]=ps->events[(psSeq+i)&(MAX_PS_EVENTS-1)]; parm[i]=ps->eventParms[(psSeq+i)&(MAX_PS_EVENTS-1)]; }
+ return n;
+}
+/* the entity's, for everyone else */
+static int Sent(int *ev,int *parm) {
+ entityState_t *es=&g_entities[THROWER].s;
+ int i, n=(es->eventSequence-esSeq)&ES_EVENT_SEQUENCE_MASK;
+ CHECK(n<=MAX_ENTITY_EVENTS);
+ for(i=0;i<n;i++) { ev[i]=es->events[(esSeq+i)&(MAX_ENTITY_EVENTS-1)]; parm[i]=es->eventParms[(esSeq+i)&(MAX_ENTITY_EVENTS-1)]; }
+ return n;
+}
+/* Q3 sent each pending event as a temp entity too (SendPendingPredictableEvents);
+ * MW2 has none (ClientThink_real 493873-493915, ClientEndFrame 5d8134). */
+static int PlayerEventEntities(void) {
+ int i, n=0;
+ for(i=0;i<level.num_entities;i++)
+  if(g_entities[i].inuse && g_entities[i].s.eType>ET_EVENTS && (g_entities[i].s.eFlags&EF_PLAYER_EVENT)) n++;
+ return n;
+}
+static void Press(int row,int *ev,int *parm,int *n,int *sent,int *sev,int *sparm) {
+ Mark(); Frame(Button(mw2[row].weapon)); *n=Raised(ev,parm); *sent=Sent(sev,sparm);
+}
+/* flash thrown, then held still until its recovery is the gun's quick raise
+ * after equipment (MW2's OFFHAND_END) */
+static void FlashToOffhandEnd(void) {
+ int t;
+ Frame(BUTTON_TACTICAL);
+ for(t=0;t<10000 && !(ps->weapon==WP_SHOTGUN && ps->weaponstate==WEAPON_RAISING && (ps->weaponAction&WA_FIRED));t+=CMD_MSEC) Frame(0);
+ CHECK(t<10000 && (ps->weaponAction&WA_TYPE_MASK)==WA_TACTICAL);
+}
+static void TestEventRing(void) {
+ int ev[8], parm[8], sev[8], sparm[8], n, sent, row, t, i, k;
+ /* a shot, then the throwing knife on the very next command */
+ Reset(TKNIFE); Frames(0,100);
+ Mark(); Frame(BUTTON_ATTACK);
+ n=Raised(ev,parm); sent=Sent(sev,sparm);
+ CHECK(n==1 && ev[0]==EV_FIRE_WEAPON && parm[0]==WP_SHOTGUN);	/* the parm is the gun that fired */
+ CHECK(sent==1 && sev[0]==EV_FIRE_WEAPON && sparm[0]==WP_SHOTGUN);
+ Press(TKNIFE,ev,parm,&n,&sent,sev,sparm);
+ CHECK(n==4 && ev[0]==EV_SWITCH_OFFHAND && ev[1]==EV_WEAPON_SWITCH_STARTED && ev[2]==EV_RESET_ADS && ev[3]==EV_PREP_OFFHAND);
+ CHECK(parm[0]==WP_THROWING_KNIFE && parm[1]==WP_THROWING_KNIFE && parm[2]==0 && parm[3]==WP_THROWING_KNIFE);
+ CHECK(ps->weapon==WP_THROWING_KNIFE && ps->weaponstate==WEAPON_READY);
+ /* four on one think: the playerstate's ring holds nothing of the shot now,
+  * as MW2's archived playerstate does not */
+ for(i=0;i<MAX_PS_EVENTS;i++) CHECK(ps->events[i]!=EV_FIRE_WEAPON);
+ /* but everyone else keeps it: the entity holds the shot, naming the gun,
+  * beside the knife's pullback, and nothing of the press meant for the
+  * server or the player alone */
+ CHECK(sent==1 && sev[0]==EV_PREP_OFFHAND && sparm[0]==WP_THROWING_KNIFE);
+ k=(g_entities[THROWER].s.eventSequence-2)&(MAX_ENTITY_EVENTS-1);
+ CHECK(g_entities[THROWER].s.events[k]==EV_FIRE_WEAPON && g_entities[THROWER].s.eventParms[k]==WP_SHOTGUN);
+ CHECK(g_entities[THROWER].s.weapon==WP_THROWING_KNIFE);
+ /* MW2's server notifies the switch's start with the offhand's name */
+ CHECK(!strcmp(lastLog,"WeaponSwitchStarted: 0 weapon_throwingknife\n"));
+ CHECK(!PlayerEventEntities());
+
+ /* Q3's EVENT_VALID_MSEC on each slot of the entity's ring, as G_RunFrame
+  * runs G_AgeEntityEvents for every entity once a frame: the shot and the
+  * pullback go, the sequence stays */
+ k=g_entities[THROWER].s.eventSequence;
+ G_AgeEntityEvents(&g_entities[THROWER]);	/* the next frame stamps them */
+ level.time+=EVENT_VALID_MSEC; G_AgeEntityEvents(&g_entities[THROWER]);
+ CHECK(g_entities[THROWER].s.events[(k-1)&(MAX_ENTITY_EVENTS-1)]==EV_PREP_OFFHAND);
+ level.time+=50; G_AgeEntityEvents(&g_entities[THROWER]);
+ for(i=0;i<MAX_ENTITY_EVENTS;i++) CHECK(!g_entities[THROWER].s.events[i] && !g_entities[THROWER].s.eventParms[i]);
+ CHECK(g_entities[THROWER].s.eventSequence==k);
+
+ /* frag, flash and Semtex: three on the press think, nothing for anyone
+  * else, and no weapon-change event (OffHandInit's drop raises none); the
+  * pullback comes when the quick drop is over and the pull begins */
+ for(row=FRAG;row<=SEMTEX;row++) {
+  int weapon=mw2[row].weapon;
+  Reset(row); Frames(0,100);
+  Press(row,ev,parm,&n,&sent,sev,sparm);
+  CHECK(n==3 && ev[0]==EV_SWITCH_OFFHAND && ev[1]==EV_WEAPON_SWITCH_STARTED && ev[2]==EV_RESET_ADS);
+  CHECK(parm[0]==weapon && parm[1]==weapon && parm[2]==0 && sent==0);
+  CHECK(ps->weapon==WP_SHOTGUN && ps->weaponstate==WEAPON_DROPPING);
+  for(t=0;t<10000 && ps->weapon!=weapon;t+=CMD_MSEC) {
+   Mark(); Frame(Button(weapon)); n=Raised(ev,parm); sent=Sent(sev,sparm);
+   if(ps->weapon!=weapon) CHECK(n==0 && sent==0);
+  }
+  CHECK(n==1 && ev[0]==EV_PREP_OFFHAND && parm[0]==weapon);
+  CHECK(sent==1 && sev[0]==EV_PREP_OFFHAND && sparm[0]==weapon);
+  CHECK(ps->weaponstate==WEAPON_RAISING && ps->weaponTime==mw2[row].holdFireTime);
+ }
+
+ /* straight out (MW2's direct OffHandPrepare, 5791b0-5791ce): no use hint,
+  * the gun's quick raise after equipment. Two events: the switch and the
+  * pullback, both on the press think, for the knife and a frag alike. With a
+  * hint the same press is OffHandInit's: four for the knife. */
+ for(k=0;k<2;k++) {
+  Reset(TKNIFE); Frames(0,100); FlashToOffhandEnd();
+  if(!k) ps->cursorHintEntIndex=ENTITYNUM_NONE;
+  Press(TKNIFE,ev,parm,&n,&sent,sev,sparm);
+  if(!k) CHECK(n==2 && ev[0]==EV_SWITCH_OFFHAND && ev[1]==EV_PREP_OFFHAND && parm[0]==WP_THROWING_KNIFE && parm[1]==WP_THROWING_KNIFE);
+  else CHECK(n==4 && ev[1]==EV_WEAPON_SWITCH_STARTED && ev[2]==EV_RESET_ADS && ev[3]==EV_PREP_OFFHAND);
+  CHECK(sent==1 && sev[0]==EV_PREP_OFFHAND && ps->weapon==WP_THROWING_KNIFE);
+ }
+ Reset(FRAG); Frames(0,100); FlashToOffhandEnd(); ps->cursorHintEntIndex=ENTITYNUM_NONE;
+ Press(FRAG,ev,parm,&n,&sent,sev,sparm);
+ CHECK(n==2 && ev[0]==EV_SWITCH_OFFHAND && ev[1]==EV_PREP_OFFHAND && parm[1]==WP_FRAG);
+ CHECK(ps->weapon==WP_FRAG && ps->weaponstate==WEAPON_RAISING);
+
+ /* the knife is MW2's MeleeInit, not an offhand: none of these */
+ Reset(TKNIFE); Frames(0,100); Mark(); Frame(BUTTON_MELEE); n=Raised(ev,parm);
+ CHECK(ps->weapon==WP_KNIFE);
+ for(i=0;i<n;i++) CHECK(ev[i]<EV_SWITCH_OFFHAND);
+ /* a Y swap is the gun's own change, as before */
+ Reset(TKNIFE); Frames(0,100); cmdWeapon=WP_MACHINEGUN; Mark(); Frame(0); n=Raised(ev,parm);
+ CHECK(n==1 && ev[0]==EV_CHANGE_WEAPON && ps->weaponstate==WEAPON_DROPPING);
+
+ /* G_AddEvent: a player's own external event, and on the entity's ring for
+  * everyone else; any other entity's on its own ring (MW2's 0x469a50) */
+ Reset(TKNIFE); Mark();
+ G_AddEvent(&g_entities[THROWER],EV_PAIN,50);
+ CHECK((ps->externalEvent&~EV_EVENT_BITS)==EV_PAIN && ps->externalEventParm==50);
+ sent=Sent(sev,sparm); CHECK(sent==1 && sev[0]==EV_PAIN && sparm[0]==50);
+ { gentity_t *e=G_Spawn(), *w=G_Spawn();
+   G_AgeEntityEvents(e);
+   G_AddEvent(e,EV_GENERAL_SOUND,3); G_AddEvent(e,EV_GENERAL_SOUND,4); G_AgeEntityEvents(e);
+   CHECK(e->s.eventSequence==2 && !e->s.event);
+   CHECK(e->s.events[0]==EV_GENERAL_SOUND && e->s.eventParms[0]==3 && e->s.events[1]==EV_GENERAL_SOUND && e->s.eventParms[1]==4);
+   /* each slot ages on its own clock: the old ones go, a newer one stays */
+   level.time+=EVENT_VALID_MSEC-100; G_AddEvent(e,EV_GENERAL_SOUND,6); G_AgeEntityEvents(e);
+   level.time+=150; G_AgeEntityEvents(e);
+   CHECK(!e->s.events[0] && !e->s.events[1] && e->s.events[2]==EV_GENERAL_SOUND && e->s.eventParms[2]==6 && e->s.eventSequence==3);
+   /* the sequence is MW2's 11 bits */
+   w->s.eventSequence=ES_EVENT_SEQUENCE_MASK; G_AddEvent(w,EV_GENERAL_SOUND,5);
+   CHECK(w->s.eventSequence==0 && w->s.events[3]==EV_GENERAL_SOUND && w->s.eventParms[3]==5); }
+}
+
 int main(void) {
  TestData(); TestThrow(); TestCook(); TestChoppedCookOut(); TestDeathDrop(); TestReleaseOnFatalFall();
+ TestEventRing();
  printf("PASS: %d offhand server checks\n",checks); return 0;
 }

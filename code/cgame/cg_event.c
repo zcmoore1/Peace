@@ -509,6 +509,19 @@ void CG_PainEvent( centity_t *cent, int health ) {
 
 /*
 ==============
+CG_EventPlayerView
+
+MW2's isPlayerView: the event is the viewed player's own, played from the
+playerstate (CG_CheckPlayerstateEvents), not someone else's from their entity.
+That player's entity is never in a snapshot (SV_BuildClientSnapshot).
+==============
+*/
+qboolean CG_EventPlayerView( const centity_t *cent ) {
+	return cent == &cg.predictedPlayerEntity || cent->currentState.number == cg.snap->ps.clientNum;
+}
+
+/*
+==============
 CG_EntityEvent
 
 An entity has an event value
@@ -829,7 +842,41 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		break;
 	case EV_FIRE_WEAPON:
 		DEBUGNAME("EV_FIRE_WEAPON");
-		CG_FireWeapon( cent );
+		// MW2's player-view shot also kicks the view (CG_FireWeapon, 4fb2d7)
+		if ( cent == &cg.predictedPlayerEntity ) {
+			CG_KickFire();
+		}
+		CG_FireWeapon( cent, es->eventParm );
+		break;
+
+	// MW2's offhand press (CG_EntityEvent 4ddd6d, 4dd965, 4ddd22)
+	case EV_SWITCH_OFFHAND:
+		DEBUGNAME("EV_SWITCH_OFFHAND");
+		// Only the player's own (singleClient): the HUD's equipped offhand,
+		// MW2's CG_SetEquippedOffHand (4ee3f0).
+		if ( CG_EventPlayerView( cent ) ) {
+			cg.equippedOffhand = es->eventParm;
+		} else {
+			CG_Printf( "Event %s just for client %i was sent to other clients\n", "EV_SWITCH_OFFHAND", es->number );
+		}
+		break;
+	case EV_WEAPON_SWITCH_STARTED:
+		// the server's alone (serverOnly); MW2's cgame does nothing with it
+		DEBUGNAME("EV_WEAPON_SWITCH_STARTED");
+		break;
+	case EV_RESET_ADS:
+		DEBUGNAME("EV_RESET_ADS");
+		// Only the player's own (singleClient): leave a toggled aim, as MW2's
+		// sets cl.usingAds false (4f1b80). Never a followed or replayed player's.
+		if ( !CG_EventPlayerView( cent ) ) {
+			CG_Printf( "Event %s just for client %i was sent to other clients\n", "EV_RESET_ADS", es->number );
+		} else if ( cg.snap->ps.clientNum == cg.clientNum && !CG_Killcam_Active() && !cg.demoPlayback ) {
+			trap_SendConsoleCommand( "leaveads\n" );
+		}
+		break;
+	case EV_PREP_OFFHAND:
+		DEBUGNAME("EV_PREP_OFFHAND");
+		CG_PrepOffhand( cent, es->eventParm );
 		break;
 
 	case EV_GRENADE_SUICIDE:
@@ -1275,34 +1322,66 @@ CG_CheckEvents
 ==============
 */
 void CG_CheckEvents( centity_t *cent ) {
+	entityState_t	*es = &cent->currentState;
+	int				i, sequence, savedParm;
+
 	// check for event-only entities
-	if ( cent->currentState.eType > ET_EVENTS ) {
+	if ( es->eType > ET_EVENTS ) {
 		if ( cent->previousEvent ) {
 			return;	// already fired
 		}
 		// if this is a player event set the entity number of the client entity number
-		if ( cent->currentState.eFlags & EF_PLAYER_EVENT ) {
-			cent->currentState.number = cent->currentState.otherEntityNum;
+		if ( es->eFlags & EF_PLAYER_EVENT ) {
+			es->number = es->otherEntityNum;
 		}
 
 		cent->previousEvent = 1;
 
-		cent->currentState.event = cent->currentState.eType - ET_EVENTS;
-	} else {
-		// check for events riding with another entity
-		if ( cent->currentState.event == cent->previousEvent ) {
-			return;
-		}
-		cent->previousEvent = cent->currentState.event;
-		if ( ( cent->currentState.event & ~EV_EVENT_BITS ) == 0 ) {
-			return;
-		}
+		es->event = es->eType - ET_EVENTS;
+
+		// calculate the position at exactly the frame time
+		BG_EvaluateTrajectory( &es->pos, cg.snap->serverTime, cent->lerpOrigin );
+		CG_SetEntitySoundPosition( cent );
+
+		CG_EntityEvent( cent, cent->lerpOrigin );
+		return;
+	}
+
+	// Events riding with an entity: MW2's ring (CG_CheckEvents 4c33f0). Every
+	// one raised since the last snapshot this client saw, oldest first, up to
+	// the four the ring holds, each with its own parm.
+	sequence = es->eventSequence;
+	if ( cent->previousEventSequence == sequence ) {
+		return;
+	}
+	if ( !sequence ) {
+		cent->previousEventSequence = 0;
+		return;
+	}
+	i = cent->previousEventSequence;
+	if ( i > sequence + ( ES_EVENT_SEQUENCE_MASK + 1 ) / 4 ) {
+		i -= ES_EVENT_SEQUENCE_MASK + 1;	// the sequence wrapped
+	}
+	if ( sequence - i > MAX_ENTITY_EVENTS ) {
+		i = sequence - MAX_ENTITY_EVENTS;
+	}
+	cent->previousEventSequence = sequence;
+	if ( i >= sequence ) {
+		return;
 	}
 
 	// calculate the position at exactly the frame time
-	BG_EvaluateTrajectory( &cent->currentState.pos, cg.snap->serverTime, cent->lerpOrigin );
+	BG_EvaluateTrajectory( &es->pos, cg.snap->serverTime, cent->lerpOrigin );
 	CG_SetEntitySoundPosition( cent );
 
-	CG_EntityEvent( cent, cent->lerpOrigin );
+	savedParm = es->eventParm;
+	for ( ; i < sequence; i++ ) {
+		es->event = es->events[i & (MAX_ENTITY_EVENTS-1)];
+		es->eventParm = es->eventParms[i & (MAX_ENTITY_EVENTS-1)];
+		if ( es->event ) {
+			CG_EntityEvent( cent, cent->lerpOrigin );
+		}
+	}
+	es->event = 0;
+	es->eventParm = savedParm;
 }
-

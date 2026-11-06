@@ -336,6 +336,12 @@ void		trap_SetUserCmdValue( int stateValue, float sensitivityScale ) {
 	syscall( CG_SETUSERCMDVALUE, stateValue, PASSFLOAT(sensitivityScale) );
 }
 
+// Three floats by value in both module types: a QVM's call pushes the same
+// three words (cg_syscalls.asm), so the engine never reads cgame memory for it.
+void		trap_SetUserCmdKickAngles( float pitch, float yaw, float roll ) {
+	syscall( CG_SETUSERCMDKICKANGLES, PASSFLOAT(pitch), PASSFLOAT(yaw), PASSFLOAT(roll) );
+}
+
 void		testPrintInt( char *string, int i ) {
 	syscall( CG_TESTPRINTINT, string, i );
 }

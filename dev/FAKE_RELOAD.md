@@ -16,6 +16,11 @@ scripts do every one of these with `+usereload`.
   held X is a real reload.
 - **Fake bullet.** Tap X just before a shot. The gun shows the shot, but the
   shot never happened and no round is spent: the server reloaded instead.
+  Bullets are drawn by the clients (MW2's `sv_clientSideBullets`), so the
+  shooter also sees its tracer and impact, blood on a player included, with no
+  damage, as in MW2. Only the picture is new; the window below did not move
+  (`dev/tests/run-bullets.sh` checks the drawn shot, `run-fakereload.sh` the
+  windows).
 - **Wild scope.** With a scoped gun (the M300), hold aim, do the fake reload,
   and knife straight after. The knife plays while you stay scoped (a fake
   knife).
@@ -27,6 +32,12 @@ scripts do every one of these with `+usereload`.
 - On your own host every window is tight, with MW2's sure zone: let go of X
   within about 16ms of the gun coming up and the fake reload always happens
   (MW2's client clock, below). With ping every window is much wider.
+- **The silent shot** is the same family on another set of MW2's pieces: shoot,
+  then press the throwing knife within a server frame, and the round's
+  killcam shows no shot and a kicked-over view, while the shooter, the
+  opponents and the server all got it. It comes from the four-event rings,
+  client-side bullets and the view kick, through the same client and server
+  clocks; `dev/SILENT_SHOT.md` has it and its windows.
 
 ## The rules that make it
 
@@ -101,6 +112,13 @@ so moving targets need about 11ms more lead.
 The SPAS and the M300 in hand, 125 fps client, sv_fps 20 (MW2's fixed 50ms
 frame, and the shipped autoexec's). Times are from the moment the client sees
 the gun at rest.
+
+Re-measured at protocol 86, with MW2's event rings, the view kick and
+client-side bullets in: every number on this page is unchanged (the suite's
+summary, `FAKERELOAD_PHASES=1` and `FAKERELOAD_MAXPACKETS=30`, compared line
+for line with the build before them). None of them touches `Pmove`, the
+use/reload bit or the clocks; the kick moves only the aim, and the knife's
+press adds events, not time.
 
 Fake reload. What matters is when X is let go: by the moment the gun is fully
 up, and as close to it as you can. The X press must also be held across the

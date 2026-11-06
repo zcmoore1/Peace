@@ -67,7 +67,7 @@ int main(void) {
  /* the use hint's six types in PS_CURSOR_HINT_BITS (3, protocol 84): both
   * Tactical Insertion types, the top one included, each from every other.
   * Protocol 85 adds grenadeTimeLeft. */
- CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==85);
+ CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==86);
  for(i=0;i<CURSOR_HINT_COUNT;i++) for(j=0;j<CURSOR_HINT_COUNT;j++) {
   memset(&from,0,sizeof(from)); to=from; from.cursorHint=i; to.cursorHint=j;
   to.cursorHintEntIndex=MAX_CLIENTS+j;

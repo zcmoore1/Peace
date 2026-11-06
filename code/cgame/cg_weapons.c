@@ -625,6 +625,33 @@ static const char *cg_viewModelBase[WP_NUM_WEAPONS] = {
 };
 
 /*
+MW2's pullbackSound and pullbackSoundPlayer (WeaponDef +0x64/+0x68), from the
+IW4 dump: frag_grenade_mp, flash_grenade_mp, semtex_mp and flare_mp have a
+world pullback (their pin, or the flare's lift); throwingknife_mp has none,
+and no offhand has a first-person one. Peace keeps each under its MW2 alias
+name and plays it only if the sound is there (none ships yet). Word-only, as
+q3asm needs.
+*/
+static const struct { int weapon; const char *world; } cg_pullbackSounds[] = {
+	{ WP_FRAG,               "sound/weapons/offhand/weap_fraggrenade_pin.wav" },
+	{ WP_FLASH,              "sound/weapons/offhand/weap_flashgrenade_pin.wav" },
+	{ WP_SEMTEX,             "sound/weapons/offhand/weap_semtexgrenade_pin.wav" },
+	{ WP_TACTICAL_INSERTION, "sound/weapons/offhand/tactical_insert_flare_lift_npc.wav" }
+};
+
+// A sound only if its file is there: a missing one is no sound, not a warning.
+static sfxHandle_t CG_RegisterSoundIfPresent( const char *path ) {
+	fileHandle_t f = 0;
+	int length = trap_FS_FOpenFile( path, &f, FS_READ );
+	if ( length <= 0 ) {
+		if ( length == 0 && f ) trap_FS_FCloseFile( f );
+		return 0;
+	}
+	trap_FS_FCloseFile( f );
+	return trap_S_RegisterSound( path, qfalse );
+}
+
+/*
 =================
 CG_RegisterWeapon
 
@@ -709,6 +736,12 @@ void CG_RegisterWeapon( int weaponNum ) {
 	if ( cg_viewModelBase[weaponNum][0] ) {
 		Com_sprintf( path, sizeof(path), "%s.iqm", cg_viewModelBase[weaponNum] );
 		weaponInfo->viewModel = trap_R_RegisterModel( path );
+	}
+
+	for ( i = 0; i < ARRAY_LEN( cg_pullbackSounds ); i++ ) {
+		if ( cg_pullbackSounds[i].weapon == weaponNum ) {
+			weaponInfo->pullbackSound = CG_RegisterSoundIfPresent( cg_pullbackSounds[i].world );
+		}
 	}
 
 	switch ( weaponNum ) {
@@ -1282,8 +1315,8 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 	refEntity_t	barrel;
 	refEntity_t	flash;
 	vec3_t		angles;
-	weapon_t	weaponNum;
-	weaponInfo_t	*weapon;
+	weapon_t	weaponNum, flashNum;
+	weaponInfo_t	*weapon, *flashWeapon;
 	centity_t	*nonPredictedCent;
 	orientation_t	lerped;
 
@@ -1378,23 +1411,30 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 	}
 
 	// add the flash
+	flashNum = weaponNum;
 	if ( ( weaponNum == WP_LIGHTNING || weaponNum == WP_GAUNTLET || weaponNum == WP_GRAPPLING_HOOK )
 		&& ( nonPredictedCent->currentState.eFlags & EF_FIRING ) ) 
 	{
 		// continuous flash
 	} else {
-		// impulse flash
-		if ( cg.time - cent->muzzleFlashTime > MUZZLE_FLASH_TIME ) {
+		// impulse flash: the fire event's gun (CG_FireWeapon), with its
+		// flash model, its light and its own muzzle, even when the entity
+		// holds an offhand pulled since, which MW2's es.weapon never shows
+		if ( cg.time - cent->muzzleFlashGunTime > MUZZLE_FLASH_TIME ||
+			cent->muzzleFlashGun <= WP_NONE || cent->muzzleFlashGun >= WP_NUM_WEAPONS ) {
 			return;
 		}
+		flashNum = cent->muzzleFlashGun;
 	}
+	CG_RegisterWeapon( flashNum );
+	flashWeapon = &cg_weapons[flashNum];
 
 	memset( &flash, 0, sizeof( flash ) );
 	VectorCopy( parent->lightingOrigin, flash.lightingOrigin );
 	flash.shadowPlane = parent->shadowPlane;
 	flash.renderfx = parent->renderfx;
 
-	flash.hModel = weapon->flashModel;
+	flash.hModel = flashWeapon->flashModel;
 	if (!flash.hModel) {
 		return;
 	}
@@ -1404,7 +1444,7 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 	AnglesToAxis( angles, flash.axis );
 
 	// colorize the railgun blast
-	if ( weaponNum == WP_RAILGUN ) {
+	if ( flashNum == WP_RAILGUN ) {
 		clientInfo_t	*ci;
 
 		ci = &cgs.clientinfo[ cent->currentState.clientNum ];
@@ -1413,7 +1453,7 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 		flash.shaderRGBA[2] = 255 * ci->color1[2];
 	}
 
-	CG_PositionRotatedEntityOnTag( &flash, &gun, weapon->weaponModel, "tag_flash");
+	CG_PositionRotatedEntityOnTag( &flash, &gun, flashWeapon->weaponModel, "tag_flash");
 	trap_R_AddRefEntityToScene( &flash );
 
 	if ( ps || cg.renderingThirdPerson ||
@@ -1421,9 +1461,9 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 		// add lightning bolt
 		CG_LightningBolt( nonPredictedCent, flash.origin );
 
-		if ( weapon->flashDlightColor[0] || weapon->flashDlightColor[1] || weapon->flashDlightColor[2] ) {
-			trap_R_AddLightToScene( flash.origin, 300 + (rand()&31), weapon->flashDlightColor[0],
-				weapon->flashDlightColor[1], weapon->flashDlightColor[2] );
+		if ( flashWeapon->flashDlightColor[0] || flashWeapon->flashDlightColor[1] || flashWeapon->flashDlightColor[2] ) {
+			trap_R_AddLightToScene( flash.origin, 300 + (rand()&31), flashWeapon->flashDlightColor[0],
+				flashWeapon->flashDlightColor[1], flashWeapon->flashDlightColor[2] );
 		}
 	}
 }
@@ -1962,36 +2002,55 @@ WEAPON EVENTS
 ================
 CG_FireWeapon
 
-Caused by an EV_FIRE_WEAPON event
+Caused by an EV_FIRE_WEAPON event. The event names the gun that fired: by the
+time its ring slot is played the entity may hold an offhand already, as MW2's
+es.weapon never does. A fire event with no gun (a map shooter's) is the
+entity's own weapon.
 ================
 */
-void CG_FireWeapon( centity_t *cent ) {
+void CG_FireWeapon( centity_t *cent, int weapon ) {
 	entityState_t *ent;
 	int				c;
 	weaponInfo_t	*weap;
 
 	ent = &cent->currentState;
-	if ( ent->weapon == WP_NONE ) {
+	if ( weapon == WP_NONE ) {
+		weapon = ent->weapon;
+	}
+	if ( weapon == WP_NONE ) {
 		return;
 	}
-	if ( ent->weapon >= WP_NUM_WEAPONS ) {
-		CG_Error( "CG_FireWeapon: ent->weapon >= WP_NUM_WEAPONS" );
+	if ( weapon < 0 || weapon >= WP_NUM_WEAPONS ) {
+		CG_Error( "CG_FireWeapon: weapon %i out of range", weapon );
 		return;
 	}
-	weap = &cg_weapons[ ent->weapon ];
+	CG_RegisterWeapon( weapon );
+	weap = &cg_weapons[ weapon ];
 
 	// mark the entity as muzzle flashing, so when it is added it will
 	// append the flash to the weapon model
 	cent->muzzleFlashTime = cg.time;
+	// the third-person flash is this gun's, which the entity may no longer
+	// hold (CG_AddPlayerWeapon). A fire with no flash (a throw) puts none
+	// out: MW2's flash is an effect of its own fire event.
+	if ( weap->flashModel ) {
+		cent->muzzleFlashGunTime = cg.time;
+		cent->muzzleFlashGun = weapon;
+	}
+
+	// the shot's tracer and impacts: the server sends none (MW2's
+	// sv_clientSideBullets, CG_FireWeapon 4fb2df). Every fire event, the
+	// lightning gun's after its first too.
+	CG_FireBullets( cent, weapon );
 
 	// lightning gun only does this this on initial press
-	if ( ent->weapon == WP_LIGHTNING ) {
+	if ( weapon == WP_LIGHTNING ) {
 		if ( cent->pe.lightningFiring ) {
 			return;
 		}
 	}
 
-	if( ent->weapon == WP_RAILGUN ) {
+	if( weapon == WP_RAILGUN ) {
 		cent->pe.railFireTime = cg.time;
 	}
 
@@ -2017,6 +2076,27 @@ void CG_FireWeapon( centity_t *cent ) {
 	// do brass ejection
 	if ( weap->ejectBrassFunc && cg_brassTime.integer > 0 ) {
 		weap->ejectBrassFunc( cent );
+	}
+}
+
+/*
+================
+CG_PrepOffhand
+
+Caused by an EV_PREP_OFFHAND event: MW2's (501c40) plays the offhand's
+pullbackSoundPlayer in the player's own view and its pullbackSound for
+everyone else, each only if the weapon has one.
+================
+*/
+void CG_PrepOffhand( centity_t *cent, int weapon ) {
+	sfxHandle_t sound;
+	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
+		return;
+	}
+	CG_RegisterWeapon( weapon );
+	sound = CG_EventPlayerView( cent ) ? cg_weapons[weapon].pullbackSoundPlayer : cg_weapons[weapon].pullbackSound;
+	if ( sound ) {
+		trap_S_StartSound( NULL, cent->currentState.number, CHAN_WEAPON, sound );
 	}
 }
 
@@ -2259,6 +2339,67 @@ void CG_MissileHitPlayer( int weapon, vec3_t origin, vec3_t dir, int entityNum )
 /*
 ============================================================================
 
+CLIENT-SIDE BULLET TRACES
+
+============================================================================
+*/
+
+/*
+================
+CG_ShotTrace
+
+A drawn shot's trace. The viewed player (the one cg.predictedPlayerState is)
+is never among a snapshot's entities, so their own box is tested as well:
+someone else's bullet stops in them, as the server's did. Only while they
+have a body there: a viewer with no health and no PM_DEAD corpse (S&D's
+player out of the round, or waiting for the next one) is unlinked on the
+server, and the bullet goes through.
+================
+*/
+static void CG_ShotTrace( trace_t *tr, const vec3_t start, const vec3_t end, int shooter, int mask ) {
+	const playerState_t	*ps = &cg.predictedPlayerState;
+	trace_t		body;
+	vec3_t		mins, maxs;
+
+	CG_Trace( tr, start, NULL, NULL, end, shooter, mask );
+	if ( shooter == ps->clientNum || !( mask & CONTENTS_BODY ) ) {
+		return;
+	}
+	if ( ps->pm_type == PM_SPECTATOR || ps->pm_type == PM_NOCLIP || ps->pm_type == PM_INTERMISSION ||
+	     ps->pm_type == PM_SPINTERMISSION || ps->persistant[PERS_TEAM] == TEAM_SPECTATOR ||
+	     ( ps->stats[STAT_HEALTH] <= 0 && ps->pm_type != PM_DEAD ) ) {
+		return;
+	}
+	VectorSet( mins, -PLAYER_WIDTH, -PLAYER_WIDTH, MINS_Z );
+	VectorSet( maxs, PLAYER_WIDTH, PLAYER_WIDTH, ps->pm_type == PM_DEAD ? DEAD_HEIGHT :
+		( ps->pm_flags & PMF_DUCKED ) ? CROUCH_HEIGHT : DEFAULT_HEIGHT );
+	trap_CM_TransformedBoxTrace( &body, start, end, NULL, NULL, trap_CM_TempBoxModel( mins, maxs ),
+		mask, ps->origin, vec3_origin );
+	if ( body.fraction < tr->fraction ) {
+		body.entityNum = ps->clientNum;
+		*tr = body;
+	}
+}
+
+/*
+================
+CG_ShotHitsPlayer
+
+Whether a drawn shot's trace ended in a player (blood, not a wall's mark).
+================
+*/
+static qboolean CG_ShotHitsPlayer( int entityNum ) {
+	if ( entityNum == cg.predictedPlayerState.clientNum ) {
+		return qtrue;
+	}
+	return entityNum >= 0 && entityNum < ENTITYNUM_MAX_NORMAL &&
+		cg_entities[entityNum].currentState.eType == ET_PLAYER;
+}
+
+
+/*
+============================================================================
+
 SHOTGUN TRACING
 
 ============================================================================
@@ -2273,7 +2414,7 @@ static void CG_ShotgunPellet( vec3_t start, vec3_t end, int skipNum ) {
 	trace_t		tr;
 	int sourceContentType, destContentType;
 
-	CG_Trace( &tr, start, NULL, NULL, end, skipNum, MASK_SHOT );
+	CG_ShotTrace( &tr, start, end, skipNum, MASK_SHOT );
 
 	sourceContentType = CG_PointContents( start, 0 );
 	destContentType = CG_PointContents( tr.endpos, 0 );
@@ -2298,8 +2439,11 @@ static void CG_ShotgunPellet( vec3_t start, vec3_t end, int skipNum ) {
 	if (  tr.surfaceFlags & SURF_NOIMPACT ) {
 		return;
 	}
+	if ( tr.entityNum == ENTITYNUM_NONE ) {
+		return;		// nothing in the way: the server's pellet hits nothing either
+	}
 
-	if ( cg_entities[tr.entityNum].currentState.eType == ET_PLAYER ) {
+	if ( CG_ShotHitsPlayer( tr.entityNum ) ) {
 		CG_MissileHitPlayer( WP_SHOTGUN, tr.endpos, tr.plane.normal, tr.entityNum );
 	} else {
 		if ( tr.surfaceFlags & SURF_NOIMPACT ) {
@@ -2319,29 +2463,19 @@ static void CG_ShotgunPellet( vec3_t start, vec3_t end, int skipNum ) {
 CG_ShotgunPattern
 
 Perform the same traces the server did to locate the
-hit splashes
+hit splashes: the server's own pattern (bg_misc.c), from the same seed
 ================
 */
-static void CG_ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, int otherEntNum ) {
+static void CG_ShotgunPattern( vec3_t origin, vec3_t aim, int seed, int otherEntNum ) {
 	int			i;
-	float		r, u;
 	vec3_t		end;
 	vec3_t		forward, right, up;
 
-	// derive the right and up vectors from the forward vector, because
-	// the client won't have any other information
-	VectorNormalize2( origin2, forward );
-	PerpendicularVector( right, forward );
-	CrossProduct( forward, right, up );
+	BG_ShotgunAxes( aim, forward, right, up );
 
 	// generate the "random" spread pattern
 	for ( i = 0 ; i < DEFAULT_SHOTGUN_COUNT ; i++ ) {
-		r = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
-		u = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
-		VectorMA( origin, 8192 * 16, forward, end);
-		VectorMA (end, r, right, end);
-		VectorMA (end, u, up, end);
-
+		BG_ShotgunPelletEnd( &seed, origin, forward, right, up, end );
 		CG_ShotgunPellet( origin, end, otherEntNum );
 	}
 }
@@ -2370,6 +2504,25 @@ void CG_ShotgunFire( entityState_t *es ) {
 		}
 	}
 	CG_ShotgunPattern( es->pos.trBase, es->origin2, es->eventParm, es->otherEntityNum );
+}
+
+/*
+==============
+CG_ShotgunBlast
+
+A client-side shotgun shot: the smoke at the muzzle, then the pellets.
+==============
+*/
+static void CG_ShotgunBlast( vec3_t muzzle, vec3_t forward, int seed, int shooter ) {
+	vec3_t	v, up;
+
+	if ( cgs.glconfig.hardwareType != GLHW_RAGEPRO &&
+	     !( CG_PointContents( muzzle, 0 ) & CONTENTS_WATER ) ) {
+		VectorMA( muzzle, 32, forward, v );
+		VectorSet( up, 0, 0, 8 );
+		CG_SmokePuff( v, up, 32, 1, 1, 1, 0.33f, 900, cg.time, 0, LEF_PUFF_DONT_SCALE, cgs.media.shotgunSmokePuffShader );
+	}
+	CG_ShotgunPattern( muzzle, forward, seed, shooter );
 }
 
 /*
@@ -2502,42 +2655,54 @@ static qboolean	CG_CalcMuzzlePoint( int entityNum, vec3_t muzzle ) {
 
 /*
 ======================
+CG_BulletTrail
+
+A bullet's bubbles and, by cg_tracerChance, its tracer.
+======================
+*/
+static void CG_BulletTrail( vec3_t start, vec3_t end ) {
+	trace_t trace;
+	int sourceContentType, destContentType;
+
+	sourceContentType = CG_PointContents( start, 0 );
+	destContentType = CG_PointContents( end, 0 );
+
+	// do a complete bubble trail if necessary
+	if ( ( sourceContentType == destContentType ) && ( sourceContentType & CONTENTS_WATER ) ) {
+		CG_BubbleTrail( start, end, 32 );
+	}
+	// bubble trail from water into air
+	else if ( ( sourceContentType & CONTENTS_WATER ) ) {
+		trap_CM_BoxTrace( &trace, end, start, NULL, NULL, 0, CONTENTS_WATER );
+		CG_BubbleTrail( start, trace.endpos, 32 );
+	}
+	// bubble trail from air into water
+	else if ( ( destContentType & CONTENTS_WATER ) ) {
+		trap_CM_BoxTrace( &trace, start, end, NULL, NULL, 0, CONTENTS_WATER );
+		CG_BubbleTrail( trace.endpos, end, 32 );
+	}
+
+	// draw a tracer
+	if ( random() < cg_tracerChance.value ) {
+		CG_Tracer( start, end );
+	}
+}
+
+/*
+======================
 CG_Bullet
 
 Renders bullet effects.
 ======================
 */
 void CG_Bullet( vec3_t end, int sourceEntityNum, vec3_t normal, qboolean flesh, int fleshEntityNum ) {
-	trace_t trace;
-	int sourceContentType, destContentType;
 	vec3_t		start;
 
 	// if the shooter is currently valid, calc a source point and possibly
 	// do trail effects
 	if ( sourceEntityNum >= 0 && cg_tracerChance.value > 0 ) {
 		if ( CG_CalcMuzzlePoint( sourceEntityNum, start ) ) {
-			sourceContentType = CG_PointContents( start, 0 );
-			destContentType = CG_PointContents( end, 0 );
-
-			// do a complete bubble trail if necessary
-			if ( ( sourceContentType == destContentType ) && ( sourceContentType & CONTENTS_WATER ) ) {
-				CG_BubbleTrail( start, end, 32 );
-			}
-			// bubble trail from water into air
-			else if ( ( sourceContentType & CONTENTS_WATER ) ) {
-				trap_CM_BoxTrace( &trace, end, start, NULL, NULL, 0, CONTENTS_WATER );
-				CG_BubbleTrail( start, trace.endpos, 32 );
-			}
-			// bubble trail from air into water
-			else if ( ( destContentType & CONTENTS_WATER ) ) {
-				trap_CM_BoxTrace( &trace, start, end, NULL, NULL, 0, CONTENTS_WATER );
-				CG_BubbleTrail( trace.endpos, end, 32 );
-			}
-
-			// draw a tracer
-			if ( random() < cg_tracerChance.value ) {
-				CG_Tracer( start, end );
-			}
+			CG_BulletTrail( start, end );
 		}
 	}
 
@@ -2548,4 +2713,284 @@ void CG_Bullet( vec3_t end, int sourceEntityNum, vec3_t normal, qboolean flesh, 
 		CG_MissileHitWall( WP_MACHINEGUN, 0, end, normal, IMPACTSOUND_DEFAULT );
 	}
 
+}
+
+
+/*
+============================================================================
+
+CLIENT-SIDE BULLETS
+
+MW2's sv_clientSideBullets ("clients will synthesize tracers and bullet
+impacts", on by default): the server sends no impact, tracer, blast or beam
+for a hitscan shot (g_weapon.c), and every client traces the shot again from
+its fire event and draws them (CG_FireWeapon 4fb2df, 0x59fdc0). The player's
+own shot comes from its playerstate event: from the state its command left,
+which prediction records (CG_RecordShots), or, when nothing is predicted (a
+demo, a followed player, the killcam), from the state the event came in,
+as MW2 reads predictedPlayerState. Anyone else's comes from their entity's
+event and what that entity carries. Both are built with the server's own
+bg_misc.c functions and seed, so the player's bullets and pellets land where
+the server's damage traces went; another player's are as near as their entity
+says (its last command's place, whole-degree aim and seed, no aim state).
+Damage is the server's alone; nothing here touches ammo or weapon state.
+
+============================================================================
+*/
+
+typedef struct {
+	int		shooter;		// the entity the traces skip
+	int		seed;			// BG_BulletSeed of the shot command's time
+	vec3_t	muzzle;
+	vec3_t	forward, right, up;
+	float	spread;
+} cgShot_t;
+
+// What a predicted shot's command left, by the playerstate event it fired on.
+typedef struct {
+	qboolean	valid;
+	int		sequence;
+	int		clientNum;
+	int		gameTime;		// the command's time: MW2's seed
+	vec3_t	base;			// the snapped origin the server's muzzle starts from
+	int		viewheight;
+	vec3_t	viewangles;
+	float	spreadScale;	// BG_SpreadScale of that state
+} cgShotRecord_t;
+
+static cgShotRecord_t	cg_shotRecords[MAX_PS_EVENTS];
+
+/*
+================
+CG_RecordShots
+
+After each predicted command: the state it left, for every shot it fired. The
+server fires the shot from the same state, right after the same command.
+================
+*/
+void CG_RecordShots( const playerState_t *before, const playerState_t *after ) {
+	cgShotRecord_t	*record;
+	int				i;
+
+	i = before->eventSequence;
+	if ( i < after->eventSequence - MAX_PS_EVENTS ) {
+		i = after->eventSequence - MAX_PS_EVENTS;
+	}
+	for ( ; i < after->eventSequence; i++ ) {
+		if ( after->events[i & (MAX_PS_EVENTS-1)] != EV_FIRE_WEAPON ) {
+			continue;
+		}
+		record = &cg_shotRecords[i & (MAX_PS_EVENTS-1)];
+		record->valid = qtrue;
+		record->sequence = i;
+		record->clientNum = after->clientNum;
+		record->gameTime = after->commandTime;
+		BG_PlayerShotBase( after, record->base );
+		record->viewheight = after->viewheight;
+		VectorCopy( after->viewangles, record->viewangles );
+		record->spreadScale = BG_SpreadScale( after );
+	}
+}
+
+static void CG_ShotAim( cgShot_t *shot, const vec3_t base, int viewheight, const vec3_t viewangles ) {
+	AngleVectors( viewangles, shot->forward, shot->right, shot->up );
+	BG_ShotMuzzle( base, viewheight, shot->forward, shot->muzzle );
+}
+
+/*
+================
+CG_PlayerShot
+
+The player's own shot, from its playerstate event.
+================
+*/
+static void CG_PlayerShot( const playerState_t *ps, int sequence, int weapon, cgShot_t *shot ) {
+	const cgShotRecord_t	*record = &cg_shotRecords[sequence & (MAX_PS_EVENTS-1)];
+	vec3_t					base;
+
+	if ( ps == &cg.predictedPlayerState && record->valid && record->sequence == sequence &&
+	     record->clientNum == ps->clientNum && record->gameTime <= ps->commandTime ) {
+		CG_ShotAim( shot, record->base, record->viewheight, record->viewangles );
+		shot->seed = BG_BulletSeed( record->gameTime );
+		shot->spread = BG_WeaponBaseSpread( weapon ) * record->spreadScale;
+	} else {
+		BG_PlayerShotBase( ps, base );
+		CG_ShotAim( shot, base, ps->viewheight, ps->viewangles );
+		shot->seed = BG_BulletSeed( ps->commandTime );
+		shot->spread = BG_WeaponBaseSpread( weapon ) * BG_SpreadScale( ps );
+	}
+	shot->shooter = ps->clientNum;
+}
+
+/*
+================
+CG_EntityShot
+
+Someone else's shot, from their entity's event: its snapped origin, its aim
+(snapped to whole degrees), the time of its last command and the spread its
+motion and stance show. Aiming is not on the entity, so it is the hip's.
+================
+*/
+static void CG_EntityShot( const entityState_t *es, int weapon, cgShot_t *shot ) {
+	playerState_t	ps;
+	int				anim;
+	qboolean		crouched;
+
+	anim = es->legsAnim & ~ANIM_TOGGLEBIT;
+	crouched = anim == LEGS_WALKCR || anim == LEGS_IDLECR || anim == LEGS_BACKCR;
+
+	memset( &ps, 0, sizeof( ps ) );
+	ps.weapon = weapon;
+	ps.groundEntityNum = es->groundEntityNum;
+	if ( es->pos.trType == TR_LINEAR_STOP ) {
+		VectorCopy( es->pos.trDelta, ps.velocity );
+	}
+	if ( crouched ) {
+		ps.pm_flags |= PMF_DUCKED;
+	}
+
+	CG_ShotAim( shot, es->pos.trBase, crouched ? CROUCH_VIEWHEIGHT : DEFAULT_VIEWHEIGHT, es->apos.trBase );
+	shot->seed = BG_BulletSeed( es->pos.trTime );
+	shot->spread = BG_WeaponBaseSpread( weapon ) * BG_SpreadScale( &ps );
+	shot->shooter = es->number;
+}
+
+/*
+================
+CG_BulletShot
+
+A bullet (the machinegun's, the M300's, the chaingun's): its tracer and its
+impact, as the server's Bullet_Fire traced it.
+================
+*/
+static void CG_BulletShot( const cgShot_t *shot ) {
+	trace_t	tr;
+	vec3_t	start, end;
+	int		seed = shot->seed;
+
+	BG_BulletEnd( &seed, shot->spread, shot->muzzle, shot->forward, shot->right, shot->up, end );
+	CG_ShotTrace( &tr, shot->muzzle, end, shot->shooter, MASK_SHOT );
+	if ( tr.surfaceFlags & SURF_NOIMPACT ) {
+		return;		// the server's bullet ends there unseen
+	}
+	if ( cg_tracerChance.value > 0 ) {
+		VectorCopy( shot->muzzle, start );
+		CG_BulletTrail( start, tr.endpos );
+	}
+	if ( tr.entityNum == ENTITYNUM_NONE ) {
+		return;		// nothing in the way
+	}
+	if ( CG_ShotHitsPlayer( tr.entityNum ) ) {
+		CG_Bleed( tr.endpos, tr.entityNum );
+	} else {
+		CG_MissileHitWall( WP_MACHINEGUN, 0, tr.endpos, tr.plane.normal, IMPACTSOUND_DEFAULT );
+	}
+}
+
+/*
+================
+CG_RailShot
+
+The railgun's beam, through bodies to the first solid as the server's goes
+(its MAX_RAIL_HITS cap aside), and the mark where it stops.
+================
+*/
+static void CG_RailShot( const cgShot_t *shot ) {
+	trace_t	tr;
+	vec3_t	start, end;
+	int		clientNum;
+
+	clientNum = shot->shooter >= 0 && shot->shooter < MAX_CLIENTS ? shot->shooter : 0;
+	VectorMA( shot->muzzle, 8192, shot->forward, end );
+	CG_Trace( &tr, shot->muzzle, NULL, NULL, end, shot->shooter, CONTENTS_SOLID );
+
+	// a bit to the side, nearer the drawn gun's muzzle
+	VectorMA( shot->muzzle, 4, shot->right, start );
+	VectorMA( start, -1, shot->up, start );
+	if ( shot->shooter == cg.snap->ps.clientNum && !cg.renderingThirdPerson ) {
+		if ( cg_drawGun.integer == 2 ) {
+			VectorMA( start, 8, cg.refdef.viewaxis[1], start );
+		} else if ( cg_drawGun.integer == 3 ) {
+			VectorMA( start, 4, cg.refdef.viewaxis[1], start );
+		}
+	}
+	CG_RailTrail( &cgs.clientinfo[clientNum], start, tr.endpos );
+
+	// no explosion at the end of a nomark surface, or of nothing
+	if ( tr.entityNum != ENTITYNUM_NONE && !( tr.surfaceFlags & SURF_NOIMPACT ) ) {
+		CG_MissileHitWall( WP_RAILGUN, clientNum, tr.endpos, tr.plane.normal, IMPACTSOUND_DEFAULT );
+	}
+}
+
+/*
+================
+CG_LightningImpact
+
+Where one of the lightning gun's fire events hits (its beam is drawn from the
+entity every frame, CG_LightningBolt).
+================
+*/
+static void CG_LightningImpact( const cgShot_t *shot ) {
+	trace_t	tr;
+	vec3_t	end;
+
+	VectorMA( shot->muzzle, LIGHTNING_RANGE, shot->forward, end );
+	CG_ShotTrace( &tr, shot->muzzle, end, shot->shooter, MASK_SHOT );
+	if ( tr.entityNum == ENTITYNUM_NONE ) {
+		return;
+	}
+	if ( CG_ShotHitsPlayer( tr.entityNum ) ) {
+		CG_MissileHitPlayer( WP_LIGHTNING, tr.endpos, tr.plane.normal, tr.entityNum );
+	} else if ( !( tr.surfaceFlags & SURF_NOIMPACT ) ) {
+		CG_MissileHitWall( WP_LIGHTNING, 0, tr.endpos, tr.plane.normal, IMPACTSOUND_DEFAULT );
+	}
+}
+
+/*
+================
+CG_FireBullets
+
+A fire event's hitscan shot, drawn on this client. Projectiles, knives and
+equipment draw nothing here.
+================
+*/
+void CG_FireBullets( centity_t *cent, int weapon ) {
+	cgShot_t	shot;
+
+	switch ( weapon ) {
+	case WP_MACHINEGUN:
+	case WP_SHOTGUN:
+	case WP_LIGHTNING:
+	case WP_RAILGUN:
+	case WP_M40A3:
+#ifdef MISSIONPACK
+	case WP_CHAINGUN:
+#endif
+		break;
+	default:
+		return;
+	}
+
+	if ( cg.eventPlayerState ) {
+		CG_PlayerShot( cg.eventPlayerState, cg.eventPlayerSequence, weapon, &shot );
+	} else if ( cent->currentState.number == cg.snap->ps.clientNum ) {
+		return;		// the viewed player's shot is drawn from their playerstate event
+	} else {
+		CG_EntityShot( &cent->currentState, weapon, &shot );
+	}
+
+	switch ( weapon ) {
+	case WP_SHOTGUN:
+		CG_ShotgunBlast( shot.muzzle, shot.forward, shot.seed, shot.shooter );
+		break;
+	case WP_RAILGUN:
+		CG_RailShot( &shot );
+		break;
+	case WP_LIGHTNING:
+		CG_LightningImpact( &shot );
+		break;
+	default:
+		CG_BulletShot( &shot );
+		break;
+	}
 }

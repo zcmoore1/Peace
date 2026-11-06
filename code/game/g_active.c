@@ -574,6 +574,11 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 			FireWeapon( ent );
 			break;
 
+		case EV_GRENADE_SUICIDE:
+			// MW2's ClientEvents, 5d6df1: the parm is the grenade that cooked out
+			G_GrenadeSuicide( ent, client->ps.eventParms[ i & (MAX_PS_EVENTS-1) ] );
+			break;
+
 		case EV_USE_ITEM1:		// teleporter
 			// drop flags in CTF
 			item = NULL;

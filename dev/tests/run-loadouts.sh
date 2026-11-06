@@ -11,13 +11,17 @@ out/tests/loadout-test
 ${CC:-cc} $flags dev/tests/semtex_test.c $game code/qcommon/msg.c code/qcommon/huffman.c $common -Wl,--gc-sections -lm -o out/tests/semtex-test
 out/tests/semtex-test
 # Projectile boundary harness is basegame; both complete modules also build in CI.
-${CC:-cc} $flags -UMISSIONPACK dev/tests/semtex_missile_test.c code/game/bg_misc.c $common -Wl,--gc-sections -lm -o out/tests/semtex-missile-test
+${CC:-cc} $flags -UMISSIONPACK dev/tests/semtex_missile_test.c code/game/bg_misc.c code/game/bg_loadout.c $common -Wl,--gc-sections -lm -o out/tests/semtex-missile-test
 out/tests/semtex-missile-test
-${CC:-cc} $flags -UMISSIONPACK dev/tests/knife_missile_test.c code/game/bg_misc.c $common -Wl,--gc-sections -lm -o out/tests/knife-missile-test
+${CC:-cc} $flags -UMISSIONPACK dev/tests/knife_missile_test.c code/game/bg_misc.c code/game/bg_loadout.c $common -Wl,--gc-sections -lm -o out/tests/knife-missile-test
 out/tests/knife-missile-test
 # A knife stuck in a player, through the real g_client.c body queue, g_utils.c and g_items.c.
 ${CC:-cc} $flags -UMISSIONPACK dev/tests/knife_corpse_test.c code/game/g_missile.c code/game/g_client.c code/game/g_utils.c code/game/g_items.c code/game/g_insertion.c code/game/bg_pmove.c $game $common -Wl,--gc-sections -lm -o out/tests/knife-corpse-test
 out/tests/knife-corpse-test
+# MW2's offhands through the real server: ClientThink, ClientEvents, FireWeapon,
+# the missiles, the cook-out's suicide and the death drop (g_active.c, g_combat.c).
+${CC:-cc} $flags dev/tests/offhand_server_test.c code/game/g_active.c code/game/g_combat.c code/game/g_weapon.c code/game/g_missile.c code/game/g_client.c code/game/g_utils.c code/game/g_items.c code/game/g_insertion.c code/game/g_cmds.c code/game/bg_pmove.c $game $common -Wl,--gc-sections -lm -o out/tests/offhand-server-test
+out/tests/offhand-server-test
 ${CC:-cc} $flags dev/tests/class_menu_test.c code/q3_ui/ui_atoms.c code/q3_ui/ui_qmenu.c code/q3_ui/ui_mfield.c code/game/bg_loadout.c $common -Wl,--gc-sections -lm -o out/tests/class-menu-test
 out/tests/class-menu-test
 ${CC:-cc} $flags dev/tests/action_wire_test.c code/qcommon/msg.c code/qcommon/huffman.c $common -Wl,--gc-sections -lm -o out/tests/action-wire-test

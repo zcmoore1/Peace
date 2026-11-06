@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-13"
+#define	GAME_VERSION		BASEGAME "-14"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -200,15 +200,24 @@ typedef enum {
 // is over meleeTime after it (MeleeEnd), where the gun's quick raise starts.
 #define BG_MELEE_DELAY            79
 #define BG_MELEE_TIME             800
-// MW2's throwing knife times are weapon data (fastfiles), not code: these are
-// placeholders until the owner supplies throwingknife_mp's values.
-#define BG_THROWING_KNIFE_PULL_MS 150	// iHoldFireTime: in hand, ready to throw
-#define BG_THROWING_KNIFE_SPEED   1200	// projectileSpeed (weapon data, placeholder)
+// MW2's offhand prepare, holdFireTime (weapon data, the IW4 dump's
+// weapons/mp files): OffHandPrepare (577800) locks the offhand for it, and the
+// offhand waits in HOLD for its release once it is over. The frag, flash and
+// Semtex take 0.6s; the throwing knife none at all (it is in hand on its
+// press); the Tactical Insertion's is its ignite (below).
+#define BG_GRENADE_HOLD_FIRE_MS   600	// frag_grenade_mp, flash_grenade_mp, semtex_mp holdFireTime 0.6
+#define BG_THROWING_KNIFE_PULL_MS 0	// throwingknife_mp holdFireTime 0
+// The rest of throwingknife_mp is weapon data still to be supplied:
 #define BG_THROWING_KNIFE_DAMAGE  135	// damage (weapon data, placeholder: one hit kills)
 #define BG_THROWING_KNIFE_BOUNCE  0.4f	// per-surface bounce scale (weapon data, placeholder)
 // MW2's code and dvar defaults for the throwing knife (iw4x.exe):
 #define BG_THROWING_KNIFE_SPIN    2000	// deg/s end over end in flight (0x6ddf68)
-#define BG_THROWING_KNIFE_LIFE    30000	// ms in flight before it is freed (5e947c)
+#define BG_THROWING_KNIFE_LIFE    30000	// ms in flight before it is freed: its fuseTime 30 (5e947c caps an unset one the same)
+// MW2's death drop (player_die 42bd08 -> 5df920): a held offhand is fired from
+// 40 above the feet at up to 160 u/s on each axis. Peace's origin is MINS_Z
+// (24) above its feet, so the drop leaves 16 above the origin.
+#define BG_OFFHAND_DEATH_SPEED    160.0f	// 0x6f2de0
+#define BG_OFFHAND_DEATH_HEIGHT   16.0f	// MW2's 40 above the feet (0x739aa8)
 #define BG_THROWING_KNIFE_WORLD_MAX 32	// Peace's bound on knives out at once: the oldest is freed
 #define BG_THROWING_KNIFE_HIT_SPEED 400.0f	// g_minGrenadeDamageSpeed: slower does no damage
 #define BG_THROWING_KNIFE_REST_SPEED 20.0f	// grenadeRestThreshold: settles on a floor below it
@@ -358,7 +367,7 @@ int  BG_ReloadSegmentTime( const playerState_t *ps, int seq );
 int  BG_HolsterTime( const playerState_t *ps );	// the holster this player is doing right now
 int  BG_WeaponFireLength( int weapon );		// 0 = no modelled fire animation
 int  BG_WeaponDropTime( int weapon );		// holster length, never 0
-int  BG_WeaponRaiseTime( int weapon );		// deploy length, never 0
+int  BG_WeaponRaiseTime( int weapon );		// deploy length, never 0 for a gun; an offhand's holdFireTime
 int  BG_WeaponQuickDropTime( int weapon );	// MW2's quickDropTime: going away for a grenade
 int  BG_WeaponQuickRaiseTime( int weapon );	// MW2's quickRaiseTime: back after a knife or a grenade
 int  BG_WeaponDrawTime( const playerState_t *ps );
@@ -601,6 +610,11 @@ qboolean BG_OffhandOut(const playerState_t *ps);
 qboolean BG_OffhandPreparesAtOnce( int weapon );
 qboolean BG_QuickActionInPlace( int weapon );
 qboolean BG_OffhandHeldToThrow( int weapon );
+qboolean BG_OffhandCancelable( int weapon );
+qboolean BG_OffhandCooks( int weapon );
+int BG_OffhandFuseTime( int weapon );
+void BG_OffhandLaunchVelocity( int weapon, const vec3_t forward, vec3_t velocity );
+int BG_QuickActionWeapon( const playerState_t *ps, int action );
 #define BG_EMPTY_HAND_OFFHAND_TIME 100	// MW2's OffHandInit with no gun in hand
 void BG_GetSlot(const playerState_t *ps, int slot, bg_weaponInstance_t *gun);
 void BG_PutSlot(playerState_t *ps, int slot, const bg_weaponInstance_t *gun);
@@ -822,7 +836,9 @@ typedef enum {
 	EV_TAUNT_PATROL,
 
 	EV_STEP_DOWN_4,			// MW2's step down (PM_StepSlideMove), smoothed like a step up
-	EV_STEP_DOWN_8
+	EV_STEP_DOWN_8,
+
+	EV_GRENADE_SUICIDE		// MW2's 0x5d: a cooked grenade ran out in its holder's hand
 
 } entity_event_t;
 

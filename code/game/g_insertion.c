@@ -135,9 +135,11 @@ static void G_InsertionDie( gentity_t *ti, gentity_t *inflictor, gentity_t *atta
 G_PlantInsertion
 
 MW2's monitorTIUse at the throw (_perkfunctions.gsc:757-799), from the TI's
-EV_FIRE_WEAPON: the player's last TI is freed; then, with no standing spot
-this life (or touching a trigger_hurt, or dead), nothing is planted - the TI
-is spent all the same. Otherwise it goes on the ground below that spot:
+EV_FIRE_WEAPON or a death drop (G_DropOffhand, before player_die marks
+the player dead, as MW2's 'grenade_fire' comes before 'death'): the player's
+last TI is freed; then, with no standing spot this life (or touching a
+trigger_hurt, or dead - the thread ends on 'death'), nothing is planted - the
+TI is spent all the same. Otherwise it goes on the ground below that spot:
 TIGroundPosition, a player-box trace from 16 above it to 2048 below, plus 1.
 MW2's player origin is its feet; Peace's is MINS_Z above them, so the ground
 point is that trace's feet. It faces the owner's yaw (MW2's self.angles:
@@ -155,7 +157,7 @@ gentity_t *G_PlantInsertion( gentity_t *player ) {
 	trace_t tr;
 	gentity_t *ti;
 	G_FreeInsertion( player );
-	if ( !client || !client->insertionSpotValid || client->ps.stats[STAT_HEALTH] <= 0 ||
+	if ( !client || !client->insertionSpotValid || client->ps.pm_type == PM_DEAD ||
 		G_InsertionHurting( player ) ) return NULL;
 	G_InsertionPlayerBox( boxMins, boxMaxs );
 	VectorCopy( client->insertionSpot, start );

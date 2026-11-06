@@ -266,11 +266,13 @@ static void TestPlant(void) {
  /* a new life has no spot until it stands somewhere: the plant only frees the
   * old one (MW2's monitorTIUse deletes it first, then finds no spot) */
  cl[0].insertionSpotValid=qfalse; CHECK(!Fire(0) && !ti->inuse && Insertions()==1);
- /* dead: nothing (a TI held at death is never thrown either) */
- Stand(0,100,50,24); EndFrames(); g_entities[0].health=cl[0].ps.stats[STAT_HEALTH]=0;
+ /* dead (player_die has marked it, MW2's 'death' that ends monitorTIUse):
+  * nothing. A TI held at death is planted by the death drop before that
+  * mark (offhand_server_test.c). */
+ Stand(0,100,50,24); EndFrames(); g_entities[0].health=cl[0].ps.stats[STAT_HEALTH]=0; cl[0].ps.pm_type=PM_DEAD;
  CHECK(!G_PlantInsertion(&g_entities[0]) && Insertions()==1);
  /* the dead sample nothing */
- cl[0].insertionSpotValid=qfalse; cl[0].ps.pm_type=PM_DEAD; EndFrames(); CHECK(!cl[0].insertionSpotValid);
+ cl[0].insertionSpotValid=qfalse; EndFrames(); CHECK(!cl[0].insertionSpotValid);
  /* touching a trigger_hurt: nothing (MW2's monitorTIUse) */
  Alive(0); Stand(0,100,50,24); EndFrames();
  { gentity_t *hurt=G_Spawn(); hurt->classname="trigger_hurt"; hurt->r.contents=CONTENTS_TRIGGER;

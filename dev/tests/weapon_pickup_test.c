@@ -717,7 +717,7 @@ static void SeaLion(int use) {
  ps->ammo[WP_FLASH]=5; ps->ammo[WP_MACHINEGUN]=4; BG_RebuildWeaponMask(ps);
  EndFrame(); CHECK(ps->cursorHintEntIndex==0);
  UseStep(BUTTON_LETHAL); EndFrame();
- CHECK(ps->weapon==WP_THROWING_KNIFE && ps->weaponstate==WEAPON_RAISING);
+ CHECK(ps->weapon==WP_THROWING_KNIFE && ps->weaponstate==WEAPON_READY);	/* holdFireTime 0: in HOLD on the press */
  for(t=0;t<3000 && ps->ammo[WP_THROWING_KNIFE];t++) { UseStep(0); EndFrame(); }
  CHECK(t<3000 && ps->cursorHintEntIndex==0);
  knife=GroundKnife(20,0,0);
@@ -736,7 +736,7 @@ static void SeaLion(int use) {
   * after it the flash comes straight out, chain after chain */
  for(t=0;t<12000 && ps->weaponstate!=WEAPON_READY;t++) { UseStep(0); EndFrame(); }
  UseStep(BUTTON_LETHAL); EndFrame();
- CHECK(ps->weapon==WP_THROWING_KNIFE && ps->weaponstate==WEAPON_RAISING && ps->weaponTime==BG_THROWING_KNIFE_PULL_MS);
+ CHECK(ps->weapon==WP_THROWING_KNIFE && ps->weaponstate==WEAPON_READY && ps->weaponTime==BG_THROWING_KNIFE_PULL_MS);
  for(t=0;t<12000 && !(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_RAISING);t++) { UseStep(0); EndFrame(); }
  CHECK(ps->ammo[WP_THROWING_KNIFE]==0 && ps->cursorHintEntIndex==ENTITYNUM_NONE);
  for(i=0;i<3;i++) {
@@ -761,7 +761,7 @@ static void SeaLion(int use) {
  CHECK(ps->cursorHintEntIndex==gun->s.number);
  ps->ammo[WP_FLASH]=1; ps->ammo[WP_THROWING_KNIFE]=1; BG_RebuildWeaponMask(ps);
  UseStep(BUTTON_LETHAL); EndFrame();
- CHECK(ps->weapon==WP_THROWING_KNIFE && ps->weaponstate==WEAPON_RAISING);	/* the knife's own pull */
+ CHECK(ps->weapon==WP_THROWING_KNIFE && ps->weaponstate==WEAPON_READY);	/* the knife's own pull, of no length */
  for(t=0;t<12000 && !(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_RAISING);t++) { UseStep(0); EndFrame(); }
  UseStep(BUTTON_TACTICAL); EndFrame();
  CHECK(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_DROPPING &&

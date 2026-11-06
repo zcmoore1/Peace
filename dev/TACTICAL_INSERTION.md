@@ -42,15 +42,20 @@ classifiers in `bg_loadout.c` are its data:
   OffHandPrepare. No release cuts it short: a tap is queued and the TI is
   thrown on the first command after the ignite ends (MW2's PREPARE ends in
   HOLD, which throws on its next think). Held longer it stays in hand for good
-  (cookOffHold 0: it never throws itself) until the release
-  (`BG_OffhandHeldToThrow`).
+  (holdButtonToThrow and cookOffHold 0: it never throws itself) until the
+  release (`BG_OffhandHeldToThrow`, every offhand's rule). Held means an
+  offhand button down on this command and the one before - the lethal or the
+  tactical, either one (MW2's `0xc000`, 578f2d-578f3f). HOLD writes its fuseTime
+  (50) into `ps.grenadeTimeLeft`, as for every offhand; it never counts down,
+  and the plant spends it.
 - **Cancel.** Y before the release, in the drop, the ignite or held, sends it
   back to the gun on the gun's quick raise with nothing spent or planted
-  (offhandHoldIsCancelable 1), exactly as the Semtex. After the release a Y
+  (offhandHoldIsCancelable 1, `BG_OffhandCancelable`), exactly as the Semtex;
+  the frag and flash take no cancel. After the release a Y
   only queues the swap behind the recovery. In the drop and the ignite (MW2's
   INIT and PREPARE) Y cancels whatever the buttons; held after the ignite
   (HOLD) MW2 throws before it reads Y (578f2d-578f52), so Y cancels only with
-  lethal down on that command and the last (`PM_OffhandHeld`). A release and
+  an offhand button down on that command and the last (`PM_OffhandHeld`). A release and
   Y on one command plants it, as does a Y - or lethal pressed again - on the
   first command after a queued tap's ignite; the Y is eaten (weapnext keeps
   the slot while it is out, as MW2's 59d5f0-59d622).
@@ -76,7 +81,19 @@ the TI from the throw's `grenade_fire`. Peace plants on the TI's
 1. The player's previous TI is freed (one per player; a new plant replaces it).
 2. Nothing is planted - the TI is spent all the same - with no standing spot
    this life, while touching a `trigger_hurt` (MW2's touchingBadTrigger; Peace
-   has no radiation triggers), or dead. A TI held at death is never thrown.
+   has no radiation triggers), or dead (`PM_DEAD`: player_die has marked the
+   player, MW2's 'death' that ends monitorTIUse).
+   **A TI in hand at death** - ignited and held (HOLD) - is planted: MW2's
+   death drop (player_die 42bd08 -> 5df920) fires the held flare with
+   G_FireGrenade, whose 'grenade_fire' notify (464698-4646a1) comes before
+   player_die's 'death' (42bd13), and monitorTIUse has no alive test
+   (`G_DropOffhand` -> `G_PlantInsertion`, before `PM_DEAD` is set). That
+   the waiting script thread runs at once on the notify is INFERRED from GSC
+   notify semantics. In the drop or the 2630 ignite there is no fuse yet and
+   nothing is planted. Ammo is not touched. A TI let go on the command a fall
+   kills its holder is planted the same way, once: the fall's death comes
+   before the throw in that command's events, and the throw then has nothing
+   to plant (player_die's `s.weapon` is `WP_NONE`).
 3. **The standing spot** is MW2's TISpawnPosition: sampled every server
    end-frame (`ClientEndFrame` → `G_InsertionSample`, MW2 every 50ms) while
    alive, `PM_NORMAL`, on the ground, and with the standing player box at the
@@ -200,6 +217,8 @@ code for it either).
   (tiValidationCheck) has nothing to check: Peace has no care packages.
 - **Frame.** MW2's player origin is its feet, Peace's is 24 above them; the
   ground point is translated (the trace itself is MW2's).
+- **Planted at death.** As MW2 (inferred above), a TI held after its ignite
+  is planted when its holder dies, so their next spawn is on it.
 
 ## Placeholders
 
@@ -214,8 +233,10 @@ code for it either).
 
 Two `cursorHint_t` values (`CURSOR_HINT_INSERTION`,
 `CURSOR_HINT_INSERTION_ENEMY`) make six, so `PS_CURSOR_HINT_BITS` is 3:
-**protocol 84, GAME_VERSION -13**. Rebuild the executable, server and every
-module together. No `stats[]`, `pm_flags` or `weaponAction` bit is used.
+protocol 84, GAME_VERSION -13. MW2's `grenadeTimeLeft` (every offhand's fuse
+from HOLD, signed 16 bits) makes **protocol 85, GAME_VERSION -14**. Rebuild
+the executable, server and every module together. No `stats[]`, `pm_flags`
+or `weaponAction` bit is used.
 
 ## Tests
 
@@ -226,10 +247,14 @@ module together. No `stats[]`, `pm_flags` or `weaponAction` bit is used.
   a post-release Y, the recovery (also in `TestRecovery` beside the frag, flash
   and Semtex), the sea lion chain and its live-hint and at-rest drops, the
   knife's return, the empty hand, and the class (one, lethal only, both
-  formats). `TestHoldThrowsBeforeCancel` (the TI, Semtex and throwing knife):
+  formats). `TestHoldThrowsBeforeCancel` (every offhand, the TI among them):
   MW2's HOLD throws before Y - release and Y on one command, Y or a re-press on
-  the first command after a tap - while Y with lethal held, Y on the ignite's
-  last command and Y in the drop cancel. `class_menu_test.c`: the LETHAL row, its text and count, no
+  the first command after a tap - while Y with an offhand button held (its own
+  or the other), Y on the ignite's last command and Y in the drop cancel; a
+  tap, and a re-press held through the ignite. `offhand_server_test.c`: the
+  plant on the throw spends the fuse, and a TI held at death, or let go on
+  the command a fall kills its holder, is planted once through the real
+  `player_die`. `class_menu_test.c`: the LETHAL row, its text and count, no
   TACTICAL row, a saved TI class. `missile_draw_test.c`: the rest pose and
   glow colours. `action_wire_test.c`: the 3-bit hint, 0..5 through the codec.
 - `run-pickups.sh`: `weapon_pickup_test.c` (owner pickup with every use

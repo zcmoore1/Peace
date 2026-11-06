@@ -594,9 +594,10 @@ static void CG_PeaceDump_f( void ) {
 	CG_Printf( "equip    lethal %i (weapon %i)   tactical %i   semtex %i   knife %i   insertion %i\n",
 		ps->ammo[BG_LethalWeapon(ps)], BG_LethalWeapon(ps), ps->ammo[WP_FLASH], ps->ammo[WP_SEMTEX],
 		ps->ammo[WP_THROWING_KNIFE], ps->ammo[WP_TACTICAL_INSERTION] );
-	CG_Printf( "action   type %i   fired %i   held %i\n",
+	CG_Printf( "action   type %i   fired %i   held %i   fuse %i%s\n",
 		ps->weaponAction & WA_TYPE_MASK, !!(ps->weaponAction & WA_FIRED),
-		(ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT );
+		(ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT, ps->grenadeTimeLeft,
+		ps->grenadeTimeLeft < 0 ? " (cooked out)" : "" );
 	CG_Printf("selection requested %i   cancelAck %i   recovering %i\n", cg.weaponSelect,
 		!!(ps->weaponAction & WA_RETURNING), !!(ps->weaponAction & WA_RECOVERING));
 

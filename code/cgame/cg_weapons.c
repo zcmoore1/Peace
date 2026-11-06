@@ -1446,7 +1446,7 @@ static void CG_EquipmentView(const playerState_t *ps, const weaponInfo_t *weapon
 	memset(&hand, 0, sizeof(hand));
 	animated = CG_WeapAnim_ActionFrame(ps, &hand);
 	if (!animated && ps->weaponstate == WEAPON_RAISING) {
-		t = 1.0f - (float)ps->weaponTime / BG_WeaponRaiseTime(ps->weapon);
+		t = BG_WeaponRaiseTime(ps->weapon) > 0 ? 1.0f - (float)ps->weaponTime / BG_WeaponRaiseTime(ps->weapon) : 1;
 		if (t < 0) t = 0;
 		if (t > 1) t = 1;
 		t = t*t*(3-2*t);
@@ -1817,8 +1817,12 @@ void CG_NextWeapon_f( void ) {
 
 	ps = &cg.predictedPlayerState;
 	trap_SendConsoleCommand("_peaceWeaponSwap\n");
-	if (!(ps->weaponAction & WA_FIRED) && (ps->weaponAction & WA_TYPE_MASK) == WA_LETHAL &&
-		BG_OffhandHeldToThrow(BG_LethalWeapon(ps))) {
+	// MW2's weapnext (59d5f0-59d622): an offhand still to be thrown whose data
+	// says offhandHoldIsCancelable gets only the cancel; the frag and flash
+	// cannot be cancelled, so their Y asks for the other slot, which waits
+	// for the gun's return.
+	if (!(ps->weaponAction & WA_FIRED) &&
+		BG_OffhandCancelable(BG_QuickActionWeapon(ps, ps->weaponAction))) {
 		cg.weaponSelectSlot = ps->stats[STAT_ACTIVE_SLOT];
 		cg.weaponSelect = BG_ActiveSlotWeapon(ps);
 		cg.weaponSelectTime = cg.time;

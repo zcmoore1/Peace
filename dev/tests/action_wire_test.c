@@ -1,4 +1,4 @@
-/* Verify the real playerstate delta format preserves all nine action bits,
+/* Verify the real playerstate delta format preserves all ten action bits and MW2's grenadeTimeLeft,
  * including a tap released while holstering, through prediction corrections. */
 #include "../../code/qcommon/q_shared.h"
 #include "../../code/qcommon/qcommon.h"
@@ -37,6 +37,10 @@ int main(void) {
    * slowdown, the full jump wait, a fractional take-off height, the meter. */
   to.jumpLand=(j&1) ? -1 : BG_JUMP_LAND_TIME; to.jumpWait=(i&1) ? BG_JUMP_WAIT : 0;
   to.jumpOriginZ=-123.375f; to.sprintUsed=(j&2) ? BG_SPRINT_TIME : 0;
+  /* MW2's grenadeTimeLeft: none, cooked out (-1), every offhand's whole
+   * fuse, a cooked frag part way, from every other */
+  { const int fuses[8]={0,-1,3500,1500,2000,BG_THROWING_KNIFE_LIFE,50,1};
+    from.grenadeTimeLeft=fuses[i&7]; to.grenadeTimeLeft=fuses[j&7]; }
   MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,&from,&to);
   CHECK(!msg.overflowed); MSG_BeginReading(&msg);
   MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
@@ -58,10 +62,12 @@ int main(void) {
   CHECK(decoded.jumpOriginZ==to.jumpOriginZ && decoded.sprintUsed==to.sprintUsed);
   CHECK(decoded.cursorHintEntIndex==to.cursorHintEntIndex);
   CHECK(decoded.cursorHint==to.cursorHint);
+  CHECK(decoded.grenadeTimeLeft==to.grenadeTimeLeft);
  }
  /* the use hint's six types in PS_CURSOR_HINT_BITS (3, protocol 84): both
-  * Tactical Insertion types, the top one included, each from every other */
- CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==84);
+  * Tactical Insertion types, the top one included, each from every other.
+  * Protocol 85 adds grenadeTimeLeft. */
+ CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==85);
  for(i=0;i<CURSOR_HINT_COUNT;i++) for(j=0;j<CURSOR_HINT_COUNT;j++) {
   memset(&from,0,sizeof(from)); to=from; from.cursorHint=i; to.cursorHint=j;
   to.cursorHintEntIndex=MAX_CLIENTS+j;
@@ -70,5 +76,16 @@ int main(void) {
   MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
   CHECK(decoded.cursorHint==j && decoded.cursorHintEntIndex==MAX_CLIENTS+j);
  }
+ /* grenadeTimeLeft is MW2's signed 16 bits (0x742550): every fuse an offhand
+  * has fits (the throwing knife's 30000 the longest), as do both ends */
+ { const int fuses[6]={-32768,-1,0,1,BG_THROWING_KNIFE_LIFE,32767};
+   CHECK(BG_THROWING_KNIFE_LIFE<32768);
+   for(i=0;i<6;i++) for(j=0;j<6;j++) {
+    memset(&from,0,sizeof(from)); to=from; from.grenadeTimeLeft=fuses[i]; to.grenadeTimeLeft=fuses[j];
+    MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,&from,&to);
+    CHECK(!msg.overflowed); MSG_BeginReading(&msg);
+    MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
+    CHECK(decoded.grenadeTimeLeft==fuses[j]);
+   } }
  printf("PASS: %d action wire checks\n",checks); return 0;
 }

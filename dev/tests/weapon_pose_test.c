@@ -1195,6 +1195,36 @@ static void TestActionHandoff(int gun) {
  }
 }
 
+/* The throwing knife is ready on its press (throwingknife_mp holdFireTime 0),
+ * but its authored pull-out still plays, as picture only, from when the
+ * picture first showed it, then holds; a throw takes the picture at once, and
+ * the player state is never touched. */
+static void TestKnifePullPicture(void) {
+ playerState_t ps,before; refEntity_t entity; const weapAnimDef_t *def; int start,len,first,last;
+ CG_WeapAnim_RegisterClips(WP_THROWING_KNIFE,2,"assets/baseq3/models/weapons2/throwingknife/throw.cfg");
+ def=&bg_weapAnimDefs[WP_THROWING_KNIFE];
+ first=def->clips[WANIM_RAISE].firstFrame; last=first+def->clips[WANIM_RAISE].numFrames-1;
+ len=(int)CG_WeapAnim_LastFrameTime(def,WANIM_RAISE);
+ CHECK(len>0 && BG_THROWING_KNIFE_PULL_MS==0);
+ Ready(&ps,WP_SHOTGUN); cg.time=50000; memset(&entity,0,sizeof(entity)); entity.hModel=1;
+ ps.weapon=WP_THROWING_KNIFE; ps.weaponstate=WEAPON_READY; ps.weaponTime=0;
+ start=cg.time; before=ps; CG_WeapAnim_ActionFrame(&ps,&entity);
+ CHECK(!memcmp(&before,&ps,sizeof(ps)) && entity.oldframe==first);
+ cg.time=start+len/2; CG_WeapAnim_ActionFrame(&ps,&entity);
+ CHECK(entity.oldframe>first && entity.oldframe<last);
+ cg.time=start+len+1; CG_WeapAnim_ActionFrame(&ps,&entity);
+ CHECK(entity.oldframe<first || entity.oldframe>last);	/* held */
+ /* a throw on the next command cuts the pull-out */
+ ps.weapon=WP_SHOTGUN; CG_WeapAnim_ActionFrame(&ps,&entity);
+ ps.weapon=WP_THROWING_KNIFE; ps.weaponstate=WEAPON_READY; cg.time+=16; CG_WeapAnim_ActionFrame(&ps,&entity);
+ CHECK(entity.oldframe==first);
+ ps.weaponstate=WEAPON_FIRING; ps.weaponTime=BG_QUICK_ACTION_HOLD; cg.time+=16; before=ps;
+ { qboolean drawn=CG_WeapAnim_ActionFrame(&ps,&entity);
+   CHECK(!memcmp(&before,&ps,sizeof(ps)));
+   /* the throw's own clip, or (none authored) the caller's picture: never the pull-out */
+   CHECK(def->clips[WANIM_FIRE].numFrames>0 ? drawn && entity.oldframe==def->clips[WANIM_FIRE].firstFrame : !drawn); }
+}
+
 int main(void) {
  playerState_t ps;
  const int states[]={WEAPON_READY,WEAPON_FIRING,WEAPON_BOLTING};
@@ -1232,6 +1262,7 @@ int main(void) {
  TestSprintReentry(def);
  TestPictureContinuity(def,WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm");
  TestActionHandoff(WP_SHOTGUN);
+ TestKnifePullPicture();
  CG_WeapAnim_RegisterClips(WP_M40A3,2,"assets/baseq3/models/weapons2/m40a3/view.cfg");
  def=&bg_weapAnimDefs[WP_M40A3];
  TestRestampLower(def,WP_M40A3);

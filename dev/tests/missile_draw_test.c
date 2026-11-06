@@ -156,7 +156,7 @@ static void TestFlightAndRest(void) {
  knife=Entity(MAX_CLIENTS,ET_MISSILE,WP_THROWING_KNIFE);
  VectorSet(knife->currentState.angles,90,90,90);
  knife->currentState.pos.trType=TR_GRAVITY; knife->currentState.pos.trTime=1000;
- VectorSet(knife->currentState.pos.trDelta,BG_THROWING_KNIFE_SPEED,0,0);
+ VectorSet(knife->currentState.pos.trDelta,1400,0,40);	/* throwingknife_mp: 1400 along the aim, 40 up */
  knife->currentState.apos.trType=TR_LINEAR; knife->currentState.apos.trTime=1000;
  knife->currentState.apos.trBase[PITCH]=-120; knife->currentState.apos.trDelta[PITCH]=BG_THROWING_KNIFE_SPIN;
  knife->nextState=knife->currentState; knife->interpolate=qtrue;

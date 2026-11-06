@@ -69,16 +69,33 @@ static void SameBlade(const refEntity_t *a,const refEntity_t *b) {
 static void TestHeld(int gun) {
  playerState_t ps; refEntity_t first,ready; vec3_t previous; int t;
  memset(&ps,0,sizeof(ps)); ps.weapon=gun; ps.weaponAction=WA_LETHAL;
- ps.weaponstate=WEAPON_RAISING;ps.weaponTime=BG_WeaponRaiseTime(gun);
- Draw(&ps,2); first=rendered[1]; VectorCopy(first.origin,previous);
- for(t=BG_WeaponRaiseTime(gun)-1;t>=0;t--) {
-  ps.weaponTime=t; Draw(&ps,2);
-  CHECK(Distance(previous,rendered[1].origin)<1);
-  if(gun==WP_SEMTEX) CHECK(rendered[1].origin[2]>=previous[2]);
-  VectorCopy(rendered[1].origin,previous);
+ if(BG_WeaponRaiseTime(gun)>0) {
+  ps.weaponstate=WEAPON_RAISING;ps.weaponTime=BG_WeaponRaiseTime(gun);
+  Draw(&ps,2); first=rendered[1]; VectorCopy(first.origin,previous);
+  for(t=BG_WeaponRaiseTime(gun)-1;t>=0;t--) {
+   ps.weaponTime=t; Draw(&ps,2);
+   CHECK(Distance(previous,rendered[1].origin)<1);
+   if(gun==WP_SEMTEX) CHECK(rendered[1].origin[2]>=previous[2]);
+   VectorCopy(rendered[1].origin,previous);
+  }
+  ready=rendered[1]; CHECK(ready.origin[2]>first.origin[2]+15);
+ } else {
+  /* holdFireTime 0 (the throwing knife's): it is in HOLD, ready, on its press
+   * think, so it is never drawn raising. The picture still plays the authored
+   * pull-out at its own length from when it is first shown, smoothly, then
+   * holds where the pull ends. */
+  int start;
+  CHECK(gun==WP_THROWING_KNIFE);
+  ps.weapon=WP_KNIFE; ps.weaponstate=WEAPON_RAISING; ps.weaponTime=BG_MELEE_DELAY; Draw(&ps,2);
+  ps.weapon=gun; ps.weaponstate=WEAPON_READY; ps.weaponTime=0; start=cg.time;
+  Draw(&ps,2); first=rendered[1]; VectorCopy(first.origin,previous);
+  for(t=1;t<=400;t++) {
+   cg.time=start+t; Draw(&ps,2);
+   CHECK(Distance(previous,rendered[1].origin)<1); VectorCopy(rendered[1].origin,previous);
+  }
+  ready=rendered[1]; CHECK(Distance(ready.origin,first.origin)>5);	/* it did move */
+  ps.weaponstate=WEAPON_RAISING; ps.weaponTime=0; Draw(&ps,2); SameBlade(&ready,&rendered[1]);	/* where the pull ends */
  }
- ready=rendered[1]; CHECK(ready.origin[2]>first.origin[2]+15);
- if(gun==WP_THROWING_KNIFE) CHECK(DotProduct(first.axis[0],ready.axis[0])<.9f);
  ps.weaponstate=WEAPON_READY; Draw(&ps,2); SameBlade(&ready,&rendered[1]);
  cg.time+=1000; Draw(&ps,2); SameBlade(&ready,&rendered[1]);
  ps.weaponstate=WEAPON_DROPPING;ps.weaponTime=BG_HolsterTime(&ps); Draw(&ps,2);

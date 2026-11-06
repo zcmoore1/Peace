@@ -1201,6 +1201,7 @@ typedef struct playerState_s {
 	int             pickupTarget, pickupSerial, pickupTime, pickupSlot, pickupHeld;
 	int             cursorHintEntIndex;	// MW2's sticky use hint, written only by the server
 	int             cursorHint;	// MW2's cursorHint: what that hint is usable as now (cursorHint_t), rewritten every end-frame
+	int             grenadeTimeLeft;	// MW2's: ms of fuse left on the offhand in hand (from HOLD entry), -1 cooked out; a duration, never rebased
 
 	vec3_t		viewangles;		// for fixed views
 	int			viewheight;

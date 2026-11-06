@@ -16,11 +16,11 @@ cl %test_flags% /Feout\build\loadout-tests\semtex.exe dev\tests\semtex_test.c %t
 if errorlevel 1 goto fail
 out\build\loadout-tests\semtex.exe
 if errorlevel 1 goto fail
-cl %test_flags% /Feout\build\loadout-tests\missile.exe dev\tests\semtex_missile_test.c code\game\bg_misc.c %test_common% /link /OPT:REF
+cl %test_flags% /Feout\build\loadout-tests\missile.exe dev\tests\semtex_missile_test.c code\game\bg_misc.c code\game\bg_loadout.c %test_common% /link /OPT:REF
 if errorlevel 1 goto fail
 out\build\loadout-tests\missile.exe
 if errorlevel 1 goto fail
-cl %test_flags% /Feout\build\loadout-tests\knife-missile.exe dev\tests\knife_missile_test.c code\game\bg_misc.c %test_common% /link /OPT:REF
+cl %test_flags% /Feout\build\loadout-tests\knife-missile.exe dev\tests\knife_missile_test.c code\game\bg_misc.c code\game\bg_loadout.c %test_common% /link /OPT:REF
 if errorlevel 1 goto fail
 out\build\loadout-tests\knife-missile.exe
 if errorlevel 1 goto fail

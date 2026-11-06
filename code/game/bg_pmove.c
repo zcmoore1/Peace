@@ -2093,11 +2093,13 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 	300, 300, 300,
 #endif
 	BG_MELEE_DELAY,	// WP_KNIFE: MW2's meleeDelay, out on the press and ending in the hit
-	150,	// WP_FRAG
-	150,	// WP_FLASH
-	350,    // WP_SEMTEX pull back into held pose
+	// Equipment's rows are its prepare, MW2's holdFireTime (OffHandPrepare
+	// 577800), which BG_WeaponRaiseTime never raises to the swap floor.
+	BG_GRENADE_HOLD_FIRE_MS,	// WP_FRAG: frag_grenade_mp holdFireTime 0.6
+	BG_GRENADE_HOLD_FIRE_MS,	// WP_FLASH: flash_grenade_mp holdFireTime 0.6
+	BG_GRENADE_HOLD_FIRE_MS,	// WP_SEMTEX: semtex_mp holdFireTime 0.6
 	M40_RAISE_MS,
-	BG_THROWING_KNIFE_PULL_MS,	// WP_THROWING_KNIFE: MW2's iHoldFireTime (weapon data)
+	BG_THROWING_KNIFE_PULL_MS,	// WP_THROWING_KNIFE: throwingknife_mp holdFireTime 0, in hand on the press
 	BG_INSERTION_IGNITE_MS,	// WP_TACTICAL_INSERTION: flare_mp's holdFireTime, the ignite
 };
 
@@ -2252,6 +2254,10 @@ int BG_WeaponRaiseTime( int weapon ) {
 	int t;
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return WEAPON_MIN_SWAP_TIME;
 	t = bg_weaponRaiseTime[weapon];
+	// An offhand's prepare is no deploy but its holdFireTime, which may be 0:
+	// the throwing knife is in HOLD on the think it is pressed (MW2's
+	// OffHandInit, Prepare and Hold in one think). Nothing is put down for it.
+	if ( BG_OffhandHeldToThrow( weapon ) ) return t;
 	return ( t < WEAPON_MIN_SWAP_TIME ) ? WEAPON_MIN_SWAP_TIME : t;
 }
 
@@ -2485,6 +2491,16 @@ qboolean BG_UpdateWeaponPickup(playerState_t *ps, const usercmd_t *cmd,
 	ps->pickupTarget = target;
 	ps->pickupSerial = serial;
 	return reload;
+}
+
+// The knife or equipment a quick action uses.
+int BG_QuickActionWeapon( const playerState_t *ps, int action ) {
+	switch ( action & WA_TYPE_MASK ) {
+	case WA_MELEE: return WP_KNIFE;
+	case WA_LETHAL: return BG_LethalWeapon( ps );
+	case WA_TACTICAL: return WP_FLASH;
+	default: return WP_NONE;
+	}
 }
 
 int BG_LethalWeapon( const playerState_t *ps ) {
@@ -3071,12 +3087,7 @@ static void PM_AdvanceReloadSegments( void ) {
 }
 
 static int PM_QuickActionWeapon( int action ) {
-	switch ( action & WA_TYPE_MASK ) {
-	case WA_MELEE: return WP_KNIFE;
-	case WA_LETHAL: return BG_LethalWeapon(pm->ps);
-	case WA_TACTICAL: return WP_FLASH;
-	default: return WP_NONE;
-	}
+	return BG_QuickActionWeapon( pm->ps, action );
 }
 
 static int PM_ActionWeapon( void ) {
@@ -3088,14 +3099,36 @@ static int PM_HeldActionButtons( void ) {
 	return (pm->cmd.buttons >> 15) & 7;
 }
 
-// MW2's offhand HOLD (578f00-578f69): a held-to-throw offhand in hand and
-// ready stays there only while its button is down on this command and was on
-// the one before (heldBefore: weaponAction's held bits as the last command
-// left them). Any other HOLD think throws it, and does so before the cancel is
-// read (578f2d-578f52), so a Y on that think is spent on nothing. With
-// holdButtonToThrow 0 the throw waits for that, never for a timer.
+// MW2's offhand HOLD (578f00-578f69): an offhand in hand and ready stays
+// there only while an offhand button - the lethal or the tactical, either one
+// (mask 0xc000) - is down on this command and one was on the command before
+// (heldBefore: weaponAction's held bits as the last command left them,
+// 578f2d-578f3f). The two commands are asked separately, so lethal then
+// tactical still holds. Any other HOLD think throws it, and does so before the
+// cancel is read (578f41-578f52), so a Y on that think is spent on nothing.
+// With holdButtonToThrow 0 the throw waits for that, never for a timer.
 static qboolean PM_OffhandHeld( int heldBefore ) {
-	return ( heldBefore & 2 ) && ( pm->cmd.buttons & BUTTON_LETHAL );
+	return ( heldBefore & 6 ) && ( pm->cmd.buttons & ( BUTTON_LETHAL | BUTTON_TACTICAL ) );
+}
+
+// MW2's OffHandEnd (577a10), for an offhand that ends without a throw: a Y
+// cancel, or a cooked grenade that ran out in its holder's hand. The offhand
+// is gone with nothing more spent, and the gun it left comes back on its quick
+// raise (BG_WeaponDrawTime: the latch reads as fired); from an empty hand the
+// hand is empty again. Like MW2's it never touches grenadeTimeLeft: a cook-out
+// leaves its -1 (577bf7), which the next offhand's start clears (OffHandInit,
+// 578e00), and a cancel's caller zeroes the fuse (IW4x's fix, at 0x578F52).
+static void PM_OffhandEnd( void ) {
+	pm->ps->weaponAction |= WA_FIRED;
+	pm->ps->weapon = ( pm->ps->weaponAction & WA_LEFT_EMPTY ) ? WP_NONE : BG_ActiveSlotWeapon( pm->ps );
+	if ( pm->ps->weapon == WP_NONE ) {
+		pm->ps->weaponstate = WEAPON_READY;
+		pm->ps->weaponTime = 0;
+		pm->ps->weaponAnimTime = -1;
+		pm->ps->pm_flags &= ~PMF_PENDING_MAG;
+	} else {
+		BG_BeginWeaponDraw( pm->ps );
+	}
 }
 
 // Whether step 1 may begin a weapon change this think. A shot's fire lock
@@ -3106,6 +3139,59 @@ static qboolean PM_WeaponChangeOpen( void ) {
 	return pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ||
 		( ( BG_IsActionWeapon( pm->ps->weapon ) || ( pm->ps->weaponAction & WA_TYPE_MASK ) ) &&
 		  !( pm->ps->weaponAction & WA_FIRED ) );
+}
+
+/*
+===============
+PM_UpdateGrenadeThrow
+
+MW2's (577bc0), for an offhand in hand and not yet thrown. HOLD entry wrote
+its fuseTime into grenadeTimeLeft; only a cookOffHold offhand (the frag)
+counts it down, by each think's msec, so it explodes fuseTime after HOLD
+entry whenever it is let go. Run out in hand, it is MW2's grenade suicide: -1,
+the predictable EV_GRENADE_SUICIDE with the grenade as its parm (577c37
+passes offHandIndex: the server kills its holder, and the death drop sets that
+grenade off at once) and the grenade spent (577c37-577c75). The next think
+ends the offhand, as a Y cancel does (OffHandEnd, 577bf7), and keeps the -1.
+That think may be a later step of this same command, run before the server
+reads the event, which is why the event names the grenade. Either think is
+over at once: returns qtrue.
+
+The throw is Peace's release command (MW2's fireDelay is not modelled), so
+the countdown stops there: the server reads what is left and zeroes it. In
+hand and ready with its latch unfired is HOLD, the only place the server ever
+holds a fuse; a client still showing a thrown frag's fuse until the snapshot
+that zeroed it never counts it down in the next one's drop or prepare.
+===============
+*/
+static qboolean PM_UpdateGrenadeThrow( void ) {
+	int weapon = pm->ps->weapon;
+	if ( !pm->ps->grenadeTimeLeft || !BG_OffhandHeldToThrow( weapon ) ||
+	     PM_ActionWeapon() != weapon || ( pm->ps->weaponAction & WA_FIRED ) ||
+	     pm->ps->weaponstate != WEAPON_READY ) {
+		return qfalse;
+	}
+	if ( pm->ps->grenadeTimeLeft < 0 ) {
+		if ( BG_OffhandCooks( weapon ) ) {
+			PM_OffhandEnd();
+			return qtrue;
+		}
+		pm->ps->grenadeTimeLeft = 0;
+		return qfalse;
+	}
+	if ( !BG_OffhandCooks( weapon ) ) {
+		return qfalse;
+	}
+	pm->ps->grenadeTimeLeft -= pml.msec;
+	if ( pm->ps->grenadeTimeLeft > 0 ) {
+		return qfalse;
+	}
+	pm->ps->grenadeTimeLeft = -1;
+	BG_AddPredictableEventToPlayerstate( EV_GRENADE_SUICIDE, weapon, pm->ps );
+	if ( pm->ps->ammo[weapon] > 0 ) {
+		pm->ps->ammo[weapon]--;
+	}
+	return qtrue;
 }
 
 // Latch a press through holster/deploy. Releasing the button cannot lose a tap,
@@ -3152,6 +3238,7 @@ static void PM_UpdateWeaponAction( void ) {
 		action = 0;
 		returning = 0;
 		recovering = 0;
+		pm->ps->grenadeTimeLeft = 0;	// an offhand the ladder took is gone, fuse and all
 	} else {
 		// A quick action is not over when it fires. It is over when the gun is
 		// back in hand and fully drawn: that whole recovery keeps the latch, and
@@ -3212,15 +3299,22 @@ static void PM_UpdateWeaponAction( void ) {
 				action = nextAction;
 				returning = recovering = 0;
 				leftEmpty = pm->ps->weapon == WP_NONE ? WA_LEFT_EMPTY : 0;
+				// MW2's OffHandInit (578e00) clamps a negative fuse: a
+				// cook-out's -1 is cleared by the next offhand's start.
+				if ( BG_OffhandHeldToThrow( nextWeapon ) && pm->ps->grenadeTimeLeft < 0 ) {
+					pm->ps->grenadeTimeLeft = 0;
+				}
 			}
 		}
-		// MW2 takes the cancel in INIT and PREPARE (the drop and the pull)
-		// whatever the buttons (577daa-577dde), but HOLD (in hand and ready)
-		// throws first unless the button is held across this command and the
-		// last (PM_OffhandHeld): a release and Y on one command, or a Y on
-		// HOLD's first command after a tap, is the throw, as the release says.
-		if (swapPressed && !(action & WA_FIRED) && (action & WA_TYPE_MASK) == WA_LETHAL &&
-			BG_OffhandHeldToThrow(BG_LethalWeapon(pm->ps)) &&
+		// Only an offhand whose data says offhandHoldIsCancelable takes the
+		// cancel (MW2's 59d5f0-59d622 sends the cancel bit for no other): the
+		// frag and flash cannot be cancelled. MW2 takes it in INIT and PREPARE
+		// (the drop and the pull) whatever the buttons (577daa-577dde), but
+		// HOLD (in hand and ready) throws first unless an offhand button is
+		// held across this command and the last (PM_OffhandHeld): a release
+		// and Y on one command, or a Y on HOLD's first command after a tap, is
+		// the throw, as the release says.
+		if (swapPressed && !(action & WA_FIRED) && BG_OffhandCancelable(PM_QuickActionWeapon(action)) &&
 			( pm->ps->weapon != PM_QuickActionWeapon( action ) ||
 			  pm->ps->weaponstate != WEAPON_READY || PM_OffhandHeld( heldBefore ) ) ) {
 			// Equipment never changes the active slot. Do not refund a throw
@@ -3228,9 +3322,8 @@ static void PM_UpdateWeaponAction( void ) {
 			// the same recovery: the latch holds until that gun is fully drawn.
 			// From an empty hand it is MW2's OffHandEnd with no gun: the hand
 			// is empty again, and the selection brings a gun as from any.
-			action = WA_LETHAL | WA_FIRED;
+			action = (action & WA_TYPE_MASK) | WA_FIRED;
 			returning = leftEmpty ? 0 : WA_RETURNING;
-			pm->ps->weapon = leftEmpty ? WP_NONE : BG_ActiveSlotWeapon(pm->ps);
 			cancelDraw = qtrue;
 		}
 	}
@@ -3238,13 +3331,13 @@ static void PM_UpdateWeaponAction( void ) {
 	pm->ps->weaponAction = action | (held << WA_HELD_SHIFT) | returning | recovering |
 		(swap ? WA_SWAP_HELD : 0) | leftEmpty;
 	// Drawn once the latch says it is a return, so it is the quick raise.
-	if ( cancelDraw && pm->ps->weapon == WP_NONE ) {
-		pm->ps->weaponstate = WEAPON_READY;
-		pm->ps->weaponTime = 0;
-		pm->ps->weaponAnimTime = -1;
-		pm->ps->pm_flags &= ~PMF_PENDING_MAG;
-	} else if ( cancelDraw ) {
-		BG_BeginWeaponDraw( pm->ps );
+	// The cancel leaves no fuse: IW4x's bg_weaponOffHandFix zeroes
+	// grenadeTimeLeft after the HOLD cancel's OffHandEnd (0x578F52), where
+	// stock MW2 left one for the death drop to fire; in INIT and PREPARE there
+	// is none yet.
+	if ( cancelDraw ) {
+		pm->ps->grenadeTimeLeft = 0;
+		PM_OffhandEnd();
 	}
 	if ( prepare ) {
 		PM_FinishWeaponChange();
@@ -3733,6 +3826,17 @@ static void PM_Weapon( void ) {
 		pm->ps->weaponTime -= pml.msec;
 	}
 
+	// MW2 counts a cooking grenade down here, after the timers and before
+	// any of its checks, and a think it ends is over (PM_UpdateGrenadeThrow,
+	// 44c3f7). That think's buttons are still the last ones the next think
+	// compares with, as MW2's oldcmd always is.
+	if ( PM_UpdateGrenadeThrow() ) {
+		pm->ps->weaponAction = ( pm->ps->weaponAction & ~( WA_HELD_MASK | WA_SWAP_HELD ) ) |
+			( PM_HeldActionButtons() << WA_HELD_SHIFT ) |
+			( ( pm->cmd.buttons & BUTTON_WEAPON_SWAP ) ? WA_SWAP_HELD : 0 );
+		return;
+	}
+
 	heldBefore = ( pm->ps->weaponAction & WA_HELD_MASK ) >> WA_HELD_SHIFT;
 	PM_UpdateWeaponAction();
 	ladderWeapon = PM_LadderWeapon();
@@ -3927,6 +4031,13 @@ static void PM_Weapon( void ) {
 			PM_StartTorsoAnim( TORSO_STAND2 );
 		} else {
 			PM_StartTorsoAnim( TORSO_STAND );
+		}
+		// An offhand's prepare that ends is MW2's OffHandHold (577920): in
+		// hand, waiting for the release, with its fuse (577958-577961). Only
+		// a cooking one counts it down from the next think.
+		if ( BG_OffhandHeldToThrow( pm->ps->weapon ) && PM_ActionWeapon() == pm->ps->weapon &&
+		     !( pm->ps->weaponAction & WA_FIRED ) ) {
+			pm->ps->grenadeTimeLeft = BG_OffhandFuseTime( pm->ps->weapon );
 		}
 		if ( !BG_QuickActionInPlace( pm->ps->weapon ) ) {
 			return;

@@ -1463,7 +1463,9 @@ char *eventnames[] = {
 	"EV_TAUNT_PATROL",
 
 	"EV_STEP_DOWN_4",
-	"EV_STEP_DOWN_8"
+	"EV_STEP_DOWN_8",
+
+	"EV_GRENADE_SUICIDE"
 
 };
 

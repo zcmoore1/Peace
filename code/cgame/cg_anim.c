@@ -87,6 +87,7 @@ static qboolean      bg_weapAnimDefsLoaded = qfalse;
 // Active layer state for the local player's viewmodel.
 static animLayer_t   cg_weapLayers[ANIM_LAYER_COUNT];
 static int           cg_weapAnimWeapon = WP_NONE;   // weapon these layers belong to
+static int           cg_weapAnimChangeTime;         // cg.time the picture first showed it
 static qboolean      cg_retainedActive, cg_retainedDrop, cg_previousSprint;
 static float         cg_retainedRate = 1.0f;
 static qboolean      cg_animContextValid;
@@ -173,6 +174,7 @@ static void CG_WeapAnim_WeaponChanged( int weapon ) {
 	cg_weapLayers[LAYER_SPRINT].blendSpeed = 0.02f;
 
 	cg_weapAnimWeapon = weapon;
+	cg_weapAnimChangeTime = cg.time;
 }
 
 // ---------------------------------------------------------------------------
@@ -411,7 +413,7 @@ static void CG_WeapAnim_UpdateRetention(const weapAnimDef_t *def, const playerSt
 			ps->weaponstate == WEAPON_RAISING && sprinting) {
 			animLayer_t *move = &cg_weapLayers[LAYER_MOVE];
 			move->clip = CG_WeapAnim_DrawClip(def, ps);
-			move->time = (1.0f - (float)ps->weaponTime / BG_WeaponDrawTime(ps)) *
+			move->time = (BG_WeaponDrawTime(ps) > 0 ? 1.0f - (float)ps->weaponTime / BG_WeaponDrawTime(ps) : 1.0f) *
 				CG_WeapAnim_ClipLength(def, move->clip);
 			source = LAYER_MOVE;
 		}
@@ -638,7 +640,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 		int duration = ps->weaponstate == WEAPON_RAISING ?
 		               BG_WeaponDrawTime( ps ) :
 		               BG_HolsterTime( ps );	// the same rule pmove stamped with
-		float fraction = CG_WeapAnim_DropFit( move, 1.0f - (float)ps->weaponTime / duration );
+		float fraction = CG_WeapAnim_DropFit( move, duration > 0 ? 1.0f - (float)ps->weaponTime / duration : 1.0f );
 		move->time = fraction * CG_WeapAnim_ClipLength( def, move->clip );
 	} else if ( move->fit == MOVE_FIT_RETURN ) {
 		float s, eased;
@@ -743,10 +745,22 @@ qboolean CG_WeapAnim_ActionFrame(const playerState_t *ps, refEntity_t *entity) {
 		sample.clip = WANIM_DROP;
 		duration = BG_HolsterTime(ps);
 	}
+	// A transition with no length (a 0 holdFireTime, the throwing knife's) is over.
 	if (duration > 0) fraction = 1.0f - (float)ps->weaponTime / duration;
+	else if (sample.clip != WANIM_IDLE) fraction = 1;
 	if (fraction < 0) fraction = 0;
 	if (fraction > 1) fraction = 1;
 	sample.time = fraction * CG_WeapAnim_LastFrameTime(def, sample.clip);
+	// Picture only: an authored raise longer than the gameplay raise (the
+	// throwing knife's pull-out, where MW2's holdFireTime is 0) finishes playing
+	// at its own length, counted from when the picture first showed the weapon,
+	// while the weapon rests in hand. Gameplay is ready all along; a throw,
+	// drop or anything else that moves the weapon takes the picture at once.
+	if (ps->weaponstate == WEAPON_READY && cg.time >= cg_weapAnimChangeTime &&
+		cg.time - cg_weapAnimChangeTime < CG_WeapAnim_LastFrameTime(def, WANIM_RAISE)) {
+		sample.clip = WANIM_RAISE;
+		sample.time = (float)( cg.time - cg_weapAnimChangeTime );
+	}
 	return CG_WeapAnim_SampleFrame(def, &sample, entity);
 }
 

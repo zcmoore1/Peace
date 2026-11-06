@@ -1,8 +1,10 @@
 /* The sea lion's server wiring, through the real ClientEndFrame (g_active.c),
  * the real G_FreeEntity (g_utils.c) and the real hint pass (g_items.c): the
  * end-frame pass writes the use hint, a free of what it names empties it, and
- * a usable S&D site or bomb is a live hint that is never freed. Only engine
- * traps and modules outside these three files are stubbed. */
+ * a usable S&D site or bomb is a live hint that is never freed. The same
+ * end-frame samples MW2's TISpawnPosition (g_insertion.c), and a Tactical
+ * Insertion is named by the same pass and emptied by the same free. Only
+ * engine traps and modules outside these four files are stubbed. */
 #include "../../code/game/g_local.h"
 static int checks;
 static qboolean bombUsable;
@@ -28,10 +30,14 @@ void trap_SetConfigstring(int n,const char *s) { (void)n;(void)s; }
 void trap_LinkEntity(gentity_t *e) { e->r.linked=qtrue; }
 void trap_UnlinkEntity(gentity_t *e) { e->r.linked=qfalse; }
 void trap_LocateGameData(gentity_t *g,int n,int s,playerState_t *c,int cs) { (void)g;(void)n;(void)s;(void)c;(void)cs; }
+static qboolean solid;	/* the player's spot starts in solid (a low ceiling) */
 void trap_Trace(trace_t *t,const vec3_t start,const vec3_t mins,const vec3_t maxs,const vec3_t end,int pass,int mask) {
  (void)start;(void)mins;(void)maxs;(void)pass;(void)mask;
  memset(t,0,sizeof(*t)); t->fraction=1; t->entityNum=ENTITYNUM_NONE; VectorCopy(end,t->endpos);
+ if(solid && mins) { t->startsolid=t->allsolid=qtrue; t->fraction=0; VectorCopy(start,t->endpos); }
 }
+int trap_EntitiesInBox(const vec3_t mins,const vec3_t maxs,int *list,int maxcount) { (void)mins;(void)maxs;(void)list;(void)maxcount; return 0; }
+qboolean trap_EntityContact(const vec3_t mins,const vec3_t maxs,const gentity_t *e) { (void)mins;(void)maxs;(void)e; return qfalse; }
 int main(void) {
  static gclient_t cl[2];
  gentity_t *item,*knife; playerState_t *ps=&cl[0].ps; int i;
@@ -48,14 +54,17 @@ int main(void) {
    BG_PutSlot(&cl[1].ps,SLOT_PRIMARY,&gun); }
  item=G_DropWeapon(&g_entities[1],SLOT_PRIMARY); CHECK(item!=NULL);
  G_SetOrigin(item,ps->origin);
- CHECK(G_FindWeaponPickup(&g_entities[0])!=NULL && ps->cursorHintEntIndex==0);
+ CHECK(G_FindWeaponPickup(&g_entities[0])!=NULL && ps->cursorHintEntIndex==0 && ps->cursorHint==CURSOR_HINT_NONE);
  ClientEndFrame(&g_entities[0]);
- CHECK(ps->cursorHintEntIndex==item->s.number && (item->flags&FL_CURSOR_HINT));
+ CHECK(ps->cursorHintEntIndex==item->s.number && (item->flags&FL_CURSOR_HINT) && ps->cursorHint==CURSOR_HINT_WEAPON);
  G_FreeEntity(item);
  CHECK(ps->cursorHintEntIndex==ENTITYNUM_NONE);
+ /* the type is rewritten every end-frame: nothing in reach, nothing usable */
+ ClientEndFrame(&g_entities[0]);
+ CHECK(ps->cursorHintEntIndex==ENTITYNUM_NONE && ps->cursorHint==CURSOR_HINT_NONE);
  /* a usable site or the bomb: a live hint, never freed, which ends a sea lion */
  bombUsable=qtrue; ClientEndFrame(&g_entities[0]);
- CHECK(ps->cursorHintEntIndex==ENTITYNUM_WORLD);
+ CHECK(ps->cursorHintEntIndex==ENTITYNUM_WORLD && ps->cursorHint==CURSOR_HINT_OBJECTIVE);
  bombUsable=qfalse;
  /* a resting throwing knife, for a player who carries them, is named and its
   * free empties the hint the same way */
@@ -63,8 +72,39 @@ int main(void) {
  knife=G_Spawn(); knife->classname="throwingknife"; knife->s.eType=ET_MISSILE;
  knife->s.weapon=WP_THROWING_KNIFE; knife->timestamp=level.time; G_SetOrigin(knife,ps->origin);
  ClientEndFrame(&g_entities[0]);
- CHECK(ps->cursorHintEntIndex==knife->s.number && (knife->flags&FL_CURSOR_HINT));
+ CHECK(ps->cursorHintEntIndex==knife->s.number && (knife->flags&FL_CURSOR_HINT) && ps->cursorHint==CURSOR_HINT_KNIFE);
+ /* the knife prompt's type is the server's, through the networked field only */
+ cl[0].ps.pm_flags|=PMF_SPRINTING; ClientEndFrame(&g_entities[0]);
+ CHECK(ps->cursorHintEntIndex==knife->s.number && ps->cursorHint==CURSOR_HINT_NONE);
+ cl[0].ps.pm_flags&=~PMF_SPRINTING; ClientEndFrame(&g_entities[0]);
+ CHECK(ps->cursorHint==CURSOR_HINT_KNIFE);
  G_FreeEntity(knife);
  CHECK(ps->cursorHintEntIndex==ENTITYNUM_NONE);
+ ClientEndFrame(&g_entities[0]); CHECK(ps->cursorHint==CURSOR_HINT_NONE);
+ /* MW2's TISpawnPosition, sampled by the end-frame: only alive, PM_NORMAL, on
+  * the ground and with the standing box clear at the origin */
+ { gentity_t *ti; vec3_t at;
+   cl[0].pers.connected=CON_CONNECTED; cl[0].pers.enterTime=7;
+   cl[0].insertionSpotValid=qfalse;	/* a new life, as ClientSpawn's clear leaves it */
+   ps->groundEntityNum=ENTITYNUM_NONE; VectorSet(ps->origin,40,0,0); ClientEndFrame(&g_entities[0]);
+   CHECK(!cl[0].insertionSpotValid);	/* in the air */
+   ps->groundEntityNum=ENTITYNUM_WORLD; solid=qtrue; ClientEndFrame(&g_entities[0]);
+   CHECK(!cl[0].insertionSpotValid);	/* a box that starts in solid */
+   solid=qfalse; ClientEndFrame(&g_entities[0]);
+   CHECK(cl[0].insertionSpotValid && VectorCompare(cl[0].insertionSpot,ps->origin));
+   VectorSet(ps->origin,50,0,0); ps->groundEntityNum=ENTITYNUM_NONE; ClientEndFrame(&g_entities[0]);
+   CHECK(cl[0].insertionSpot[0]==40);	/* jumped: the last good spot stays */
+   ps->groundEntityNum=ENTITYNUM_WORLD; g_entities[0].health=0; ClientEndFrame(&g_entities[0]);
+   CHECK(cl[0].insertionSpot[0]==40);	/* dead */
+   g_entities[0].health=100; ps->pm_type=PM_SPECTATOR; ClientEndFrame(&g_entities[0]);
+   CHECK(cl[0].insertionSpot[0]==40);
+   ps->pm_type=PM_NORMAL; ClientEndFrame(&g_entities[0]); CHECK(cl[0].insertionSpot[0]==50);
+   /* the owner's TI: named by the same pass, typed for its owner, emptied by its free */
+   ti=G_PlantInsertion(&g_entities[0]); CHECK(ti && VectorCompare(ti->pos1,cl[0].insertionSpot));
+   VectorSet(at,ps->origin[0]+10,0,ps->origin[2]); G_SetOrigin(ti,at);
+   ClientEndFrame(&g_entities[0]);
+   CHECK(ps->cursorHintEntIndex==ti->s.number && ps->cursorHint==CURSOR_HINT_INSERTION && (ti->flags&FL_CURSOR_HINT));
+   G_FreeEntity(ti); CHECK(ps->cursorHintEntIndex==ENTITYNUM_NONE);
+   ClientEndFrame(&g_entities[0]); CHECK(ps->cursorHint==CURSOR_HINT_NONE && ps->cursorHintEntIndex==ENTITYNUM_NONE); }
  printf("PASS: %d cursor-hint wiring checks\n",checks); return 0;
 }

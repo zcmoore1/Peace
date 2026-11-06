@@ -168,15 +168,32 @@ int main(void) {
  Click(Option(&classPicker,WP_SHOTGUN)); CHECK(uis.menusp==4 && classEdit.draft.slot[0]==WP_MACHINEGUN);
  Key(K_ESCAPE); Key(K_ESCAPE);
 
- /* Equipment commits only after choosing a quantity. */
- Activate(&classEdit.lethal); Activate(Option(&classPicker,WP_SEMTEX)); Screen(&classQuantity.menu,4);
- CHECK(classEdit.draft.lethal==WP_FRAG);
- Key(K_PAD0_B); CHECK(classEdit.draft.lethal==WP_FRAG);
- Activate(Option(&classPicker,WP_SEMTEX)); Click(Option(&classQuantity,3)); Screen(&classEdit.menu,2);
- CHECK(classEdit.draft.lethal==WP_SEMTEX && classEdit.draft.lethalCount==3);
+ /* Equipment commits at once with MW2's count: there is no quantity screen. */
+ Activate(&classEdit.lethal); Screen(&classPicker.menu,3);
+ Key(K_PAD0_B); CHECK(uis.menusp==2 && classEdit.draft.lethal==WP_FRAG && classEdit.draft.lethalCount==1);
+ Activate(&classEdit.lethal); Activate(Option(&classPicker,WP_SEMTEX)); Screen(&classEdit.menu,2);
+ CHECK(classEdit.draft.lethal==WP_SEMTEX && classEdit.draft.lethalCount==1);
+ CHECK(!strcmp(classEdit.lethal.title,"Semtex x1"));
+ Activate(&classEdit.lethal); Activate(Option(&classPicker,WP_THROWING_KNIFE)); Screen(&classEdit.menu,2);
+ CHECK(classEdit.draft.lethal==WP_THROWING_KNIFE && classEdit.draft.lethalCount==1);
+ CHECK(!strcmp(classEdit.lethal.title,"Throwing knife x1"));
+ /* MW2's Tactical Insertion is a lethal beside them (isValidEquipment), one
+  * of it, and never a tactical */
+ Activate(&classEdit.lethal); Screen(&classPicker.menu,3);
+ CHECK(classPicker.count==5 && !strcmp(Option(&classPicker,WP_TACTICAL_INSERTION)->title,"Tactical Insertion"));
+ CHECK(!strcmp(Option(&classPicker,WP_TACTICAL_INSERTION)->description,
+  "Plant it where you stand; your next life starts there; pick it back up with use."));
+ Activate(Option(&classPicker,WP_TACTICAL_INSERTION)); Screen(&classEdit.menu,2);
+ CHECK(classEdit.draft.lethal==WP_TACTICAL_INSERTION && classEdit.draft.lethalCount==1 && BG_ValidateClass(&classEdit.draft));
+ CHECK(!strcmp(classEdit.lethal.title,"Tactical Insertion x1"));
+ Activate(&classEdit.tactical); Screen(&classPicker.menu,3);
+ { int k; for(k=0;k<classPicker.count;k++) CHECK(classPicker.rows[k].value!=WP_TACTICAL_INSERTION); }
+ Key(K_ESCAPE); Screen(&classEdit.menu,2);
+ Activate(&classEdit.lethal); Activate(Option(&classPicker,WP_SEMTEX)); Screen(&classEdit.menu,2);
+ CHECK(classEdit.draft.lethal==WP_SEMTEX && classEdit.draft.lethalCount==1);
  Activate(&classEdit.tactical); Activate(Option(&classPicker,WP_NONE));
  CHECK(classEdit.draft.tactical==WP_NONE && classEdit.draft.tacticalCount==0);
- Activate(&classEdit.tactical); Activate(Option(&classPicker,WP_FLASH)); Activate(Option(&classQuantity,2));
+ Activate(&classEdit.tactical); Activate(Option(&classPicker,WP_FLASH)); Screen(&classEdit.menu,2);
  CHECK(classEdit.draft.tactical==WP_FLASH && classEdit.draft.tacticalCount==2);
 
  ChoosePerk(0,PERK_QUICK_RELOAD);
@@ -203,7 +220,7 @@ int main(void) {
  Activate(&classEdit.save); Screen(&classSelect.menu,1);
  CHECK(!strcmp(active,vars[Find("peace_loadout")].value));
  cl=ReadClass("peace_class_0"); CHECK(!strcmp(cl.name,"Trickshot"));
- CHECK(cl.slot[0]==WP_M40A3 && cl.slot[1]==WP_SHOTGUN && cl.lethal==WP_SEMTEX && cl.lethalCount==3);
+ CHECK(cl.slot[0]==WP_M40A3 && cl.slot[1]==WP_SHOTGUN && cl.lethal==WP_SEMTEX && cl.lethalCount==1);
  CHECK(cl.tacticalCount==2 && cl.perk[0]==PERK_QUICK_RELOAD && cl.perk[1]==PERK_NO_FALL_DAMAGE && cl.perk[2]==PERK_EXPEDITIOUS);
  Activate(&classSelect.rows[BG_ClassCount()]); CHECK(UI_ClassSelected()==BG_ClassCount());
  CHECK(!strcmp(vars[Find("peace_loadout")].value,vars[Find("peace_class_0")].value));
@@ -215,6 +232,33 @@ int main(void) {
   OpenEditor(i); Activate(&classEdit.name); TypeName(va("Saved %i",i+1)); Key(K_ENTER); Activate(&classEdit.save);
   OpenEditor(i); CHECK(!strcmp(classEdit.draft.name,va("Saved %i",i+1))); Key(K_ESCAPE);
  }
+ /* a class saved with three knives opens with one and nothing else lost, and
+  * one with three frags and one flash opens with MW2's one and two */
+ { char old[BG_CLASS_STRING_SIZE];
+   Com_sprintf(old,sizeof(old),"2|%i|%i|%i|3|%i|1|%i|0|0|0|0|Old grenades",WP_M40A3,WP_SHOTGUN,
+    WP_FRAG,WP_FLASH,PERK_QUICK_RELOAD);
+   trap_Cvar_Set("peace_class_2",old); OpenEditor(2);
+   CHECK(!strcmp(classEdit.draft.name,"Old grenades") && classEdit.draft.slot[0]==WP_M40A3);
+   CHECK(classEdit.draft.lethal==WP_FRAG && classEdit.draft.lethalCount==1);
+   CHECK(classEdit.draft.tactical==WP_FLASH && classEdit.draft.tacticalCount==2);
+   Key(K_ESCAPE); }
+ { char old[BG_CLASS_STRING_SIZE];
+   Com_sprintf(old,sizeof(old),"2|%i|%i|%i|3|%i|2|%i|0|0|0|%i|Old knives",WP_M40A3,WP_SHOTGUN,
+    WP_THROWING_KNIFE,WP_FLASH,PERK_QUICK_RELOAD,BG_ATTACHMENT_REDDOT);
+   trap_Cvar_Set("peace_class_3",old); OpenEditor(3);
+   CHECK(!strcmp(classEdit.draft.name,"Old knives") && classEdit.draft.slot[0]==WP_M40A3 &&
+    classEdit.draft.slot[1]==WP_SHOTGUN && classEdit.draft.attachments[1]==BG_ATTACHMENT_REDDOT);
+   CHECK(classEdit.draft.lethal==WP_THROWING_KNIFE && classEdit.draft.lethalCount==1);
+   CHECK(classEdit.draft.tactical==WP_FLASH && classEdit.draft.tacticalCount==2 && classEdit.draft.perk[0]==PERK_QUICK_RELOAD);
+   CHECK(!UI_ClassDirty()); Key(K_ESCAPE); }
+ { char saved[BG_CLASS_STRING_SIZE];	/* a saved TI class opens as one, and saves back the same */
+   Com_sprintf(saved,sizeof(saved),"2|%i|%i|%i|1|%i|2|0|0|0|0|0|Insertion",WP_SHOTGUN,WP_MACHINEGUN,
+    WP_TACTICAL_INSERTION,WP_FLASH);
+   trap_Cvar_Set("peace_class_4",saved); OpenEditor(4);
+   CHECK(!strcmp(classEdit.draft.name,"Insertion") && classEdit.draft.lethal==WP_TACTICAL_INSERTION &&
+    classEdit.draft.lethalCount==1 && !strcmp(classEdit.lethal.title,"Tactical Insertion x1") && !UI_ClassDirty());
+   Activate(&classEdit.save); cl=ReadClass("peace_class_4");
+   CHECK(cl.lethal==WP_TACTICAL_INSERTION && cl.lethalCount==1 && !strcmp(cl.name,"Insertion")); }
  trap_Cvar_Set("peace_class_1","corrupt"); OpenEditor(1);
  CHECK(BG_ValidateClass(&classEdit.draft) && !strcmp(classEdit.draft.name,"Custom 2"));
  CHECK(!strcmp(vars[Find("peace_class_1")].value,"corrupt")); Key(K_ESCAPE);

@@ -382,7 +382,7 @@ typedef struct weaponInfo_s {
 	qboolean		registered;
 	gitem_t			*item;
 
-	qhandle_t		handsModel;			// the hands don't actually draw, they just position the weapon
+	qhandle_t		handsModel;			// MD3 parent; quick-action hands also draw their mesh
 	qhandle_t		weaponModel;
 	qhandle_t		viewModel;			// optional IQM with the arms and the gun in one skeleton; when
 										// set it IS the first-person view, drawn instead of hands+gun
@@ -1398,11 +1398,31 @@ void CG_WeapPicture_Update( const playerState_t *predicted, const pmove_t *model
 	int first, int last, qboolean (*getCmd)( int, usercmd_t * ) );
 const playerState_t *CG_WeapPicture_State( const playerState_t *predicted );
 void     CG_WeapAnim_RegisterClips( int weapon, qhandle_t hModel, const char *cfgPath );
+qboolean CG_WeapAnim_ActionFrame( const playerState_t *ps, refEntity_t *entity );
 
 // cg_killcam.c
 qboolean CG_Killcam_Active( void );
 void     CG_Killcam_Transition( const snapshot_t *previous, const snapshot_t *next );
 void     CG_Killcam_Draw( void );
+
+// cg_usehint.c
+// ms between bind lookups while a use prompt stays up; one that appears again
+// after being hidden this long looks its binds up at once
+#define CG_USE_BUTTON_REFRESH	1000
+#define CG_USE_BUTTON_GAP		250
+void     CG_ReadableKeyName( const char *bindName, char *out, int outSize );
+qboolean CG_FindUseButton( qboolean gamepad, char *label, int labelSize, qboolean *hold );
+void     CG_UsePromptText( qboolean bound, qboolean hold, const char *label, const char *action,
+	char *out, int outSize );
+void     CG_UseButtonPrompt( int time, const char *action, char *out, int outSize );
+const char *CG_UsePromptAction( int cursorHint );
+const char *CG_UsePromptShown( const playerState_t *ps, const playerState_t *server );
+const char *CG_CursorHintName( int cursorHint );
+
+// a planted Tactical Insertion's glow (picture only)
+#define CG_INSERTION_GLOW			100
+#define CG_INSERTION_GLOW_HEIGHT	8
+qboolean CG_InsertionFriendly( const entityState_t *s1 );
 
 void CG_RegisterWeapon( int weaponNum );
 void CG_RegisterItemVisuals( int itemNum );
@@ -1699,6 +1719,8 @@ qboolean	trap_Key_IsDown( int keynum );
 int			trap_Key_GetCatcher( void );
 void		trap_Key_SetCatcher( int catcher );
 int			trap_Key_GetKey( const char *binding );
+// the first gamepad (or keyboard and mouse) key bound to exactly binding, and its bind name
+int			trap_Key_GetBindingName( const char *binding, qboolean gamepad, char *name, int nameSize );
 
 
 typedef enum {

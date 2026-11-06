@@ -963,6 +963,70 @@ int Key_GetKey(const char *binding) {
 
 /*
 ===================
+Key_IsGamepadKey
+
+A key a joystick or gamepad sends: the joystick buttons and hats (JOY*, AUX*)
+and SDL's game controller (PAD0_*).
+===================
+*/
+qboolean Key_IsGamepadKey( int keynum ) {
+	return ( keynum >= K_JOY1 && keynum <= K_JOY32 ) ||
+		( keynum >= K_AUX1 && keynum <= K_AUX16 ) ||
+		( keynum >= K_PAD0_A && keynum <= K_PAD0_TOUCHPAD );
+}
+
+/*
+===================
+CL_NoteInputDevice
+
+Which kind of input the player used last, as cl_gamepadInUse: 1 after a
+gamepad or joystick button or stick, 0 after a keyboard key, a mouse button or
+the mouse moving. IW4x switches its prompts on the same rule (its controller
+runtime marks the pad in use on pad input, and not on other input). cgame's
+use prompt names the bound key of that kind. It decides nothing else.
+===================
+*/
+cvar_t *cl_gamepadInUse;
+
+void CL_NoteInputDevice( qboolean gamepad ) {
+	if ( cl_gamepadInUse && cl_gamepadInUse->integer != ( gamepad ? 1 : 0 ) ) {
+		Cvar_Set( "cl_gamepadInUse", gamepad ? "1" : "0" );
+	}
+}
+
+/*
+===================
+Key_GetBindingName
+
+The first key of one kind (gamepad, or keyboard and mouse) bound to exactly
+this command, as Key_GetKey matches it, and its bind name in name. Returns
+-1 and an empty name when no such key is bound.
+===================
+*/
+int Key_GetBindingName( const char *binding, qboolean gamepad, char *name, int nameSize ) {
+	int i;
+
+	if ( name && nameSize > 0 ) {
+		name[0] = '\0';
+	}
+	if ( !binding || !binding[0] ) {
+		return -1;
+	}
+	for ( i = 0 ; i < MAX_KEYS ; i++ ) {
+		if ( !keys[i].binding || Q_stricmp( binding, keys[i].binding ) ||
+			!Key_IsGamepadKey( i ) != !gamepad ) {
+			continue;
+		}
+		if ( name && nameSize > 0 ) {
+			Q_strncpyz( name, Key_KeynumToString( i ), nameSize );
+		}
+		return i;
+	}
+	return -1;
+}
+
+/*
+===================
 Key_Unbind_f
 ===================
 */
@@ -1146,6 +1210,7 @@ CL_InitKeyCommands
 ===================
 */
 void CL_InitKeyCommands( void ) {
+	cl_gamepadInUse = Cvar_Get( "cl_gamepadInUse", "0", CVAR_ROM );
 	// register our functions
 	Cmd_AddCommand ("bind",Key_Bind_f);
 	Cmd_SetCommandCompletionFunc( "bind", Key_CompleteBind );
@@ -1372,6 +1437,9 @@ Called by the system for both key up and key down events
 ===================
 */
 void CL_KeyEvent (int key, qboolean down, unsigned time) {
+	if ( down ) {
+		CL_NoteInputDevice( Key_IsGamepadKey( key ) );
+	}
 	if( down )
 		CL_KeyDownEvent( key, time );
 	else

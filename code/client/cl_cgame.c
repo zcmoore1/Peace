@@ -702,6 +702,9 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		re.BlendModelPoses( VMA(1), VMA(2), VMF(3), VMA(4), VMF(5) );
 		return 0;
 
+	case CG_KEY_GETBINDINGNAME:
+		return Key_GetBindingName( VMA(1), args[2], VMA(3), args[4] );
+
 	default:
 	        assert(0);
 		Com_Error( ERR_DROP, "Bad cgame system trap: %ld", (long int) args[0] );

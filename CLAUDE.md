@@ -46,6 +46,8 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
   appends, with a `===== session started` banner per run.
 - `peacedump` prints the full weapon/loadout state. `F11` = `peacedump; condump`.
 - In-game: `cg_weaponDebug 1`, `g_debugMove 1`, `devmap <map>` (not `map`).
+- `cl_debugButtons 1` prints which command each X (use/reload) and RT press
+  went out in. X must go out a command before RT for a fake bullet.
 - `spawndummy [red|blue]` (server console) adds a stationary training dummy on
   any map. It needs no bot AI and no `.aas` file — Peace's maps have none, and
   botlib refuses a map without one. The mark is the `peace_dummy` userinfo key,
@@ -93,10 +95,16 @@ source for MW2 behaviour; the owner rejects it.
   not a gameplay state. `TestFlow` drives it through the real `PM_Weapon`.
 - **Sprint cancellation returns along the visible transition.** Sprint, Y,
   end the sprint (it latches: a fresh press, aim, letting go of forward), Y
-  transfers the retained sprint entry/exit into the existing move-layer
-  return. It retraces the authored easing at twice the ordinary sprint-out
-  rate (125ms SPAS / 130ms M300 for a full return), without easing the clock
-  a second time; it does not keep advancing away while
+  transfers the retained sprint entry, carry or exit into the existing
+  move-layer return. The picture is the ordinary sprint exit's, minus its
+  lock: a carry (entry finished, or the loop) plays the exit over the whole
+  `BG_WeaponSprintOutTime` (250ms SPAS / 260ms M300), an exit already under
+  way keeps its own pace, and a partial entry runs back over the whole
+  sprint-out time, as a sprint tap's reversal does. No `MOVE_RETURN_MS` cap
+  and no second easing: the clock is linear and the authored clip eases the
+  pose, so it leaves the carry at the exit's pace and settles like it. A loop
+  drops its bob onto the exit's first frame exactly as an ordinary stop in the
+  loop does. The return does not keep advancing away while
   fading to idle. The ready endpoint stays fixed throughout that fade. A new
   sprint may inherit only a posture that is still visible (including a
   move-layer return), never a hidden layer's old clock. A sprint still running
@@ -182,8 +190,9 @@ source for MW2 behaviour; the owner rejects it.
   variants of the same base gun must keep separate magazines and chamber debt.
   Do not replace a floor pickup with a full-mag grant. Death drops the held
   slot, not the requested destination. Exact weapon+attachment matches scavenge
-  to reserve on touch (capacity-capped) and consume the item; other guns, and a
-  resting throwing knife, take MW2's use hold (`BG_UseHoldTime`): `+activate`
+  to reserve on touch (capacity-capped) and consume the item; other guns, a
+  resting throwing knife and a Tactical Insertion take MW2's use hold
+  (`BG_UseHoldTime`, one hold entity: `useHold`): `+activate`
   at once (g_useholdtime 0), use/reload (and, for guns, the owner's plain
   reload) held 250ms (IW4x's gpad_use_hold_time), nothing in the first 500ms
   after the PLAYER spawns, never an item's age. A short tap still reloads: a
@@ -220,8 +229,14 @@ source for MW2 behaviour; the owner rejects it.
   (`BG_OffhandOut`) or dead it writes nothing; spawn leaves 0, a live entity
   number. Only freeing what it names (`G_ClearCursorHintRefs` in
   `G_FreeEntity`, flagged `FL_CURSOR_HINT`) makes it `ENTITYNUM_NONE`, and a
-  pickup frees its dropped gun - or a throwing knife taken back by use - at
-  once. A resting knife outranks any gun as the hint. Pmove only reads it: with no hint at
+  pickup frees its dropped gun - or a throwing knife taken back by use, or a
+  Tactical Insertion picked up by its owner or smashed by an enemy - at once.
+  MW2's use list ranks by score, lowest first: a resting knife outranks
+  anything; a TI (-192) and a floor gun compare by 128 * (1 - dot) + eye
+  distance (`G_UseScore`). Its type, `ps.cursorHint`, is cleared by every pass
+  and set beside a written index; the server's use test and cgame's use
+  prompt read it, pmove never does.
+  Pmove only reads the index: with no hint at
   all and either no gun in hand or the gun's quick raise after equipment
   (MW2's OFFHAND_END, a Semtex cancel's included), equipment comes straight
   out and the gun is never lowered (MW2's CheckForOffHand 5791b0-5791ce). So
@@ -290,14 +305,65 @@ source for MW2 behaviour; the owner rejects it.
   lock is restamped or whose `BG_HolsterTime` changes where the old fit has it
   (`CG_WeapAnim_ReanchorDrop`), so the picture never jumps; the fit is still
   `BG_HolsterTime`. Do not add a second timing rule in the renderer.
+- **Offhands are MW2's pre-throw machine, from each one's data (owner's rule:
+  do what MW2 does).** The table in `bg_loadout.c` and the raise table carry
+  the IW4 dump's values; pmove names no offhand. The prepare is the item's
+  holdFireTime as its raise (`BG_WeaponRaiseTime` never floors an offhand's):
+  frag, flash and Semtex 600ms, the throwing knife 0 (in hand and ready on the
+  press think), the TI's 2630 ignite. holdButtonToThrow is 0 for every one
+  (`BG_OffhandHeldToThrow`): in hand and ready is MW2's HOLD, which waits while
+  an offhand button is down on this command and the one before
+  (`PM_OffhandHeld`: lethal OR tactical, MW2's `0xc000`, the two commands asked
+  separately, 578f2d-578f3f) and throws on the first command that is not so. A
+  release in the drop or the prepare is queued: nothing is thrown early and
+  nothing throws itself. Only offhandHoldIsCancelable takes Y
+  (`BG_OffhandCancelable`, read from the action's own weapon: Semtex, throwing
+  knife, TI); a frag or flash Y is weapnext's toggle, which waits behind the
+  recovery. HOLD entry writes fuseTime into `ps.grenadeTimeLeft` (MW2's
+  ps+0x34, predicted and networked); only cookOffHold (the frag) counts it
+  down, in `PM_UpdateGrenadeThrow` at the top of `PM_Weapon` after the timers
+  and before anything else, in HOLD only, so the frag goes off 3500ms after
+  HOLD entry whenever it is let go, and a release on the think it runs out
+  loses. Run out in hand it is MW2's grenade suicide: -1, the predicted
+  `EV_GRENADE_SUICIDE` whose parm is the frag (577c37: offHandIndex), the frag
+  spent, that think over; the server kills the holder as a suicide unless in
+  god mode (`G_GrenadeSuicide`), firing the frag the event names through the
+  death drop at once, and the next think ends the offhand as a cancel does.
+  That next think can be a later pmove step of the same command (pmove_fixed,
+  or a hitch past 66ms), before the server reads the event: so the event names
+  the frag and MW2's OffHandEnd never writes the fuse (577bf7) - the -1 stays
+  until the next offhand's start clears it (OffHandInit, 578e00). Never key
+  the suicide's drop on what is in hand after pmove. The throw is the release
+  command (MW2's fireDelay is not modelled), so the countdown stops at
+  `WA_FIRED`; the server reads what is left and zeroes it at the throw
+  (`fire_equipment`'s fuse, MW2's 5e9400). IW4x's bg_weaponOffHandFix zeroes
+  it after a HOLD cancel only (0x578F52; the INIT and PREPARE cancels have none
+  yet), and Peace's ladder takes the offhand, fuse and all. The launch is MW2's
+  (4c3690): forward times projectileSpeed, plus projectileSpeedUp and the
+  flattened forward's projectileSpeedForward (`BG_OffhandLaunchVelocity`),
+  snapped, then the thrower's velocity along it, its component only and
+  unsnapped (`G_ThrowOffhand`); like every offhand missile and death drop it
+  starts at level.time (408490), never with Q3's `MISSILE_PRESTEP_TIME`, which
+  only Quake's own `fire_grenade` and the other Quake missiles keep. Death
+  fires what has a fuse with that fuse, from 40 above MW2's feet at up to 160
+  per axis (`G_DropOffhand`, first in `player_die`; a TI is planted); in the
+  drop, the prepare and after the throw there is nothing to fire. An offhand
+  let go on the command whose own events kill its holder before its throw (a
+  fatal fall's `EV_FALL_FAR` comes first) still has its fuse, MW2's FIRE before
+  fireDelay, and is dropped; player_die's `s.weapon = WP_NONE` leaves the
+  throw nothing. Ammo is spent only at the throw and at a cook-out. No cook
+  timer on the HUD (MW2 has none).
 - **Recovering from equipment is ONE thing, in time and function, and the
-  knife ends in the same quick raise.** Frag, flash, a released Semtex and the
-  throwing knife are held `BG_QUICK_ACTION_HOLD` (500ms) and go away in
+  knife ends in the same quick raise.** Frag, flash, a released Semtex, the
+  throwing knife and the Tactical Insertion (not MW2's flare fireTime 0.6 /
+  fireDelay 0.129) are held `BG_QUICK_ACTION_HOLD` (500ms) and go away in
   `BG_RAPID_DROP_TIME` (50ms); the knife has neither, and goes straight from
   `BG_MELEE_TIME` into the raise. Either way the gun comes back on its MW2
   quick raise (`BG_WeaponQuickRaiseTime`: 750ms for rifles, shotguns and
   launchers, 250ms for the M300, as the Intervention), a Semtex cancel's
-  return included (owner's rule: MW2's MeleeEnd and OffHandEnd). Only
+  return included (owner's rule: MW2's MeleeEnd and OffHandEnd). A frag that
+  cooks out in a hand that lives is no throw: like a cancel it goes straight
+  into the quick raise (MW2's OffHandEnd from PM_UpdateGrenadeThrow). Only
   equipment's return is OFFHAND_END, so with no use hint at all, equipment
   pulled during it comes straight out, while the knife's return still
   quick-drops (the sea lion). `BG_WeaponDrawTime` is the single draw rule,
@@ -528,8 +594,9 @@ source for MW2 behaviour; the owner rejects it.
 - `pm_flags` — **full.** All 16 networked bits used. A 17th needs the wire
   format widened.
 - `STAT_WEAPONS` — full 32-bit wire mask at `PS_STAT_WEAPONS`. `MAX_WEAPONS`
-  is 24; the M300 is 15 and the throwing knife 16 in baseq3 (18 and 19 in
-  missionpack). Other
+  is 24; the M300 is 15, the throwing knife 16 and the Tactical Insertion 17
+  in baseq3 (18, 19 and 20 in missionpack; `WP_NUM_WEAPONS` 18 / 21). The
+  networked `ps.weapon` is 5 bits, so no weapon may pass 31. Other
   stats remain signed int16: their bit 15 must stay unused.
 - `weaponAnimSeq` — **full.** 2 bits in `msg.c`; all four values are taken
   (`RSEQ_START/LOOP/END` + `ASEQ_FIRE`). A fifth animation segment has to widen
@@ -537,7 +604,7 @@ source for MW2 behaviour; the owner rejects it.
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 10-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 82 requires client, server
+  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 85 (GAME_VERSION -14) requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
@@ -548,7 +615,19 @@ source for MW2 behaviour; the owner rejects it.
   height, none rebased. Protocol 81 adds `cursorHintEntIndex`
   (`GENTITYNUM_BITS`; an entity number, never rebased) and widens
   `slotFlags` to 3 bits for `BG_GUN_GENERATION`, a slot's bit that never
-  travels with a dropped instance.
+  travels with a dropped instance. Protocol 83 adds `cursorHint`
+  (`cursorHint_t`, MW2's ps+0x194): the hint's type, rewritten by every
+  end-frame pass where the index is sticky. Server only, never rebased; pmove
+  does not read it; cgame's use prompt draws from it. It replaced the
+  gclient-only boolean of the same name. Protocol 84 (GAME_VERSION -13) widens
+  `PS_CURSOR_HINT_BITS` to 3 for the Tactical Insertion's two types (own:
+  pick up; enemy's: smash): six of eight values used, guarded by the static
+  assert in `g_items.c`. A seventh and eighth fit; a ninth needs 4 bits.
+  Protocol 85 (GAME_VERSION -14) adds `grenadeTimeLeft`, MW2's playerstate
+  netfield (0x742550, signed 16 bits): the fuse of the offhand in hand, -1
+  after a cook-out. Every offhand's fuseTime fits (the throwing knife's 30000
+  the longest). A duration, never rebased by the replay. `EV_GRENADE_SUICIDE`
+  (MW2's 0x5d) is appended to `entity_event_t`.
   Dropped ET_ITEM uses `generic1` for attachments, `time2` for packed magazine
   and reserve, `otherEntityNum2` for chamber debt, and `time` as a spawn serial.
 - `perks` is a five-bit spawn-owned playerstate field. All three class perk
@@ -637,11 +716,31 @@ all ten action bits through the actual network codec, and pose release. It
 also builds `knife_missile_test.c` (the throwing knife's real launch, impact,
 carry and rest code), `knife_corpse_test.c` (the real `CopyToBodyQue`,
 `BodySink`, `G_FreeEntity` and use code with a carried knife) and
-`missile_draw_test.c` (the real `CG_Missile` and snapshot lerp).
+`missile_draw_test.c` (the real `CG_Missile` and snapshot lerp, a planted
+Tactical Insertion's rest pose and glow included). `TestTacticalInsertion`
+drives the TI's quick drop, 2630ms ignite, queued tap, hold, Y cancels,
+recovery and sea lion chain through the real `PM_Weapon` in both numberings;
+`TestHoldThrowsBeforeCancel` checks MW2's HOLD for every offhand: a tap queued
+and thrown on HOLD's first command, a re-press held through the prepare, the
+throw before Y unless an offhand button (either one) is held across both
+commands, and the cancel allowed (Semtex, throwing knife, TI) or refused (frag,
+flash, whose Y waits behind the recovery). `TestFragCook` drives the frag's
+cook: the fuse at the release, the cook-out at every think length and on every
+step of a several-step command (with and without a gun), the event's frag, a
+hand that lives keeping the -1 until the next offhand, a death and a ladder
+while cooking. `offhand_server_test.c` (sh only) runs the real `ClientThink`,
+`ClientEvents`, `FireWeapon`, missiles and `player_die`: every launch velocity,
+start time and fuse, the cook-out's suicide and explosion (also on commands
+the real `Pmove` chops, pmove_fixed or not, gun or empty hand), god mode and a
+kill in its raise, the death drop of every class, and a release on the
+command a fall kills its holder.
 Pose checks cover source retention, ladder holsters, loop/endpoint semantics,
 reload/action exclusions, ordinary sprint reversal and frame-only crossfades,
 plus YY flow (reversed draw, eased return, fire cut-in) through the real
 `PM_Weapon`, which is why the pose test links `pickup_pmove_driver.c`.
+The glide return is compared frame by frame with the ordinary sprint exit
+from the same posture (carry, loop, exit under way, partial entry), in both
+rendering paths, for SPAS and M300.
 The native/QVM pointer-boundary test links `cl_vm.c` and `vm_ptr.c` directly;
 keep it independent of the full client and VM lifecycle so MSVC can link it.
 Loadouts UI and class definitions are documented in `dev/LOADOUTS.md`.
@@ -653,8 +752,17 @@ showing the scope on that frame only. On Linux, build the same file list with
 
 `dev/tests/run-pickups.sh` runs the inventory, pickup, use/reload, take
 window (with the client's selection lagging the snapshot), throwing-knife
-pickup and sea lion checks, and `cursor_hint_wiring_test.c`, which links the
-real `ClientEndFrame`, `G_FreeEntity` and hint pass.
+pickup, Tactical Insertion pickup/smash/ranking, hint type and sea lion checks
+(the TI's end to end through the real plant), `cursor_hint_wiring_test.c`,
+which links the real `ClientEndFrame` (TI spot sampling included),
+`G_FreeEntity` and hint pass, `use_hint_test.c`: the knife and TI prompts
+through the real `cg_draw.c`, `cg_usehint.c` and the engine's bind lookup in
+`cl_keys.c`, and `insertion_test.c`: the TI's plant through the real
+`FireWeapon`, its damage through the real `G_Damage`/`G_RadiusDamage` from real
+shots, the spawn on it inside the real `ClientSpawn` (a corpse there, killed
+through the real `G_Damage`, is left untouched), and cleanup through the
+real `SetTeam` and `ClientDisconnect`. `dev/TACTICAL_INSERTION.md` lists the
+TI's checks in every suite.
 
 `dev/tests/run-fakereload.cmd` (or `.sh`) models the client/server clocks
 (MW2's client time base through the real `CL_DriftTimeDelta`, snapshot
@@ -689,6 +797,9 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   is in `run-snd`). Normal rounds need both teams;
   `exec peace-snd-practice` is a separate cheat-only solo test setup.
 - Run `dev/tests/run-snd.cmd` or `.sh`; see `dev/SEARCH_AND_DESTROY.md`.
+- A Tactical Insertion can be planted, picked up and smashed in S&D but is
+  never spawned on; `SND_StartRound` frees it with every missile and
+  `SND_WaitForPlayers` frees it too (MW2's round restart frees everything).
 - QVM `sscanf` returns zero even after parsing! Do not use its return count
   to validate HUD data. The S&D site reader uses `COM_Parse` instead.
 - Round-winning killcams use a bounded engine snapshot history in
@@ -721,9 +832,21 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   M40's scope is integral, so a red-dot spawn preference cannot invent a
   nonexistent attachment variant. See `dev/M40A3.md`.
 - The throwing knife (`WP_THROWING_KNIFE`) is appended lethal equipment
-  (16 basegame / 19 missionpack), with the frag's grenade as placeholder art.
+  (16 basegame / 19 missionpack), with original Peace knife/hand/icon art from
+  `dev/tools/build_throwingknife.py` (`--check` supported). The world blade
+  points along +X; the hand's `tag_weapon` authors its first-person grip.
+  `animation.json` beside its source authors the pullout and regular melee's
+  horizontal slash. Both use the same blade and animated hand; `throw.cfg` and
+  `melee.cfg` supply the frame ranges through the existing clip loader.
+  `CG_WeapAnim_ActionFrame` fits the MD3 picture to existing timers only (79ms
+  melee hit / 800ms melee end; the throwing knife has no pull, holdFireTime 0,
+  so it is drawn at the pullout's last frame at once). The grip tag is interpolated with the
+  hand, while the blade stays frame 0. `CG_EquipmentView` hides a thrown blade
+  on release but keeps melee's blade through the slash. Semtex's gesture and
+  the throwing follow-through are unchanged. See `assets/source/throwingknife/README.md`.
   Its flight, stick, pickup by use and world bound are in `dev/THROWING_KNIFE.md`.
-  Its speed, damage, bounce and pull time are placeholder weapon data. It
+  Its damage and bounce are placeholder weapon data; its pull (0), fuse (30s)
+  and launch (1400, 40 up) are throwingknife_mp's. It
   sticks in players (owner's choice of MW2's `stickToPlayers`), rides them and
   their corpse, and falls when the corpse goes; that carry is Semtex's
   (`G_CarryMissile`/`G_FollowHost`, the `host*` fields), and only knives move
@@ -731,13 +854,36 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   lerps with its carrier. `CG_Missile` registers a missile's weapon on first
   sight: never rely on someone holding it (a frag in flight is
   `WP_GRENADE_LAUNCHER`, which nobody holds).
+- The Tactical Insertion (`WP_TACTICAL_INSERTION`) is appended lethal
+  equipment (17 basegame / 20 missionpack; its item is appended at the end of
+  `bg_itemlist`), MW2's `flare_mp` in the LETHAL slot (owner's choice of MW2's
+  way: equipment, thrown with `BUTTON_LETHAL`, one per class, never a
+  tactical). In pmove it is only data: the gun's quick drop, a 2630ms ignite
+  (`BG_INSERTION_IGNITE_MS`, holdFireTime) as its raise, held to throw and
+  Y-cancelable like the Semtex, the one equipment recovery, the ordinary sea
+  lion gate; no TI-named branch. The server (`g_insertion.c`) plants it on its
+  fire at the last sampled standing spot (MW2's TISpawnPosition), spawns its
+  owner on it (not in S&D; not over another player; that spawn skips
+  `G_KillBox`, so a corpse not yet respawned is never gibbed or credited, as
+  MW2's spawn there has no telefrag), and frees it on pickup,
+  smash, more than 20 counted damage, a new plant, the spawn, a team change,
+  disconnect and S&D resets. Placeholder art: the flash's grenade model and
+  icon. See `dev/TACTICAL_INSERTION.md`.
 
 The enum is not enough. A weapon in `STAT_WEAPONS` with no `bg_itemlist` entry
 crashes on spawn: `CG_RegisterWeapon` calls `CG_Error`, and `BG_FindItemForWeapon`
 calls `Com_Error`. This has already caused one map-load crash. Also check every
 `MAX_WEAPONS` table in `bg_pmove.c` — they are positional.
 
-Semtex and the throwing knife (`BG_OffhandHeldToThrow`): pre-release Y cancels to the same gun using its melee-return raise.
+Semtex, the throwing knife and the Tactical Insertion (`BG_OffhandCancelable`): pre-release Y cancels to the same gun using its melee-return raise.
+The frag and flash wait in hand the same way but take no cancel.
+As MW2's offhand states: in the drop and the pull (INIT, PREPARE) Y cancels
+whatever the buttons; in hand and ready (HOLD, 578f00-578f69) the throw comes
+first unless an offhand button (lethal or tactical) is down on that command
+and one was on the one before (`PM_OffhandHeld`, weaponAction's held bits), so
+a release and Y on one command, or Y (or a re-press) on the first command
+after a queued tap's pull, throws and the Y is eaten. weapnext keeps the slot either way (MW2's
+59d5f0-59d622 sets only the cancel bit). No per-weapon or glitch branch.
 Post-release Y queues a normal slot swap behind throw and original-gun recovery,
 as every quick action now does.
 Never treat an emitted throw as a cancellable equip or reset queued selection

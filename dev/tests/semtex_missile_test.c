@@ -38,8 +38,12 @@ void Weapon_HookThink(gentity_t *e) { (void)e; }
 void Weapon_HookFree(gentity_t *e) { G_FreeEntity(e); }
 void G_RunThink(gentity_t *e) { if(e->nextthink>0 && e->nextthink<=level.time) { e->nextthink=0; e->think(e); } }
 
+/* Thrown as MW2 throws it: fire_equipment with its own data's velocity (940
+ * along the view, 120 up), and the fuse HOLD wrote into grenadeTimeLeft -
+ * the Semtex never cooks, so all of its fuseTime, from the throw (MW2 writes
+ * no fuse on a stick path). The thrower's fuse is spent by the throw. */
 static gentity_t *Launch(void) {
- vec3_t start={0,0,24},dir={1,0,0};
+ vec3_t start={0,0,24},forward={1,0,0},velocity;
  gentity_t *m;
  memset(g_entities,0,sizeof(g_entities)); memset(clients,0,sizeof(clients));
  memset(&level,0,sizeof(level)); level.time=1000; level.previousTime=950; level.num_entities=MAX_CLIENTS;
@@ -48,9 +52,14 @@ static gentity_t *Launch(void) {
  blasts=impacts=traceCount=0;
  memset(&collision,0,sizeof(collision)); collision.fraction=.5f;
  collision.entityNum=ENTITYNUM_WORLD; VectorSet(collision.endpos,10,0,24); VectorSet(collision.plane.normal,-1,0,0);
- m=fire_semtex(&g_entities[0],start,dir);
+ CHECK(BG_OffhandFuseTime(WP_SEMTEX)==2000 && !BG_OffhandCooks(WP_SEMTEX));	/* semtex_mp fuseTime 2 */
+ clients[0].ps.grenadeTimeLeft=BG_OffhandFuseTime(WP_SEMTEX);
+ BG_OffhandLaunchVelocity(WP_SEMTEX,forward,velocity);
+ CHECK(velocity[0]==940 && velocity[1]==0 && velocity[2]==120);
+ m=fire_equipment(&g_entities[0],WP_SEMTEX,start,velocity);
  CHECK(m->s.weapon==WP_SEMTEX && m->s.pos.trType==TR_GRAVITY);
- CHECK(m->nextthink==level.time+SEMTEX_FUSE_TIME && !m->damage && !m->s.eFlags);
+ CHECK(m->s.pos.trDelta[0]==940 && m->s.pos.trDelta[2]==120);
+ CHECK(m->nextthink==level.time+2000 && !m->damage && !m->s.eFlags && !clients[0].ps.grenadeTimeLeft);
  return m;
 }
 int main(void) {

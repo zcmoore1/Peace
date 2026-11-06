@@ -511,9 +511,12 @@ void weapon_railgun_fire (gentity_t *ent) {
 		unlinked++;
 	} while ( unlinked < MAX_RAIL_HITS );
 
-	// link back in any entities we unlinked
+	// link back in any entities we unlinked, but not one the beam destroyed
+	// (a Tactical Insertion's damage frees it)
 	for ( i = 0 ; i < unlinked ; i++ ) {
-		trap_LinkEntity( unlinkedEntities[i] );
+		if ( unlinkedEntities[i]->inuse ) {
+			trap_LinkEntity( unlinkedEntities[i] );
+		}
 	}
 
 	// the final trace endpos will be the terminal point of the rail trail
@@ -833,24 +836,24 @@ void Weapon_Knife( gentity_t *ent ) {
 		KNIFE_DAMAGE * s_quadFactor, 0, MOD_GAUNTLET );
 }
 
-// Both equipment types are thrown the same way; only the payload differs.
-void Weapon_ThrowEquipment( gentity_t *ent, qboolean lethal ) {
+/*
+===============
+Weapon_ThrowEquipment
+
+MW2's throw (G_ThrowOffhand): every offhand at its own data's velocity, plus
+the thrower's along it, with what its fuse has left. The start is Peace's
+muzzle point. The flash has no effect yet.
+===============
+*/
+void Weapon_ThrowEquipment( gentity_t *ent ) {
 	gentity_t	*m;
 
-	m = ent->s.weapon == WP_SEMTEX ? fire_semtex(ent, muzzle, forward) :
-		ent->s.weapon == WP_THROWING_KNIFE ? fire_throwingknife(ent, muzzle, forward) :
-		fire_grenade( ent, muzzle, forward );
+	m = G_ThrowOffhand( ent, ent->s.weapon, muzzle, forward );
 	if ( !m ) {
 		return;
 	}
-	if ( lethal ) {
-		m->damage       *= s_quadFactor;
-		m->splashDamage *= s_quadFactor;
-	} else {
-		// Tactical: no damage yet - the flash effect lands with the HUD work.
-		m->damage       = 0;
-		m->splashDamage = 0;
-	}
+	m->damage       *= s_quadFactor;
+	m->splashDamage *= s_quadFactor;
 }
 
 /*
@@ -897,12 +900,17 @@ void FireWeapon( gentity_t *ent ) {
 		Weapon_Knife( ent );
 		break;
 	case WP_FRAG:
+	case WP_FLASH:
 	case WP_SEMTEX:
 	case WP_THROWING_KNIFE:
-		Weapon_ThrowEquipment( ent, qtrue );
+		Weapon_ThrowEquipment( ent );
 		break;
-	case WP_FLASH:
-		Weapon_ThrowEquipment( ent, qfalse );
+	case WP_TACTICAL_INSERTION:
+		// MW2 throws an invisible flare it ignores; the TI is planted at the
+		// owner's last standing spot (monitorTIUse on 'grenade_fire'). The
+		// flare's G_FireGrenade spends the fuse HOLD wrote.
+		G_PlantInsertion( ent );
+		ent->client->ps.grenadeTimeLeft = 0;
 		break;
 	case WP_LIGHTNING:
 		Weapon_LightningFire( ent );

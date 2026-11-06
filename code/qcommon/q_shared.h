@@ -1140,6 +1140,7 @@ typedef struct {
 // so if a playerState_t is transmitted, the entityState_t can be fully derived
 // from it.
 #define PS_PERK_BITS 5
+#define PS_CURSOR_HINT_BITS 3	// cursorHint_t (bg_public.h): six types
 
 typedef struct playerState_s {
 	int			commandTime;	// cmd->serverTime of last executed command
@@ -1199,6 +1200,8 @@ typedef struct playerState_s {
 	int             slotAmmo[2], slotReserve[2], slotAttachments[2], slotFlags[2];
 	int             pickupTarget, pickupSerial, pickupTime, pickupSlot, pickupHeld;
 	int             cursorHintEntIndex;	// MW2's sticky use hint, written only by the server
+	int             cursorHint;	// MW2's cursorHint: what that hint is usable as now (cursorHint_t), rewritten every end-frame
+	int             grenadeTimeLeft;	// MW2's: ms of fuse left on the offhand in hand (from HOLD entry), -1 cooked out; a duration, never rebased
 
 	vec3_t		viewangles;		// for fixed views
 	int			viewheight;

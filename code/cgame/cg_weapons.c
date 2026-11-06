@@ -620,7 +620,8 @@ static const char *cg_viewModelBase[WP_NUM_WEAPONS] = {
 	"",                                 // WP_FLASH
 	"",                                 // WP_SEMTEX (procedural MD3 hand pose)
 	"models/weapons2/m40a3/view",         // WP_M40A3
-	""                                  // WP_THROWING_KNIFE (frag model until the knife lands)
+	"",                                 // WP_THROWING_KNIFE (MD3 hand and tagged knife)
+	""                                  // WP_TACTICAL_INSERTION (placeholder: the flash's legacy hands and grenade)
 };
 
 /*
@@ -634,6 +635,7 @@ void CG_RegisterWeapon( int weaponNum ) {
 	weaponInfo_t	*weaponInfo;
 	gitem_t			*item, *ammo;
 	char			path[MAX_QPATH];
+	const char		*handClips = NULL;
 	vec3_t			mins, maxs;
 	int				i;
 
@@ -722,8 +724,21 @@ void CG_RegisterWeapon( int weaponNum ) {
 		cgs.media.grenadeExplosionShader = trap_R_RegisterShader("grenadeExplosion");
 		break;
 	case WP_THROWING_KNIFE:
-		// placeholder art: a thrown knife looks like a thrown frag until its model lands
-		weaponInfo->missileModel = trap_R_RegisterModel( "models/ammo/grenade1.md3" );
+		// +X is the blade tip, matching the server's flight/stick orientation.
+		weaponInfo->missileModel = weaponInfo->weaponModel;
+		weaponInfo->flashModel = 0;
+		weaponInfo->barrelModel = 0;
+		handClips = "models/weapons2/throwingknife/throw.cfg";
+		break;
+	case WP_KNIFE:
+		// The same blade and hand, with a horizontal melee motion. No gun flash.
+		weaponInfo->flashModel = weaponInfo->barrelModel = 0;
+		handClips = "models/weapons2/throwingknife/melee.cfg";
+		break;
+	case WP_TACTICAL_INSERTION:
+		// Placeholder art until the flare lands: the planted TI is drawn with
+		// its item model (the flash's grenade). CG_Missile adds its glow.
+		weaponInfo->missileModel = weaponInfo->weaponModel;
 		weaponInfo->flashModel = 0;
 		weaponInfo->barrelModel = 0;
 		break;
@@ -872,14 +887,14 @@ void CG_RegisterWeapon( int weaponNum ) {
 	}
 
 	// Clip table lives beside the model it describes, so the two can never drift
-	// apart. No viewmodel means no clips, and the legacy torso path is used.
+	// apart. MD3 quick-action hands use the same clip format and loader.
 	if ( weaponInfo->viewModel ) {
 		Com_sprintf( path, sizeof(path), "%s.cfg", cg_viewModelBase[weaponNum] );
 		CG_WeapAnim_RegisterClips( weaponNum, weaponInfo->viewModel, path );
 		Com_sprintf( path, sizeof(path), "%s.sights", cg_viewModelBase[weaponNum] );
 		CG_Sights_Register( weaponNum, path );
 	} else {
-		CG_WeapAnim_RegisterClips( weaponNum, 0, NULL );
+		CG_WeapAnim_RegisterClips( weaponNum, weaponInfo->handsModel, handClips );
 		CG_Sights_Register( weaponNum, NULL );
 	}
 }
@@ -1420,26 +1435,31 @@ CG_AddViewWeapon
 Add the weapon, and flash for the player's view
 ==============
 */
-static void CG_SemtexView(playerState_t *ps, weaponInfo_t *weapon) {
+// MD3 quick-action hands use authored motion where supplied, with the existing
+// equipment gesture as fallback. tag_weapon carries the SAME blade through all
+// frames without rotating the world model. Gameplay alone owns hits and throws.
+static void CG_EquipmentView(const playerState_t *ps, const weaponInfo_t *weapon) {
 	refEntity_t hand;
 	vec3_t angles;
+	qboolean animated;
 	float t = 1, x = 18, y = -8, z = -8;
-	if (ps->weaponstate == WEAPON_RAISING) {
-		t = 1.0f - (float)ps->weaponTime / BG_WeaponRaiseTime(WP_SEMTEX);
+	memset(&hand, 0, sizeof(hand));
+	animated = CG_WeapAnim_ActionFrame(ps, &hand);
+	if (!animated && ps->weaponstate == WEAPON_RAISING) {
+		t = BG_WeaponRaiseTime(ps->weapon) > 0 ? 1.0f - (float)ps->weaponTime / BG_WeaponRaiseTime(ps->weapon) : 1;
 		if (t < 0) t = 0;
 		if (t > 1) t = 1;
 		t = t*t*(3-2*t);
 		x += 7*(1-t); z -= 19*(1-t);
-	} else if (ps->weaponstate == WEAPON_FIRING) {
+	} else if (!animated && ps->weaponstate == WEAPON_FIRING) {
 		t = 1.0f - (float)ps->weaponTime / BG_QUICK_ACTION_HOLD;
 		if (t < 0) t = 0;
 		if (t > 1) t = 1;
 		x += 18*sin(t*M_PI); z += 8*sin(t*M_PI)-24*t;
-	} else if (ps->weaponstate == WEAPON_DROPPING) {
+	} else if (!animated && ps->weaponstate == WEAPON_DROPPING) {
 		t = 1.0f - (float)ps->weaponTime / BG_HolsterTime(ps);
 		z -= 24*t;
 	}
-	memset(&hand, 0, sizeof(hand));
 	VectorCopy(cg.refdef.vieworg, hand.origin);
 	VectorMA(hand.origin, x, cg.refdef.viewaxis[0], hand.origin);
 	VectorMA(hand.origin, y, cg.refdef.viewaxis[1], hand.origin);
@@ -1451,9 +1471,21 @@ static void CG_SemtexView(playerState_t *ps, weaponInfo_t *weapon) {
 	hand.renderfx = RF_DEPTHHACK | RF_FIRST_PERSON | RF_MINLIGHT;
 	hand.hModel = weapon->handsModel;
 	trap_R_AddRefEntityToScene(&hand);
-	if (!(ps->weaponAction & (WA_FIRED | WA_RECOVERING))) {
-		hand.hModel = weapon->weaponModel;
-		trap_R_AddRefEntityToScene(&hand);
+	if (BG_QuickActionInPlace(ps->weapon) || !(ps->weaponAction & (WA_FIRED | WA_RECOVERING))) {
+		refEntity_t item = hand;
+		orientation_t grip;
+		int i;
+		if (trap_R_LerpTag(&grip, weapon->handsModel, hand.oldframe, hand.frame, 1.0f-hand.backlerp, "tag_weapon")) {
+			for (i = 0; i < 3; i++)
+				VectorMA(item.origin, grip.origin[i], hand.axis[i], item.origin);
+			MatrixMultiply(grip.axis, hand.axis, item.axis);
+			VectorCopy(item.origin, item.oldorigin);
+		}
+		item.hModel = weapon->weaponModel;
+		// The hand animates; the world/pickup blade is a single-frame mesh.
+		item.frame = item.oldframe = 0;
+		item.backlerp = 0;
+		trap_R_AddRefEntityToScene(&item);
 	}
 }
 
@@ -1518,8 +1550,8 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	cent = &cg.predictedPlayerEntity;	// &cg_entities[cg.snap->ps.clientNum];
 	CG_RegisterWeapon( ps->weapon );
 	weapon = &cg_weapons[ ps->weapon ];
-	if (ps->weapon == WP_SEMTEX) {
-		CG_SemtexView(ps, weapon);
+	if (ps->weapon == WP_SEMTEX || ps->weapon == WP_THROWING_KNIFE || ps->weapon == WP_KNIFE) {
+		CG_EquipmentView(ps, weapon);
 		return;
 	}
 
@@ -1785,8 +1817,12 @@ void CG_NextWeapon_f( void ) {
 
 	ps = &cg.predictedPlayerState;
 	trap_SendConsoleCommand("_peaceWeaponSwap\n");
-	if (!(ps->weaponAction & WA_FIRED) && (ps->weaponAction & WA_TYPE_MASK) == WA_LETHAL &&
-		BG_OffhandHeldToThrow(BG_LethalWeapon(ps))) {
+	// MW2's weapnext (59d5f0-59d622): an offhand still to be thrown whose data
+	// says offhandHoldIsCancelable gets only the cancel; the frag and flash
+	// cannot be cancelled, so their Y asks for the other slot, which waits
+	// for the gun's return.
+	if (!(ps->weaponAction & WA_FIRED) &&
+		BG_OffhandCancelable(BG_QuickActionWeapon(ps, ps->weaponAction))) {
 		cg.weaponSelectSlot = ps->stats[STAT_ACTIVE_SLOT];
 		cg.weaponSelect = BG_ActiveSlotWeapon(ps);
 		cg.weaponSelectTime = cg.time;

@@ -211,9 +211,9 @@ and the weapon-select HUD walks every owned bit.
 	{
 		"weapon_knife",
 		"sound/misc/w_pkup.wav",
-        { "models/weapons2/gauntlet/gauntlet.md3",
+        { "models/weapons2/throwingknife/knife.md3",
 		NULL, NULL, NULL},
-/* icon */		"icons/iconw_gauntlet",
+/* icon */		"icons/peace_throwingknife",
 /* pickup */	"Knife",
 		0,
 		IT_WEAPON,
@@ -263,12 +263,11 @@ Tactical equipment. Placeholder visuals until real assets land.
 		"icons/peace_semtex", "Semtex", 0, IT_WEAPON, WP_SEMTEX, "", ""
 	},
 
-/* Lethal equipment: MW2's throwing knife. The frag's grenade model stands in
-   until the knife model lands. */
+/* Lethal equipment: throwing knife, with original Peace art. */
 	{
 		"weapon_throwingknife", "sound/misc/w_pkup.wav",
-		{ "models/weapons2/grenadel/grenadel.md3", NULL, NULL, NULL },
-		"icons/iconw_grenade", "Throwing Knife", 0, IT_WEAPON, WP_THROWING_KNIFE, "", ""
+		{ "models/weapons2/throwingknife/knife.md3", NULL, NULL, NULL },
+		"icons/peace_throwingknife", "Throwing Knife", 0, IT_WEAPON, WP_THROWING_KNIFE, "", ""
 	},
 
 /*QUAKED weapon_shotgun (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
@@ -990,6 +989,13 @@ Only in One Flag CTF games
 		{ "models/weapons2/m40a3/world.md3", NULL, NULL, NULL },
 		"icons/peace_m40a3", "M300 Praetorian", 5, IT_WEAPON, WP_M40A3, "", ""
 	},
+	/* Lethal equipment: MW2's Tactical Insertion (flare_mp). Appended so no
+	 * item index moves. Placeholder art: the flash's grenade model and icon. */
+	{
+		"weapon_tacticalinsertion", "sound/misc/w_pkup.wav",
+		{ "models/weapons2/grenadel/grenadel.md3", NULL, NULL, NULL },
+		"icons/iconw_grenade", "Tactical Insertion", 0, IT_WEAPON, WP_TACTICAL_INSERTION, "", ""
+	},
 	{NULL}
 };
 
@@ -1457,7 +1463,9 @@ char *eventnames[] = {
 	"EV_TAUNT_PATROL",
 
 	"EV_STEP_DOWN_4",
-	"EV_STEP_DOWN_8"
+	"EV_STEP_DOWN_8",
+
+	"EV_GRENADE_SUICIDE"
 
 };
 

@@ -832,6 +832,12 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		CG_FireWeapon( cent );
 		break;
 
+	case EV_GRENADE_SUICIDE:
+		// MW2's predictable grenade suicide: the server kills the holder, and
+		// the grenade's own explosion is its missile's event. Nothing to draw.
+		DEBUGNAME("EV_GRENADE_SUICIDE");
+		break;
+
 	case EV_USE_ITEM0:
 		DEBUGNAME("EV_USE_ITEM0");
 		CG_UseItem( cent );

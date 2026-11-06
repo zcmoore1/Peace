@@ -421,6 +421,23 @@ static void CG_Item( centity_t *cent ) {
 
 /*
 ===============
+CG_InsertionFriendly
+
+Whether a Tactical Insertion is the viewer's or their team's, for its glow:
+what its entity state carries, the owner (clientNum) and their team
+(generic1). Picture only (MW2 shows friendlies the green flare and enemies the
+red); the server alone decides who may pick it up or smash it.
+===============
+*/
+qboolean CG_InsertionFriendly( const entityState_t *s1 ) {
+	if ( !cg.snap ) return qfalse;
+	if ( cgs.gametype >= GT_TEAM )
+		return s1->generic1 == cg.snap->ps.persistant[PERS_TEAM];
+	return s1->clientNum == cg.snap->ps.clientNum;
+}
+
+/*
+===============
 CG_Missile
 ===============
 */
@@ -532,6 +549,18 @@ static void CG_Missile( centity_t *cent ) {
 
 	if (s1->weapon == WP_SEMTEX && s1->pos.trType == TR_STATIONARY)
 		AnglesToAxis(cent->lerpAngles, ent.axis);
+	if (s1->weapon == WP_TACTICAL_INSERTION) {
+		// Planted upright, facing its owner's yaw, and glowing: green to its
+		// owner and their team, red to everyone else (MW2's flare_ambient fx).
+		vec3_t glow;
+		AnglesToAxis(cent->lerpAngles, ent.axis);
+		VectorCopy(cent->lerpOrigin, glow);
+		glow[2] += CG_INSERTION_GLOW_HEIGHT;
+		if (CG_InsertionFriendly(s1))
+			trap_R_AddLightToScene(glow, CG_INSERTION_GLOW, 0.2f, 1.0f, 0.2f);
+		else
+			trap_R_AddLightToScene(glow, CG_INSERTION_GLOW, 1.0f, 0.15f, 0.1f);
+	}
 	if (s1->weapon == WP_THROWING_KNIFE) {
 		// end over end in flight, buried along the throw once stopped, and
 		// turned with whoever carries it: a carried knife's pos and apos are

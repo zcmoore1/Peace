@@ -458,10 +458,17 @@ static void SND_AssignCarrier( void ) {
 
 static void SND_WaitForPlayers( void ) {
     int n;
+    gentity_t *ent;
     trap_ReplayReset(qtrue);
     level.replayEndTime = 0;
     snd.phase = SND_WAITING; snd.carrier = -1; snd.deadline = 0;
     SND_HideBomb();
+    // No Tactical Insertion outlives the round it was planted in (MW2's round
+    // restart frees everything); SND_StartRound frees every missile.
+    for ( n = MAX_CLIENTS; n < level.num_entities; n++ ) {
+        ent = &g_entities[n];
+        if ( ent->inuse && ent->s.eType == ET_MISSILE && ent->s.weapon == WP_TACTICAL_INSERTION ) G_FreeEntity(ent);
+    }
     // Release chase cameras/freeze when a team empties between rounds.
     // Waiting players may explore, but cannot deal damage or plant a bomb.
     for ( n = 0; n < level.maxclients; n++ ) if ( SND_Player(n) ) trap_UnlinkEntity(&g_entities[n]);

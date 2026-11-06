@@ -1,0 +1,30 @@
+{
+  "description": "Original Peace hand motion. Positions are viewmodel art units; angles are XYZ degrees. Gameplay owns every duration and hit.",
+  "motions": {
+    "pull": [
+      {"ms": 0, "offset": [4, -5, -18], "angles": [-38, 24, -12]},
+      {"ms": 55, "offset": [1.5, -2, -5], "angles": [-22, 14, -6]},
+      {"ms": 115, "offset": [-0.3, 0.35, 0.7], "angles": [4, -3, 2]},
+      {"ms": 150, "offset": [0, 0, 0], "angles": [0, 0, 0]}
+    ],
+    "slash": [
+      {"ms": 0, "offset": [0, -12, -6], "angles": [-30, 15, -20]},
+      {"ms": 35, "offset": [2, -6, 5], "angles": [-52, 0, -6]},
+      {"ms": 79, "offset": [5, 8, 5], "angles": [-75, -5, 10]},
+      {"ms": 145, "offset": [3, 18, 4], "angles": [-92, -12, 15]},
+      {"ms": 260, "offset": [0, 20, 0], "angles": [-105, -18, 10]},
+      {"ms": 475, "offset": [1, 16, -7], "angles": [-95, -15, 0]},
+      {"ms": 650, "offset": [3, 10, -16], "angles": [-60, 4, -12]},
+      {"ms": 800, "offset": [4, 6, -26], "angles": [-35, 15, -10]}
+    ]
+  },
+  "clips": {
+    "pull": {"motion": "pull", "start_ms": 0, "end_ms": 150, "frames": 13},
+    "slash_in": {"motion": "slash", "start_ms": 0, "end_ms": 79, "frames": 7},
+    "slash_out": {"motion": "slash", "start_ms": 79, "end_ms": 800, "frames": 37}
+  },
+  "configs": {
+    "throw": {"raise": "pull"},
+    "melee": {"raise": "slash_in", "fire": "slash_out"}
+  }
+}

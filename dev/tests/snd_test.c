@@ -265,10 +265,29 @@ static void TestRoundKillcam(void) {
  G_SNDRecordKill(&g_entities[1],&g_entities[0]); G_SNDRunFrame();
  CHECK(snd.deadline==level.time+snd.pauseMs && level.replayEndTime==0);
 }
+/* A Tactical Insertion can be planted in S&D but never outlives its round
+ * (MW2's round restart frees everything; ClientSpawn never spawns on it in
+ * S&D): the next round's reset frees it with every missile, and so does going
+ * back to waiting for players, which frees nothing else. */
+static gentity_t *Missile(int weapon) {
+ gentity_t *e=G_Spawn(); e->s.eType=ET_MISSILE; e->s.weapon=weapon; e->r.linked=qtrue; return e;
+}
+static void TestInsertionReset(void) {
+ gentity_t *ti,*grenade;
+ Reset(2); Live(); ti=Missile(WP_TACTICAL_INSERTION);
+ Die(1); G_SNDRunFrame(); CHECK(snd.phase==SND_ROUND_OVER && ti->inuse);
+ level.time=snd.deadline; G_SNDRunFrame(); CHECK(snd.phase==SND_COUNTDOWN && snd.round==2 && !ti->inuse);
+ ti=Missile(WP_TACTICAL_INSERTION); grenade=Missile(WP_GRENADE_LAUNCHER);
+ g_clients[1].pers.connected=CON_DISCONNECTED; G_SNDRunFrame();
+ CHECK(snd.phase==SND_WAITING && !ti->inuse && grenade->inuse);
+ ti=Missile(WP_TACTICAL_INSERTION); Player(1,TEAM_BLUE); G_SNDRunFrame();
+ CHECK(snd.phase==SND_COUNTDOWN && !ti->inuse && !grenade->inuse);
+}
 int main(void) {
  TestPlantDefuse(); TestInterrupts(); TestCarrierSpectateJoin(); TestWinsAndSides(); TestWaitingPracticeAndMode();
  TestCountdownAndEmptyTeam();
  TestRoundKillcam();
+ TestInsertionReset();
  printf("PASS: %i S&D round, bomb, timing, spectating, late-join and side-switch checks\n",checks);
  return 0;
 }

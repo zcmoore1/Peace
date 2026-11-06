@@ -274,8 +274,9 @@ static void Run(int rtt, const script_t *sc, int at) {
 	CG_WeapPicture_Reset();
 	memset(&svPs, 0, sizeof(svPs)); memset(&svUse, 0, sizeof(svUse));
 	cl.slot[0] = GUN; cl.slot[1] = WP_MACHINEGUN;
-	cl.lethal = S.action == ACT_SEMTEX_CANCEL ? WP_SEMTEX : WP_FRAG; cl.lethalCount = 2;
+	cl.lethal = S.action == ACT_SEMTEX_CANCEL ? WP_SEMTEX : WP_FRAG; cl.lethalCount = BG_ClassEquipmentCount(cl.lethal);
 	BG_ApplyClass(&svPs, &cl);
+	svPs.ammo[cl.lethal] = 2;	/* as before MW2's counts: a scenario may use one before its own */
 	svPs.stats[STAT_HEALTH] = 100; svPs.pm_type = PM_NORMAL; svPs.weapon = GUN; svPs.weaponstate = WEAPON_READY;
 	svPs.ammo[GUN] = svPs.slotAmmo[SLOT_PRIMARY] = startAmmo = BG_WeaponMagSize(GUN) - 2;
 	svPs.viewheight = 26; svPs.origin[2] = 24.125f; svPs.groundEntityNum = ENTITYNUM_WORLD;

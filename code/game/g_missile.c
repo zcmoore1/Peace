@@ -71,7 +71,7 @@ void G_ExplodeMissile( gentity_t *ent ) {
 	gentity_t *attacker = ent->parent;
 	if (!attacker || !attacker->inuse || !attacker->client ||
 		attacker->client->pers.connected != CON_CONNECTED ||
-		(ent->s.weapon == WP_SEMTEX && attacker->client->pers.enterTime != ent->semtexOwnerConnect))
+		(ent->s.weapon == WP_SEMTEX && attacker->client->pers.enterTime != ent->ownerConnect))
 		attacker = &g_entities[ENTITYNUM_WORLD];
 
 	BG_EvaluateTrajectory( &ent->s.pos, level.time, origin );
@@ -714,6 +714,12 @@ void G_RunMissile( gentity_t *ent ) {
 		G_RunThink(ent);
 		return;
 	}
+	// A Tactical Insertion never moves (MW2's script_model): it waits to be
+	// used, shot or spawned on, and thinks only if something asks it to.
+	if (ent->s.weapon == WP_TACTICAL_INSERTION) {
+		G_RunThink(ent);
+		return;
+	}
 
 	// get current position
 	BG_EvaluateTrajectory( &ent->s.pos, level.time, origin );
@@ -822,87 +828,17 @@ gentity_t *fire_plasma (gentity_t *self, vec3_t start, vec3_t dir) {
 
 /*
 =================
-fire_grenade
+G_GrenadeBolt
+
+A grenade leaving start at velocity: MW2's trajectory (408490, which
+G_FireGrenade sets for a throw and a death drop alike): TR_GRAVITY from start
+at level.time, the velocity snapped (ftol; Q3 truncates it the same way). So
+an offhand is at its start when it is thrown and its fuse runs from there.
+Quake's fire_grenade shares it, adding its own prestep.
 =================
 */
-#define SEMTEX_FUSE_TIME 2500
-
-gentity_t *fire_semtex(gentity_t *self, vec3_t start, vec3_t dir) {
-	gentity_t *bolt = fire_grenade(self, start, dir);
-	bolt->classname = "semtex";
-	bolt->s.weapon = WP_SEMTEX;
-	bolt->s.eFlags = 0;
-	bolt->damage = 0;
-	bolt->nextthink = level.time + SEMTEX_FUSE_TIME;
-	bolt->semtexOwnerConnect = self->client ? self->client->pers.enterTime : 0;
-	return bolt;
-}
-
-/*
-=================
-fire_throwingknife
-
-MW2's G_FireGrenade for weapClass 9: thrown along the view at the knife's
-speed plus the thrower's own speed along it, falling under gravity and
-spinning end over end (apos) from 120 degrees back. It never explodes: in
-flight it lives BG_THROWING_KNIFE_LIFE, and once stopped it stays until a
-pickup frees it - or, the oldest of BG_THROWING_KNIFE_WORLD_MAX out, another is thrown.
-=================
-*/
-gentity_t *fire_throwingknife(gentity_t *self, vec3_t start, vec3_t dir) {
-	gentity_t	*bolt, *oldest = NULL;
-	vec3_t		angles;
-	int			i, count = 0;
-
-	// Peace's bound, not MW2's: the exe never frees a stopped knife, and any
-	// cleanup it has is script. The oldest goes, freed like any other.
-	for ( i = MAX_CLIENTS; i < level.num_entities; i++ ) {
-		gentity_t *knife = &g_entities[i];
-		if ( !knife->inuse || knife->s.eType != ET_MISSILE || knife->s.weapon != WP_THROWING_KNIFE ) continue;
-		count++;
-		if ( !oldest || knife->timestamp < oldest->timestamp ) oldest = knife;
-	}
-	if ( count >= BG_THROWING_KNIFE_WORLD_MAX ) G_FreeEntity( oldest );
-
-	VectorNormalize( dir );
-	bolt = G_Spawn();
-	bolt->classname = "throwingknife";
-	bolt->nextthink = level.time + BG_THROWING_KNIFE_LIFE;
-	bolt->think = G_FreeEntity;
-	bolt->s.eType = ET_MISSILE;
-	bolt->r.svFlags = SVF_USE_CURRENT_ORIGIN;
-	bolt->s.weapon = WP_THROWING_KNIFE;
-	bolt->r.ownerNum = self->s.number;
-	bolt->parent = self;
-	bolt->damage = BG_THROWING_KNIFE_DAMAGE;
-	bolt->methodOfDeath = MOD_GAUNTLET;
-	bolt->clipmask = MASK_SHOT;
-	bolt->target_ent = NULL;
-	bolt->timestamp = level.time;		// identifies this knife to a use hold (knifeHoldSpawn)
-
-	bolt->s.pos.trType = TR_GRAVITY;
-	bolt->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;
-	VectorCopy( start, bolt->s.pos.trBase );
-	VectorScale( dir, BG_THROWING_KNIFE_SPEED, bolt->s.pos.trDelta );
-	if ( self->client ) {
-		VectorMA( bolt->s.pos.trDelta, DotProduct( self->client->ps.velocity, dir ), dir, bolt->s.pos.trDelta );
-	}
-	SnapVector( bolt->s.pos.trDelta );
-	VectorCopy( start, bolt->r.currentOrigin );
-
-	vectoangles( dir, angles );
-	angles[PITCH] = AngleNormalize180( angles[PITCH] - 120 );
-	bolt->s.apos.trType = TR_LINEAR;
-	bolt->s.apos.trTime = level.time;
-	VectorCopy( angles, bolt->s.apos.trBase );
-	VectorSet( bolt->s.apos.trDelta, BG_THROWING_KNIFE_SPIN, 0, 0 );
-	return bolt;
-}
-
-gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir) {
+static gentity_t *G_GrenadeBolt( gentity_t *self, vec3_t start, const vec3_t velocity ) {
 	gentity_t	*bolt;
-
-	VectorNormalize (dir);
 
 	bolt = G_Spawn();
 	bolt->classname = "grenade";
@@ -923,13 +859,194 @@ gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir) {
 	bolt->target_ent = NULL;
 
 	bolt->s.pos.trType = TR_GRAVITY;
-	bolt->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;		// move a bit on the very first frame
+	bolt->s.pos.trTime = level.time;
 	VectorCopy( start, bolt->s.pos.trBase );
-	VectorScale( dir, 700, bolt->s.pos.trDelta );
+	VectorCopy( velocity, bolt->s.pos.trDelta );
 	SnapVector( bolt->s.pos.trDelta );			// save net bandwidth
 
 	VectorCopy (start, bolt->r.currentOrigin);
 
+	return bolt;
+}
+
+// The frag and the flash (the flash has no effect yet: no damage at all).
+static gentity_t *fire_offhandgrenade( gentity_t *self, int weapon, vec3_t start, const vec3_t velocity ) {
+	gentity_t *bolt = G_GrenadeBolt( self, start, velocity );
+	bolt->nextthink = level.time + BG_OffhandFuseTime( weapon );
+	if ( weapon == WP_FLASH ) {
+		bolt->damage = 0;
+		bolt->splashDamage = 0;
+	}
+	return bolt;
+}
+
+/*
+=================
+fire_semtex
+
+semtex_mp: a grenade that sticks to all, with its fuseTime (2s) from the
+throw (MW2 writes no fuse on a stick path).
+=================
+*/
+gentity_t *fire_semtex(gentity_t *self, vec3_t start, vec3_t velocity) {
+	gentity_t *bolt = G_GrenadeBolt(self, start, velocity);
+	bolt->classname = "semtex";
+	bolt->s.weapon = WP_SEMTEX;
+	bolt->s.eFlags = 0;
+	bolt->damage = 0;
+	bolt->nextthink = level.time + BG_OffhandFuseTime( WP_SEMTEX );
+	bolt->ownerConnect = self->client ? self->client->pers.enterTime : 0;
+	return bolt;
+}
+
+/*
+=================
+fire_throwingknife
+
+MW2's G_FireGrenade for weapClass 9: leaving start at velocity (the throw's,
+or a death drop's) at level.time, as 408490 sets every grenade's trajectory,
+falling under gravity and spinning end over end (apos) from
+120 degrees back along it. It never explodes: in flight it lives its
+fuseTime (BG_THROWING_KNIFE_LIFE), and once stopped it stays until a pickup
+frees it - or, the oldest of BG_THROWING_KNIFE_WORLD_MAX out, another is thrown.
+=================
+*/
+gentity_t *fire_throwingknife(gentity_t *self, vec3_t start, vec3_t velocity) {
+	gentity_t	*bolt, *oldest = NULL;
+	vec3_t		angles, dir;
+	int			i, count = 0;
+
+	// Peace's bound, not MW2's: the exe never frees a stopped knife, and any
+	// cleanup it has is script. The oldest goes, freed like any other.
+	for ( i = MAX_CLIENTS; i < level.num_entities; i++ ) {
+		gentity_t *knife = &g_entities[i];
+		if ( !knife->inuse || knife->s.eType != ET_MISSILE || knife->s.weapon != WP_THROWING_KNIFE ) continue;
+		count++;
+		if ( !oldest || knife->timestamp < oldest->timestamp ) oldest = knife;
+	}
+	if ( count >= BG_THROWING_KNIFE_WORLD_MAX ) G_FreeEntity( oldest );
+
+	VectorNormalize2( velocity, dir );
+	bolt = G_Spawn();
+	bolt->classname = "throwingknife";
+	bolt->nextthink = level.time + BG_THROWING_KNIFE_LIFE;
+	bolt->think = G_FreeEntity;
+	bolt->s.eType = ET_MISSILE;
+	bolt->r.svFlags = SVF_USE_CURRENT_ORIGIN;
+	bolt->s.weapon = WP_THROWING_KNIFE;
+	bolt->r.ownerNum = self->s.number;
+	bolt->parent = self;
+	bolt->damage = BG_THROWING_KNIFE_DAMAGE;
+	bolt->methodOfDeath = MOD_GAUNTLET;
+	bolt->clipmask = MASK_SHOT;
+	bolt->target_ent = NULL;
+	bolt->timestamp = level.time;		// identifies this knife to a use hold (useHoldSpawn)
+
+	bolt->s.pos.trType = TR_GRAVITY;
+	bolt->s.pos.trTime = level.time;		// MW2's 408490: no prestep
+	VectorCopy( start, bolt->s.pos.trBase );
+	VectorCopy( velocity, bolt->s.pos.trDelta );
+	SnapVector( bolt->s.pos.trDelta );
+	VectorCopy( start, bolt->r.currentOrigin );
+
+	vectoangles( dir, angles );
+	angles[PITCH] = AngleNormalize180( angles[PITCH] - 120 );
+	bolt->s.apos.trType = TR_LINEAR;
+	bolt->s.apos.trTime = level.time;
+	VectorCopy( angles, bolt->s.apos.trBase );
+	VectorSet( bolt->s.apos.trDelta, BG_THROWING_KNIFE_SPIN, 0, 0 );
+	return bolt;
+}
+
+/*
+=================
+fire_grenade
+
+Quake's grenade launcher (and shooter_grenade): 700 along the aim, with
+Quake's prestep.
+=================
+*/
+gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir) {
+	gentity_t	*bolt;
+	vec3_t		velocity;
+
+	VectorNormalize (dir);
+	VectorScale( dir, 700, velocity );
+	bolt = G_GrenadeBolt( self, start, velocity );
+	bolt->s.pos.trTime -= MISSILE_PRESTEP_TIME;		// move a bit on the very first frame
+	return bolt;
+}
+
+/*
+=================
+G_OffhandFuse
+
+MW2's fuse (5e9400): a thrower's grenadeTimeLeft, if it has any, is the fuse
+- all that is left of a cooked frag, or the whole fuseTime HOLD wrote - and
+is zeroed; otherwise the fuse given. A fuse that lands on 0 is 30s, and none
+is longer than 60s.
+=================
+*/
+static void G_OffhandFuse( gentity_t *bolt, gentity_t *self, int fuse ) {
+	gclient_t *client = self ? self->client : NULL;
+	if ( client && client->ps.grenadeTimeLeft ) {
+		bolt->nextthink = level.time + client->ps.grenadeTimeLeft;
+		client->ps.grenadeTimeLeft = 0;
+	} else {
+		bolt->nextthink = level.time + fuse;
+	}
+	if ( !bolt->nextthink ) {
+		bolt->nextthink = level.time + 30000;
+	}
+	if ( bolt->nextthink > level.time + 60000 ) {
+		bolt->nextthink = level.time + 60000;
+	}
+}
+
+/*
+=================
+fire_equipment
+
+MW2's G_FireGrenade (464530) for Peace's thrown equipment: the offhand's
+missile from start at velocity, with MW2's fuse. The throw (Weapon_ThrowEquipment)
+and the death drop (G_DropOffhand) both come here.
+=================
+*/
+gentity_t *fire_equipment( gentity_t *self, int weapon, vec3_t start, vec3_t velocity ) {
+	gentity_t *bolt;
+	if ( weapon == WP_SEMTEX ) {
+		bolt = fire_semtex( self, start, velocity );
+	} else if ( weapon == WP_THROWING_KNIFE ) {
+		bolt = fire_throwingknife( self, start, velocity );
+	} else {
+		bolt = fire_offhandgrenade( self, weapon, start, velocity );
+	}
+	G_OffhandFuse( bolt, self, BG_OffhandFuseTime( weapon ) );
+	return bolt;
+}
+
+/*
+=================
+G_ThrowOffhand
+
+MW2's throw (4c3690): the offhand leaves start at its own data's velocity
+(BG_OffhandLaunchVelocity: forward at projectileSpeed, plus projectileSpeedUp
+and projectileSpeedForward) with MW2's fuse (fire_equipment), and then -
+after its trajectory is snapped - gains the thrower's own velocity along the
+throw (4c375f-4c37c3): that component only, which may be negative, neither
+clamped nor snapped.
+=================
+*/
+gentity_t *G_ThrowOffhand( gentity_t *self, int weapon, vec3_t start, const vec3_t forward ) {
+	gentity_t	*bolt;
+	vec3_t		velocity, dir;
+
+	BG_OffhandLaunchVelocity( weapon, forward, velocity );
+	bolt = fire_equipment( self, weapon, start, velocity );
+	if ( bolt && self->client ) {
+		VectorNormalize2( velocity, dir );
+		VectorMA( bolt->s.pos.trDelta, DotProduct( self->client->ps.velocity, dir ), dir, bolt->s.pos.trDelta );
+	}
 	return bolt;
 }
 

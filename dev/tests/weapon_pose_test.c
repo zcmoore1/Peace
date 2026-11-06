@@ -727,12 +727,16 @@ static void TestSprintFlow(weapAnimDef_t *def) {
   CHECK(move->fit==MOVE_FIT_RETURN && move->clip==clip && move->weight==1);
   CHECK(fabs(move->time-from)<.01f && PoseDistance(&before,&after)<.001f);
   home=exiting ? CG_WeapAnim_LastFrameTime(def,clip) : 0;
-  for(t=0;move->targetWeight>0 && t<MOVE_RETURN_MS+16;t+=8) {
+  /* A partial entry runs back over the whole exit, as a sprint tap reverses
+   * it; an exit under way keeps the exit's own pace for what is left of it. */
+  CHECK(fabs(move->returnLength-(exiting ? (home-from)/home*BG_WeaponSprintOutTime(flowPs.weapon) :
+   BG_WeaponSprintOutTime(flowPs.weapon)))<1);
+  for(t=0;move->targetWeight>0 && t<BG_WeaponSprintOutTime(flowPs.weapon)+16;t+=8) {
    last=move->time; FlowStep();
    CHECK(flowPs.weaponstate==WEAPON_READY && flowPs.weaponTime==0);
    CHECK(move->clip==clip && fabs(home-move->time)<=fabs(home-last)+.01f);
   }
-  CHECK(move->targetWeight==0 && fabs(move->time-home)<.01f);
+  CHECK(move->targetWeight==0 && fabs(move->time-home)<.01f && t+8>=move->returnLength);
   /* The return has reached home. Its short release must hold that endpoint;
    * advancing a returned entry away again gives the tail a visible hiccup. */
   for(t=0;t<48;t+=8) {
@@ -754,10 +758,21 @@ static void TestSprintFlow(weapAnimDef_t *def) {
  nativePose=qfalse;
 }
 
-/* A cancelled sprint transition must visibly leave the carry promptly. The
- * old double-eased, full sprint-out return barely moved in its first 40ms.
- * Measure the actual shipped gun pose in both rendering paths, not only a
- * decreasing clip clock. Gameplay remains ready throughout the visual return. */
+/* The glide's picture is the ordinary sprint exit's, minus the lock. Sprint, Y,
+ * end the sprint, Y: gameplay is ready at once, and the gun comes home exactly
+ * as the sprint layer would bring that same posture home when a sprint stops -
+ * from the carry, from an exit already under way, out of the carry loop, and
+ * back down a partial entry over the whole sprint-out time (a sprint tap's
+ * reversal). So it leaves the carry at the exit's pace (the old double-eased
+ * return barely moved for 40ms) and settles as gently as the exit does (the
+ * old twice-rate retrace was home in half the exit, at twice its peak speed).
+ * Shipped poses are compared frame by frame in both rendering paths, and every
+ * duration is read from the weapon's tables, never written here. */
+#define POSTURE_CARRY   0	/* the entry finished and holding its carry */
+#define POSTURE_EXITING 1	/* an exit already part way home */
+#define POSTURE_LOOP    2	/* the carry loop, at its widest bob */
+#define POSTURE_PARTIAL 3	/* an entry still part way out */
+#define SPRINT_FRAMES   64
 static float GunRotationDistance(const modelPose_t *a,const modelPose_t *b) {
  float same=0,opposite=0;int k;
  for(k=0;k<4;k++) {
@@ -766,41 +781,132 @@ static float GunRotationDistance(const modelPose_t *a,const modelPose_t *b) {
  }
  return sqrtf(same<opposite ? same : opposite);
 }
-static void TestSprintReturnResponse(weapAnimDef_t *def,int weapon,const char *path) {
- playerState_t ps;
- modelPose_t before,after,home;
- int native,exiting,t;
- float distance,remaining;
- LoadAuthoredPoses(path);
- for(native=0;native<2;native++)for(exiting=0;exiting<2;exiting++) {
-  nativePose=native;Ready(&ps,weapon);
-  ps.pm_flags=PMF_SPRINTING;ps.weaponstate=WEAPON_SPRINT_IN;
-  ps.weaponTime=BG_WeaponSprintInTime(weapon);Picture(&ps,0,&before);
-  ps.weaponTime=0;Picture(&ps,BG_WeaponSprintInTime(weapon),&before);
-  if(exiting) {
-   ps.pm_flags=0;ps.weaponstate=WEAPON_SPRINT_OUT;
-   ps.weaponTime=BG_WeaponSprintOutTime(weapon);Picture(&ps,0,&before);
+/* Clips may store a joint's rotation with either quaternion sign; q and -q
+ * are the same rotation, so compare whichever sign is nearer. */
+static float RigDistance(const modelPose_t *a,const modelPose_t *b) {
+ float distance=0;int j,k;
+ CHECK(a->numJoints==b->numJoints);
+ for(j=0;j<a->numJoints;j++) {
+  float same=0,opposite=0;
+  for(k=0;k<3;k++) {
+   float d=fabs(a->joints[j].translate[k]-b->joints[j].translate[k]);
+   if(d>distance)distance=d;
   }
+  for(k=0;k<4;k++) {
+   float x=a->joints[j].rotate[k],y=b->joints[j].rotate[k];
+   if(fabs(x-y)>same)same=fabs(x-y);
+   if(fabs(x+y)>opposite)opposite=fabs(x+y);
+  }
+  if((same<opposite ? same : opposite)>distance)distance=same<opposite ? same : opposite;
+ }
+ return distance;
+}
+static void SprintPosture(playerState_t *ps,int weapon,int posture,int quarter) {
+ modelPose_t pose;
+ int in=BG_WeaponSprintInTime(weapon),out=BG_WeaponSprintOutTime(weapon);
+ Ready(ps,weapon);
+ ps->pm_flags=PMF_SPRINTING;ps->weaponstate=WEAPON_SPRINT_IN;ps->weaponTime=in;Picture(ps,0,&pose);
+ if(posture==POSTURE_PARTIAL) {
+  ps->weaponTime=in-in*quarter/4;Picture(ps,in*quarter/4,&pose);return;
+ }
+ ps->weaponTime=0;Picture(ps,in,&pose);
+ if(posture==POSTURE_LOOP) {
+  ps->weaponstate=WEAPON_SPRINTING;Picture(ps,0,&pose);
+  Picture(ps,(int)CG_WeapAnim_ClipLength(&bg_weapAnimDefs[weapon],WANIM_SPRINT_LOOP)/4,&pose);
+ } else if(posture==POSTURE_EXITING) {
+  ps->pm_flags=0;ps->weaponstate=WEAPON_SPRINT_OUT;ps->weaponTime=out;Picture(ps,0,&pose);
+  ps->weaponTime=out-out*quarter/4;Picture(ps,out*quarter/4,&pose);
+ }
+}
+/* An ordinary sprint stop: pmove stamps the whole exit unless one is already
+ * running, and READY follows the think its lock runs out. */
+static int SprintExitFrames(playerState_t *ps,int weapon,modelPose_t *poses) {
+ int n=0;
+ ps->pm_flags=0;
+ if(ps->weaponstate!=WEAPON_SPRINT_OUT) {
+  ps->weaponstate=WEAPON_SPRINT_OUT;ps->weaponTime=BG_WeaponSprintOutTime(weapon);
+ }
+ Picture(ps,0,&poses[n++]);
+ while(ps->weaponstate==WEAPON_SPRINT_OUT) {
+  ps->weaponTime-=8;
+  if(ps->weaponTime<=0) { ps->weaponTime=0;ps->weaponstate=WEAPON_READY; }
+  CHECK(n<SPRINT_FRAMES);Picture(ps,8,&poses[n++]);
+ }
+ return n;
+}
+static void TestSprintReturnLikeExit(weapAnimDef_t *def,int weapon,const char *path) {
+ static modelPose_t exitPoses[SPRINT_FRAMES];
+ animLayer_t *move=&cg_weapLayers[LAYER_MOVE];
+ playerState_t ps;
+ modelPose_t before,after,last,home;
+ int native,posture,quarter,frames,k,t,out=BG_WeaponSprintOutTime(weapon);
+ float exitPeak,returnPeak,step;
+ LoadAuthoredPoses(path);
+ home=authored[def->clips[WANIM_SPRINT_IN].firstFrame];
+ for(native=0;native<2;native++)for(posture=POSTURE_CARRY;posture<=POSTURE_PARTIAL;posture++)
+ for(quarter=1;quarter<4;quarter++) {
+  int expected;
+  if(posture!=POSTURE_EXITING && posture!=POSTURE_PARTIAL && quarter>1) continue;
+  nativePose=native;
+  SprintPosture(&ps,weapon,posture,quarter);
+  frames=SprintExitFrames(&ps,weapon,exitPoses);
+  /* How long an ordinary stop's exit takes from this posture: the whole
+   * sprint-out, or what is left of one already under way. */
+  expected=posture==POSTURE_EXITING ? out-out*quarter/4 : out;
+  CHECK(frames==(expected+7)/8+1);
+
+  SprintPosture(&ps,weapon,posture,quarter);
   ps.weaponstate=WEAPON_DROPPING;ps.weaponTime=BG_WeaponDropTime(weapon);
   Picture(&ps,0,&before);CHECK(CG_WeapAnim_HoldsDrop());
   ps.pm_flags=0;ps.weaponstate=WEAPON_READY;ps.weaponTime=0;
-  Picture(&ps,0,&after);CHECK(PoseDistance(&before,&after)<.001f);
-  home=authored[def->clips[WANIM_SPRINT_IN].firstFrame];
-  distance=GunRotationDistance(&before,&home);
-  CHECK(distance>.1f);
-  for(t=0;t<40;t+=8)Picture(&ps,8,&after);
-  remaining=GunRotationDistance(&after,&home);
-  if(remaining>=distance*.9f)fprintf(stderr,"sprint response: gun %d native %d exit %d distance %.3f remaining %.3f clip %d time %.3f return %.3f/%.3f\n",
-   weapon,native,exiting,distance,remaining,cg_weapLayers[LAYER_MOVE].clip,cg_weapLayers[LAYER_MOVE].time,
-   cg_weapLayers[LAYER_MOVE].returnTime,cg_weapLayers[LAYER_MOVE].returnLength);
-  CHECK(remaining<distance*.9f);
-  for(;t<144;t+=8)Picture(&ps,8,&after);
-  CHECK(GunRotationDistance(&after,&home)<distance*.03f); /* allow idle breathing */
-  CHECK(cg_weapLayers[LAYER_MOVE].fit==MOVE_FIT_NONE);
-  CHECK(ps.weaponstate==WEAPON_READY && ps.weaponTime==0);
+  Picture(&ps,0,&after);
+  /* Ownership passes to the return with the pose on screen; only a carry
+   * loop drops its bob, as an ordinary stop in the loop does. */
+  if(posture!=POSTURE_LOOP) CHECK(PoseDistance(&before,&after)<.001f);
+  CHECK(move->fit==MOVE_FIT_RETURN && move->weight==1 && cg_weapLayers[LAYER_RETAINED].weight==0);
+  CHECK(move->clip==(posture==POSTURE_CARRY || posture==POSTURE_PARTIAL ? WANIM_SPRINT_IN : WANIM_SPRINT_OUT));
+  CHECK(fabs(move->returnLength-expected)<1);
+  exitPeak=returnPeak=0;last=after;
+  for(k=0;k<frames;k++) {
+   float d;
+   if(k) {
+    Picture(&ps,8,&after);
+    step=GunRotationDistance(&after,&last);if(step>returnPeak)returnPeak=step;
+    step=GunRotationDistance(&exitPoses[k],&exitPoses[k-1]);if(step>exitPeak)exitPeak=step;
+   }
+   /* Still travelling until the exit itself would arrive, then home. */
+   CHECK(ps.weaponstate==WEAPON_READY && ps.weaponTime==0);
+   if(k*8+1<expected) CHECK(move->fit==MOVE_FIT_RETURN);
+   else if(k*8>expected+1) CHECK(move->fit==MOVE_FIT_NONE);
+   /* The gun's own progress home is the exit's; the whole rig is its pose
+    * within the sampling of two clips of one authored curve (a reversal
+    * runs back down the entry, which has its own frame count). */
+   d=fabs(GunRotationDistance(&after,&home)-GunRotationDistance(&exitPoses[k],&home));
+   if(d>=.005f || RigDistance(&after,&exitPoses[k])>=.15f)
+    fprintf(stderr,"sprint return: gun %d native %d posture %d quarter %d frame %d off the exit by %.4f / %.4f\n",
+     weapon,native,posture,quarter,k,d,RigDistance(&after,&exitPoses[k]));
+   CHECK(d<.005f && RigDistance(&after,&exitPoses[k])<.15f);
+   last=after;
+  }
+  /* Never faster than the exit, so no rush; a reversal never flicks home. */
+  CHECK(returnPeak<=exitPeak*1.05f+.002f);
+  /* The 40ms release holds the ready endpoint. */
+  for(t=0;t<48;t+=8) {
+   Picture(&ps,8,&after);
+   CHECK(GunRotationDistance(&after,&home)<.02f); /* allow idle breathing */
+  }
+  CHECK(move->weight==0 && move->fit==MOVE_FIT_NONE);
  }
+ nativePose=qfalse;
+}
+static void TestSprintReturnUnmoved(int weapon,const char *path) {
+ playerState_t ps;
+ modelPose_t before,after,home;
+ int native,t;
+ LoadAuthoredPoses(path);
  /* If both presses arrive before the entry visibly moves, releasing its
-  * ownership must not start that entry while fading it out over ready. */
+  * ownership must not start that entry while fading it out over ready.
+  * There is nothing to retrace, so it is no whole-exit return either. */
  for(native=0;native<2;native++) {
   nativePose=native;Ready(&ps,weapon);
   ps.pm_flags=PMF_SPRINTING;ps.weaponstate=WEAPON_SPRINT_IN;
@@ -809,6 +915,7 @@ static void TestSprintReturnResponse(weapAnimDef_t *def,int weapon,const char *p
   Picture(&ps,0,&before);CHECK(CG_WeapAnim_HoldsDrop());
   ps.pm_flags=0;ps.weaponstate=WEAPON_READY;ps.weaponTime=0;
   Picture(&ps,0,&after);
+  CHECK(cg_weapLayers[LAYER_MOVE].fit==MOVE_FIT_RETURN && cg_weapLayers[LAYER_MOVE].returnLength<=1);
   for(t=0;t<80;t+=8) {
    Picture(&ps,8,&after);
    CHECK(GunRotationDistance(&after,&home)<.015f);
@@ -870,7 +977,7 @@ static void FlowEndSprint(void) {
 static void TestSprintReentry(weapAnimDef_t *def) {
  animLayer_t *move=&cg_weapLayers[LAYER_MOVE],*sprint=&cg_weapLayers[LAYER_SPRINT];
  modelPose_t before,after;
- int native,t,ammo;
+ int native,t,ammo,settle;
  float last,len=CG_WeapAnim_LastFrameTime(def,WANIM_SPRINT_IN);
  LoadAuthoredPoses("assets/baseq3/models/weapons2/spas12/view.iqm");
  for(native=0;native<2;native++) {
@@ -889,7 +996,7 @@ static void TestSprintReentry(weapAnimDef_t *def) {
   CHECK(flowPs.groundEntityNum==ENTITYNUM_WORLD && flowPs.weaponstate==WEAPON_DROPPING);
   FlowSlot(SLOT_SECONDARY);FlowWorldStep(qtrue);
   CHECK(flowPs.weaponstate==WEAPON_READY && flowPs.weaponTime==0 && move->fit==MOVE_FIT_RETURN);
-  for(t=0;t<MOVE_RETURN_MS+100;t+=8)FlowWorldStep(qtrue);
+  for(t=0;t<BG_WeaponSprintOutTime(WP_SHOTGUN)+100;t+=8)FlowWorldStep(qtrue);
   CHECK(move->weight==0 && sprint->weight==0 && !cg_retainedActive);
   flow.cmd.buttons=BUTTON_SPRINT;FlowWorldStep(qtrue);Picture(&flowPs,0,&after);
   CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN && flowPs.weaponTime==BG_WeaponSprintInTime(WP_SHOTGUN));
@@ -927,21 +1034,42 @@ static void TestSprintReentry(weapAnimDef_t *def) {
   FlowEndSprint();FlowSlot(SLOT_SECONDARY);FlowWorldStep(qtrue);
   CHECK(flowPs.weaponstate==WEAPON_READY && move->fit==MOVE_FIT_RETURN && move->clip==WANIM_SPRINT_IN);
 
-  /* A cancelled carried sprint is fading out, not still at full carry. A
-   * restart late in that release must not promote its faint overlay to full
-   * carry and skip the new entry. */
-  FlowWorldBegin();flow.cmd.buttons=BUTTON_SPRINT;
-  for(t=0;t<BG_WeaponSprintInTime(WP_SHOTGUN)+32;t+=8)FlowWorldStep(qtrue);
-  CHECK(flowPs.weaponstate==WEAPON_SPRINTING);
-  FlowSlot(SLOT_PRIMARY);FlowWorldStep(qtrue);FlowEndSprint();
-  FlowSlot(SLOT_SECONDARY);FlowWorldStep(qtrue);
-  CHECK(cg_weapLayers[LAYER_RETAINED].clip==WANIM_SPRINT_LOOP && !cg_retainedActive);
-  for(t=0;t<48;t+=8)FlowWorldStep(qtrue);
-  CHECK(cg_weapLayers[LAYER_RETAINED].weight>0 && cg_weapLayers[LAYER_RETAINED].weight<.5f);
-  Picture(&flowPs,0,&before);
-  flow.cmd.buttons=BUTTON_SPRINT;FlowWorldStep(qtrue);Picture(&flowPs,0,&after);
-  CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN && flowPs.weaponTime==BG_WeaponSprintInTime(WP_SHOTGUN));
-  CHECK(sprint->startFraction<1);
+  /* The glide out of a full sprint: the carry loop was the source, and its
+   * way home is its own exit from the carry, over the whole sprint-out time,
+   * never a crossfade of the carry into idle. Gameplay is ready throughout. */
+  for(settle=0;settle<2;settle++) {
+   FlowWorldBegin();flow.cmd.buttons=BUTTON_SPRINT;
+   for(t=0;t<BG_WeaponSprintInTime(WP_SHOTGUN)+32;t+=8)FlowWorldStep(qtrue);
+   CHECK(flowPs.weaponstate==WEAPON_SPRINTING);
+   FlowSlot(SLOT_PRIMARY);FlowWorldStep(qtrue);
+   CHECK(CG_WeapAnim_HoldsDrop() && cg_weapLayers[LAYER_RETAINED].clip==WANIM_SPRINT_LOOP);
+   FlowEndSprint();
+   FlowSlot(SLOT_SECONDARY);FlowWorldStep(qtrue);
+   CHECK(flowPs.weaponstate==WEAPON_READY && flowPs.weaponTime==0 && !cg_retainedActive);
+   CHECK(cg_weapLayers[LAYER_RETAINED].weight==0);
+   CHECK(move->fit==MOVE_FIT_RETURN && move->clip==WANIM_SPRINT_OUT && move->weight==1);
+   CHECK(fabs(move->returnLength-BG_WeaponSprintOutTime(WP_SHOTGUN))<1);
+   for(t=0;t<48;t+=8)FlowWorldStep(qtrue);
+   CHECK(move->fit==MOVE_FIT_RETURN && move->weight==1);
+   if(settle) {
+    /* Left alone, it arrives with the exit and releases to idle. */
+    for(t=56;t<BG_WeaponSprintOutTime(WP_SHOTGUN)+48;t+=8) {
+     FlowWorldStep(qtrue);
+     CHECK(flowPs.weaponstate==WEAPON_READY && flowPs.weaponTime==0);
+     if(t+8<BG_WeaponSprintOutTime(WP_SHOTGUN)) CHECK(move->fit==MOVE_FIT_RETURN);
+    }
+    CHECK(move->fit==MOVE_FIT_NONE && move->weight==0);
+    continue;
+   }
+   /* A restart part way home takes the exit's visible posture, neither the
+    * full carry nor frame zero, and still stamps the full entry lock. */
+   Picture(&flowPs,0,&before);
+   flow.cmd.buttons=BUTTON_SPRINT;FlowWorldStep(qtrue);Picture(&flowPs,0,&after);
+   CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN && flowPs.weaponTime==BG_WeaponSprintInTime(WP_SHOTGUN));
+   /* Exit and entry are separately sampled clips of one authored curve. */
+   CHECK(GunRotationDistance(&before,&after)<.005f && RigDistance(&before,&after)<.15f);
+   CHECK(sprint->startFraction>0 && sprint->startFraction<1);
+  }
  }
  nativePose=qfalse;
 }
@@ -1045,6 +1173,58 @@ static void TestPictureContinuity(weapAnimDef_t *def,int weapon,const char *path
  }
  nativePose=qfalse;
 }
+/* The MD3 hand path must announce a real weapon change too: a gun coming back
+ * from melee/equipment cannot inherit its hidden sprint, fire or retained pose. */
+static void TestActionHandoff(int gun) {
+ const int actions[]={WP_KNIFE,WP_THROWING_KNIFE,WP_SEMTEX};
+ const int states[]={WEAPON_FIRING,WEAPON_SPRINTING};
+ playerState_t ps,before; refEntity_t entity; int i,j;
+ CG_WeapAnim_RegisterClips(WP_KNIFE,2,"assets/baseq3/models/weapons2/throwingknife/melee.cfg");
+ CG_WeapAnim_RegisterClips(WP_THROWING_KNIFE,2,"assets/baseq3/models/weapons2/throwingknife/throw.cfg");
+ for(i=0;i<ARRAY_LEN(actions);i++)for(j=0;j<ARRAY_LEN(states);j++) {
+  Ready(&ps,gun); ps.weaponstate=states[j];ps.weaponAnimSeq=ASEQ_FIRE;ps.weaponAnimTime=100;
+  memset(&entity,0,sizeof(entity));entity.hModel=1;CG_WeapAnim_Apply(&ps,&entity,16);
+  ps.weapon=actions[i];ps.weaponstate=WEAPON_RAISING;ps.weaponTime=BG_WeaponRaiseTime(ps.weapon);
+  before=ps;CG_WeapAnim_ActionFrame(&ps,&entity);
+  CHECK(!memcmp(&before,&ps,sizeof(ps)) && cg_weapAnimWeapon==ps.weapon);
+  ps.weapon=gun;ps.weaponstate=WEAPON_RAISING;ps.weaponAction=WA_MELEE|WA_FIRED;
+  ps.weaponTime=BG_WeaponDrawTime(&ps);cg.time+=1000;CG_WeapAnim_Apply(&ps,&entity,16);
+  CHECK(!cg_retainedActive && cg_weapLayers[LAYER_SPRINT].weight==0);
+  CHECK(entity.oldframe==bg_weapAnimDefs[gun].clips[WANIM_RAISE].firstFrame);
+  CHECK(entity.backlerp==1 && cg_weapLayers[LAYER_MOVE].weight==1);
+ }
+}
+
+/* The throwing knife is ready on its press (throwingknife_mp holdFireTime 0),
+ * but its authored pull-out still plays, as picture only, from when the
+ * picture first showed it, then holds; a throw takes the picture at once, and
+ * the player state is never touched. */
+static void TestKnifePullPicture(void) {
+ playerState_t ps,before; refEntity_t entity; const weapAnimDef_t *def; int start,len,first,last;
+ CG_WeapAnim_RegisterClips(WP_THROWING_KNIFE,2,"assets/baseq3/models/weapons2/throwingknife/throw.cfg");
+ def=&bg_weapAnimDefs[WP_THROWING_KNIFE];
+ first=def->clips[WANIM_RAISE].firstFrame; last=first+def->clips[WANIM_RAISE].numFrames-1;
+ len=(int)CG_WeapAnim_LastFrameTime(def,WANIM_RAISE);
+ CHECK(len>0 && BG_THROWING_KNIFE_PULL_MS==0);
+ Ready(&ps,WP_SHOTGUN); cg.time=50000; memset(&entity,0,sizeof(entity)); entity.hModel=1;
+ ps.weapon=WP_THROWING_KNIFE; ps.weaponstate=WEAPON_READY; ps.weaponTime=0;
+ start=cg.time; before=ps; CG_WeapAnim_ActionFrame(&ps,&entity);
+ CHECK(!memcmp(&before,&ps,sizeof(ps)) && entity.oldframe==first);
+ cg.time=start+len/2; CG_WeapAnim_ActionFrame(&ps,&entity);
+ CHECK(entity.oldframe>first && entity.oldframe<last);
+ cg.time=start+len+1; CG_WeapAnim_ActionFrame(&ps,&entity);
+ CHECK(entity.oldframe<first || entity.oldframe>last);	/* held */
+ /* a throw on the next command cuts the pull-out */
+ ps.weapon=WP_SHOTGUN; CG_WeapAnim_ActionFrame(&ps,&entity);
+ ps.weapon=WP_THROWING_KNIFE; ps.weaponstate=WEAPON_READY; cg.time+=16; CG_WeapAnim_ActionFrame(&ps,&entity);
+ CHECK(entity.oldframe==first);
+ ps.weaponstate=WEAPON_FIRING; ps.weaponTime=BG_QUICK_ACTION_HOLD; cg.time+=16; before=ps;
+ { qboolean drawn=CG_WeapAnim_ActionFrame(&ps,&entity);
+   CHECK(!memcmp(&before,&ps,sizeof(ps)));
+   /* the throw's own clip, or (none authored) the caller's picture: never the pull-out */
+   CHECK(def->clips[WANIM_FIRE].numFrames>0 ? drawn && entity.oldframe==def->clips[WANIM_FIRE].firstFrame : !drawn); }
+}
+
 int main(void) {
  playerState_t ps;
  const int states[]={WEAPON_READY,WEAPON_FIRING,WEAPON_BOLTING};
@@ -1077,16 +1257,21 @@ int main(void) {
  TestRestampLower(def,WP_SHOTGUN); TestRetainedKeptHolster(); TestSnapshotRestamp(def);
  TestShortDropKept();
  TestSprintFlow(def);
- TestSprintReturnResponse(def,WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm");
+ TestSprintReturnLikeExit(def,WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm");
+ TestSprintReturnUnmoved(WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm");
  TestSprintReentry(def);
  TestPictureContinuity(def,WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm");
+ TestActionHandoff(WP_SHOTGUN);
+ TestKnifePullPicture();
  CG_WeapAnim_RegisterClips(WP_M40A3,2,"assets/baseq3/models/weapons2/m40a3/view.cfg");
  def=&bg_weapAnimDefs[WP_M40A3];
  TestRestampLower(def,WP_M40A3);
  TestSprint(def,WP_M40A3); TestFirstDraw(def,WP_M40A3);
- TestSprintReturnResponse(def,WP_M40A3,"assets/baseq3/models/weapons2/m40a3/view.iqm");
+ TestSprintReturnLikeExit(def,WP_M40A3,"assets/baseq3/models/weapons2/m40a3/view.iqm");
+ TestSprintReturnUnmoved(WP_M40A3,"assets/baseq3/models/weapons2/m40a3/view.iqm");
  TestReloadPerk(def,WP_M40A3);
  TestOwnership(def); TestExclusions(def);
  TestPictureContinuity(def,WP_M40A3,"assets/baseq3/models/weapons2/m40a3/view.iqm");
+ TestActionHandoff(WP_M40A3);
  printf("PASS: %d weapon presentation ownership checks\n",checks); return 0;
 }

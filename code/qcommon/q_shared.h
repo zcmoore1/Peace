@@ -1188,7 +1188,7 @@ typedef struct playerState_s {
 	int			weaponAnimTime;	// ms ELAPSED into the current anim SEGMENT (counts UP). -1 = no anim playing. Notes fire on crossings of this; never derived from weaponTime.
 	int			weaponAction;	// action, button history, cancel acknowledgement, recovery (9 bits)
 	int			weaponAnimSeq;	// which reload segment is playing (reloadSeq_t)
-	int             weaponDraw;     // 0 ordinary raise, 1 first deployment
+	int             weaponDraw;     // 0 ordinary raise, BG_DRAW_FIRST first deployment, BG_DRAW_ALT the raise after an alt switch
 	int             weapFlags;      // PWF_* (MW2's name): PWF_USE_RELOAD is the server's use/reload request
 	int             perks;          // spawn-owned perk mask, predicted and replayed
 	int             jumpLand;       // MW2's jump state: 0 none, -1 jumped and not landed, >0 ms of landing slowdown left
@@ -1198,6 +1198,7 @@ typedef struct playerState_s {
 	// Slot-owned inventory. ammo[] remains the working cache used by weapon
 	// notes; stowed variants of the same base gun keep independent magazines.
 	int             slotAmmo[2], slotReserve[2], slotAttachments[2], slotFlags[2];
+	int             slotAltAmmo[2], slotAltReserve[2];	// each slot gun's alt weapon (the underbarrel): its shells, loaded and spare
 	int             pickupTarget, pickupSerial, pickupTime, pickupSlot, pickupHeld;
 	int             cursorHintEntIndex;	// MW2's sticky use hint, written only by the server
 	int             cursorHint;	// MW2's cursorHint: what that hint is usable as now (cursorHint_t), rewritten every end-frame

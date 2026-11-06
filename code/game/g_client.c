@@ -1233,6 +1233,13 @@ void ClientSpawn(gentity_t *ent) {
 	client->ps.pm_flags |= PMF_RESPAWNED;
 
 	trap_GetUsercmd( client - level.clients, &ent->client->pers.cmd );
+	// MW2 keeps earned killstreaks through death (self.pers["killstreaks"]).
+	// The killstreak toggle the client is sending counts as served, so no life
+	// starts by asking for the trigger.
+	client->ps.ammo[WP_KILLSTREAK_UAV] = client->pers.killstreakUAVs;
+	client->ps.weapFlags &= ~PWF_KILLSTREAK_SERVED;
+	if ( BG_RequestedKillstreak( client->pers.cmd.weapon ) ) client->ps.weapFlags |= PWF_KILLSTREAK_SERVED;
+	BG_RebuildWeaponMask( &client->ps );
 	SetClientViewAngle( ent, spawn_angles );
 	// don't allow full run speed for a bit
 	client->ps.pm_flags |= PMF_TIME_KNOCKBACK;

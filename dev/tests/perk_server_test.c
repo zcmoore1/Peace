@@ -9,6 +9,7 @@ void G_Damage(gentity_t *t,gentity_t *i,gentity_t *a,vec3_t d,vec3_t p,int damag
 }
 void FireWeapon(gentity_t *e) { (void)e;shots++; }
 void G_GrenadeSuicide(gentity_t *e,int weapon) { (void)e;(void)weapon; }
+void G_UseKillstreak(gentity_t *e) { (void)e; }	/* g_killstreak.c: no killstreak in these checks */
 gitem_t *BG_FindItemForPowerup(powerup_t pw) { (void)pw;return NULL; }
 gitem_t *BG_FindItem(const char *name) { (void)name;return NULL; }
 gentity_t *Drop_Item(gentity_t *e,gitem_t *i,float angle) { (void)i;(void)angle;return e; }

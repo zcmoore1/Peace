@@ -543,6 +543,16 @@ static void CG_PeaceDump_f( void ) {
 		ps->stats[STAT_ACTIVE_SLOT] );
 	CG_Printf("pickup   target %i   progress %i   slot %i   held %i   selection %i   firstDraw %i\n",
 		ps->pickupTarget, ps->pickupTime, ps->pickupSlot, ps->pickupHeld, cg.weaponSelectSlot, ps->weaponDraw);
+	// The underbarrel (MW2's alt weapon) and the UAV killstreak.
+	CG_Printf("alt      slot0 %s %i/%i%s   slot1 %s %i/%i%s   asked %s   draw %s\n",
+		BG_SlotAltActive(ps, 0) ? "ALT" : "gun", ps->slotAltAmmo[0], ps->slotAltReserve[0],
+		(ps->slotFlags[0] & BG_GUN_ALT_UNCHAMBERED) ? " owes" : "",
+		BG_SlotAltActive(ps, 1) ? "ALT" : "gun", ps->slotAltAmmo[1], ps->slotAltReserve[1],
+		(ps->slotFlags[1] & BG_GUN_ALT_UNCHAMBERED) ? " owes" : "",
+		cg.weaponSelectAlt ? "alt" : "gun", ps->weaponDraw == BG_DRAW_ALT ? "alt raise" : "-");
+	CG_Printf("uav      earned %i   toggle %i   served %i   radar %s\n",
+		ps->ammo[WP_KILLSTREAK_UAV], cg.killstreakToggle, !!(ps->weapFlags & PWF_KILLSTREAK_SERVED),
+		cg.radarSweepTime ? va("%i pings, every %ims", cg.radarPingCount, cg.radarInterval) : "off");
 	// The server's use hint, as the snapshot gave it (pmove never writes either).
 	// The index is sticky (MW2's cursorHintEntIndex); ENTITYNUM_NONE is the sea
 	// lion: what it named was used and freed, and nothing has replaced it. The
@@ -682,6 +692,8 @@ static consoleCommand_t	commands[] = {
 	{ "sizeup", CG_SizeUp_f },
 	{ "sizedown", CG_SizeDown_f },
 	{ "weapnext", CG_NextWeapon_f },
+	{ "weapalt", CG_AltWeapon_f },
+	{ "killstreak", CG_Killstreak_f },
 	{ "weapprev", CG_PrevWeapon_f },
 	{ "weapon", CG_Weapon_f },
 	{ "tcmd", CG_TargetCommand_f },

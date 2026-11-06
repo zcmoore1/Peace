@@ -43,6 +43,8 @@ gentity_t *G_Spawn(void) {
  memset(e,0,sizeof(*e)); e->inuse=qtrue; e->s.number=e-g_entities; return e;
 }
 void G_FreeEntity(gentity_t *e) { e->inuse=qfalse; e->r.linked=qfalse; }
+static int uavClears;
+void G_ClearUAVs(void) { uavClears++; }	/* g_killstreak.c: every round restart takes the UAVs down */
 void G_SetOrigin(gentity_t *e,vec3_t p) { VectorCopy(p,e->s.origin); VectorCopy(p,e->r.currentOrigin); }
 int G_ModelIndex(char *s) { (void)s; return 1; }
 void CalculateRanks(void) { }
@@ -116,7 +118,9 @@ static void TestPlantDefuse(void) {
  CHECK(snd.phase==SND_ROUND_OVER && snd.result==SND_DEFUSED && level.teamScores[TEAM_BLUE]==1);
  CHECK(!G_SNDCanDamage(&g_entities[1]));
  G_SNDRunFrame(); CHECK(level.teamScores[TEAM_BLUE]==1);
+ { int cleared=uavClears;
  level.time=snd.deadline; G_SNDRunFrame();
+ CHECK(uavClears==cleared+1); } /* the next round's start takes every UAV down */
  CHECK(snd.phase==SND_COUNTDOWN && snd.round==2 && SND_Alive(0));
  CHECK(g_clients[0].ps.ammo[WP_SHOTGUN]==8 && !snd.bomb->r.linked);
 }

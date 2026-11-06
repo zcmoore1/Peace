@@ -838,6 +838,11 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_GRENADE_SUICIDE");
 		break;
 
+	case EV_USE_KILLSTREAK:
+		// The trigger came out: the server calls the UAV in and announces it.
+		DEBUGNAME("EV_USE_KILLSTREAK");
+		break;
+
 	case EV_USE_ITEM0:
 		DEBUGNAME("EV_USE_ITEM0");
 		CG_UseItem( cent );

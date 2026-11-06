@@ -2462,7 +2462,8 @@ static void CG_DrawLoadoutHud( void ) {
 	ps = &cg.predictedPlayerState;
 	x  = 420;
 	y  = 380;
-	if (cg.weaponSelect == ps->stats[STAT_SLOT_PRIMARY] || cg.weaponSelect == ps->stats[STAT_SLOT_SECONDARY]) {
+	if (cg.weaponSelect == ps->stats[STAT_SLOT_PRIMARY] || cg.weaponSelect == ps->stats[STAT_SLOT_SECONDARY] ||
+		cg.weaponSelect == BG_SlotWeapon(ps, cg.weaponSelectSlot, qtrue)) {
 		gitem_t *selected = BG_FindItemForWeapon(cg.weaponSelect);
 		CG_DrawSmallString(x, y - SMALLCHAR_HEIGHT - 4, selected->pickup_name, 1.0f);
 	}
@@ -2482,9 +2483,19 @@ static void CG_DrawLoadoutHud( void ) {
 		if ( BG_WeaponMagSize( slotWpn ) > 0 ) {
 			bg_weaponInstance_t gun;
 			BG_GetSlot(ps, i, &gun);
-			Com_sprintf( line, sizeof( line ), "%s  %i / %i",
-				( i == SLOT_PRIMARY ) ? "1" : "2",
-				gun.ammo, gun.reserve );
+			// A gun with an underbarrel shows its shells beside its own rounds,
+			// the one in hand first.
+			if ( BG_SlotWeapon( ps, i, qtrue ) != slotWpn && BG_SlotAltActive( ps, i ) ) {
+				Com_sprintf( line, sizeof( line ), "%s  %i / %i  (%i / %i)",
+					( i == SLOT_PRIMARY ) ? "1" : "2", gun.altAmmo, gun.altReserve, gun.ammo, gun.reserve );
+			} else if ( BG_SlotWeapon( ps, i, qtrue ) != slotWpn ) {
+				Com_sprintf( line, sizeof( line ), "%s  %i / %i  (%i / %i)",
+					( i == SLOT_PRIMARY ) ? "1" : "2", gun.ammo, gun.reserve, gun.altAmmo, gun.altReserve );
+			} else {
+				Com_sprintf( line, sizeof( line ), "%s  %i / %i",
+					( i == SLOT_PRIMARY ) ? "1" : "2",
+					gun.ammo, gun.reserve );
+			}
 		} else {
 			Com_sprintf( line, sizeof( line ), "%s  --",
 				( i == SLOT_PRIMARY ) ? "1" : "2" );
@@ -2996,6 +3007,7 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 			CG_DrawAmmoWarning();
 			CG_DrawAmmoCount();
 			CG_DrawLoadoutHud();
+			CG_DrawRadar();
 			CG_DrawWeaponPickup();
 			CG_DrawWeaponDebug();
 

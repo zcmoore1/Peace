@@ -258,6 +258,7 @@ typedef struct {
 	int			selectedClass;		// index into bg_classes, applied at spawn
 	bg_class_t  selectedLoadout;     // validated definition, applied only at spawn
 	char        loadoutUserinfo[BG_CLASS_STRING_SIZE];
+	int			killstreakUAVs;		// UAVs earned and not used: MW2 keeps them through death
 } clientPersistant_t;
 
 
@@ -291,6 +292,7 @@ struct gclient_s {
 	// every spawn, so a life that never had one plants nothing.
 	qboolean		insertionSpotValid;
 	vec3_t			insertionSpot;
+	int				killstreakKills;	// enemy kills this life: BG_UAV_KILLS earns a UAV
 
 	vec3_t		oldOrigin;
 
@@ -1028,3 +1030,11 @@ void	trap_BotResetWeaponState(int weaponstate);
 int		trap_GeneticParentsAndChildSelection(int numranks, float *ranks, int *parent1, int *parent2, int *child);
 
 void	trap_SnapVector( float *v );
+
+//
+// g_killstreak.c: MW2's UAV
+//
+void G_ClearUAVs( void );
+void G_KillstreakKill( gentity_t *attacker, gentity_t *victim );
+void G_UseKillstreak( gentity_t *ent );
+void G_UpdateUAVs( void );

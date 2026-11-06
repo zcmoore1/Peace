@@ -528,6 +528,7 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	self->client->ps.pm_type = PM_DEAD;
 	G_SNDClientDied( self );
 	G_SNDRecordKill( self, attacker );
+	G_KillstreakKill( attacker, self );
 	// Record before AddScore/CalculateRanks can end a non-round match.
 	if ( attacker && attacker->client && attacker != self && !OnSameTeam( self, attacker ) &&
 	     attacker->s.number < MAX_CLIENTS && self->s.number < MAX_CLIENTS ) {

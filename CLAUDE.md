@@ -184,6 +184,62 @@ source for MW2 behaviour; the owner rejects it.
   shared pmove cancels the drop and reaches the normal fire gates that think.
   There is no YY timing window or extra delay. Initial drops still stamp their
   real times; chamber debt, ammo, sprint and ladder ownership still apply.
+  A slot command may also ask for the slot gun's alt weapon
+  (`BG_SLOT_CMD_ALT`) and carry the killstreak toggle; weapnext from an alt
+  weapon is MW2's switch back to its own gun, the same slot (see below).
+- **The underbarrel is MW2's alt weapon (owner's rule: do what MW2 does).**
+  `WP_MASTERKEY` is `m4_shotgun_attach_mp`, the alt weapon of a gun with
+  `BG_ATTACHMENT_SHOTGUN` (the Machinegun only, `BG_AltWeapon`), never a slot:
+  it rides in its gun's slot, `BG_GUN_ALT` saying which of the two is in hand,
+  and `BG_ActiveSlotWeapon` answers the one in hand, so a knife, equipment or
+  the killstreak returns to it. An alt switch (`BG_IsAltSwitch`, MW2's 479b80:
+  the gun and its own alt, either way) puts nothing down - MW2's altDropTime
+  is 0 for all 181 pairings, and its expiry pass (579450) runs after its
+  change check (578bc0) - so the incoming weapon is in hand on the switch
+  command and raises in its own altRaiseTime (`weaponDraw == BG_DRAW_ALT`,
+  MW2's RAISING_ALTSWITCH; `BG_WeaponDrawTime` is still the one draw rule).
+  It is no zero holster, as the knife's is none; never stamp an alt drop.
+  While `PMF_SPRINTING` it is an ordinary drop and raise (MW2's
+  BeginWeaponChange, pm_flags 0x4000). weapnext (MW2's 59ed40): from the alt
+  to its gun (59ed8c); from a gun to the next slot's gun, never its alt
+  (59eef4) - `BG_ToggleSlotWeapon`. D-pad left is `weapalt`, the attachment
+  slot. Its fire cycle is MW2's shot and pump in one clip, its close 1 ms
+  into the pump (MW2's rechamber weaponDelay with rechamberBoltTime 0,
+  575bd8-575c03): that and the switch's no-drop are the moni NAC (Shoot, Y,
+  Y, X) - the rifle out on the first think the shot allows, at any input
+  speed. Never test for it. A switch on the pump's first think leaves the
+  pump owed (MW2's change check precedes its bolt close, 575a30), as any
+  gun's swap on its close note does. Its shells belong to the gun's instance
+  (`slotAltAmmo`, `slotAltReserve`, `BG_GUN_ALT_UNCHAMBERED`; a dropped gun's
+  item `frame`), its spawn reserve is MW2's startAmmo (`BG_WeaponStartReserve`),
+  and its reload start loads a shell of its own (reloadStartAdd), going straight
+  to the end when that fills the tube. Data: `assets/source/masterkey/weapon.json`
+  -> `dev/tools/build_masterkey.py` -> `bg_masterkey_data.h` and the clip
+  table; see `dev/MASTERKEY.md`. Sprint never cuts its raise or drop (MW2's
+  sprint check refuses states 1-5 for every gun); it does take it out of its
+  pump, as every gun's.
+- **The UAV is MW2's killstreak (owner's rule: do what MW2 does).**
+  `WP_KILLSTREAK_UAV` is `killstreak_uav_mp`, the trigger; `ammo[]` counts
+  UAVs earned (3 enemy kills a life, once a life) and kept through death
+  (`pers.killstreakUAVs`). D-pad right (`killstreak`) flips the command's
+  killstreak toggle; the trigger is wanted while it differs from
+  `PWF_KILLSTREAK_SERVED` (`PM_SelectedWeapon`), and the command still names
+  the selection to return to. The gun goes down in its own drop; the command
+  the trigger is in hand is MW2's weapon_change (5e49b0, in
+  PM_FinishWeaponChange): one is spent, the toggle served,
+  `EV_USE_KILLSTREAK` sent, and from the next command the trigger goes away
+  in its dropTime and the gun returns on its ordinary raise. Y before the
+  trigger is out takes the request back, returning the drop to the gun in
+  hand - the underbarrel if it came from there (owner's rule; MW2 would pick
+  weaponLatestPrimary, the base rifle). A spawn counts the client's toggle as
+  served. The radar (`g_killstreak.c`, `cg_radar.c`) is MW2's: 30 s
+  (radarViewTime) on the owner's team (the owner alone in FFA), a sweep of
+  enemy positions every 4 s or 2 s with two up (compassRadarUpdateTime /
+  compassFastRadarUpdateTime), each ping shown 4 s (compassRadarPingFadeTime),
+  2500 units to the minimap's edge (compassMaxRange), farther held at the edge
+  (compassClampIcons). S&D's round start and map restarts take every UAV down.
+  Picture and server only: pmove knows the trigger, never the radar. See
+  `dev/UAV.md`.
 - **Inventory instances own attachments and ammunition.** `BG_GetSlot` /
   `BG_PutSlot` / `BG_SelectSlot` bridge the two instances to the existing
   `ammo[]`, `ammoReserve[]` and `STAT_UNCHAMBERED` working registers. Stowed
@@ -594,8 +650,10 @@ source for MW2 behaviour; the owner rejects it.
 - `pm_flags` — **full.** All 16 networked bits used. A 17th needs the wire
   format widened.
 - `STAT_WEAPONS` — full 32-bit wire mask at `PS_STAT_WEAPONS`. `MAX_WEAPONS`
-  is 24; the M300 is 15, the throwing knife 16 and the Tactical Insertion 17
-  in baseq3 (18, 19 and 20 in missionpack; `WP_NUM_WEAPONS` 18 / 21). The
+  is 24; the M300 is 15, the throwing knife 16, the Tactical Insertion 17,
+  the Masterkey 18 and the UAV trigger 19 in baseq3 (18-22 in missionpack;
+  `WP_NUM_WEAPONS` 20 / 23). Four more fit `MAX_WEAPONS` in baseq3, one in
+  missionpack. The
   networked `ps.weapon` is 5 bits, so no weapon may pass 31. Other
   stats remain signed int16: their bit 15 must stay unused.
 - `weaponAnimSeq` — **full.** 2 bits in `msg.c`; all four values are taken
@@ -604,13 +662,13 @@ source for MW2 behaviour; the owner rejects it.
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 10-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 85 (GAME_VERSION -14) requires client, server
+  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 86 (GAME_VERSION -15) requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
-  `weapFlags` (MW2's name; 2 bits) carries `PWF_USE_RELOAD`, the
-  server's use/reload request, and `PWF_SPRINT_RELEASE`. Neither is a clock,
-  and neither is rebased. Protocol 80 adds `jumpLand` (signed 12 bits),
+  `weapFlags` (MW2's name; 3 bits) carries `PWF_USE_RELOAD`, the
+  server's use/reload request, `PWF_SPRINT_RELEASE` and
+  `PWF_KILLSTREAK_SERVED`. None is a clock, and none is rebased. Protocol 80 adds `jumpLand` (signed 12 bits),
   `jumpWait` (10), `jumpOriginZ` (float) and `sprintUsed` (14): durations and a
   height, none rebased. Protocol 81 adds `cursorHintEntIndex`
   (`GENTITYNUM_BITS`; an entity number, never rebased) and widens
@@ -628,8 +686,17 @@ source for MW2 behaviour; the owner rejects it.
   after a cook-out. Every offhand's fuseTime fits (the throwing knife's 30000
   the longest). A duration, never rebased by the replay. `EV_GRENADE_SUICIDE`
   (MW2's 0x5d) is appended to `entity_event_t`.
+  Protocol 86 (GAME_VERSION -15) widens `slotFlags` to 5 bits (`BG_GUN_ALT`,
+  which never travels, and `BG_GUN_ALT_UNCHAMBERED`, which does), adds
+  `slotAltAmmo[2]` (4 bits) and `slotAltReserve[2]` (6 bits), the alt
+  weapon's shells, widens `weaponDraw` to 2 bits (`BG_DRAW_ALT`) and
+  `weapFlags` to 3; `EV_USE_KILLSTREAK` is appended to `entity_event_t`. The
+  slot command uses 16 values from `BG_SLOT_COMMAND` (128): slot, generation,
+  alt and killstreak bits.
   Dropped ET_ITEM uses `generic1` for attachments, `time2` for packed magazine
-  and reserve, `otherEntityNum2` for chamber debt, and `time` as a spawn serial.
+  and reserve, `otherEntityNum2` for chamber debt, `frame` for the alt
+  weapon's magazine, reserve and chamber debt (`BG_WeaponItemAltFrame`), and
+  `time` as a spawn serial.
 - `perks` is a five-bit spawn-owned playerstate field. All three class perk
   slots share the roster in `bg_loadout.c`; duplicate nonzero IDs are invalid.
   Quick Reload retimes authored notes, segment endpoints and presentation via
@@ -774,6 +841,19 @@ during it, `+reload` never faking, no fake shot, the lone knife, the fake bullet
 and the M300 wild scope at 0/50/100/200 ms. `FAKERELOAD_PROBE=1` prints every
 tap timing; `FAKERELOAD_SVFPS` changes the server rate.
 
+`dev/tests/run-masterkey.cmd` (or `.sh`) drives the Masterkey and the UAV trigger through
+the real `PM_Weapon` in both numberings, at every think length from 1 to
+50 ms: MW2's data (read from `bg_masterkey_data.h`), the class, the alt switch
+(nothing put down, the alt raise, the sprint exception), MW2's weapnext, the
+moni NAC with the SPAS as its contrast, swap and sprint out of the raise,
+drop and pump, the trigger (its drop, Y taking it back, the knife lost
+meanwhile, use on the command it is in hand, its drop and the gun's return),
+the instance's shells through swaps, drops and scavenges, and the segmented
+reload. It runs `build_masterkey.py --check` first. Every rule was
+mutation-checked. The shoot-reload checks in `shotgun_reload_test.c` cover it
+too, from its tables: guards there skip only windows its 1 ms action has no
+think for.
+
 `dev/tests/run-gamepad-aim.cmd` (or `.sh`) drives the real `cl_gamepadaim.c`:
 the radial deadzone, the squared move with its diagonal stretch, floor
 rounding and the sprint threshold (read from `BG_SPRINT_FORWARD_MINIMUM`),
@@ -874,6 +954,14 @@ The enum is not enough. A weapon in `STAT_WEAPONS` with no `bg_itemlist` entry
 crashes on spawn: `CG_RegisterWeapon` calls `CG_Error`, and `BG_FindItemForWeapon`
 calls `Com_Error`. This has already caused one map-load crash. Also check every
 `MAX_WEAPONS` table in `bg_pmove.c` — they are positional.
+
+- The Masterkey (`WP_MASTERKEY`) and the UAV trigger (`WP_KILLSTREAK_UAV`) are
+  appended (18 and 19 basegame / 21 and 22 missionpack), with items appended
+  at the end of `bg_itemlist` (placeholder art, never on the floor). The
+  Masterkey's viewmodel plugs in at `models/weapons2/masterkey/view.iqm`
+  with the generated `view.cfg` (`assets/source/masterkey/README.md`); until
+  then cgame draws its item's legacy model. See `dev/MASTERKEY.md` and
+  `dev/UAV.md`.
 
 Semtex, the throwing knife and the Tactical Insertion (`BG_OffhandCancelable`): pre-release Y cancels to the same gun using its melee-return raise.
 The frag and flash wait in hand the same way but take no cancel.

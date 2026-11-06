@@ -17,7 +17,7 @@ static bg_class_t bg_classes[ARRAY_LEN(presets)];
 static qboolean classesReady;
 
 static const struct { int mask; const char *name; } attachmentTypes[] = {
-	{ 0, "None" }, { BG_ATTACHMENT_REDDOT, "Red dot" }
+	{ 0, "None" }, { BG_ATTACHMENT_REDDOT, "Red dot" }, { BG_ATTACHMENT_SHOTGUN, "Shotgun" }
 };
 int BG_AttachmentTypeCount( void ) { return ARRAY_LEN(attachmentTypes); }
 int BG_AttachmentType( int index ) {
@@ -32,7 +32,7 @@ static const bg_perkDef_t perks[BG_PERK_COUNT] = {
 	{ "Quick Reload", "Half reload time. Swap and bolt speeds are unchanged.", 50, 1, 100 },
 	{ "9 Lives", "Landing cannot damage you. Other damage is unchanged.", 100, 1, 100 },
 	{ "Inaudible", "Silent running and wading footsteps for everyone.", 100, 1, 100 },
-	{ "Second Nature", "Two attachments per gun. Only red dots are available so far.", 100, 2, 100 },
+	{ "Second Nature", "Two attachments per gun, such as a red dot with the shotgun.", 100, 2, 100 },
 	{ "Expeditious", "10% faster movement. Jump height and weapon speeds unchanged.", 100, 1, 110 }
 };
 typedef char perkMaskFitsWire[(BG_PERK_COUNT - 1 <= PS_PERK_BITS) ? 1 : -1];
@@ -189,7 +189,7 @@ qboolean BG_IsActionWeapon( int weapon ) {
 }
 
 static const struct { int weapon; const char *name; int attachments; } classWeapons[] = {
-	{WP_MACHINEGUN, "Machinegun", BG_ATTACHMENT_REDDOT}, {WP_SHOTGUN, "SPAS-12", BG_ATTACHMENT_REDDOT},
+	{WP_MACHINEGUN, "Machinegun", BG_ATTACHMENT_REDDOT | BG_ATTACHMENT_SHOTGUN}, {WP_SHOTGUN, "SPAS-12", BG_ATTACHMENT_REDDOT},
 	{WP_RAILGUN, "Railgun", BG_ATTACHMENT_REDDOT}, {WP_ROCKET_LAUNCHER, "Rocket launcher", BG_ATTACHMENT_REDDOT},
 	{WP_GRENADE_LAUNCHER, "Grenade launcher", BG_ATTACHMENT_REDDOT}, {WP_LIGHTNING, "Lightning gun", BG_ATTACHMENT_REDDOT},
 	{WP_PLASMAGUN, "Plasma gun", BG_ATTACHMENT_REDDOT}, {WP_BFG, "BFG", BG_ATTACHMENT_REDDOT},
@@ -201,6 +201,32 @@ int BG_WeaponAttachmentMask(int weapon) {
 	for (i=0; i<ARRAY_LEN(classWeapons); i++)
 		if (classWeapons[i].weapon == weapon) return classWeapons[i].attachments;
 	return 0;
+}
+
+// MW2's alt weapons (WeaponCompleteDef altWeaponIndex): the gun in a slot
+// carries one when its attachments give it one (bg_pmove.c has the switch).
+int BG_AltWeapon( int weapon, int attachments ) {
+	if ( ( attachments & BG_ATTACHMENT_SHOTGUN ) && ( BG_WeaponAttachmentMask( weapon ) & BG_ATTACHMENT_SHOTGUN ) )
+		return WP_MASTERKEY;
+	return WP_NONE;
+}
+
+qboolean BG_IsAltWeapon( int weapon ) {
+	return weapon == WP_MASTERKEY;
+}
+
+int BG_SlotWeapon( const playerState_t *ps, int slot, qboolean alt ) {
+	int weapon, altWeapon;
+	if ( slot < 0 || slot >= SLOT_COUNT ) return WP_NONE;
+	weapon = ps->stats[STAT_SLOT_PRIMARY + slot];
+	altWeapon = BG_AltWeapon( weapon, ps->slotAttachments[slot] );
+	return ( alt && altWeapon != WP_NONE ) ? altWeapon : weapon;
+}
+
+qboolean BG_SlotAltActive( const playerState_t *ps, int slot ) {
+	if ( slot < 0 || slot >= SLOT_COUNT ) return qfalse;
+	return ( ps->slotFlags[slot] & BG_GUN_ALT ) &&
+		BG_AltWeapon( ps->stats[STAT_SLOT_PRIMARY + slot], ps->slotAttachments[slot] ) != WP_NONE;
 }
 
 int BG_ClassCount( void ) { return ARRAY_LEN(bg_classes); }
@@ -344,11 +370,35 @@ qboolean BG_SerializeClass( const bg_class_t *loadout, char *text, int size ) {
 
 // Weapon IDs need not be adjacent. Cycle the TWO SLOT INDICES modulo the slot
 // count, using the latest requested weapon rather than an acknowledged snapshot.
-// The slot command a client sends for a slot, carrying the generation it
-// last saw for it (a pickup flips it, server side, in the slot's flags).
+// The command a client sends for a selection: the slot, the generation it
+// last saw for it (a pickup flips it, server side, in the slot's flags),
+// whether it asks for the slot gun's alt weapon, and the killstreak toggle.
+int BG_SelectionCommand(const playerState_t *ps, int slot, qboolean alt, qboolean killstreak) {
+	int bits = 0;
+	if (slot < 0 || slot >= SLOT_COUNT) slot = 0;
+	if (ps->slotFlags[slot] & BG_GUN_GENERATION) bits |= BG_SLOT_CMD_GENERATION;
+	if (alt && BG_AltWeapon(ps->stats[STAT_SLOT_PRIMARY + slot], ps->slotAttachments[slot]) != WP_NONE)
+		bits |= BG_SLOT_CMD_ALT;
+	if (killstreak) bits |= BG_SLOT_CMD_KILLSTREAK;
+	return BG_SLOT_COMMAND + slot + bits * SLOT_COUNT;
+}
+
+// The slot as it is: in the weapon it holds, with no killstreak asked for
+// (the toggle as last served).
 int BG_SlotCommand(const playerState_t *ps, int slot) {
 	if (slot < 0 || slot >= SLOT_COUNT) slot = 0;
-	return BG_SLOT_COMMAND + slot + ((ps->slotFlags[slot] & BG_GUN_GENERATION) ? SLOT_COUNT : 0);
+	return BG_SelectionCommand(ps, slot, BG_SlotAltActive(ps, slot),
+		(ps->weapFlags & PWF_KILLSTREAK_SERVED) != 0);
+}
+
+static int BG_SelectionBits(int selection) {
+	return BG_IS_SLOT_COMMAND(selection) ? (selection - BG_SLOT_COMMAND) / SLOT_COUNT : 0;
+}
+qboolean BG_RequestedAlt(int selection) {
+	return (BG_SelectionBits(selection) & BG_SLOT_CMD_ALT) != 0;
+}
+qboolean BG_RequestedKillstreak(int selection) {
+	return (BG_SelectionBits(selection) & BG_SLOT_CMD_KILLSTREAK) != 0;
 }
 
 // False for a slot command sent before the client saw that slot's pickup:
@@ -357,13 +407,22 @@ qboolean BG_SlotCommandCurrent(const playerState_t *ps, int selection) {
 	int slot;
 	if (!BG_IS_SLOT_COMMAND(selection)) return qtrue;
 	slot = (selection - BG_SLOT_COMMAND) % SLOT_COUNT;
-	return ((selection - BG_SLOT_COMMAND) >= SLOT_COUNT) == !!(ps->slotFlags[slot] & BG_GUN_GENERATION);
+	return !!(BG_SelectionBits(selection) & BG_SLOT_CMD_GENERATION) == !!(ps->slotFlags[slot] & BG_GUN_GENERATION);
 }
 
+// MW2's weapnext (the cycle at 59ed40): from an alt weapon it selects that
+// weapon's own gun (59ed8c-59edd6), the alt switch back, in the same slot;
+// from a gun it goes to the next slot, and lands on that slot's gun, never its
+// alt (59eef4: only an altModeSameWeapon gun remembers its alt, and the
+// underbarrel's does not). The killstreak toggle is carried as it is.
 int BG_ToggleSlotWeapon( const playerState_t *ps, int selection ) {
 	int slot, next, weapon;
-	if (BG_IS_SLOT_COMMAND(selection))
-		return BG_SlotCommand(ps, ((selection - BG_SLOT_COMMAND) % SLOT_COUNT + 1) % SLOT_COUNT);
+	if (BG_IS_SLOT_COMMAND(selection)) {
+		slot = (selection - BG_SLOT_COMMAND) % SLOT_COUNT;
+		if (BG_RequestedAlt(selection))
+			return BG_SelectionCommand(ps, slot, qfalse, BG_RequestedKillstreak(selection));
+		return BG_SelectionCommand(ps, (slot + 1) % SLOT_COUNT, qfalse, BG_RequestedKillstreak(selection));
+	}
 	for ( slot = 0; slot < SLOT_COUNT; slot++ )
 		if ( selection == ps->stats[STAT_SLOT_PRIMARY + slot] ) break;
 	if ( slot == SLOT_COUNT ) slot = ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ? SLOT_SECONDARY : SLOT_PRIMARY;

@@ -20,7 +20,7 @@ ${CC:-cc} $flags -UMISSIONPACK dev/tests/knife_corpse_test.c code/game/g_missile
 out/tests/knife-corpse-test
 # MW2's offhands through the real server: ClientThink, ClientEvents, FireWeapon,
 # the missiles, the cook-out's suicide and the death drop (g_active.c, g_combat.c).
-${CC:-cc} $flags dev/tests/offhand_server_test.c code/game/g_active.c code/game/g_combat.c code/game/g_weapon.c code/game/g_missile.c code/game/g_client.c code/game/g_utils.c code/game/g_items.c code/game/g_insertion.c code/game/g_cmds.c code/game/bg_pmove.c $game $common -Wl,--gc-sections -lm -o out/tests/offhand-server-test
+${CC:-cc} $flags dev/tests/offhand_server_test.c code/game/g_active.c code/game/g_combat.c code/game/g_weapon.c code/game/g_missile.c code/game/g_client.c code/game/g_utils.c code/game/g_items.c code/game/g_insertion.c code/game/g_killstreak.c code/game/g_cmds.c code/game/bg_pmove.c $game $common -Wl,--gc-sections -lm -o out/tests/offhand-server-test
 out/tests/offhand-server-test
 ${CC:-cc} $flags dev/tests/class_menu_test.c code/q3_ui/ui_atoms.c code/q3_ui/ui_qmenu.c code/q3_ui/ui_mfield.c code/game/bg_loadout.c $common -Wl,--gc-sections -lm -o out/tests/class-menu-test
 out/tests/class-menu-test

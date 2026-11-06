@@ -239,7 +239,7 @@ static int UI_ClassWeaponCategory( int weapon ) {
 
 static const char *UI_ClassWeaponDescription( int weapon ) {
 	switch ( weapon ) {
-	case WP_MACHINEGUN: return "Automatic rifle. A flexible choice for sustained fire.";
+	case WP_MACHINEGUN: return "Automatic rifle. Takes the underbarrel Shotgun: D-pad left switches to it.";
 	case WP_SHOTGUN: return "Semi-automatic shotgun. Load shells individually for close-range fights.";
 	case WP_M40A3: return "Bolt-action sniper rifle with an integral scope. No optional attachments.";
 	case WP_RAILGUN: return "Single-shot precision weapon with a long recovery between shots.";

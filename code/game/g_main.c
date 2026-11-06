@@ -478,6 +478,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 
 	// reserve some spots for dead player bodies
 	InitBodyQue();
+	G_ClearUAVs();
 
 	ClearRegisteredItems();
 	G_SNDInit();
@@ -1879,6 +1880,7 @@ void G_RunFrame( int levelTime ) {
 	}
 
 	G_SNDRunFrame();
+	G_UpdateUAVs();
 
 	// perform final fixups on the players
 	ent = &g_entities[0];

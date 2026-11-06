@@ -996,6 +996,21 @@ Only in One Flag CTF games
 		{ "models/weapons2/grenadel/grenadel.md3", NULL, NULL, NULL },
 		"icons/iconw_grenade", "Tactical Insertion", 0, IT_WEAPON, WP_TACTICAL_INSERTION, "", ""
 	},
+	/* MW2's underbarrel shotgun (m4_shotgun_attach_mp) and the UAV's trigger
+	 * (killstreak_uav_mp). Appended so no item index moves. Neither is ever on
+	 * the floor: the Masterkey travels with the gun it is under, and the
+	 * trigger is in hand only to call the UAV in. Placeholder art until their
+	 * models exist (assets/source/masterkey/README.md). */
+	{
+		"weapon_masterkey", "sound/misc/w_pkup.wav",
+		{ "models/weapons2/shotgun/shotgun.md3", NULL, NULL, NULL },
+		"icons/iconw_shotgun", "Masterkey", 0, IT_WEAPON, WP_MASTERKEY, "", ""
+	},
+	{
+		"weapon_killstreak_uav", "sound/misc/w_pkup.wav",
+		{ "models/weapons2/grenadel/grenadel.md3", NULL, NULL, NULL },
+		"icons/iconw_grenade", "UAV", 0, IT_WEAPON, WP_KILLSTREAK_UAV, "", ""
+	},
 	{NULL}
 };
 
@@ -1465,7 +1480,8 @@ char *eventnames[] = {
 	"EV_STEP_DOWN_4",
 	"EV_STEP_DOWN_8",
 
-	"EV_GRENADE_SUICIDE"
+	"EV_GRENADE_SUICIDE",
+	"EV_USE_KILLSTREAK"
 
 };
 

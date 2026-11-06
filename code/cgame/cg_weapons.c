@@ -621,7 +621,9 @@ static const char *cg_viewModelBase[WP_NUM_WEAPONS] = {
 	"",                                 // WP_SEMTEX (procedural MD3 hand pose)
 	"models/weapons2/m40a3/view",         // WP_M40A3
 	"",                                 // WP_THROWING_KNIFE (MD3 hand and tagged knife)
-	""                                  // WP_TACTICAL_INSERTION (placeholder: the flash's legacy hands and grenade)
+	"",                                 // WP_TACTICAL_INSERTION (placeholder: the flash's legacy hands and grenade)
+	"models/weapons2/masterkey/view",     // WP_MASTERKEY: until view.iqm exists, the item's legacy gun and hands
+	""                                  // WP_KILLSTREAK_UAV (placeholder: the frag's legacy hands)
 };
 
 /*
@@ -797,9 +799,14 @@ void CG_RegisterWeapon( int weaponNum ) {
 		break;
 
 	case WP_SHOTGUN:
+	case WP_MASTERKEY:
 		MAKERGB( weaponInfo->flashDlightColor, 1, 1, 0 );
 		weaponInfo->flashSound[0] = trap_S_RegisterSound( "sound/weapons/shotgun/sshotf1b.wav", qfalse );
 		weaponInfo->ejectBrassFunc = CG_ShotgunEjectBrass;
+		break;
+	case WP_KILLSTREAK_UAV:
+		// Nothing leaves the trigger: no flash, no sound.
+		weaponInfo->flashModel = weaponInfo->barrelModel = 0;
 		break;
 
 	case WP_ROCKET_LAUNCHER:
@@ -1817,6 +1824,15 @@ void CG_NextWeapon_f( void ) {
 
 	ps = &cg.predictedPlayerState;
 	trap_SendConsoleCommand("_peaceWeaponSwap\n");
+	// A killstreak asked for and not yet in hand: Y takes the request back, and
+	// the selection it rode on - the gun it was pulled from, its underbarrel
+	// included - is what stays wanted (owner's rule). MW2 itself would select
+	// its latest primary (weaponLatestPrimary, 59ede8), the base rifle.
+	if ( cg.killstreakToggle != !!( ps->weapFlags & PWF_KILLSTREAK_SERVED ) ) {
+		cg.killstreakToggle = !!( ps->weapFlags & PWF_KILLSTREAK_SERVED );
+		cg.weaponSelectTime = cg.time;
+		return;
+	}
 	// MW2's weapnext (59d5f0-59d622): an offhand still to be thrown whose data
 	// says offhandHoldIsCancelable gets only the cancel; the frag and flash
 	// cannot be cancelled, so their Y asks for the other slot, which waits
@@ -1824,6 +1840,7 @@ void CG_NextWeapon_f( void ) {
 	if (!(ps->weaponAction & WA_FIRED) &&
 		BG_OffhandCancelable(BG_QuickActionWeapon(ps, ps->weaponAction))) {
 		cg.weaponSelectSlot = ps->stats[STAT_ACTIVE_SLOT];
+		cg.weaponSelectAlt = BG_SlotAltActive(ps, cg.weaponSelectSlot);
 		cg.weaponSelect = BG_ActiveSlotWeapon(ps);
 		cg.weaponSelectTime = cg.time;
 		return;
@@ -1834,8 +1851,14 @@ void CG_NextWeapon_f( void ) {
 	// here, so the toggle is always primary <-> secondary.
 	// Toggle the requested selection, not the last acknowledged active slot.
 	// A second press must reverse the first even before a server snapshot lands.
-	cg.weaponSelectSlot = BG_RequestedSlot(ps, BG_ToggleSlotWeapon(ps, BG_SlotCommand(ps, cg.weaponSelectSlot)));
-	want = ps->stats[STAT_SLOT_PRIMARY + cg.weaponSelectSlot];
+	// From the underbarrel it is MW2's switch back to its own gun (BG_ToggleSlotWeapon).
+	{
+		int next = BG_ToggleSlotWeapon(ps, BG_SelectionCommand(ps, cg.weaponSelectSlot,
+			cg.weaponSelectAlt, cg.killstreakToggle));
+		cg.weaponSelectSlot = BG_RequestedSlot(ps, next);
+		cg.weaponSelectAlt = BG_RequestedAlt(next);
+	}
+	want = BG_SlotWeapon(ps, cg.weaponSelectSlot, cg.weaponSelectAlt);
 
 	if ( want <= WP_NONE || want >= WP_NUM_WEAPONS ) {
 		return;					// empty slot - nothing to swap to
@@ -1856,6 +1879,55 @@ CG_PrevWeapon_f
 void CG_PrevWeapon_f( void ) {
 	// With 2 slots prev and next are the same toggle.
 	CG_NextWeapon_f();
+}
+
+/*
+===============
+CG_AltWeapon_f
+
+MW2's attachment action slot (ACTIONSLOTTYPE_ALTWEAPONTOGGLE, D-pad left on a
+pad): the selected gun to its alt weapon - the underbarrel - and back. A gun
+with none has nothing to toggle. pmove makes it MW2's alt switch: nothing is
+put down and the incoming weapon raises in its altRaiseTime.
+===============
+*/
+void CG_AltWeapon_f( void ) {
+	playerState_t	*ps;
+
+	if ( !cg.snap || ( cg.snap->ps.pm_flags & PMF_FOLLOW ) ) {
+		return;
+	}
+	ps = &cg.predictedPlayerState;
+	if ( BG_SlotWeapon( ps, cg.weaponSelectSlot, qtrue ) == BG_SlotWeapon( ps, cg.weaponSelectSlot, qfalse ) ) {
+		return;
+	}
+	cg.weaponSelectAlt = !cg.weaponSelectAlt;
+	cg.weaponSelect = BG_SlotWeapon( ps, cg.weaponSelectSlot, cg.weaponSelectAlt );
+	cg.weaponSelectTime = cg.time;
+}
+
+/*
+===============
+CG_Killstreak_f
+
+MW2's killstreak action slot (D-pad right): ask for the trigger of an earned
+UAV. pmove pulls it out and uses it; Y before it is in hand takes it back.
+===============
+*/
+void CG_Killstreak_f( void ) {
+	playerState_t	*ps;
+	qboolean		served;
+
+	if ( !cg.snap || ( cg.snap->ps.pm_flags & PMF_FOLLOW ) ) {
+		return;
+	}
+	ps = &cg.predictedPlayerState;
+	served = ( ps->weapFlags & PWF_KILLSTREAK_SERVED ) != 0;
+	if ( ps->ammo[WP_KILLSTREAK_UAV] <= 0 || cg.killstreakToggle != served ) {
+		return;
+	}
+	cg.killstreakToggle = !served;
+	cg.weaponSelectTime = cg.time;
 }
 
 /*
@@ -1891,6 +1963,7 @@ void CG_Weapon_f( void ) {
 
 	cg.weaponSelect = num;
 	cg.weaponSelectSlot = BG_RequestedSlot(&cg.snap->ps, num);
+	cg.weaponSelectAlt = qfalse;	// a slot picked by its gun is that gun, not its underbarrel
 }
 
 /*
@@ -1905,6 +1978,13 @@ void CG_OutOfAmmoChange( void ) {
 	int				other;
 
 	cg.weaponSelectTime = cg.time;
+
+	// An empty underbarrel goes back to its own gun, in the same slot.
+	if ( cg.weaponSelectAlt && BG_IsAltWeapon( ps->weapon ) ) {
+		cg.weaponSelectAlt = qfalse;
+		cg.weaponSelect = BG_SlotWeapon( ps, cg.weaponSelectSlot, qfalse );
+		return;
+	}
 
 	// Stock Q3 scanned from the HIGHEST weapon index down and took the first
 	// selectable one. With melee and equipment now living in the weapon enum
@@ -1940,12 +2020,16 @@ void CG_ValidateWeaponSelect( void ) {
 	ps  = &cg.snap->ps;
 	if (cg.predictedPlayerState.weaponAction & WA_RETURNING) {
 		cg.weaponSelectSlot = cg.predictedPlayerState.stats[STAT_ACTIVE_SLOT];
+		cg.weaponSelectAlt = BG_SlotAltActive(&cg.predictedPlayerState, cg.weaponSelectSlot);
 		cg.weaponSelect = BG_ActiveSlotWeapon(&cg.predictedPlayerState);
 		return;
 	}
 	if (cg.weaponSelectSlot < 0 || cg.weaponSelectSlot >= SLOT_COUNT)
 		cg.weaponSelectSlot = ps->stats[STAT_ACTIVE_SLOT];
-	cg.weaponSelect = ps->stats[STAT_SLOT_PRIMARY + cg.weaponSelectSlot];
+	// A gun that has no alt weapon (a pickup replaced the underbarrel's) asks for its own.
+	if (BG_SlotWeapon(ps, cg.weaponSelectSlot, qtrue) == BG_SlotWeapon(ps, cg.weaponSelectSlot, qfalse))
+		cg.weaponSelectAlt = qfalse;
+	cg.weaponSelect = BG_SlotWeapon(ps, cg.weaponSelectSlot, cg.weaponSelectAlt);
 }
 
 
@@ -2348,6 +2432,33 @@ static void CG_ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, int othe
 
 /*
 ==============
+CG_PelletPattern
+
+The Masterkey's MW2 pellets, from the same seed and cone as the server's
+PelletPattern (g_weapon.c).
+==============
+*/
+static void CG_PelletPattern( vec3_t origin, vec3_t origin2, int seed, int weapon, qboolean aimed, int otherEntNum ) {
+	vec3_t	end, forward, right, up;
+	float	reach = 8192 * 16, radius, r, a;
+	int		i, n = BG_WeaponPellets( weapon );
+
+	VectorNormalize2( origin2, forward );
+	PerpendicularVector( right, forward );
+	CrossProduct( forward, right, up );
+	radius = reach * tan( DEG2RAD( BG_PelletSpread( weapon, aimed ) ) );
+	for ( i = 0; i < n; i++ ) {
+		r = sqrt( Q_random( &seed ) ) * radius;
+		a = Q_random( &seed ) * 2 * M_PI;
+		VectorMA( origin, reach, forward, end );
+		VectorMA( end, r * cos( a ), right, end );
+		VectorMA( end, r * sin( a ), up, end );
+		CG_ShotgunPellet( origin, end, otherEntNum );
+	}
+}
+
+/*
+==============
 CG_ShotgunFire
 ==============
 */
@@ -2368,6 +2479,10 @@ void CG_ShotgunFire( entityState_t *es ) {
 			VectorSet( up, 0, 0, 8 );
 			CG_SmokePuff( v, up, 32, 1, 1, 1, 0.33f, 900, cg.time, 0, LEF_PUFF_DONT_SCALE, cgs.media.shotgunSmokePuffShader );
 		}
+	}
+	if ( BG_WeaponPellets( es->weapon ) > 0 ) {
+		CG_PelletPattern( es->pos.trBase, es->origin2, es->eventParm, es->weapon, es->generic1 != 0, es->otherEntityNum );
+		return;
 	}
 	CG_ShotgunPattern( es->pos.trBase, es->origin2, es->eventParm, es->otherEntityNum );
 }

@@ -367,6 +367,63 @@ void weapon_supershotgun_fire (gentity_t *ent) {
 /*
 ======================================================================
 
+MW2's spread-class pellets (the Masterkey)
+
+shotCount pellets in a cone of the gun's hip or ADS spread (degrees), each
+doing damage that falls with its own distance (BG_PelletDamage). The cone is
+filled evenly from the event's seed; CG_PelletPattern draws the same one.
+
+======================================================================
+*/
+static void PelletPattern( vec3_t origin, vec3_t origin2, int seed, int weapon, qboolean aimed, gentity_t *ent ) {
+	vec3_t		localForward, localRight, localUp, end;
+	float		reach = 8192 * 16, radius, r, a;
+	int			i, n = BG_WeaponPellets( weapon );
+	qboolean	hitClient = qfalse;
+
+	VectorNormalize2( origin2, localForward );
+	PerpendicularVector( localRight, localForward );
+	CrossProduct( localForward, localRight, localUp );
+	radius = reach * tan( DEG2RAD( BG_PelletSpread( weapon, aimed ) ) );
+	for ( i = 0; i < n; i++ ) {
+		trace_t		tr;
+		gentity_t	*traceEnt;
+		r = sqrt( Q_random( &seed ) ) * radius;
+		a = Q_random( &seed ) * 2 * M_PI;
+		VectorMA( origin, reach, localForward, end );
+		VectorMA( end, r * cos( a ), localRight, end );
+		VectorMA( end, r * sin( a ), localUp, end );
+		trap_Trace( &tr, origin, NULL, NULL, end, ent->s.number, MASK_SHOT );
+		if ( tr.surfaceFlags & SURF_NOIMPACT ) continue;
+		traceEnt = &g_entities[ tr.entityNum ];
+		if ( traceEnt->takedamage ) {
+			int damage = BG_PelletDamage( weapon, Distance( origin, tr.endpos ) ) * s_quadFactor;
+			if ( LogAccuracyHit( traceEnt, ent ) && !hitClient ) {
+				hitClient = qtrue;
+				ent->client->accuracy_hits++;
+			}
+			if ( damage > 0 ) G_Damage( traceEnt, ent, ent, forward, tr.endpos, damage, 0, MOD_SHOTGUN );
+		}
+	}
+}
+
+static void weapon_masterkey_fire( gentity_t *ent ) {
+	gentity_t	*tent;
+	qboolean	aimed = ( ent->client->ps.pm_flags & PMF_ADS ) != 0;
+
+	tent = G_TempEntity( muzzle, EV_SHOTGUN );
+	VectorScale( forward, 4096, tent->s.origin2 );
+	SnapVector( tent->s.origin2 );
+	tent->s.eventParm = rand() & 255;		// seed for the pellets
+	tent->s.otherEntityNum = ent->s.number;
+	tent->s.weapon = WP_MASTERKEY;			// whose pellets: CG_ShotgunFire draws them
+	tent->s.generic1 = aimed;
+	PelletPattern( tent->s.pos.trBase, tent->s.origin2, tent->s.eventParm, WP_MASTERKEY, aimed, ent );
+}
+
+/*
+======================================================================
+
 GRENADE LAUNCHER
 
 ======================================================================
@@ -915,6 +972,11 @@ void FireWeapon( gentity_t *ent ) {
 	case WP_LIGHTNING:
 		Weapon_LightningFire( ent );
 		break;
+	case WP_MASTERKEY:
+		weapon_masterkey_fire( ent );
+		break;
+	case WP_KILLSTREAK_UAV:
+		break;	// the trigger only calls the UAV in, on the command it comes out
 	case WP_SHOTGUN:
 		weapon_supershotgun_fire( ent );
 		break;

@@ -3,6 +3,7 @@
 #include "../../code/qcommon/q_shared.h"
 #include "../../code/qcommon/qcommon.h"
 #include "../../code/game/bg_public.h"
+#include "../../code/game/bg_masterkey_data.h"
 
 static int checks;
 cvar_t *cl_shownet;
@@ -66,8 +67,28 @@ int main(void) {
  }
  /* the use hint's six types in PS_CURSOR_HINT_BITS (3, protocol 84): both
   * Tactical Insertion types, the top one included, each from every other.
-  * Protocol 85 adds grenadeTimeLeft. */
- CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==85);
+  * Protocol 85 adds grenadeTimeLeft; 86 the underbarrel and the killstreak. */
+ CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==86);
+ /* Protocol 86: slotFlags carry the alt weapon's state (BG_GUN_ALT,
+  * BG_GUN_ALT_UNCHAMBERED: 5 bits), each slot its alt weapon's shells (4 and
+  * 6 bits), weaponDraw the alt switch's raise (2 bits) and weapFlags the
+  * killstreak toggle served (3 bits). Every value each can hold round-trips. */
+ CHECK(BG_GUN_ALT_UNCHAMBERED<32 && BG_DRAW_ALT<4 && PWF_KILLSTREAK_SERVED<8);
+ CHECK(MK_MAG_SIZE<16 && MK_MAX_RESERVE<64);
+ for(i=0;i<64;i++) {
+  memset(&from,0,sizeof(from)); to=from;
+  to.slotFlags[0]=i&31; to.slotFlags[1]=31-(i&31);
+  to.slotAltAmmo[0]=i&15; to.slotAltAmmo[1]=15-(i&15);
+  to.slotAltReserve[0]=i; to.slotAltReserve[1]=63-i;
+  to.weaponDraw=i%3; to.weapFlags=i&7;
+  MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,&from,&to);
+  CHECK(!msg.overflowed); MSG_BeginReading(&msg);
+  MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
+  CHECK(decoded.slotFlags[0]==to.slotFlags[0] && decoded.slotFlags[1]==to.slotFlags[1]);
+  CHECK(decoded.slotAltAmmo[0]==to.slotAltAmmo[0] && decoded.slotAltAmmo[1]==to.slotAltAmmo[1]);
+  CHECK(decoded.slotAltReserve[0]==to.slotAltReserve[0] && decoded.slotAltReserve[1]==to.slotAltReserve[1]);
+  CHECK(decoded.weaponDraw==to.weaponDraw && decoded.weapFlags==to.weapFlags);
+ }
  for(i=0;i<CURSOR_HINT_COUNT;i++) for(j=0;j<CURSOR_HINT_COUNT;j++) {
   memset(&from,0,sizeof(from)); to=from; from.cursorHint=i; to.cursorHint=j;
   to.cursorHintEntIndex=MAX_CLIENTS+j;

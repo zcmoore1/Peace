@@ -480,6 +480,7 @@ static void SND_StartRound( void ) {
     gentity_t *ent;
     trap_ReplayReset(qtrue);
     level.replayEndTime = 0;
+    G_ClearUAVs();	// MW2's round restart takes every UAV down with the rest
     for ( n = 0; n < TEAM_NUM_TEAMS; n++ ) snd.lastDeath[n].killer = -1;
     snd.spawning = qtrue;
     snd.phase = SND_COUNTDOWN;

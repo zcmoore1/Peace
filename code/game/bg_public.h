@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-14"
+#define	GAME_VERSION		BASEGAME "-15"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -194,6 +194,11 @@ typedef enum {
 #define BG_RAPID_DROP_TIME        50
 // How long thrown equipment is held before its recovery starts.
 #define BG_QUICK_ACTION_HOLD      500
+// MW2's killstreak_uav_mp, the trigger the UAV is called in with: raised in
+// raiseTime, and on the command it is in hand (MW2's weapon_change, which
+// _killstreaks.gsc answers with the UAV and a switch back) put away in dropTime.
+#define BG_UAV_TRIGGER_RAISE_MS   1200
+#define BG_UAV_TRIGGER_DROP_MS    899
 // MW2's melee (weapon data: meleeDelay 0.079 and meleeTime 0.8, identical for
 // every MW2 MP gun in the dump). MeleeInit writes the melee state straight over
 // the gun's, the hit lands meleeDelay after the press (MeleeFire), and the knife
@@ -359,6 +364,7 @@ void Pmove (pmove_t *pmove);
 
 int  BG_WeaponMagSize( int weapon );
 int  BG_WeaponMaxReserve( int weapon );
+int  BG_WeaponStartReserve( int weapon );	// reserve a class spawns with
 int  BG_WeaponReloadTime( int weapon );		// nominal single-pass length (start+loop+end)
 const bg_weaponReload_t *BG_WeaponReload( int weapon );
 int  BG_WeaponReloadSegLength( int weapon, int seq );
@@ -528,8 +534,9 @@ typedef enum {
 	// state machine (switch timing, notes, firing) for free, but they are NOT
 	// inventory slots - melee is always available and equipment lives in its
 	// own slots. Basegame indices: KNIFE 11, FRAG 12, FLASH 13, SEMTEX 14,
-	// M40A3 15, THROWING_KNIFE 16, TACTICAL_INSERTION 17 (missionpack +3).
-	// Append only: saved classes store these numbers.
+	// M40A3 15, THROWING_KNIFE 16, TACTICAL_INSERTION 17, MASTERKEY 18,
+	// KILLSTREAK_UAV 19 (missionpack +3). Append only: saved classes store
+	// these numbers.
 	WP_KNIFE,			// melee, always carried
 	WP_FRAG,			// lethal equipment
 	WP_FLASH,			// tactical equipment
@@ -537,6 +544,10 @@ typedef enum {
 	WP_M40A3,            // scoped bolt-action rifle; appended to preserve class IDs
 	WP_THROWING_KNIFE,   // lethal equipment: thrown, sticks, picked back up (MW2's)
 	WP_TACTICAL_INSERTION,	// lethal equipment: planted where you stand, your next spawn (MW2's)
+	WP_MASTERKEY,        // MW2's underbarrel shotgun (m4_shotgun_attach_mp): the alt weapon of a gun with
+	                     // the Shotgun attachment, never a slot of its own
+	WP_KILLSTREAK_UAV,   // MW2's killstreak_uav_mp: the trigger, in hand only to call the UAV in;
+	                     // ammo[] is how many UAVs the player has earned and not used
 
 	WP_NUM_WEAPONS
 } weapon_t;
@@ -557,9 +568,16 @@ typedef enum {
 // attached copies of one gun). Plain weapon IDs remain valid for bots/tools.
 #define BG_SLOT_COMMAND 128
 // cmd.weapon BG_SLOT_COMMAND + slot + SLOT_COUNT * the slot's generation bit,
-// so a selection made before the client saw a pickup can be told apart
-#define BG_IS_SLOT_COMMAND(s) ((s) >= BG_SLOT_COMMAND && (s) < BG_SLOT_COMMAND + 2 * SLOT_COUNT)
+// so a selection made before the client saw a pickup can be told apart,
+// + 2 * SLOT_COUNT when it asks for the slot gun's alt weapon (MW2's usercmd
+// names the alt weapon itself), + 4 * SLOT_COUNT for the killstreak toggle:
+// the trigger is wanted while that bit differs from PWF_KILLSTREAK_SERVED.
+#define BG_SLOT_CMD_GENERATION 1
+#define BG_SLOT_CMD_ALT 2
+#define BG_SLOT_CMD_KILLSTREAK 4
+#define BG_IS_SLOT_COMMAND(s) ((s) >= BG_SLOT_COMMAND && (s) < BG_SLOT_COMMAND + 8 * SLOT_COUNT)
 #define BG_ATTACHMENT_REDDOT 1
+#define BG_ATTACHMENT_SHOTGUN 2	// MW2's underbarrel shotgun: the gun's alt weapon is WP_MASTERKEY
 #define BG_MAX_CLASS_ATTACHMENTS 2
 #define BG_ATTACHMENTS_LEGACY 256 // version-2 class encoding of cg_sight fallback
 int BG_AttachmentTypeCount( void );
@@ -569,6 +587,8 @@ int BG_WeaponAttachmentMask(int weapon);
 #define BG_GUN_FIRST_DRAW 1
 #define BG_GUN_UNCHAMBERED 2
 #define BG_GUN_GENERATION 4	// slotFlags only: flipped each time a pickup replaces the slot
+#define BG_GUN_ALT 8	// slotFlags only: the slot's gun is in its alt weapon (the underbarrel); never travels
+#define BG_GUN_ALT_UNCHAMBERED 16	// the alt weapon owes its pump: its chamber debt, which travels
 #define BG_PICKUP_RANGE 128.0f	// MW2's player_useRadius, eye to item
 // MW2's Player_ActivateHoldCmd, one rule for every hold-to-use usable, the
 // throwing knife and the floor gun alike, in ms from the press: a use from
@@ -602,10 +622,38 @@ typedef enum {
 #define BG_PICKUP_OWNER_DELAY 1000	// MW2: your own dropped gun waits this long
 typedef struct {
 	int weapon, attachments, ammo, reserve, flags;
+	int altAmmo, altReserve;	// the alt weapon's magazine and reserve (the underbarrel's shells)
 } bg_weaponInstance_t;
 int BG_RequestedSlot(const playerState_t *ps, int selection);
+qboolean BG_RequestedAlt(int selection);
+qboolean BG_RequestedKillstreak(int selection);
+int BG_RequestedWeapon(const playerState_t *ps, int selection);
 int BG_SlotCommand(const playerState_t *ps, int slot);
+int BG_SelectionCommand(const playerState_t *ps, int slot, qboolean alt, qboolean killstreak);
 qboolean BG_SlotCommandCurrent(const playerState_t *ps, int selection);
+// MW2's alt weapons (WeaponCompleteDef altWeaponIndex): the gun a slot holds
+// carries its alt weapon when its attachments give it one.
+int BG_AltWeapon(int weapon, int attachments);
+qboolean BG_IsAltWeapon(int weapon);
+int BG_SlotWeapon(const playerState_t *ps, int slot, qboolean alt);
+qboolean BG_SlotAltActive(const playerState_t *ps, int slot);
+qboolean BG_IsAltSwitch(const playerState_t *ps, int from, int to);
+int BG_WeaponAltRaiseTime(int weapon);
+// MW2's spread-class pellets (shotCount, and the cone the weapon's hip or ADS
+// spread gives them, in degrees); 0 pellets for a gun that fires one bullet.
+int BG_WeaponPellets(int weapon);
+float BG_PelletSpread(int weapon, qboolean aimed);
+int BG_PelletDamage(int weapon, float distance);
+#define BG_DRAW_FIRST 1	// weaponDraw: the slot's first deployment
+#define BG_DRAW_ALT 2	// weaponDraw: MW2's RAISING_ALTSWITCH, the raise after an alt switch
+// MW2's UAV (killstreakTable.csv, maps/mp/killstreaks/_uav.gsc) and the
+// compass that shows it (iw4mp's compass dvars, their registered defaults).
+#define BG_UAV_KILLS 3	// kills in one life that earn it
+#define BG_UAV_TIME 30000	// level.radarViewTime: how long it stays up
+#define BG_RADAR_UPDATE_TIME 4000	// compassRadarUpdateTime: one UAV's sweep
+#define BG_FAST_RADAR_UPDATE_TIME 2000	// compassFastRadarUpdateTime: two or more
+#define BG_RADAR_PING_FADE_TIME 4000	// compassRadarPingFadeTime: a ping is shown this long
+#define BG_COMPASS_MAX_RANGE 2500	// compassMaxRange, in world units; compassClampIcons 1 holds the rest at the edge
 qboolean BG_OffhandOut(const playerState_t *ps);
 qboolean BG_OffhandPreparesAtOnce( int weapon );
 qboolean BG_QuickActionInPlace( int weapon );
@@ -627,6 +675,7 @@ void BG_BeginWeaponDraw(playerState_t *ps);
 #define PWF_USE_RELOAD 1
 #define BG_SPRINT_FORWARD_MINIMUM 105	// MW2's player_sprintForwardMinimum, of 127
 #define PWF_SPRINT_RELEASE 2	// the sprint button is still down from the sprint it started or ended
+#define PWF_KILLSTREAK_SERVED 4	// the killstreak toggle last served: the trigger came out for it
 // MW2's sprint time (player_sprintTime 4s; a start needs player_sprintMinTime
 // 1s left). Used while sprinting, refilled 1:1 while not (playerState_t.sprintUsed).
 #define BG_SPRINT_TIME        4000
@@ -652,6 +701,8 @@ typedef struct {
 void BG_UpdateActivate( playerState_t *ps, bg_activate_t *use, int buttons,
 	qboolean holdUsable, qboolean usedAtOnce );
 qboolean BG_WeaponItem(const entityState_t *item, bg_weaponInstance_t *gun);
+int BG_WeaponItemAltFrame(const bg_weaponInstance_t *gun);
+void BG_WeaponItemAlt(int frame, bg_weaponInstance_t *gun);
 int BG_MatchingWeaponSlot(const playerState_t *ps, const bg_weaponInstance_t *gun);
 float BG_WeaponPickupDistance(const playerState_t *ps, const entityState_t *item, int time);
 qboolean BG_UpdateWeaponPickup(playerState_t *ps, const usercmd_t *cmd,
@@ -838,7 +889,8 @@ typedef enum {
 	EV_STEP_DOWN_4,			// MW2's step down (PM_StepSlideMove), smoothed like a step up
 	EV_STEP_DOWN_8,
 
-	EV_GRENADE_SUICIDE		// MW2's 0x5d: a cooked grenade ran out in its holder's hand
+	EV_GRENADE_SUICIDE,		// MW2's 0x5d: a cooked grenade ran out in its holder's hand
+	EV_USE_KILLSTREAK		// the killstreak trigger came out: MW2's weapon_change to it, which uses the streak
 
 } entity_event_t;
 

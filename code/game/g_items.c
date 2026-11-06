@@ -252,6 +252,13 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 		BG_GetSlot(ps, slot, &held);
 		// Scavenging never reloads the held magazine or changes its chamber.
 		held.reserve = MIN(BG_WeaponMaxReserve(wep), held.reserve + floor.ammo + floor.reserve);
+		// The same gun with the same attachments has the same alt weapon:
+		// its shells go to that reserve the same way.
+		{
+			int alt = BG_AltWeapon(wep, held.attachments);
+			if (alt != WP_NONE)
+				held.altReserve = MIN(BG_WeaponMaxReserve(alt), held.altReserve + floor.altAmmo + floor.altReserve);
+		}
 		BG_PutSlot(ps, slot, &held);
 	}
 
@@ -1005,6 +1012,7 @@ gentity_t *G_DropWeapon(gentity_t *owner, int slot) {
 	item->s.generic1 = gun.attachments;
 	item->s.time2 = (gun.ammo & 65535) | ((unsigned int)gun.reserve << 16);
 	item->s.otherEntityNum2 = gun.flags & BG_GUN_UNCHAMBERED;
+	item->s.frame = BG_WeaponItemAltFrame(&gun);	// its underbarrel's shells and pump
 	item->s.apos.trType = TR_STATIONARY;
 	VectorSet(item->s.apos.trBase, 0, angles[YAW], 90);
 	return item;

@@ -512,6 +512,13 @@ typedef struct {
 	// input state sent to server
 	int			weaponSelect;
 	int             weaponSelectSlot; // intent is a slot; weaponSelect is its HUD label
+	qboolean        weaponSelectAlt;  // ...in the slot gun's alt weapon (the underbarrel)
+	qboolean        killstreakToggle; // the killstreak toggle the commands carry (BG_SLOT_CMD_KILLSTREAK)
+	// MW2's UAV radar: the pings of the latest sweep ("uav" server command)
+	int             radarSweepTime;   // cg.time the latest sweep arrived, 0 for no radar
+	int             radarInterval;    // ms until the next sweep
+	int             radarPingCount;
+	vec3_t          radarPings[48];   // x, y and yaw of each enemy at that sweep
 
 	// auto rotating items
 	vec3_t		autoAngles;
@@ -1367,6 +1374,14 @@ void CG_PositionRotatedEntityOnTag( refEntity_t *entity, const refEntity_t *pare
 //
 void CG_NextWeapon_f( void );
 void CG_PrevWeapon_f( void );
+void CG_AltWeapon_f( void );
+void CG_Killstreak_f( void );
+
+//
+// cg_radar.c: the minimap and MW2's UAV pings
+//
+void CG_ParseUAV( void );
+void CG_DrawRadar( void );
 void CG_Weapon_f( void );
 
 // cg_sights.c: visual alignment, independent of the animation layers

@@ -579,6 +579,11 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 			G_GrenadeSuicide( ent, client->ps.eventParms[ i & (MAX_PS_EVENTS-1) ] );
 			break;
 
+		case EV_USE_KILLSTREAK:
+			// the trigger is in hand: MW2's weapon_change, which calls the UAV in
+			G_UseKillstreak( ent );
+			break;
+
 		case EV_USE_ITEM1:		// teleporter
 			// drop flags in CTF
 			item = NULL;

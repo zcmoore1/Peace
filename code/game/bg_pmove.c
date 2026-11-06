@@ -27,6 +27,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "bg_public.h"
 #include "bg_local.h"
 #include "bg_m40a3_data.h"
+#include "bg_masterkey_data.h"
 
 pmove_t		*pm;
 pml_t		pml;
@@ -1868,6 +1869,8 @@ static const int bg_weaponMagSize[MAX_WEAPONS] = {
 	M40_MAG_SIZE,
 	1,		// WP_THROWING_KNIFE (one in hand)
 	1,		// WP_TACTICAL_INSERTION (one in hand)
+	MK_MAG_SIZE,	// WP_MASTERKEY: m4_shotgun_attach_mp's clipSize
+	0,		// WP_KILLSTREAK_UAV: no magazine; ammo[] counts the UAVs earned
 };
 
 // ---------------------------------------------------------------------------
@@ -1987,6 +1990,28 @@ static const bg_weaponNote_t bgnotes_m40_end[] = {
 	{ M40_RELOAD_CLOSE_MS, WNOTE_BOLT_CLOSED, 0 }, { 0, WNOTE_NONE, 0 }
 };
 
+/* MW2's underbarrel shotgun (m4_shotgun_attach_mp), from its generated data.
+   Its fire cycle is MW2's shot (fireTime) and pump (rechamberTime) in one clip:
+   the action opens when the shot's lock ends, and the shell is chambered when
+   MW2's rechamber weaponDelay runs out - rechamberBoltTime, which this gun
+   leaves at 0, so 1 ms into the pump (575bd8-575c03). Its reload start loads a
+   shell of its own (reloadStartAdd, at reloadStartAddTime), and the loop one a
+   pass at reloadAddTime. */
+static const bg_weaponNote_t bgnotes_mk_fire[] = {
+	{ MK_BOLT_OPEN_MS, WNOTE_BOLT_OPEN, 0 },
+	{ MK_BOLT_CLOSE_MS, WNOTE_BOLT_CLOSED, 0 },
+	{ 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_mk_start[] = {
+	{ MK_RELOAD_START_ADD_MS, WNOTE_MAG_IN, 1 }, { 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_mk_loop[] = {
+	{ MK_ROUND_IN_MS, WNOTE_MAG_IN, 1 }, { 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_mk_end[] = {
+	{ MK_RELOAD_CLOSE_MS, WNOTE_BOLT_CLOSED, 0 }, { 0, WNOTE_NONE, 0 }
+};
+
 /* Length is the refire, so this and the addTime in PM_Weapon are one number.
    A zero-length entry means the weapon has no modelled fire animation and
    behaves exactly as it did before: FIRING until the lock runs out. */
@@ -2011,7 +2036,9 @@ static const bg_weaponAnimSeg_t bg_weaponFire[MAX_WEAPONS] = {
 	/* WP_SEMTEX          */ { 0, bgnotes_none },
 	/* WP_M40A3           */ { M40_FIRE_MS, bgnotes_m40_fire },
 	/* WP_THROWING_KNIFE  */ { 0, bgnotes_none },
-	/* WP_TACTICAL_INSERTION */ { 0, bgnotes_none }
+	/* WP_TACTICAL_INSERTION */ { 0, bgnotes_none },
+	/* WP_MASTERKEY       */ { MK_FIRE_MS, bgnotes_mk_fire },
+	/* WP_KILLSTREAK_UAV  */ { 0, bgnotes_none }
 };
 
 int BG_WeaponFireLength( int weapon ) {
@@ -2047,6 +2074,10 @@ static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
 	                             { M40_RELOAD_END_MS, bgnotes_m40_end } }, qtrue },
 	/* WP_THROWING_KNIFE  */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 	/* WP_TACTICAL_INSERTION */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
+	/* WP_MASTERKEY       */ { { { MK_RELOAD_START_MS, bgnotes_mk_start },
+	                             { MK_RELOAD_LOOP_MS, bgnotes_mk_loop },
+	                             { MK_RELOAD_END_MS, bgnotes_mk_end } }, qtrue },
+	/* WP_KILLSTREAK_UAV  */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 };
 
 // Holster / deploy lengths. Always stamped on a weapon change - never 0, so a
@@ -2075,6 +2106,8 @@ static const int bg_weaponDropTime[MAX_WEAPONS] = {
 	M40_DROP_MS,
 	BG_RAPID_DROP_TIME,	// WP_THROWING_KNIFE
 	BG_RAPID_DROP_TIME,	// WP_TACTICAL_INSERTION
+	MK_DROP_MS,	// WP_MASTERKEY
+	BG_UAV_TRIGGER_DROP_MS,	// WP_KILLSTREAK_UAV: killstreak_uav_mp dropTime
 };
 
 static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
@@ -2101,6 +2134,8 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 	M40_RAISE_MS,
 	BG_THROWING_KNIFE_PULL_MS,	// WP_THROWING_KNIFE: throwingknife_mp holdFireTime 0, in hand on the press
 	BG_INSERTION_IGNITE_MS,	// WP_TACTICAL_INSERTION: flare_mp's holdFireTime, the ignite
+	MK_RAISE_MS,	// WP_MASTERKEY (its raise after an alt switch is BG_WeaponAltRaiseTime)
+	BG_UAV_TRIGGER_RAISE_MS,	// WP_KILLSTREAK_UAV: killstreak_uav_mp raiseTime
 };
 
 // MW2's quickDropTime and quickRaiseTime (its weapon files): the gun going
@@ -2118,6 +2153,8 @@ static const int bg_weaponQuickDropTime[MAX_WEAPONS] = {
 	M40_QUICK_DROP_MS,
 	250,	// WP_THROWING_KNIFE
 	250,	// WP_TACTICAL_INSERTION
+	MK_QUICK_DROP_MS,	// WP_MASTERKEY
+	400,	// WP_KILLSTREAK_UAV: killstreak_uav_mp quickDropTime
 };
 static const int bg_weaponQuickRaiseTime[MAX_WEAPONS] = {
 	250,	// WP_NONE
@@ -2138,6 +2175,8 @@ static const int bg_weaponQuickRaiseTime[MAX_WEAPONS] = {
 	M40_QUICK_RAISE_MS,	// MW2's Intervention
 	250,	// WP_THROWING_KNIFE
 	250,	// WP_TACTICAL_INSERTION
+	MK_QUICK_RAISE_MS,	// WP_MASTERKEY
+	500,	// WP_KILLSTREAK_UAV: killstreak_uav_mp quickRaiseTime
 };
 
 int BG_WeaponMagSize( int weapon ) {
@@ -2176,14 +2215,16 @@ static const int bg_weaponSprintInTime[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	250, 250, 250,
 #endif
-	150, 150, 150, 150, M40_SPRINT_IN_MS, 150, 150	// ..., WP_THROWING_KNIFE, WP_TACTICAL_INSERTION
+	150, 150, 150, 150, M40_SPRINT_IN_MS, 150, 150,	// ..., WP_THROWING_KNIFE, WP_TACTICAL_INSERTION
+	MK_SPRINT_IN_MS, 300	// WP_MASTERKEY, WP_KILLSTREAK_UAV (killstreak_uav_mp sprintInTime)
 };
 static const int bg_weaponSprintOutTime[MAX_WEAPONS] = {
 	180, 180, 250, 250, 300, 300, 250, 300, 250, 350, 150,
 #ifdef MISSIONPACK
 	300, 300, 300,
 #endif
-	180, 180, 180, 180, M40_SPRINT_OUT_MS, 180, 180	// ..., WP_THROWING_KNIFE, WP_TACTICAL_INSERTION
+	180, 180, 180, 180, M40_SPRINT_OUT_MS, 180, 180,	// ..., WP_THROWING_KNIFE, WP_TACTICAL_INSERTION
+	MK_SPRINT_OUT_MS, 300	// WP_MASTERKEY, WP_KILLSTREAK_UAV (killstreak_uav_mp sprintOutTime)
 };
 
 int BG_WeaponSprintInTime( int weapon ) {
@@ -2275,9 +2316,87 @@ int BG_WeaponQuickRaiseTime( int weapon ) {
 	return ( t < WEAPON_MIN_SWAP_TIME ) ? WEAPON_MIN_SWAP_TIME : t;
 }
 
+/*
+==============
+MW2's alt weapons
+
+A gun whose attachments give it an alt weapon (MW2's WeaponCompleteDef
+altWeaponIndex) carries it in the same slot: the Shotgun attachment's is the
+Masterkey, m4_shotgun_attach_mp. The slot's gun is in its alt weapon while
+BG_GUN_ALT is set; a request names the alt with BG_SLOT_CMD_ALT, as MW2's
+usercmd names the alt weapon itself.
+
+MW2's alt switch (the alt test at 479b80, from PM_BeginWeaponChange 575f70)
+is between a gun and its own alt weapon, either way. MW2's data drops every
+one of them in altDropTime 0 (all 181 pairings in the dump), so an alt switch
+puts nothing down: the incoming weapon is in hand on the switch command and
+raises in its own altRaiseTime (PM_FinishWeaponChange 5765a8-5765dc; the
+expiry pass at 579450 runs after the change check, the same think). It is
+no zero holster - nothing is lowered, as for MW2's knife. While sprinting the
+switch is an ordinary one, dropped and raised in full: MW2's BeginWeaponChange
+treats no switch as alt with pm_flags 0x4000 (PMF_SPRINTING) set.
+==============
+*/
+static const int bg_weaponAltRaiseTime[MAX_WEAPONS] = {
+	0, 0,
+	MK_HOST_ALT_RAISE_MS,	// WP_MACHINEGUN: m4_shotgun_mp's altRaiseTime, the shotgun back to the rifle
+	0, 0, 0, 0, 0, 0, 0, 0,
+#ifdef MISSIONPACK
+	0, 0, 0,
+#endif
+	0, 0, 0, 0, 0, 0, 0,	// WP_KNIFE ... WP_TACTICAL_INSERTION
+	MK_ALT_RAISE_MS,	// WP_MASTERKEY: m4_shotgun_attach_mp's altRaiseTime, the rifle to the shotgun
+	0	// WP_KILLSTREAK_UAV
+};
+
+int BG_WeaponAltRaiseTime( int weapon ) {
+	int t;
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return WEAPON_MIN_SWAP_TIME;
+	t = bg_weaponAltRaiseTime[weapon];
+	return ( t < WEAPON_MIN_SWAP_TIME ) ? BG_WeaponRaiseTime( weapon ) : t;
+}
+
+qboolean BG_IsAltSwitch( const playerState_t *ps, int from, int to ) {
+	int slot = ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ? SLOT_SECONDARY : SLOT_PRIMARY;
+	int host = ps->stats[STAT_SLOT_PRIMARY + slot];
+	int alt = BG_AltWeapon( host, ps->slotAttachments[slot] );
+	if ( from <= WP_NONE || to <= WP_NONE || alt == WP_NONE ) return qfalse;
+	return ( from == host && to == alt ) || ( from == alt && to == host );
+}
+
+/*
+==============
+BG_WeaponPellets / BG_PelletSpread / BG_PelletDamage
+
+MW2's spread-class weapon: shotCount pellets, each in the cone its hip or ADS
+spread gives (degrees), each doing damage that falls from damage at
+maxDamageRange to minDamage at minDamageRange. Only the Masterkey reads them;
+the SPAS keeps Quake's pattern for now.
+==============
+*/
+int BG_WeaponPellets( int weapon ) {
+	return weapon == WP_MASTERKEY ? MK_PELLETS : 0;
+}
+
+float BG_PelletSpread( int weapon, qboolean aimed ) {
+	if ( weapon != WP_MASTERKEY ) return 0;
+	return aimed ? MK_ADS_SPREAD_DEG : MK_HIP_SPREAD_DEG;
+}
+
+int BG_PelletDamage( int weapon, float distance ) {
+	float f;
+	if ( weapon != WP_MASTERKEY ) return 0;
+	if ( distance <= MK_MAX_DAMAGE_RANGE ) return MK_DAMAGE;
+	if ( distance >= MK_MIN_DAMAGE_RANGE ) return MK_MIN_DAMAGE;
+	f = ( distance - MK_MAX_DAMAGE_RANGE ) / (float)( MK_MIN_DAMAGE_RANGE - MK_MAX_DAMAGE_RANGE );
+	return (int)( MK_DAMAGE + ( MK_MIN_DAMAGE - MK_DAMAGE ) * f );
+}
+
+// The gun in the active slot, in the weapon it is in: the alt weapon while
+// the slot is in it. What a knife, equipment or the killstreak goes back to.
 int BG_ActiveSlotWeapon( const playerState_t *ps ) {
-	return ps->stats[ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ?
-		STAT_SLOT_SECONDARY : STAT_SLOT_PRIMARY];
+	int slot = ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ? SLOT_SECONDARY : SLOT_PRIMARY;
+	return BG_SlotWeapon( ps, slot, BG_SlotAltActive( ps, slot ) );
 }
 
 int BG_RequestedSlot(const playerState_t *ps, int selection) {
@@ -2288,6 +2407,11 @@ int BG_RequestedSlot(const playerState_t *ps, int selection) {
 	for (slot = 0; slot < SLOT_COUNT; slot++)
 		if (selection == ps->stats[STAT_SLOT_PRIMARY + slot]) return slot;
 	return active;
+}
+
+// The slot gun a selection asks for, in the weapon it asks for it in.
+int BG_RequestedWeapon(const playerState_t *ps, int selection) {
+	return BG_SlotWeapon(ps, BG_RequestedSlot(ps, selection), BG_RequestedAlt(selection));
 }
 
 // Equipment out or on its way out: MW2's offhand states 0x10-0x14, from the gun
@@ -2313,11 +2437,13 @@ draw and by cgame when it fits the raise clip. A first deployment has its
 authored cycle; the gun coming back after a knife or a grenade - a Semtex
 cancel's return included, which latches as fired - is MW2's quick raise
 (MeleeEnd, OffHandEnd);
-anything else is the gun's own raise.
+after an alt switch it is the incoming weapon's altRaiseTime (MW2's
+RAISING_ALTSWITCH); anything else is the gun's own raise.
 ==============
 */
 int BG_WeaponDrawTime(const playerState_t *ps) {
-	if ( ps->weaponDraw ) return BG_WeaponFirstRaiseTime( ps->weapon );
+	if ( ps->weaponDraw == BG_DRAW_ALT ) return BG_WeaponAltRaiseTime( ps->weapon );
+	if ( ps->weaponDraw == BG_DRAW_FIRST ) return BG_WeaponFirstRaiseTime( ps->weapon );
 	if ( ( ps->weaponAction & WA_TYPE_MASK ) && ( ps->weaponAction & WA_FIRED ) &&
 	     !BG_IsActionWeapon( ps->weapon ) ) {
 		return BG_WeaponQuickRaiseTime( ps->weapon );
@@ -2332,16 +2458,26 @@ void BG_GetSlot(const playerState_t *ps, int slot, bg_weaponInstance_t *gun) {
 	gun->weapon = ps->stats[STAT_SLOT_PRIMARY + slot];
 	gun->attachments = ps->slotAttachments[slot];
 	gun->flags = ps->slotFlags[slot] & ~BG_GUN_GENERATION;
+	gun->flags &= ~BG_GUN_ALT;	// which weapon the slot is in never travels
 	gun->ammo = ps->slotAmmo[slot];
 	gun->reserve = ps->slotReserve[slot];
+	gun->altAmmo = ps->slotAltAmmo[slot];
+	gun->altReserve = ps->slotAltReserve[slot];
 	if (gun->weapon <= WP_NONE || gun->weapon >= WP_NUM_WEAPONS) return;
 	// Unique base IDs use the existing note engine's working registers. Only
 	// a stowed duplicate needs its private cache until it becomes active.
 	if (slot == active || gun->weapon != ps->stats[STAT_SLOT_PRIMARY + active]) {
+		int alt = BG_AltWeapon(gun->weapon, gun->attachments);
 		gun->ammo = ps->ammo[gun->weapon];
 		gun->reserve = ps->ammoReserve[gun->weapon];
-		gun->flags &= ~BG_GUN_UNCHAMBERED;
+		gun->flags &= ~(BG_GUN_UNCHAMBERED | BG_GUN_ALT_UNCHAMBERED);
 		if (ps->stats[STAT_UNCHAMBERED] & (1 << gun->weapon)) gun->flags |= BG_GUN_UNCHAMBERED;
+		// The alt weapon's registers belong to the same instance.
+		if (alt != WP_NONE) {
+			gun->altAmmo = ps->ammo[alt];
+			gun->altReserve = ps->ammoReserve[alt];
+			if (ps->stats[STAT_UNCHAMBERED] & (1 << alt)) gun->flags |= BG_GUN_ALT_UNCHAMBERED;
+		}
 	}
 }
 
@@ -2352,7 +2488,9 @@ static void BG_StoreSlots(playerState_t *ps) {
 		BG_GetSlot(ps, slot, &gun);
 		ps->slotAmmo[slot] = gun.ammo;
 		ps->slotReserve[slot] = gun.reserve;
-		ps->slotFlags[slot] = (ps->slotFlags[slot] & BG_GUN_GENERATION) | gun.flags;
+		ps->slotAltAmmo[slot] = gun.altAmmo;
+		ps->slotAltReserve[slot] = gun.altReserve;
+		ps->slotFlags[slot] = (ps->slotFlags[slot] & (BG_GUN_GENERATION | BG_GUN_ALT)) | gun.flags;
 	}
 }
 
@@ -2367,19 +2505,35 @@ static void BG_LoadSlots(playerState_t *ps) {
 		ps->ammoReserve[weapon] = ps->slotReserve[slot];
 		ps->stats[STAT_UNCHAMBERED] &= ~(1 << weapon);
 		if (ps->slotFlags[slot] & BG_GUN_UNCHAMBERED) ps->stats[STAT_UNCHAMBERED] |= 1 << weapon;
+		weapon = BG_AltWeapon(weapon, ps->slotAttachments[slot]);
+		if (weapon == WP_NONE) continue;
+		ps->ammo[weapon] = ps->slotAltAmmo[slot];
+		ps->ammoReserve[weapon] = ps->slotAltReserve[slot];
+		ps->stats[STAT_UNCHAMBERED] &= ~(1 << weapon);
+		if (ps->slotFlags[slot] & BG_GUN_ALT_UNCHAMBERED) ps->stats[STAT_UNCHAMBERED] |= 1 << weapon;
 	}
 }
 
 void BG_PutSlot(playerState_t *ps, int slot, const bg_weaponInstance_t *gun) {
+	int keepAlt;
 	if (slot < 0 || slot >= SLOT_COUNT || gun->weapon <= WP_NONE ||
 		gun->weapon >= WP_NUM_WEAPONS || BG_IsActionWeapon(gun->weapon)) return;
 	BG_StoreSlots(ps);
+	// The same gun put back (a scavenge) stays in the weapon it is in.
+	keepAlt = (ps->slotFlags[slot] & BG_GUN_ALT) && ps->stats[STAT_SLOT_PRIMARY + slot] == gun->weapon &&
+		ps->slotAttachments[slot] == (gun->attachments & BG_WeaponAttachmentMask(gun->weapon)) ? BG_GUN_ALT : 0;
 	ps->stats[STAT_SLOT_PRIMARY + slot] = gun->weapon;
 	ps->slotAttachments[slot] = gun->attachments & BG_WeaponAttachmentMask(gun->weapon);
 	ps->slotAmmo[slot] = MAX(0, MIN(gun->ammo, BG_WeaponMagSize(gun->weapon)));
 	ps->slotReserve[slot] = MAX(0, MIN(gun->reserve, BG_WeaponMaxReserve(gun->weapon)));
-	ps->slotFlags[slot] = (ps->slotFlags[slot] & BG_GUN_GENERATION) |
-		(gun->flags & (BG_GUN_FIRST_DRAW | BG_GUN_UNCHAMBERED));
+	{
+		int alt = BG_AltWeapon(gun->weapon, ps->slotAttachments[slot]);
+		ps->slotAltAmmo[slot] = alt == WP_NONE ? 0 : MAX(0, MIN(gun->altAmmo, BG_WeaponMagSize(alt)));
+		ps->slotAltReserve[slot] = alt == WP_NONE ? 0 : MAX(0, MIN(gun->altReserve, BG_WeaponMaxReserve(alt)));
+	}
+	// Another gun put in a slot is in its own weapon, never its alt (MW2 gives the base).
+	ps->slotFlags[slot] = (ps->slotFlags[slot] & BG_GUN_GENERATION) | keepAlt |
+		(gun->flags & (BG_GUN_FIRST_DRAW | BG_GUN_UNCHAMBERED | BG_GUN_ALT_UNCHAMBERED));
 	BG_LoadSlots(ps);
 	BG_RebuildWeaponMask(ps);
 }
@@ -2391,18 +2545,31 @@ void BG_SelectSlot(playerState_t *ps, int slot) {
 	BG_LoadSlots(ps);
 }
 
-void BG_BeginWeaponDraw(playerState_t *ps) {
-	int slot = ps->stats[STAT_ACTIVE_SLOT];
-	ps->weaponDraw = !BG_IsActionWeapon(ps->weapon) &&
-		(ps->slotFlags[slot] & BG_GUN_FIRST_DRAW) != 0;
-	// Deployment is consumed when it STARTS, not when its animation ends.
-	// Holster/YY/sprint may interrupt it without replaying it on every return.
-	if (ps->weaponDraw) ps->slotFlags[slot] &= ~BG_GUN_FIRST_DRAW;
+static void BG_StartDraw(playerState_t *ps, int draw) {
+	ps->weaponDraw = draw;
 	ps->weaponstate = WEAPON_RAISING;
 	ps->weaponTime = BG_WeaponDrawTime(ps);
 	ps->weaponAnimTime = -1;
 	ps->pm_flags &= ~PMF_PENDING_MAG;
 	BG_StartTorsoAnim(ps, TORSO_RAISE);
+}
+
+void BG_BeginWeaponDraw(playerState_t *ps) {
+	int slot = ps->stats[STAT_ACTIVE_SLOT];
+	// Only the slot's own gun has a first deployment; its alt weapon never does.
+	qboolean first = !BG_IsActionWeapon(ps->weapon) &&
+		ps->weapon == ps->stats[STAT_SLOT_PRIMARY + slot] &&
+		(ps->slotFlags[slot] & BG_GUN_FIRST_DRAW) != 0;
+	// Deployment is consumed when it STARTS, not when its animation ends.
+	// Holster/YY/sprint may interrupt it without replaying it on every return.
+	if (first) ps->slotFlags[slot] &= ~BG_GUN_FIRST_DRAW;
+	BG_StartDraw(ps, first ? BG_DRAW_FIRST : 0);
+}
+
+// MW2's RAISING_ALTSWITCH: the weapon an alt switch put in hand comes up in
+// its altRaiseTime, from where nothing was put down.
+static void BG_BeginAltWeaponDraw(playerState_t *ps) {
+	BG_StartDraw(ps, BG_DRAW_ALT);
 }
 
 qboolean BG_WeaponItem(const entityState_t *item, bg_weaponInstance_t *gun) {
@@ -2419,11 +2586,27 @@ qboolean BG_WeaponItem(const entityState_t *item, bg_weaponInstance_t *gun) {
 		gun->ammo = item->time2 & 65535;
 		gun->reserve = (unsigned int)item->time2 >> 16;
 		gun->flags |= item->otherEntityNum2 & BG_GUN_UNCHAMBERED;
+		BG_WeaponItemAlt(item->frame, gun);
 	} else {
+		int alt = BG_AltWeapon(gun->weapon, gun->attachments);
 		gun->ammo = BG_WeaponMagSize(gun->weapon);
 		gun->reserve = BG_WeaponMaxReserve(gun->weapon);
+		gun->altAmmo = alt == WP_NONE ? 0 : BG_WeaponMagSize(alt);
+		gun->altReserve = alt == WP_NONE ? 0 : BG_WeaponMaxReserve(alt);
 	}
 	return qtrue;
+}
+
+// A dropped gun's alt weapon rides in its item's frame: magazine (4 bits),
+// reserve (6 bits) and chamber debt (one bit). CG_Item never reads frame.
+int BG_WeaponItemAltFrame(const bg_weaponInstance_t *gun) {
+	return (gun->altAmmo & 15) | ((gun->altReserve & 63) << 4) |
+		((gun->flags & BG_GUN_ALT_UNCHAMBERED) ? 1024 : 0);
+}
+void BG_WeaponItemAlt(int frame, bg_weaponInstance_t *gun) {
+	gun->altAmmo = frame & 15;
+	gun->altReserve = (frame >> 4) & 63;
+	if (frame & 1024) gun->flags |= BG_GUN_ALT_UNCHAMBERED;
 }
 
 int BG_MatchingWeaponSlot(const playerState_t *ps, const bg_weaponInstance_t *gun) {
@@ -2537,11 +2720,19 @@ static const int bg_weaponMaxReserve[MAX_WEAPONS] = {
 	M40_RESERVE,
 	0,		// WP_THROWING_KNIFE
 	0,		// WP_TACTICAL_INSERTION
+	MK_MAX_RESERVE,	// WP_MASTERKEY: m4_shotgun_attach_mp's maxAmmo
+	0,		// WP_KILLSTREAK_UAV
 };
 
 int BG_WeaponMaxReserve( int weapon ) {
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
 	return bg_weaponMaxReserve[weapon];
+}
+
+// What a class spawns with in reserve: the most it can carry, except a gun
+// whose MW2 data starts it lower (startAmmo under maxAmmo): the Masterkey.
+int BG_WeaponStartReserve( int weapon ) {
+	return weapon == WP_MASTERKEY ? MK_START_RESERVE : BG_WeaponMaxReserve( weapon );
 }
 
 // Base bullet spread per weapon (hipfire, standing still), in the same units
@@ -2571,6 +2762,8 @@ static const int bg_weaponSpread[MAX_WEAPONS] = {
 	M40_HIP_SPREAD,
 	0,		// WP_THROWING_KNIFE
 	0,		// WP_TACTICAL_INSERTION
+	0,		// WP_MASTERKEY (its pellets: BG_PelletSpread)
+	0,		// WP_KILLSTREAK_UAV
 };
 
 static const float bg_weaponAdsSpreadScale[MAX_WEAPONS] = {
@@ -2578,7 +2771,8 @@ static const float bg_weaponAdsSpreadScale[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	.15f, .15f, .15f,
 #endif
-	.15f, .15f, .15f, .15f, M40_ADS_SPREAD_SCALE, .15f, .15f	// ..., WP_THROWING_KNIFE, WP_TACTICAL_INSERTION
+	.15f, .15f, .15f, .15f, M40_ADS_SPREAD_SCALE, .15f, .15f,	// ..., WP_THROWING_KNIFE, WP_TACTICAL_INSERTION
+	.15f, .15f	// WP_MASTERKEY, WP_KILLSTREAK_UAV
 };
 
 // Aimed through an overlay scope rather than over the sights (MW2's
@@ -2588,7 +2782,8 @@ static const int bg_weaponScopeOverlay[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	0, 0, 0,
 #endif
-	0, 0, 0, 0, M40_SCOPE_OVERLAY, 0, 0	// ..., WP_THROWING_KNIFE, WP_TACTICAL_INSERTION
+	0, 0, 0, 0, M40_SCOPE_OVERLAY, 0, 0,	// ..., WP_THROWING_KNIFE, WP_TACTICAL_INSERTION
+	0, 0	// WP_MASTERKEY, WP_KILLSTREAK_UAV
 };
 
 int BG_WeaponScopeOverlay( int weapon ) {
@@ -2684,10 +2879,14 @@ void BG_RebuildWeaponMask( playerState_t *ps ) {
 		w = ps->stats[STAT_SLOT_PRIMARY + i];
 		if ( w > WP_NONE && w < WP_NUM_WEAPONS ) {
 			mask |= ( 1 << w );
+			w = BG_AltWeapon( w, ps->slotAttachments[i] );	// its alt weapon rides along
+			if ( w != WP_NONE ) mask |= ( 1 << w );
 		}
 	}
 
 	mask |= ( 1 << WP_KNIFE );					// melee is never a slot
+	// An earned UAV, and the trigger while it is still in hand after the last.
+	if ( ps->ammo[WP_KILLSTREAK_UAV] > 0 || ps->weapon == WP_KILLSTREAK_UAV ) mask |= ( 1 << WP_KILLSTREAK_UAV );
 
 	if ( ps->ammo[WP_FRAG]  > 0 ) mask |= ( 1 << WP_FRAG );
 	if ( ps->ammo[WP_FLASH] > 0 ) mask |= ( 1 << WP_FLASH );
@@ -2753,6 +2952,14 @@ void BG_ApplyClass( playerState_t *ps, const bg_class_t *cl ) {
 		ps->slotReserve[i] = ps->ammoReserve[w];
 		ps->slotFlags[i] = 0;
 		ps->slotAttachments[i] = cl->attachments[i] < 0 ? 0 : cl->attachments[i];
+		// The alt weapon's shells: MW2 starts it with a full tube and its
+		// startAmmo, not its maxAmmo.
+		w = BG_AltWeapon( w, ps->slotAttachments[i] );
+		ps->slotAltAmmo[i] = ps->slotAltReserve[i] = 0;
+		if ( w != WP_NONE ) {
+			ps->ammo[w] = ps->slotAltAmmo[i] = BG_WeaponMagSize( w );
+			ps->ammoReserve[w] = ps->slotAltReserve[i] = BG_WeaponStartReserve( w );
+		}
 	}
 	ps->stats[STAT_ACTIVE_SLOT] = SLOT_PRIMARY;
 
@@ -3060,7 +3267,9 @@ static void PM_AdvanceReloadSegments( void ) {
 
 		switch ( pm->ps->weaponAnimSeq ) {
 		case RSEQ_START:
-			pm->ps->weaponAnimSeq = RSEQ_LOOP;
+			// A start that loads a shell of its own (MW2's reloadStartAdd) may
+			// have filled the tube: then the end, as MW2's segmented reload.
+			pm->ps->weaponAnimSeq = PM_ReloadWantsMore() ? RSEQ_LOOP : RSEQ_END;
 			break;
 
 		case RSEQ_LOOP:
@@ -3196,7 +3405,8 @@ static qboolean PM_UpdateGrenadeThrow( void ) {
 
 // Latch a press through holster/deploy. Releasing the button cannot lose a tap,
 // and holding it cannot turn a quick action into a permanently selected weapon.
-static void PM_FinishWeaponChange( void );
+static void PM_FinishWeaponChange( qboolean altSwitch );
+static int PM_SelectedWeapon( void );
 static void PM_UpdateWeaponAction( void ) {
 	// MW2's knife check refuses every raise and drop, a quick action's return
 	// and the command it ends on included. A drop the requested slot has come
@@ -3206,12 +3416,14 @@ static void PM_UpdateWeaponAction( void ) {
 	qboolean yyReturn = pm->ps->weaponstate == WEAPON_DROPPING &&
 		!BG_IsActionWeapon( pm->ps->weapon ) &&
 		pm->ps->weapon == BG_ActiveSlotWeapon( pm->ps ) &&
-		BG_RequestedSlot( pm->ps, pm->cmd.weapon ) == pm->ps->stats[STAT_ACTIVE_SLOT];
+		BG_RequestedSlot( pm->ps, pm->cmd.weapon ) == pm->ps->stats[STAT_ACTIVE_SLOT] &&
+		PM_SelectedWeapon() == pm->ps->weapon;
 	qboolean swapping = pm->ps->weaponstate == WEAPON_RAISING ||
 		( pm->ps->weaponstate == WEAPON_DROPPING && !yyReturn ) ||
 		( pm->ps->weaponstate != WEAPON_DROPPING && PM_WeaponChangeOpen() &&
 		  !( pm->ps->weaponAction & ( WA_RETURNING | WA_RECOVERING ) ) &&
-		  BG_RequestedSlot( pm->ps, pm->cmd.weapon ) != pm->ps->stats[STAT_ACTIVE_SLOT] );
+		  ( BG_RequestedSlot( pm->ps, pm->cmd.weapon ) != pm->ps->stats[STAT_ACTIVE_SLOT] ||
+		    PM_SelectedWeapon() != BG_ActiveSlotWeapon( pm->ps ) ) );
 	int held = PM_HeldActionButtons();
 	int heldBefore = (pm->ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT;
 	int pressed = held & ~heldBefore;
@@ -3340,7 +3552,7 @@ static void PM_UpdateWeaponAction( void ) {
 		PM_OffhandEnd();
 	}
 	if ( prepare ) {
-		PM_FinishWeaponChange();
+		PM_FinishWeaponChange( qfalse );
 	}
 	if ( action & WA_TYPE_MASK ) {
 		// A sprint the action ends waits for its button (PM_CheckSprint).
@@ -3440,7 +3652,31 @@ static int PM_DesiredWeapon( void ) {
 	// unowned selection as weapon 0) until the selection catches up, about a
 	// round trip, as MW2's select hand-off does.
 	if ( !BG_SlotCommandCurrent( pm->ps, pm->cmd.weapon ) ) return WP_NONE;
-	return pm->ps->stats[STAT_SLOT_PRIMARY + BG_RequestedSlot(pm->ps, pm->cmd.weapon)];
+	return PM_SelectedWeapon();
+}
+
+/*
+===============
+PM_SelectedWeapon
+
+What the selection asks for: the killstreak trigger while the command's toggle
+differs from the one last served and a UAV is there to use, else the slot's
+gun in the weapon asked for (its alt weapon with BG_SLOT_CMD_ALT).
+
+MW2 selects the killstreak weapon like any other (its action slot), and the
+script (_killstreaks.gsc killstreakUseWaiter) uses the streak on the
+weapon_change to it, then switches back to the last weapon. Here the command
+carries both: the toggle, and the selection to go back to. The trigger is
+served once it is in hand (PM_FinishWeaponChange), so the selection takes
+over again on the next command and the trigger is put away.
+===============
+*/
+static int PM_SelectedWeapon( void ) {
+	if ( BG_RequestedKillstreak( pm->cmd.weapon ) != !!( pm->ps->weapFlags & PWF_KILLSTREAK_SERVED ) &&
+	     pm->ps->ammo[WP_KILLSTREAK_UAV] > 0 && ( pm->ps->stats[STAT_WEAPONS] & ( 1 << WP_KILLSTREAK_UAV ) ) ) {
+		return WP_KILLSTREAK_UAV;
+	}
+	return BG_RequestedWeapon( pm->ps, pm->cmd.weapon );
 }
 
 static int PM_DesiredSlot(void) {
@@ -3490,7 +3726,16 @@ static void PM_BeginWeaponChange( int weapon ) {
 	// straight over. The gun is simply drawn (MW2 stamps no drop for either).
 	if ( ( pm->ps->weapon == WP_NONE || BG_QuickActionInPlace( pm->ps->weapon ) ) &&
 	     !BG_IsActionWeapon( weapon ) ) {
-		PM_FinishWeaponChange();
+		PM_FinishWeaponChange( qfalse );
+		return;
+	}
+
+	// An alt switch puts nothing down either: MW2's altDropTime is 0 for every
+	// gun and its alt weapon, and the incoming weapon is in hand on this
+	// command, raised in its altRaiseTime. Never while sprinting (MW2 takes no
+	// switch as alt under PMF_SPRINTING): that is an ordinary drop and raise.
+	if ( BG_IsAltSwitch( pm->ps, pm->ps->weapon, weapon ) && !( pm->ps->pm_flags & PMF_SPRINTING ) ) {
+		PM_FinishWeaponChange( qtrue );
 		return;
 	}
 
@@ -3507,7 +3752,7 @@ static void PM_BeginWeaponChange( int weapon ) {
 PM_FinishWeaponChange
 ===============
 */
-static void PM_FinishWeaponChange( void ) {
+static void PM_FinishWeaponChange( qboolean altSwitch ) {
 	int		weapon;
 
 	weapon = PM_DesiredWeapon();
@@ -3520,8 +3765,27 @@ static void PM_FinishWeaponChange( void ) {
 	}
 
 	// Save the old instance before loading the new slot's working registers.
-	// Quick actions keep the same slot; their ammo occupies separate entries.
-	if (!BG_IsActionWeapon(weapon)) BG_SelectSlot(pm->ps, PM_DesiredSlot());
+	// Quick actions keep the same slot; their ammo occupies separate entries,
+	// and so does the killstreak trigger, which is no slot's.
+	if ( weapon == WP_KILLSTREAK_UAV ) {
+		// MW2's weapon_change to the killstreak weapon (5e49b0) is what uses
+		// it: the trigger is in hand, the streak is spent and the request
+		// served, so the selection is wanted again from the next command.
+		pm->ps->weapFlags = ( pm->ps->weapFlags & ~PWF_KILLSTREAK_SERVED ) |
+			( BG_RequestedKillstreak( pm->cmd.weapon ) ? PWF_KILLSTREAK_SERVED : 0 );
+		pm->ps->ammo[WP_KILLSTREAK_UAV]--;
+		PM_AddEvent( EV_USE_KILLSTREAK );
+	} else if ( !BG_IsActionWeapon( weapon ) ) {
+		int slot = PM_DesiredSlot();
+		BG_SelectSlot( pm->ps, slot );
+		// The slot is in whichever of its weapons comes up.
+		if ( weapon != WP_NONE && weapon == BG_SlotWeapon( pm->ps, slot, qtrue ) &&
+		     weapon != pm->ps->stats[STAT_SLOT_PRIMARY + slot] ) {
+			pm->ps->slotFlags[slot] |= BG_GUN_ALT;
+		} else if ( weapon == pm->ps->stats[STAT_SLOT_PRIMARY + slot] ) {
+			pm->ps->slotFlags[slot] &= ~BG_GUN_ALT;
+		}
+	}
 	pm->ps->weapon      = weapon;
 	// No gun to draw: the hand stays empty and ready, as a pickup's take leaves
 	// it, and no slot's first deployment is spent on it.
@@ -3532,7 +3796,11 @@ static void PM_FinishWeaponChange( void ) {
 		pm->ps->pm_flags      &= ~PMF_PENDING_MAG;
 		return;
 	}
-	BG_BeginWeaponDraw(pm->ps);
+	if ( altSwitch ) {
+		BG_BeginAltWeaponDraw( pm->ps );
+	} else {
+		BG_BeginWeaponDraw( pm->ps );
+	}
 }
 
 // An alternate holster DESTINATION, not an alternate reload or swap. Leave the
@@ -3548,7 +3816,7 @@ static qboolean PM_LadderWeapon( void ) {
 		PM_StartTorsoAnim( TORSO_DROP );
 	}
 	if ( pm->ps->weaponstate == WEAPON_LADDER && !(state & LADDER_ATTACHED) ) {
-		PM_FinishWeaponChange();
+		PM_FinishWeaponChange( qfalse );
 		return qtrue;
 	}
 	return (pm->ps->stats[STAT_LADDER] & LADDER_HOLSTER) ||
@@ -3923,7 +4191,7 @@ static void PM_Weapon( void ) {
 	//    returns - so the queued fill in step 4 is never reached. Nothing here
 	//    knows what a NAC is; it is just a drop that had its lock taken away.
 	if ( pm->ps->weaponstate == WEAPON_DROPPING && pm->ps->weaponTime <= 0 ) {
-		PM_FinishWeaponChange();
+		PM_FinishWeaponChange( qfalse );
 		return;
 	}
 

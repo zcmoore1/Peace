@@ -749,10 +749,19 @@ static void TestShootReload( int step ) {
 		CHECK( 1 + reset < close );
 		CHECK( reset < Seg( w, RSEQ_START ) + GunNote( PM_SegNotes( w, RSEQ_LOOP ), WNOTE_MAG_IN ) );
 
-		/* Reload is taken during the blast and during the pump/bolt alike. */
+		/* Reload is taken during the blast and during the pump/bolt alike. A
+		   gun whose close follows its open by a single millisecond (MW2's
+		   rechamberBoltTime 0, as the Masterkey's) has chambered on the pump's
+		   first think already, which the reload then starts from. */
 		ShootGun( w ); RunFor( 1, step ); ReloadAtOnce();
 		ShootGun( w ); RunFor( GunNote( bg_weaponFire[w].notes, WNOTE_BOLT_OPEN ), 1 );
-		CHECK( testPs.weaponstate == WEAPON_BOLTING ); ReloadAtOnce();
+		CHECK( testPs.weaponstate == WEAPON_BOLTING );
+		if ( close > GunNote( bg_weaponFire[w].notes, WNOTE_BOLT_OPEN ) + 1 ) {
+			ReloadAtOnce();
+		} else {
+			testMove.cmd.buttons = BUTTON_RELOAD; Step( 1 ); testMove.cmd.buttons = 0;
+			CHECK( testPs.weaponstate == WEAPON_RELOADING && !( testPs.stats[STAT_UNCHAMBERED] & (1 << fireGun) ) );
+		}
 
 		/* The fastest NAC: Y on the think the reload resets the action. The
 		   swap is instant, but the reload never got to settle the action, so
@@ -777,12 +786,15 @@ static void TestShootReload( int step ) {
 			testMove.cmd.buttons = 0;
 		}
 
-		/* One think earlier it is an ordinary swap: the window is a window. */
-		ShootGun( w ); ReloadAtOnce();
-		RunFor( reset - 2, 1 );
-		testMove.cmd.weapon = otherGun; Step( 1 );
-		CHECK( testPs.weapon == w && testPs.weaponstate == WEAPON_DROPPING );
-		CHECK( testPs.weaponTime == BG_WeaponDropTime( w ) );
+		/* One think earlier it is an ordinary swap: the window is a window.
+		   (A gun that settles 1 ms into its reload has no think before it.) */
+		if ( reset >= 2 ) {
+			ShootGun( w ); ReloadAtOnce();
+			RunFor( reset - 2, 1 );
+			testMove.cmd.weapon = otherGun; Step( 1 );
+			CHECK( testPs.weapon == w && testPs.weaponstate == WEAPON_DROPPING );
+			CHECK( testPs.weaponTime == BG_WeaponDropTime( w ) );
+		}
 
 		/* The Fayde: one think late, YY - the gun is ready, no pump owed, and
 		   it fires long before the pump or bolt would have let it. */
@@ -797,17 +809,20 @@ static void TestShootReload( int step ) {
 		CHECK( 1 + 1 + reset + 3 < BG_WeaponFireLength( w ) );
 
 		/* YY before the reset: the reload is gone and the action still owed,
-		   so the whole pump or bolt plays again from the top. */
-		ShootGun( w ); ReloadAtOnce();
-		RunFor( reset - 3, 1 );
-		testMove.cmd.weapon = otherGun; Step( 1 );
-		testMove.cmd.weapon = w; Step( 1 );
-		CHECK( testPs.weaponstate == WEAPON_BOLTING && testPs.weaponAnimTime == 0 );
-		shots = 0; testMove.cmd.buttons = BUTTON_ATTACK;
-		RunFor( BG_WeaponFireLength( w ) - 1, 1 );
-		CHECK( shots == 0 );
-		Step( 1 );
-		CHECK( shots == 1 );
+		   so the whole pump or bolt plays again from the top. (A gun that
+		   settles within 2 ms of its reload has no YY that early.) */
+		if ( reset >= 3 ) {
+			ShootGun( w ); ReloadAtOnce();
+			RunFor( reset - 3, 1 );
+			testMove.cmd.weapon = otherGun; Step( 1 );
+			testMove.cmd.weapon = w; Step( 1 );
+			CHECK( testPs.weaponstate == WEAPON_BOLTING && testPs.weaponAnimTime == 0 );
+			shots = 0; testMove.cmd.buttons = BUTTON_ATTACK;
+			RunFor( BG_WeaponFireLength( w ) - 1, 1 );
+			CHECK( shots == 0 );
+			Step( 1 );
+			CHECK( shots == 1 );
+		}
 
 		/* Wait out the reset, then YY late: still ready, still no pump. */
 		ShootGun( w ); ReloadAtOnce();

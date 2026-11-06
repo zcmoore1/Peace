@@ -44,8 +44,15 @@ static void TestCatalog(void) {
  BG_ApplyClass(&ps,&copy); CHECK(ps.slotAttachments[0]==BG_ATTACHMENT_REDDOT && ps.slotAttachments[1]==0);
  cl.perk[0]=BG_PERK_COUNT; CHECK(!BG_ValidateClass(&cl));
  cl.perk[0]=-1; CHECK(!BG_ValidateClass(&cl));
- cl.perk[0]=PERK_SECOND_NATURE; cl.attachments[0]=2;
+ cl.perk[0]=PERK_SECOND_NATURE; cl.attachments[0]=4;
  CHECK(!BG_ValidateClass(&cl)); /* extra capacity cannot invent unsupported attachments */
+ /* the Shotgun (MW2's underbarrel) is the machinegun's alone, and with the red
+  * dot it is two attachments: Second Nature's room, not one perk-less slot */
+ cl.attachments[0]=BG_ATTACHMENT_REDDOT|BG_ATTACHMENT_SHOTGUN; CHECK(cl.slot[0]==WP_MACHINEGUN && BG_ValidateClass(&cl));
+ cl.perk[0]=PERK_NONE; CHECK(!BG_ValidateClass(&cl));
+ cl.attachments[0]=BG_ATTACHMENT_SHOTGUN; CHECK(BG_ValidateClass(&cl));
+ cl.attachments[1]=BG_ATTACHMENT_SHOTGUN; CHECK(cl.slot[1]==WP_SHOTGUN && !BG_ValidateClass(&cl));
+ cl.attachments[1]=0; cl.perk[0]=PERK_SECOND_NATURE;
  cl=*BG_Class(1); cl.attachments[0]=BG_ATTACHMENT_REDDOT; CHECK(!BG_ValidateClass(&cl));
  before=copy;
  Com_sprintf(text,sizeof(text),"2|%i|%i|%i|2|%i|2|1|1|0|0|0|Duplicate",WP_MACHINEGUN,WP_SHOTGUN,WP_FRAG,WP_FLASH);

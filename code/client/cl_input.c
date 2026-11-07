@@ -264,6 +264,9 @@ void IN_Button13Down(void) {IN_KeyDown(&in_buttons[13]);}
 void IN_Button13Up(void) {IN_KeyUp(&in_buttons[13]);}
 void IN_Button14Down(void) {IN_KeyDown(&in_buttons[14]);}
 void IN_Button14Up(void) {IN_KeyUp(&in_buttons[14]);}
+// MW2's toggleads and leaveads (5a5ac0, 5a5ae0), on cl.usingAds
+static void IN_ToggleADS(void) {cl.usingAds = !cl.usingAds;}
+static void IN_LeaveADS(void) {cl.usingAds = qfalse;}
 void IN_Button15Down(void) {IN_KeyDown(&in_buttons[15]);}
 void IN_Button15Up(void) {IN_KeyUp(&in_buttons[15]);}
 void IN_Button16Down(void) {IN_KeyDown(&in_buttons[16]);}
@@ -679,6 +682,9 @@ void CL_CmdButtons( usercmd_t *cmd ) {
 		}
 		in_buttons[i].wasPressed = qfalse;
 	}
+	if ( cl.usingAds ) {
+		cmd->buttons |= BUTTON_ADS;
+	}
 
 	if ( Key_GetCatcher( ) ) {
 		cmd->buttons |= BUTTON_TALK;
@@ -707,8 +713,11 @@ void CL_FinishMove( usercmd_t *cmd ) {
 	// can be determined without allowing cheating
 	cmd->serverTime = cl.serverTime;
 
+	// MW2's CL_FinishMove (5a6740-5a677b): the aim is the player's view
+	// angles plus cgame's view kick, all three axes. The kick is never added
+	// into cl.viewangles, so it runs out without moving the player's own aim.
 	for (i=0 ; i<3 ; i++) {
-		cmd->angles[i] = ANGLE2SHORT(cl.viewangles[i]);
+		cmd->angles[i] = ANGLE2SHORT(cl.viewangles[i] + cl.cgameKickAngles[i]);
 	}
 }
 
@@ -1171,6 +1180,8 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-sprint", IN_Button13Up);
 	Cmd_AddCommand ("+ads", IN_Button14Down);		// BUTTON_ADS = bit 14
 	Cmd_AddCommand ("-ads", IN_Button14Up);
+	Cmd_AddCommand ("toggleads", IN_ToggleADS);
+	Cmd_AddCommand ("leaveads", IN_LeaveADS);
 	Cmd_AddCommand ("+melee", IN_Button15Down);		// BUTTON_MELEE = bit 15
 	Cmd_AddCommand ("-melee", IN_Button15Up);
 	Cmd_AddCommand ("+lethal", IN_Button16Down);	// BUTTON_LETHAL = bit 16
@@ -1294,6 +1305,8 @@ void CL_ShutdownInput(void)
 	Cmd_RemoveCommand("-sprint");
 	Cmd_RemoveCommand("+ads");
 	Cmd_RemoveCommand("-ads");
+	Cmd_RemoveCommand("toggleads");
+	Cmd_RemoveCommand("leaveads");
 	Cmd_RemoveCommand("+melee");
 	Cmd_RemoveCommand("-melee");
 	Cmd_RemoveCommand("+lethal");

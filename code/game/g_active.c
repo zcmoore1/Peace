@@ -526,6 +526,17 @@ void ClientIntermissionThink( gclient_t *client ) {
 }
 
 
+// The item name of a weapon an event names, as MW2's notifies pass its name.
+static const char *G_EventWeaponName( int weapon ) {
+	gitem_t *it;
+	for ( it = bg_itemlist + 1; it->classname; it++ ) {
+		if ( it->giType == IT_WEAPON && it->giTag == weapon ) {
+			return it->classname;
+		}
+	}
+	return "none";
+}
+
 /*
 ================
 ClientEvents
@@ -572,6 +583,14 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 
 		case EV_FIRE_WEAPON:
 			FireWeapon( ent );
+			break;
+
+		case EV_WEAPON_SWITCH_STARTED:
+			// MW2's HandleClientEvent (5d6d84) notifies the scripts with the
+			// weapon's name ("weapon_switch_started"). Peace's scripts are the
+			// ones reading the game log.
+			G_LogPrintf( "WeaponSwitchStarted: %i %s\n", ent->s.number,
+				G_EventWeaponName( client->ps.eventParms[ i & (MAX_PS_EVENTS-1) ] ) );
 			break;
 
 		case EV_GRENADE_SUICIDE:
@@ -714,41 +733,6 @@ static int StuckInOtherClient(gentity_t *ent) {
 #endif
 
 void BotTestSolid(vec3_t origin);
-
-/*
-==============
-SendPendingPredictableEvents
-==============
-*/
-void SendPendingPredictableEvents( playerState_t *ps ) {
-	gentity_t *t;
-	int event, seq;
-	int extEvent, number;
-
-	// if there are still events pending
-	if ( ps->entityEventSequence < ps->eventSequence ) {
-		// create a temporary entity for this event which is sent to everyone
-		// except the client who generated the event
-		seq = ps->entityEventSequence & (MAX_PS_EVENTS-1);
-		event = ps->events[ seq ] | ( ( ps->entityEventSequence & 3 ) << 8 );
-		// set external event to zero before calling BG_PlayerStateToEntityState
-		extEvent = ps->externalEvent;
-		ps->externalEvent = 0;
-		// create temporary entity for event
-		t = G_TempEntity( ps->origin, event );
-		number = t->s.number;
-		BG_PlayerStateToEntityState( ps, &t->s, qtrue );
-		t->s.number = number;
-		t->s.eType = ET_EVENTS + event;
-		t->s.eFlags |= EF_PLAYER_EVENT;
-		t->s.otherEntityNum = ps->clientNum;
-		// send to everyone except the client who generated the event
-		t->r.svFlags |= SVF_NOTSINGLECLIENT;
-		t->r.singleClient = ps->clientNum;
-		// set back external event
-		ps->externalEvent = extEvent;
-	}
-}
 
 /*
 ==============
@@ -967,13 +951,15 @@ void ClientThink_real( gentity_t *ent ) {
 	if ( ent->client->ps.eventSequence != oldEventSequence ) {
 		ent->eventTime = level.time;
 	}
+	// MW2's ClientThink_real (493873): the command's events go onto the
+	// entity's ring here, and nowhere else - there is no temp entity per
+	// event (Q3's SendPendingPredictableEvents), which the ring would double.
 	if (g_smoothClients.integer) {
 		BG_PlayerStateToEntityStateExtraPolate( &ent->client->ps, &ent->s, ent->client->ps.commandTime, qtrue );
 	}
 	else {
 		BG_PlayerStateToEntityState( &ent->client->ps, &ent->s, qtrue );
 	}
-	SendPendingPredictableEvents( &ent->client->ps );
 
 	if ( !( ent->client->ps.eFlags & EF_FIRING ) ) {
 		client->fireHeld = qfalse;		// for grapple
@@ -1218,7 +1204,6 @@ void ClientEndFrame( gentity_t *ent ) {
 	else {
 		BG_PlayerStateToEntityState( &ent->client->ps, &ent->s, qtrue );
 	}
-	SendPendingPredictableEvents( &ent->client->ps );
 
 	// set the bit for the reachability area the client is currently in
 //	i = trap_AAS_PointReachabilityAreaIndex( ent->client->ps.origin );

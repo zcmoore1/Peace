@@ -20,6 +20,9 @@ void TeleportPlayer(gentity_t *e,vec3_t o,vec3_t a) { (void)e;(void)o;(void)a; }
 void G_StartKamikaze(gentity_t *e) { (void)e; }
 void DropPortalSource(gentity_t *e) { (void)e; }
 void DropPortalDestination(gentity_t *e) { (void)e; }
+/* the switch-start notice's log line and its weapon name (ClientEvents) */
+gitem_t bg_itemlist[] = { { NULL }, { NULL } };	/* none: the list starts at 1 */
+void QDECL G_LogPrintf(const char *fmt,...) { (void)fmt; }
 int main(void) {
  gentity_t ent;gclient_t client;int mask,event;
  memset(&ent,0,sizeof(ent));memset(&client,0,sizeof(client));ent.client=&client;ent.s.eType=ET_PLAYER;

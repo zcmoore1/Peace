@@ -34,6 +34,7 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_weappicture.c
     ${SOURCE_DIR}/cgame/cg_killcam.c
     ${SOURCE_DIR}/cgame/cg_usehint.c
+    ${SOURCE_DIR}/cgame/cg_kick.c
     ${SOURCE_DIR}/cgame/cg_radar.c
 )
 

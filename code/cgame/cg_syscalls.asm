@@ -106,4 +106,5 @@ equ acos						-112
 equ trap_R_BuildModelPose			-113
 equ trap_R_BlendModelPoses			-114
 equ trap_Key_GetBindingName			-115
+equ trap_SetUserCmdKickAngles		-116
 

@@ -185,7 +185,8 @@ typedef enum {
 	CG_ACOS,
 	CG_R_BUILDMODELPOSE,
 	CG_R_BLENDMODELPOSES,
-	CG_KEY_GETBINDINGNAME	// appended: the numbers above stay as they are
+	CG_KEY_GETBINDINGNAME,	// appended: the numbers above stay as they are
+	CG_SETUSERCMDKICKANGLES	// MW2's view kick into the next command's angles (cl.cgameKickAngles)
 } cgameImport_t;
 
 

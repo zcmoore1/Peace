@@ -67,9 +67,9 @@ int main(void) {
  }
  /* the use hint's six types in PS_CURSOR_HINT_BITS (3, protocol 84): both
   * Tactical Insertion types, the top one included, each from every other.
-  * Protocol 85 adds grenadeTimeLeft; 86 the underbarrel and the killstreak. */
- CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==86);
- /* Protocol 86: slotFlags carry the alt weapon's state (BG_GUN_ALT,
+  * Protocol 85 adds grenadeTimeLeft; 86 the event rings; 87 the underbarrel and the killstreak. */
+ CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==87);
+ /* Protocol 87: slotFlags carry the alt weapon's state (BG_GUN_ALT,
   * BG_GUN_ALT_UNCHAMBERED: 5 bits), each slot its alt weapon's shells (4 and
   * 6 bits), weaponDraw the alt switch's raise (2 bits) and weapFlags the
   * killstreak toggle served (3 bits). Every value each can hold round-trips. */

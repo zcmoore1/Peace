@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-15"
+#define	GAME_VERSION		BASEGAME "-16"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -213,7 +213,7 @@ typedef enum {
 #define BG_GRENADE_HOLD_FIRE_MS   600	// frag_grenade_mp, flash_grenade_mp, semtex_mp holdFireTime 0.6
 #define BG_THROWING_KNIFE_PULL_MS 0	// throwingknife_mp holdFireTime 0
 // The rest of throwingknife_mp is weapon data still to be supplied:
-#define BG_THROWING_KNIFE_DAMAGE  135	// damage (weapon data, placeholder: one hit kills)
+#define BG_THROWING_KNIFE_DAMAGE  135	// throwingknife_mp damage (IW4 dump): one hit kills
 #define BG_THROWING_KNIFE_BOUNCE  0.4f	// per-surface bounce scale (weapon data, placeholder)
 // MW2's code and dvar defaults for the throwing knife (iw4x.exe):
 #define BG_THROWING_KNIFE_SPIN    2000	// deg/s end over end in flight (0x6ddf68)
@@ -639,10 +639,9 @@ int BG_SlotWeapon(const playerState_t *ps, int slot, qboolean alt);
 qboolean BG_SlotAltActive(const playerState_t *ps, int slot);
 qboolean BG_IsAltSwitch(const playerState_t *ps, int from, int to);
 int BG_WeaponAltRaiseTime(int weapon);
-// MW2's spread-class pellets (shotCount, and the cone the weapon's hip or ADS
-// spread gives them, in degrees); 0 pellets for a gun that fires one bullet.
+// MW2's spread-class pellets: shotCount bullets of the weapon's spread from one
+// seed, 0 for a gun that fires one bullet, and each one's damage by distance.
 int BG_WeaponPellets(int weapon);
-float BG_PelletSpread(int weapon, qboolean aimed);
 int BG_PelletDamage(int weapon, float distance);
 #define BG_DRAW_FIRST 1	// weaponDraw: the slot's first deployment
 #define BG_DRAW_ALT 2	// weaponDraw: MW2's RAISING_ALTSWITCH, the raise after an alt switch
@@ -693,6 +692,18 @@ float BG_JumpVelocity( const playerState_t *ps );
 float BG_ViewBobCycle( const playerState_t *ps );
 float BG_VerticalViewBob( const playerState_t *ps, float cycle, float speed, float adsFrac );
 float BG_HorizontalViewBob( const playerState_t *ps, float cycle, float speed, float adsFrac );
+// MW2's view kick: a shot assigns an angular velocity (BG_WeaponFireRecoil's
+// view part), cgame's CG_KickAngles runs it out, and the client adds the
+// angles into the command's aim. Pmove never reads it. adsFrac is the aim
+// clock (MW2's fWeaponPosFrac): the ADS kick needs it at exactly 1, the ADS
+// centre speed above one half.
+#define BG_KICK_NO_DEF_CENTER_SPEED	2400.0f	// MW2's weapon 0, no weapon def (596870)
+#define BG_KICK_MAX_ANGLE			10.0f	// each axis clamps at +-10 (0x6fd688, 0x6e24f0)
+#define BG_KICK_RETURN_SCALE		0.06f	// a step back toward 0 is cut to this (0x6f1dd8)
+#define BG_KICK_STEP_MSEC			5		// CG_KickAngles' substep
+int BG_ViewmodelWeapon( const playerState_t *ps );
+float BG_WeaponViewKickCenterSpeed( int weapon, float adsFrac );
+qboolean BG_WeaponFireRecoil( const playerState_t *ps, float adsFrac, vec3_t kickAVel, unsigned int *holdrand );
 typedef struct {
 	int buttons;		// the last command's buttons, as the use code saw them
 	qboolean done;		// this press has used something (MW2's useButtonDone)
@@ -890,9 +901,21 @@ typedef enum {
 	EV_STEP_DOWN_8,
 
 	EV_GRENADE_SUICIDE,		// MW2's 0x5d: a cooked grenade ran out in its holder's hand
+
+	// MW2's offhand press (CheckForOffHand 579030, OffHandInit 578e00,
+	// OffHandPrepare 577800). Each parm is the offhand but EV_RESET_ADS's (0).
+	EV_SWITCH_OFFHAND,		// MW2's 0x32, singleClient: the HUD's equipped offhand
+	EV_WEAPON_SWITCH_STARTED,	// MW2's 0x1c, serverOnly: the server's switch-start notice
+	EV_RESET_ADS,			// MW2's 0x11, singleClient: the client leaves a toggled aim
+	EV_PREP_OFFHAND,		// MW2's 0x30: the offhand's pullback sound
 	EV_USE_KILLSTREAK		// the killstreak trigger came out: MW2's weapon_change to it, which uses the streak
 
 } entity_event_t;
+
+// MW2's event routing (56eab0, the lists at 0x739b38 and 0x739af0): whether
+// an event the player raised is put on the player's entity for others.
+qboolean BG_EventReachesOthers( int event );
+void BG_AddEntityEvent( entityState_t *es, int event, int eventParm );
 
 
 typedef enum {
@@ -1148,6 +1171,21 @@ void	BG_PlayerStateToEntityState( playerState_t *ps, entityState_t *s, qboolean 
 void	BG_PlayerStateToEntityStateExtraPolate( playerState_t *ps, entityState_t *s, int time, qboolean snap );
 
 qboolean	BG_PlayerTouchesItem( playerState_t *ps, entityState_t *item, int atTime );
+
+// MW2's client-side bullets (sv_clientSideBullets): the server's damage
+// traces and every client's drawn bullets are built by these, from the same
+// seed (the shot command's time) and the same shapes. bg_misc.c.
+#define	BG_BULLET_RANGE		(8192*16)
+int		BG_BulletSeed( int gameTime );
+float	BG_BulletRandom( int *seed );
+float	BG_BulletCrandom( int *seed );
+void	BG_ShotMuzzle( const vec3_t base, int viewheight, const vec3_t forward, vec3_t muzzle );
+void	BG_PlayerShotBase( const playerState_t *ps, vec3_t base );
+void	BG_BulletEnd( int *seed, float spread, const vec3_t muzzle, const vec3_t forward,
+			const vec3_t right, const vec3_t up, vec3_t end );
+void	BG_ShotgunAxes( const vec3_t aim, vec3_t forward, vec3_t right, vec3_t up );
+void	BG_ShotgunPelletEnd( int *seed, const vec3_t origin, const vec3_t forward,
+			const vec3_t right, const vec3_t up, vec3_t end );
 
 
 #define ARENAS_PER_TIER		4

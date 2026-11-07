@@ -18,6 +18,10 @@ out/tests/knife-missile-test
 # A knife stuck in a player, through the real g_client.c body queue, g_utils.c and g_items.c.
 ${CC:-cc} $flags -UMISSIONPACK dev/tests/knife_corpse_test.c code/game/g_missile.c code/game/g_client.c code/game/g_utils.c code/game/g_items.c code/game/g_insertion.c code/game/bg_pmove.c $game $common -Wl,--gc-sections -lm -o out/tests/knife-corpse-test
 out/tests/knife-corpse-test
+# A body and a podium model start with no ring of their own (CopyToBodyQue,
+# SpawnModelOnVictoryPad), or clients would replay the player's last shots.
+${CC:-cc} $flags dev/tests/body_ring_test.c code/game/g_client.c code/game/g_utils.c $game $common -Wl,--gc-sections -lm -o out/tests/body-ring-test
+out/tests/body-ring-test
 # MW2's offhands through the real server: ClientThink, ClientEvents, FireWeapon,
 # the missiles, the cook-out's suicide and the death drop (g_active.c, g_combat.c).
 ${CC:-cc} $flags dev/tests/offhand_server_test.c code/game/g_active.c code/game/g_combat.c code/game/g_weapon.c code/game/g_missile.c code/game/g_client.c code/game/g_utils.c code/game/g_items.c code/game/g_insertion.c code/game/g_killstreak.c code/game/g_cmds.c code/game/bg_pmove.c $game $common -Wl,--gc-sections -lm -o out/tests/offhand-server-test
@@ -26,6 +30,10 @@ ${CC:-cc} $flags dev/tests/class_menu_test.c code/q3_ui/ui_atoms.c code/q3_ui/ui
 out/tests/class-menu-test
 ${CC:-cc} $flags dev/tests/action_wire_test.c code/qcommon/msg.c code/qcommon/huffman.c $common -Wl,--gc-sections -lm -o out/tests/action-wire-test
 out/tests/action-wire-test
+# MW2's event rings end to end: the real Pmove and BG_PlayerStateToEntityState,
+# the codec, and the cgame's snapshot transition and event playback.
+${CC:-cc} $flags dev/tests/event_ring_test.c dev/tests/event_ring_wire.c dev/tests/fake_reload_pmove.c code/cgame/cg_event.c code/cgame/cg_kick.c code/cgame/cg_weapons.c code/cgame/cg_playerstate.c code/qcommon/msg.c code/qcommon/huffman.c $game $common -Wl,--gc-sections -lm -o out/tests/event-ring-test
+out/tests/event-ring-test
 ${CC:-cc} $flags dev/tests/weapon_pose_test.c dev/tests/pickup_pmove_driver.c $game $common -Wl,--gc-sections -lm -o out/tests/weapon-pose-test
 out/tests/weapon-pose-test
 ${CC:-cc} $flags dev/tests/pose_vm_test.c code/client/cl_vm.c code/qcommon/vm_ptr.c -Wl,--gc-sections -lm -o out/tests/pose-vm-test

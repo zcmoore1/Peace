@@ -236,7 +236,10 @@ void CG_CheckPlayerstateEvents( playerState_t *ps, playerState_t *ops ) {
 			event = ps->events[ i & (MAX_PS_EVENTS-1) ];
 			cent->currentState.event = event;
 			cent->currentState.eventParm = ps->eventParms[ i & (MAX_PS_EVENTS-1) ];
+			cg.eventPlayerState = ps;
+			cg.eventPlayerSequence = i;
 			CG_EntityEvent( cent, cent->lerpOrigin );
+			cg.eventPlayerState = NULL;
 
 			cg.predictableEvents[ i & (MAX_PREDICTED_EVENTS-1) ] = event;
 
@@ -269,7 +272,10 @@ void CG_CheckChangedPredictableEvents( playerState_t *ps ) {
 				event = ps->events[ i & (MAX_PS_EVENTS-1) ];
 				cent->currentState.event = event;
 				cent->currentState.eventParm = ps->eventParms[ i & (MAX_PS_EVENTS-1) ];
+				cg.eventPlayerState = ps;
+				cg.eventPlayerSequence = i;
 				CG_EntityEvent( cent, cent->lerpOrigin );
+				cg.eventPlayerState = NULL;
 
 				cg.predictableEvents[ i & (MAX_PREDICTED_EVENTS-1) ] = event;
 

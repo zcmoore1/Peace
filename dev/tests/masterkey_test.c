@@ -108,7 +108,14 @@ static void TestData(void) {
  CHECK(BG_PelletDamage(ALT,0)==MK_DAMAGE && BG_PelletDamage(ALT,MK_MAX_DAMAGE_RANGE)==MK_DAMAGE);
  CHECK(BG_PelletDamage(ALT,MK_MIN_DAMAGE_RANGE)==MK_MIN_DAMAGE && BG_PelletDamage(ALT,MK_MIN_DAMAGE_RANGE*4)==MK_MIN_DAMAGE);
  CHECK(BG_PelletDamage(ALT,(MK_MAX_DAMAGE_RANGE+MK_MIN_DAMAGE_RANGE)/2.0f)==(MK_DAMAGE+MK_MIN_DAMAGE)/2);
- CHECK(BG_PelletSpread(ALT,qfalse)==MK_HIP_SPREAD_DEG && BG_PelletSpread(ALT,qtrue)==MK_ADS_SPREAD_DEG);
+ /* MW2's cone: 5 deg at the hip (spread = tan * 8192, BG_BULLET_RANGE's unit), adsSpread 5.5 aimed */
+ CHECK(BG_WeaponBaseSpread(ALT)==MK_HIP_SPREAD && MK_HIP_SPREAD==(int)(tan(5.0*M_PI/180.0)*8192.0+0.5));
+ {
+  playerState_t ps; memset(&ps,0,sizeof(ps)); ps.weapon=ALT; ps.groundEntityNum=0;
+  CHECK(BG_WeaponSpread(&ps)==(float)MK_HIP_SPREAD);
+  ps.pm_flags|=PMF_ADS;
+  CHECK(fabs(BG_WeaponSpread(&ps)-MK_HIP_SPREAD*5.5f/5.0f)<0.01f);
+ }
  /* MW2's UAV and compass: killstreakTable's 3 kills, radarViewTime, the radar dvars */
  CHECK(BG_UAV_KILLS==3 && BG_UAV_TIME==30000 && BG_RADAR_UPDATE_TIME==4000 && BG_FAST_RADAR_UPDATE_TIME==2000);
  CHECK(BG_RADAR_PING_FADE_TIME==4000 && BG_COMPASS_MAX_RANGE==2500);

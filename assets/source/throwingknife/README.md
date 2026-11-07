@@ -28,8 +28,11 @@ below the view for the gun's return. Its two clips sample one continuous curve;
 the last pre-hit and first post-hit poses are identical, including the tag.
 
 `CG_WeapAnim_ActionFrame` reads these tables and fits the picture to existing
-predicted timers: 150 ms pullout, melee contact at 79 ms and completion at
-800 ms. Frame numbers are data, not C constants. No animation emits a gameplay
+predicted timers: melee contact at 79 ms and completion at 800 ms. The throw's
+pullout has no gameplay timer to fit: MW2's throwingknife_mp prepares in 0 ms
+(holdFireTime 0), so the knife is ready on its press. The pullout still plays,
+as picture only, at its own authored length from when the knife is first shown,
+then holds its last frame. Frame numbers are data, not C constants. No animation emits a gameplay
 event, changes ammunition, or adds a lock. A thrown blade disappears from the
 hand at release; a melee blade stays attached through the follow-through.
 Semtex and throwing follow-through retain their existing fallback gestures.

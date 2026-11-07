@@ -455,7 +455,8 @@ void CopyToBodyQue( gentity_t *ent ) {
 	} else {
 		body->s.pos.trType = TR_STATIONARY;
 	}
-	body->s.event = 0;
+	// nor the player's ring: the body is a new entity with no events of its own
+	G_ClearEntityEvents( body );
 
 	// change the animation to the last-frame only, so the sequence
 	// doesn't repeat anew for the body

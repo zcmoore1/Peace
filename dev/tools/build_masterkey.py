@@ -16,6 +16,7 @@ numbers. --check never writes and fails if a generated file is stale.
 """
 import argparse
 import json
+import math
 import pathlib
 import sys
 
@@ -52,6 +53,10 @@ def load():
                 'sprint_in_ms', 'sprint_out_ms', 'model_fps'):
         if not isinstance(data.get(key), int) or data[key] <= 0:
             fail('%s must be a positive whole number' % key)
+    for mode in ('hip', 'ads'):
+        for part in ('pitch_min', 'pitch_max', 'yaw_min', 'yaw_max', 'center_speed'):
+            if not isinstance(data.get('%s_view_kick_%s' % (mode, part)), int):
+                fail('%s_view_kick_%s must be a whole number (MW2 degrees per second)' % (mode, part))
     if data.get('alt_drop_ms') != 0:
         # Every alt pairing in MW2's data drops in 0: an alt switch puts nothing
         # down, and pmove has no alt drop to time.
@@ -98,8 +103,10 @@ def header(data):
         ('MK_MIN_DAMAGE', data['min_damage']),
         ('MK_MAX_DAMAGE_RANGE', data['max_damage_range']),
         ('MK_MIN_DAMAGE_RANGE', data['min_damage_range']),
-        ('MK_HIP_SPREAD_DEG', c_float(data['hip_spread_deg'])),
-        ('MK_ADS_SPREAD_DEG', c_float(data['ads_spread_deg'])),
+        # Peace's spread unit: a bullet lands at most spread * 16 off at
+        # BG_BULLET_RANGE (8192 * 16), so spread is tan(half angle) * 8192.
+        ('MK_HIP_SPREAD', round(math.tan(math.radians(data['hip_spread_deg'])) * 8192)),
+        ('MK_ADS_SPREAD_SCALE', c_float(round(data['ads_spread_deg'] / data['hip_spread_deg'], 6))),
         ('MK_FIRE_MS', data['fire_ms'] + data['rechamber_ms']),
         ('MK_BOLT_OPEN_MS', data['fire_ms']),
         ('MK_BOLT_CLOSE_MS', bolt_close(data)),
@@ -122,6 +129,11 @@ def header(data):
         ('MK_ADS_OUT_MS', data['ads_out_ms']),
         ('MK_ADS_ZOOM_FOV', data['ads_zoom_fov']),
     ]
+    # MW2's view kick (hip/adsViewKick*), bg_viewKick's row for the underbarrel.
+    for mode in ('hip', 'ads'):
+        for part in ('pitch_min', 'pitch_max', 'yaw_min', 'yaw_max', 'center_speed'):
+            key = '%s_view_kick_%s' % (mode, part)
+            defs.append(('MK_' + key.upper(), data[key]))
     lines += ['#define %s %s' % (name, value) for name, value in defs]
     lines += ['#endif', '']
     return '\n'.join(lines)

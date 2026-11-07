@@ -168,7 +168,10 @@ typedef struct centity_s {
 	qboolean		currentValid;	// true if cg.frame holds this entity
 
 	int				muzzleFlashTime;	// move to playerEntity?
-	int				previousEvent;
+	int				muzzleFlashGunTime;	// the last fire event of a gun with a flash model (CG_FireWeapon) ...
+	int				muzzleFlashGun;		// ... and that gun, which es.weapon may no longer be
+	int				previousEvent;		// a temp entity's: already fired
+	int				previousEventSequence;	// the entity ring's: played up to here (CG_CheckEvents)
 	int				teleportFlag;
 
 	int				trailTime;		// so missile trails can handle dropped initial packets
@@ -414,6 +417,10 @@ typedef struct weaponInfo_s {
 
 	sfxHandle_t		readySound;
 	sfxHandle_t		firingSound;
+
+	// MW2's pullbackSound / pullbackSoundPlayer: EV_PREP_OFFHAND's (0 = none)
+	sfxHandle_t		pullbackSound;
+	sfxHandle_t		pullbackSoundPlayer;
 } weaponInfo_t;
 
 
@@ -500,6 +507,12 @@ typedef struct {
 	int			eventSequence;
 	int			predictableEvents[MAX_PREDICTED_EVENTS];
 
+	// The playerstate event CG_CheckPlayerstateEvents is playing (NULL when
+	// an entity's is): the state it is played from and its ring index. The
+	// player's own shot draws its bullets from what its command left.
+	const playerState_t	*eventPlayerState;
+	int			eventPlayerSequence;
+
 	float		stepChange;				// for stair up smoothing
 	int			stepTime;
 
@@ -519,6 +532,7 @@ typedef struct {
 	int             radarInterval;    // ms until the next sweep
 	int             radarPingCount;
 	vec3_t          radarPings[48];   // x, y and yaw of each enemy at that sweep
+	int			equippedOffhand;	// MW2's cg equippedOffHand: the offhand EV_SWITCH_OFFHAND last named
 
 	// auto rotating items
 	vec3_t		autoAngles;
@@ -642,6 +656,13 @@ typedef struct {
 	float		v_dmg_time;
 	float		v_dmg_pitch;
 	float		v_dmg_roll;
+
+	// MW2's view kick (cg_kick.c): an angular velocity a shot assigns and the
+	// angles it has run out to. The client adds the angles into the next
+	// command's aim; the view shows them only through ps.viewangles.
+	vec3_t		kickAVel;
+	vec3_t		kickAngles;
+	int			kickTime;		// cg.time CG_KickAngles last ran out to
 
 	// temp working variables for player view
 	float		bobfracsin;
@@ -1420,6 +1441,11 @@ qboolean CG_Killcam_Active( void );
 void     CG_Killcam_Transition( const snapshot_t *previous, const snapshot_t *next );
 void     CG_Killcam_Draw( void );
 
+// cg_kick.c -- MW2's view kick: the kick only, never ammo or weapon state
+extern unsigned int cg_kickSeed;
+void     CG_KickFire( void );
+void     CG_KickAngles( void );
+
 // cg_usehint.c
 // ms between bind lookups while a use prompt stays up; one that appears again
 // after being hidden this long looks its binds up at once
@@ -1442,11 +1468,15 @@ qboolean CG_InsertionFriendly( const entityState_t *s1 );
 void CG_RegisterWeapon( int weaponNum );
 void CG_RegisterItemVisuals( int itemNum );
 
-void CG_FireWeapon( centity_t *cent );
+void CG_FireWeapon( centity_t *cent, int weapon );
+qboolean CG_EventPlayerView( const centity_t *cent );
+void CG_PrepOffhand( centity_t *cent, int weapon );
 void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, impactSound_t soundType );
 void CG_MissileHitPlayer( int weapon, vec3_t origin, vec3_t dir, int entityNum );
 void CG_ShotgunFire( entityState_t *es );
 void CG_Bullet( vec3_t origin, int sourceEntityNum, vec3_t normal, qboolean flesh, int fleshEntityNum );
+void CG_FireBullets( centity_t *cent, int weapon );
+void CG_RecordShots( const playerState_t *before, const playerState_t *after );
 
 void CG_RailTrail( clientInfo_t *ci, vec3_t start, vec3_t end );
 void CG_GrappleTrail( centity_t *ent, const weaponInfo_t *wi );
@@ -1723,6 +1753,11 @@ qboolean	trap_GetUserCmd( int cmdNumber, usercmd_t *ucmd );
 
 // used for the weapon select and zoom
 void		trap_SetUserCmdValue( int stateValue, float sensitivityScale, float aimFraction );
+// MW2's view kick: added into the next command's angles, never into the
+// client's own view angles (cl.cgameKickAngles, CL_FinishMove). Three floats
+// by value, so a QVM pushes the same three words the native wrapper passes
+// and the engine reads them as VMF(1..3); a vec3_t would arrive as a pointer.
+void		trap_SetUserCmdKickAngles( float pitch, float yaw, float roll );
 
 // aids for VM testing
 void		testPrintInt( char *string, int i );

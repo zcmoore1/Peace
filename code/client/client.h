@@ -122,6 +122,7 @@ typedef struct {
 	int			cgameUserCmdValue;	// current weapon to add to usercmd_t
 	float		cgameSensitivity;
 	float		cgameAimFraction;	// how far into aim down sights, 0..1 (MW2's adsLerp)
+	vec3_t		cgameKickAngles;	// MW2's view kick, added into each usercmd_t's angles only
 
 	// cmds[cmdNumber] is the predicted command, [cmdNumber-1] is the last
 	// properly generated command
@@ -130,6 +131,12 @@ typedef struct {
 									// frames may need to be packed into a single packet
 
 	outPacket_t	outPackets[PACKET_BACKUP];	// information about each packet we have sent out
+
+	// MW2's cl.usingAds (clientActive_t's first field): a toggled aim, sent as
+	// BUTTON_ADS beside +ads until toggleads turns it off or leaveads (MW2's
+	// commands at 5a5ac0, 5a5ae0) leaves it. Every offhand's EV_RESET_ADS
+	// runs leaveads, so equipment always ends a toggled aim.
+	qboolean	usingAds;
 
 	// the client maintains its own idea of view angles, which are
 	// sent to the server each frame.  It is cleared to 0 upon entering each level.
@@ -610,6 +617,7 @@ void CIN_CloseAllVideos(void);
 //
 void CL_InitCGame( void );
 void CL_ShutdownCGame( void );
+void CL_SetUserCmdKickAngles( float pitch, float yaw, float roll );
 qboolean CL_GameCommand( void );
 void CL_CGameRendering( stereoFrame_t stereo );
 void CL_SetCGameTime( void );

@@ -2444,11 +2444,14 @@ static void CG_DrawWeaponPickup(void) {
 	}
 }
 
+// The lethal this life showed with ammo, for its 0 count (CG_DrawLoadoutHud).
+static int cg_hudLethal, cg_hudLethalClient = -1, cg_hudLethalSpawn;
+
 static void CG_DrawLoadoutHud( void ) {
 	playerState_t	*ps;
 	char			line[64];
 	int				x, y;
-	int				i, slotWpn;
+	int				i, slotWpn, lethal;
 	vec4_t			dim    = { 1.0f, 1.0f, 1.0f, 0.45f };
 	vec4_t			bright = { 1.0f, 1.0f, 1.0f, 1.0f };
 
@@ -2504,15 +2507,31 @@ static void CG_DrawLoadoutHud( void ) {
 		y += SMALLCHAR_HEIGHT + 2;
 	}
 
+	// Equipment counts are just the ammo on those weapon entries. The offhand
+	// last switched to (EV_SWITCH_OFFHAND, MW2's equipped offhand) is the
+	// bright one once there is one. MW2 keeps showing the class's lethal at 0;
+	// BG_LethalWeapon falls back to the frag once the last one is spent and the
+	// mask rebuilt, so the picture remembers this life's lethal (picture only).
+	lethal = BG_LethalWeapon( ps );
+	if ( ps->clientNum != cg_hudLethalClient || ps->persistant[PERS_SPAWN_COUNT] != cg_hudLethalSpawn ) {
+		cg_hudLethalClient = ps->clientNum;
+		cg_hudLethalSpawn = ps->persistant[PERS_SPAWN_COUNT];
+		cg_hudLethal = WP_NONE;
+	}
+	if ( ps->ammo[lethal] > 0 ) cg_hudLethal = lethal;
+	else if ( cg_hudLethal != WP_NONE ) lethal = cg_hudLethal;
+	Com_sprintf( line, sizeof( line ), "%s %i   ",
+		lethal == WP_SEMTEX ? "SEMTEX" :
+		lethal == WP_THROWING_KNIFE ? "KNIFE" :
+		lethal == WP_TACTICAL_INSERTION ? "TI" :
+		lethal == WP_FRAG && cg_hudLethal == WP_FRAG ? "FRAG" : "LETHAL",
+		ps->ammo[lethal] );
 	trap_R_SetColor( bright );
-
-	// Equipment counts are just the ammo on those weapon entries.
-	Com_sprintf( line, sizeof( line ), "%s %i   TAC %i",
-		BG_LethalWeapon(ps) == WP_SEMTEX ? "SEMTEX" :
-		BG_LethalWeapon(ps) == WP_THROWING_KNIFE ? "KNIFE" :
-		BG_LethalWeapon(ps) == WP_TACTICAL_INSERTION ? "TI" : "LETHAL",
-		ps->ammo[BG_LethalWeapon(ps)], ps->ammo[WP_FLASH] );
-	CG_DrawSmallString( x, y, line, 1.0f );
+	CG_DrawSmallString( x, y, line, cg.equippedOffhand == WP_FLASH ? dim[3] : bright[3] );
+	x += CG_DrawStrlen( line ) * SMALLCHAR_WIDTH;
+	Com_sprintf( line, sizeof( line ), "TAC %i", ps->ammo[WP_FLASH] );
+	CG_DrawSmallString( x, y, line,
+		cg.equippedOffhand && cg.equippedOffhand != WP_FLASH ? dim[3] : bright[3] );
 
 	trap_R_SetColor( NULL );
 }

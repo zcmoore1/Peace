@@ -40,6 +40,17 @@
   "ads_out_ms": 200,
   "ads_zoom_fov": 55,
 
+  "hip_view_kick_pitch_min": 55,
+  "hip_view_kick_pitch_max": 65,
+  "hip_view_kick_yaw_min": -35,
+  "hip_view_kick_yaw_max": 35,
+  "hip_view_kick_center_speed": 1400,
+  "ads_view_kick_pitch_min": 55,
+  "ads_view_kick_pitch_max": 65,
+  "ads_view_kick_yaw_min": -35,
+  "ads_view_kick_yaw_max": 35,
+  "ads_view_kick_center_speed": 1400,
+
   "model_fps": 30,
   "idle_ms": 1000,
   "_idle_ms": "placeholder: the idle loop's length is picture only."

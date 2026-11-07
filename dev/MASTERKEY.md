@@ -76,8 +76,18 @@ Model plug-in: `assets/source/masterkey/README.md`.
   600 ms, each loop pass one at 550, and the end pumps. When the start's shell
   fills the tube, the end follows at once (`PM_AdvanceReloadSegments`).
 - **Pellets**: 6, each 25 out to 500 units and falling to 0 at 1750, in a 5°
-  cone at the hip or 5.5° aimed (MW2's spread-class data; `PelletPattern` in
-  `g_weapon.c`, drawn by `CG_PelletPattern`).
+  cone at the hip or 5.5° aimed (MW2's spread-class data). They are
+  client-side bullets like every hitscan shot (MW2's sv_clientSideBullets):
+  the server traces them for damage only (`weapon_masterkey_fire`), and every
+  client draws them from the fire event (`CG_PelletShot`), both through
+  `BG_BulletEnd` from the shot's `BG_BulletSeed`. The cone is the gun's row in
+  the shared spread table (`MK_HIP_SPREAD`, `MK_ADS_SPREAD_SCALE`), so the
+  crosshair sizes to it and movement widens it as it does every gun's.
+  `run-bullets.sh` checks that the shooter's pellets land exactly where the
+  server's damage traces went, and that others draw them from the entity.
+- **View kick**: m4_shotgun_attach_mp's own, 55-65 pitch and -35..35 yaw, centre
+  1400, hip and aimed alike (`bg_viewKick`, from `weapon.json`; see
+  `dev/VIEW_KICK.md`). The UAV trigger has killstreak_uav_mp's zero row.
 
 ## The moni NAC (Shoot, Y, Y, X)
 

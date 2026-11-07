@@ -93,6 +93,8 @@ struct gentity_s {
 	int			freetime;			// level.time when the object was freed
 	
 	int			eventTime;			// events will be cleared EVENT_VALID_MSEC after set
+	int			eventRingSequence;	// s.eventSequence G_AgeEntityEvents last stamped
+	int			eventRingTime[MAX_ENTITY_EVENTS];	// when each ring slot was filled
 	qboolean	freeAfterEvent;
 	qboolean	unlinkAfterEvent;
 
@@ -539,6 +541,8 @@ float vectoyaw( const vec3_t vec );
 
 void G_AddPredictableEvent( gentity_t *ent, int event, int eventParm );
 void G_AddEvent( gentity_t *ent, int event, int eventParm );
+void G_AgeEntityEvents( gentity_t *ent );
+void G_ClearEntityEvents( gentity_t *ent );
 void G_SetOrigin( gentity_t *ent, vec3_t origin );
 void AddRemap(const char *oldShader, const char *newShader, float timeOffset);
 const char *BuildShaderStateConfig( void );

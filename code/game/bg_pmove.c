@@ -35,7 +35,7 @@ pml_t		pml;
 float	pm_stopspeed = 100.0f;
 float	pm_duckScale = 0.25f;
 float	pm_swimScale = 0.50f;
-float	pm_adsScale = 0.50f;	// aiming, on the ground and in the air alike (MW2's walking scale)
+float	pm_adsScale = 0.50f;	// aiming, on the ground and in the air alike (Peace's value; MW2's walk scale is 0.4)
 
 float	pm_accelerate = 10.0f;
 float	pm_airaccelerate = 1.0f;

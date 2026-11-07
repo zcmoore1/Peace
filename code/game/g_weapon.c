@@ -768,7 +768,7 @@ MELEE / EQUIPMENT
 ======================================================================
 */
 #define	KNIFE_RANGE		64
-#define	KNIFE_DAMAGE	100		// CoD-style: a connected melee kills
+#define	KNIFE_DAMAGE	135		// MW2's meleeDamage for every MP gun (weapons/mp/*_mp)
 
 void Weapon_Knife( gentity_t *ent ) {
 	trace_t		tr;

@@ -216,12 +216,6 @@ and `TestClockBase` allows a batched packet's wait in the base's age.
 
 ## Where Peace and MW2 still differ
 
-- **A grenade out of the gun's return after a throw** pays the gun's quick
-  drop, as in MW2: OffHandInit (0x578E00) stamps quickDropTime out of
-  OFFHAND_END. Only with no use hint at all (`cursorHintEntIndex`
-  `ENTITYNUM_NONE`, MW2's 0x7ff; CheckForOffHand 0x5791B0) does it come
-  straight out with no drop - the sea lion (CLAUDE.md). Listed here because
-  this page used to say otherwise; the two now agree.
 - **The IW4x wild scope script** presses knife and X on the same frame while
   the gun is still coming back from equipment, with aim held. That knife is
   lost in Peace, as in MW2's code, so the script gives a zoomload and no knife;
@@ -240,6 +234,7 @@ offhand check 0x579030, offhand init/end 0x578E00/0x577A10, knife end 0x578D80).
 - **The knife's own timing** now agrees: as MW2's, it never drops the gun. It
   is out on the press, hits `BG_MELEE_DELAY` (meleeDelay, 79ms) in, and is over
   at `BG_MELEE_TIME` (meleeTime, 800ms), straight into the quick raise (MW2's
-  MeleeInit, MeleeFire, MeleeEnd). It still has no art on the gun's model.
+  MeleeInit, MeleeFire, MeleeEnd). It is drawn with its own knife and hand
+  (a horizontal slash), not on the gun's model.
   With no drops left either side, its return times much like a Semtex
   cancel's, and the knife rows above sit close to that one's.

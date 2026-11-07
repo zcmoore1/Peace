@@ -208,7 +208,7 @@ typedef enum {
 #define BG_GRENADE_HOLD_FIRE_MS   600	// frag_grenade_mp, flash_grenade_mp, semtex_mp holdFireTime 0.6
 #define BG_THROWING_KNIFE_PULL_MS 0	// throwingknife_mp holdFireTime 0
 // The rest of throwingknife_mp is weapon data still to be supplied:
-#define BG_THROWING_KNIFE_DAMAGE  135	// damage (weapon data, placeholder: one hit kills)
+#define BG_THROWING_KNIFE_DAMAGE  135	// throwingknife_mp damage (IW4 dump): one hit kills
 #define BG_THROWING_KNIFE_BOUNCE  0.4f	// per-surface bounce scale (weapon data, placeholder)
 // MW2's code and dvar defaults for the throwing knife (iw4x.exe):
 #define BG_THROWING_KNIFE_SPIN    2000	// deg/s end over end in flight (0x6ddf68)

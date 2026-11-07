@@ -33,6 +33,8 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_anim.c
     ${SOURCE_DIR}/cgame/cg_weappicture.c
     ${SOURCE_DIR}/cgame/cg_killcam.c
+    ${SOURCE_DIR}/cgame/cg_usehint.c
+    ${SOURCE_DIR}/cgame/cg_kick.c
 )
 
 set(CGAME_BINARY_SOURCES ${SOURCE_DIR}/cgame/cg_syscalls.c)
@@ -58,6 +60,7 @@ set(GAME_SOURCES
     ${SOURCE_DIR}/game/g_cmds.c
     ${SOURCE_DIR}/game/g_combat.c
     ${SOURCE_DIR}/game/g_items.c
+    ${SOURCE_DIR}/game/g_insertion.c
     ${SOURCE_DIR}/game/g_mem.c
     ${SOURCE_DIR}/game/g_misc.c
     ${SOURCE_DIR}/game/g_missile.c

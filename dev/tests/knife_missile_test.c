@@ -65,10 +65,11 @@ static void Frame(gentity_t *k) { frameTraces=0; level.previousTime=level.time; 
 static void Clear(void) { memset(&collision,0,sizeof(collision)); collision.fraction=1; collision.entityNum=ENTITYNUM_NONE; }
 static void Behind(int entityNum) { Clear(); collision.fraction=.5f; collision.entityNum=entityNum; }
 static qboolean Same(const vec3_t a,const vec3_t b) { return NEAR(a[0],b[0]) && NEAR(a[1],b[1]) && NEAR(a[2],b[2]); }
+/* Thrown as MW2 throws it (G_ThrowOffhand), along +x, by a thrower moving at v. */
 static gentity_t *Throw(float vx,float vy,float vz) {
  vec3_t start={0,0,24},dir={1,0,0};
  VectorSet(clients[0].ps.velocity,vx,vy,vz);
- return fire_throwingknife(&g_entities[0],start,dir);
+ return G_ThrowOffhand(&g_entities[0],WP_THROWING_KNIFE,start,dir);
 }
 /* Strike something on this frame with the knife moving at v. */
 static void Strike(gentity_t *k,float vx,float vy,float vz,int entityNum,float nx,float ny,float nz) {
@@ -81,13 +82,27 @@ static void Strike(gentity_t *k,float vx,float vy,float vz,int entityNum,float n
 }
 int main(void) {
  gentity_t *k,*first=NULL; vec3_t at,angles,fwd,off; int i,n;
- /* the throw: speed plus the thrower's own along the aim, end over end */
- Reset(); k=Throw(100,50,0);
- CHECK(k->s.eType==ET_MISSILE && k->s.weapon==WP_THROWING_KNIFE && !strcmp(k->classname,"throwingknife"));
- CHECK(k->s.pos.trType==TR_GRAVITY && k->s.pos.trDelta[0]==BG_THROWING_KNIFE_SPEED+100 &&
-  k->s.pos.trDelta[1]==0 && k->s.pos.trDelta[2]==0);
- CHECK(k->s.apos.trType==TR_LINEAR && k->s.apos.trDelta[PITCH]==BG_THROWING_KNIFE_SPIN &&
-  NEAR(k->s.apos.trBase[PITCH],-120));
+ /* the throw (MW2's 4c3690): throwingknife_mp's 1400 along the aim and 40
+  * up, snapped, then the thrower's own velocity along that direction (its
+  * component only, unsnapped), end over end from 120 degrees back along it */
+ { vec3_t dir={1,0,0},v,unit; float along;
+   BG_OffhandLaunchVelocity(WP_THROWING_KNIFE,dir,v);
+   CHECK(v[0]==1400 && v[1]==0 && v[2]==40);
+   Reset(); k=Throw(100,50,0);
+   VectorNormalize2(v,unit); along=100*unit[0]+50*unit[1];
+   CHECK(k->s.eType==ET_MISSILE && k->s.weapon==WP_THROWING_KNIFE && !strcmp(k->classname,"throwingknife"));
+   CHECK(k->s.pos.trType==TR_GRAVITY && NEAR(k->s.pos.trDelta[0],1400+along*unit[0]) &&
+    k->s.pos.trDelta[1]==0 && NEAR(k->s.pos.trDelta[2],40+along*unit[2]));
+   CHECK(along>99.9f && along<100 && k->s.pos.trDelta[0]!=(int)k->s.pos.trDelta[0]);	/* not snapped */
+   vectoangles(v,angles);
+   CHECK(k->s.apos.trType==TR_LINEAR && k->s.apos.trDelta[PITCH]==BG_THROWING_KNIFE_SPIN &&
+    NEAR(k->s.apos.trBase[PITCH],AngleNormalize180(angles[PITCH]-120)) && k->s.apos.trBase[PITCH]<-120);
+   /* thrown backpedalling: the component along the throw is negative, and kept */
+   Reset(); k=Throw(-200,0,0);
+   CHECK(NEAR(k->s.pos.trDelta[0],1400-200*unit[0]*unit[0]) && NEAR(k->s.pos.trDelta[2],40-200*unit[0]*unit[2]));
+   /* moving across the throw adds nothing */
+   Reset(); k=Throw(0,300,0); CHECK(k->s.pos.trDelta[0]==1400 && k->s.pos.trDelta[1]==0 && k->s.pos.trDelta[2]==40);
+   Reset(); k=Throw(100,50,0); }
  CHECK(k->damage==BG_THROWING_KNIFE_DAMAGE && k->methodOfDeath==MOD_GAUNTLET && !k->s.eFlags);
  CHECK(k->timestamp==level.time && k->nextthink==level.time+BG_THROWING_KNIFE_LIFE && k->r.ownerNum==0);
  /* thirty seconds in the air and it is gone */
@@ -181,7 +196,7 @@ int main(void) {
   * Semtex keeps its own rule. */
  Reset(); VectorSet(g_entities[1].r.currentOrigin,20,0,24);
  k=Throw(0,0,0); Strike(k,BG_THROWING_KNIFE_HIT_SPEED+1,0,0,1,-1,0,0);
- { gentity_t *semtex=fire_semtex(&g_entities[0],at,fwd); Behind(1); G_RunMissile(semtex); CHECK(semtex->enemy==&g_entities[1]);
+ { gentity_t *semtex=G_ThrowOffhand(&g_entities[0],WP_SEMTEX,at,fwd); Behind(1); G_RunMissile(semtex); CHECK(semtex->enemy==&g_entities[1]);
    VectorCopy(k->r.currentOrigin,at); VectorCopy(g_entities[1].r.currentOrigin,g_entities[MAX_CLIENTS].r.currentOrigin);
    G_MoveCarriedMissiles(&g_entities[1],&g_entities[MAX_CLIENTS]);
    CHECK(k->enemy==&g_entities[MAX_CLIENTS] && Same(at,k->r.currentOrigin) && semtex->enemy==&g_entities[1]); }

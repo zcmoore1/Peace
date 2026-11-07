@@ -22,5 +22,15 @@
   "ads_out_ms": 200,
   "fov_scale": 0.26,
   "scope_overlay": 1,
-  "fps": 60
+  "fps": 60,
+  "hip_view_kick_pitch_min": 80,
+  "hip_view_kick_pitch_max": 100,
+  "hip_view_kick_yaw_min": -50,
+  "hip_view_kick_yaw_max": -55,
+  "hip_view_kick_center_speed": 500,
+  "ads_view_kick_pitch_min": 30,
+  "ads_view_kick_pitch_max": 85,
+  "ads_view_kick_yaw_min": 70,
+  "ads_view_kick_yaw_max": -75,
+  "ads_view_kick_center_speed": 500
 }

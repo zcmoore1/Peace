@@ -1125,7 +1125,16 @@ typedef struct {
 #define PS_STAT_WEAPONS 2
 #define PS_STAT_UNCHAMBERED 12
 
-#define	MAX_PS_EVENTS			2
+// MW2's predictable event ring (playerState_s events[4] at +0xb8, 0x4bd150).
+// Every index into it is "& (MAX_PS_EVENTS-1)", so it stays a power of two.
+#define	MAX_PS_EVENTS			4
+
+// MW2's entity event ring (entityState_s eventSequence +0xa8, events[4] +0xac,
+// eventParms[4] +0xbc). Its sequence is 11 bits, as MW2 masks it (0x4405d0,
+// 0x56eb72); the client walks it with MW2's wrap test (CG_CheckEvents 4c33f0).
+#define	MAX_ENTITY_EVENTS		4
+#define	ES_EVENT_SEQUENCE_BITS	11
+#define	ES_EVENT_SEQUENCE_MASK	( ( 1 << ES_EVENT_SEQUENCE_BITS ) - 1 )
 
 #define PS_PMOVEFRAMECOUNTBITS	6
 
@@ -1140,6 +1149,7 @@ typedef struct {
 // so if a playerState_t is transmitted, the entityState_t can be fully derived
 // from it.
 #define PS_PERK_BITS 5
+#define PS_CURSOR_HINT_BITS 3	// cursorHint_t (bg_public.h): six types
 
 typedef struct playerState_s {
 	int			commandTime;	// cmd->serverTime of last executed command
@@ -1199,6 +1209,8 @@ typedef struct playerState_s {
 	int             slotAmmo[2], slotReserve[2], slotAttachments[2], slotFlags[2];
 	int             pickupTarget, pickupSerial, pickupTime, pickupSlot, pickupHeld;
 	int             cursorHintEntIndex;	// MW2's sticky use hint, written only by the server
+	int             cursorHint;	// MW2's cursorHint: what that hint is usable as now (cursorHint_t), rewritten every end-frame
+	int             grenadeTimeLeft;	// MW2's: ms of fuse left on the offhand in hand (from HOLD entry), -1 cooked out; a duration, never rebased
 
 	vec3_t		viewangles;		// for fixed views
 	int			viewheight;
@@ -1338,8 +1350,17 @@ typedef struct entityState_s {
 
 	int		solid;			// for client side prediction, trap_linkentity sets this properly
 
-	int		event;			// impulse events -- muzzle flashes, footsteps, etc
-	int		eventParm;
+	int		event;			// only the cgame's working copy of the event it is playing now;
+							// the server never sends one (temp entities use eType)
+	int		eventParm;		// a temp entity's parm, and the cgame's working copy
+
+	// MW2's entity event ring: everything raised on this entity, and every
+	// predictable event of the player it is (BG_PlayerStateToEntityState),
+	// except MW2's serverOnly and singleClient events. Players see every one
+	// since their last snapshot, up to four (CG_CheckEvents).
+	int		eventSequence;	// & ES_EVENT_SEQUENCE_MASK: the next slot is eventSequence & (MAX_ENTITY_EVENTS-1)
+	int		events[MAX_ENTITY_EVENTS];
+	int		eventParms[MAX_ENTITY_EVENTS];
 
 	// for players
 	int		powerups;		// bit flags

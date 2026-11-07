@@ -102,7 +102,7 @@ static void Frame(void) {
 static gentity_t *Throw(void) {
  vec3_t start={0,0,12},dir={1,0,0}; gentity_t *k;	/* low enough to stay in the corpse */
  Place(&g_entities[0],0,0); Spawn(&g_entities[1],100,0);
- k=fire_throwingknife(&g_entities[0],start,dir);
+ k=G_ThrowOffhand(&g_entities[0],WP_THROWING_KNIFE,start,dir);
  while (k->s.pos.trType==TR_GRAVITY) Frame();
  return k;
 }
@@ -133,7 +133,7 @@ int main(void) {
   cl[i].pers.connected=CON_CONNECTED; cl[i].pers.enterTime=i+1; cl[i].lastCmdTime=level.time;
   Spawn(e,i*100,0);
  }
- cl[0].knifeMax=2; cl[0].ps.ammo[WP_THROWING_KNIFE]=0; cl[0].knifeHold=ENTITYNUM_NONE;
+ cl[0].knifeMax=BG_ClassEquipmentCount(WP_THROWING_KNIFE); cl[0].ps.ammo[WP_THROWING_KNIFE]=0; cl[0].useHold=ENTITYNUM_NONE;
  InitBodyQue();
  /* thrown into the victim: one hit, buried at the hit and carried by them */
  k=Throw();

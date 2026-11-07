@@ -37,6 +37,20 @@ static void CG_ResetEntity( centity_t *cent ) {
 	// an event window back in time then we can reset the previous event
 	if ( cent->snapShotTime < cg.time - EVENT_VALID_MSEC ) {
 		cent->previousEvent = 0;
+		// Not seen for that long: play what its ring still holds. The server
+		// empties each slot EVENT_VALID_MSEC after it was filled
+		// (G_AgeEntityEvents), as Q3 cleared its one event, so that is only
+		// what was raised since this client last saw it. Seen more recently
+		// (a teleport, a respawn), it plays only what is new.
+		cent->previousEventSequence = 0;
+	}
+	// MW2's CG_ResetEntity (0x5950e0; ET_PLAYER at 5951f4, 595213): a
+	// player's ring counts as played as it arrives. What it holds happened
+	// out of this client's sight, or reached it through that player's own
+	// playerstate while it was followed (a follow switch brings the entity
+	// back, its last shots still in the ring).
+	if ( cent->currentState.eType == ET_PLAYER ) {
+		cent->previousEventSequence = cent->currentState.eventSequence;
 	}
 
 	cent->trailTime = cg.snap->serverTime;
@@ -46,6 +60,24 @@ static void CG_ResetEntity( centity_t *cent ) {
 	if ( cent->currentState.eType == ET_PLAYER ) {
 		CG_ResetPlayerEntity( cent );
 	}
+}
+
+/*
+==================
+CG_ViewedPlayerChanged
+
+MW2's (0x472ff0), which its snapshot transition calls when the viewed player
+or their life changes (4507cd-450811): the HUD's equipped offhand is taken
+from the playerstate (MW2's offHandIndex at 473078), so a killer's or a
+followed player's last press never stays on the viewer's own HUD, and the
+view kick is dropped. Peace's playerstate names an offhand only while one is
+out.
+==================
+*/
+static void CG_ViewedPlayerChanged( const playerState_t *ps ) {
+	cg.equippedOffhand = BG_OffhandOut( ps ) ? BG_QuickActionWeapon( ps, ps->weaponAction ) : WP_NONE;
+	VectorClear( cg.kickAngles );
+	VectorClear( cg.kickAVel );
 }
 
 /*
@@ -174,6 +206,13 @@ static void CG_TransitionSnapshot( void ) {
 		// teleporting checks are irrespective of prediction
 		if ( ( ps->eFlags ^ ops->eFlags ) & EF_TELEPORT_BIT ) {
 			cg.thisFrameTeleport = qtrue;	// will be cleared by prediction code
+		}
+
+		// another player's view (a follow, the killcam, the viewer's own
+		// again), or a new life: never in a demo, as MW2's
+		if ( !cg.demoPlayback && ( ps->clientNum != ops->clientNum ||
+		     ps->persistant[PERS_SPAWN_COUNT] != ops->persistant[PERS_SPAWN_COUNT] ) ) {
+			CG_ViewedPlayerChanged( ps );
 		}
 
 		// if we are not doing client side movement prediction for any

@@ -543,6 +543,30 @@ static void CG_PeaceDump_f( void ) {
 		ps->stats[STAT_ACTIVE_SLOT] );
 	CG_Printf("pickup   target %i   progress %i   slot %i   held %i   selection %i   firstDraw %i\n",
 		ps->pickupTarget, ps->pickupTime, ps->pickupSlot, ps->pickupHeld, cg.weaponSelectSlot, ps->weaponDraw);
+	// The server's use hint, as the snapshot gave it (pmove never writes either).
+	// The index is sticky (MW2's cursorHintEntIndex); ENTITYNUM_NONE is the sea
+	// lion: what it named was used and freed, and nothing has replaced it. The
+	// type (MW2's cursorHint) says what is usable right now.
+	if ( ps->cursorHintEntIndex == ENTITYNUM_NONE ) {
+		CG_Printf( "usehint  none: SEA LION (equipment in a quick raise, or from empty hands, comes straight out)" );
+	} else if ( ps->cursorHintEntIndex == ENTITYNUM_WORLD ) {
+		CG_Printf( "usehint  %i: a bomb site or the bomb (no sea lion)", ps->cursorHintEntIndex );
+	} else if ( ps->cursorHintEntIndex == 0 ) {
+		CG_Printf( "usehint  0: nothing hinted this life yet (no sea lion)" );
+	} else {
+		const entityState_t *hint = &cg_entities[ps->cursorHintEntIndex].currentState;
+		bg_weaponInstance_t gun;
+		if ( hint->eType == ET_MISSILE && hint->weapon == WP_THROWING_KNIFE )
+			CG_Printf( "usehint  %i: a throwing knife (no sea lion until it is taken)", ps->cursorHintEntIndex );
+		else if ( hint->eType == ET_MISSILE && hint->weapon == WP_TACTICAL_INSERTION )
+			CG_Printf( "usehint  %i: %s Tactical Insertion (no sea lion until it is picked up or smashed)",
+				ps->cursorHintEntIndex, hint->clientNum == ps->clientNum ? "your" : "another player's" );
+		else if ( BG_WeaponItem( hint, &gun ) )
+			CG_Printf( "usehint  %i: a floor gun, weapon %i (no sea lion)", ps->cursorHintEntIndex, gun.weapon );
+		else
+			CG_Printf( "usehint  %i: last seen as entity type %i (no sea lion)", ps->cursorHintEntIndex, hint->eType );
+	}
+	CG_Printf( "   usable now: %s\n", CG_CursorHintName( ps->cursorHint ) );
 	for (i = 0; i < SLOT_COUNT; i++) {
 		bg_weaponInstance_t gun;
 		BG_GetSlot(ps, i, &gun);
@@ -558,13 +582,22 @@ static void CG_PeaceDump_f( void ) {
 		CG_Printf("floor    entity %i   weapon %i   attachments %i   ammo %i / %i   at %.1f %.1f %.1f\n",
 			item->number, gun.weapon, gun.attachments, gun.ammo, gun.reserve, origin[0], origin[1], origin[2]);
 	}
+	if (cg.snap) for (i = 0; i < cg.snap->numEntities; i++) {
+		const entityState_t *ti = &cg.snap->entities[i];
+		if (ti->eType != ET_MISSILE || ti->weapon != WP_TACTICAL_INSERTION) continue;
+		CG_Printf("insertion entity %i   owner %i%s   team %i   yaw %.1f   at %.1f %.1f %.1f\n",
+			ti->number, ti->clientNum, ti->clientNum == ps->clientNum ? " (you)" : "", ti->generic1,
+			ti->angles[YAW], ti->pos.trBase[0], ti->pos.trBase[1], ti->pos.trBase[2]);
+	}
 	CG_Printf( "ammo     mag %i / reserve %i        owned mask 0x%04x\n",
 		ps->ammo[w], ps->ammoReserve[w], ps->stats[STAT_WEAPONS] );
-	CG_Printf( "equip    lethal %i (weapon %i)   tactical %i   semtex %i\n",
-		ps->ammo[BG_LethalWeapon(ps)], BG_LethalWeapon(ps), ps->ammo[WP_FLASH], ps->ammo[WP_SEMTEX] );
-	CG_Printf( "action   type %i   fired %i   held %i\n",
+	CG_Printf( "equip    lethal %i (weapon %i)   tactical %i   semtex %i   knife %i   insertion %i\n",
+		ps->ammo[BG_LethalWeapon(ps)], BG_LethalWeapon(ps), ps->ammo[WP_FLASH], ps->ammo[WP_SEMTEX],
+		ps->ammo[WP_THROWING_KNIFE], ps->ammo[WP_TACTICAL_INSERTION] );
+	CG_Printf( "action   type %i   fired %i   held %i   fuse %i%s\n",
 		ps->weaponAction & WA_TYPE_MASK, !!(ps->weaponAction & WA_FIRED),
-		(ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT );
+		(ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT, ps->grenadeTimeLeft,
+		ps->grenadeTimeLeft < 0 ? " (cooked out)" : "" );
 	CG_Printf("selection requested %i   cancelAck %i   recovering %i\n", cg.weaponSelect,
 		!!(ps->weaponAction & WA_RETURNING), !!(ps->weaponAction & WA_RECOVERING));
 

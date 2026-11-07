@@ -93,6 +93,8 @@ struct gentity_s {
 	int			freetime;			// level.time when the object was freed
 	
 	int			eventTime;			// events will be cleared EVENT_VALID_MSEC after set
+	int			eventRingSequence;	// s.eventSequence G_AgeEntityEvents last stamped
+	int			eventRingTime[MAX_ENTITY_EVENTS];	// when each ring slot was filled
 	qboolean	freeAfterEvent;
 	qboolean	unlinkAfterEvent;
 
@@ -158,7 +160,9 @@ struct gentity_s {
 	gentity_t	*enemy;
 	// Server-only stuck projectile carrier (enemy) identity. Do not follow a
 	// recycled mover, a respawned player, or a new connection in the same slot.
-	int hostFreeTime, hostSpawn, hostConnect, semtexOwnerConnect;
+	// ownerConnect is the thrower's pers.enterTime (a Semtex's kill credit, a
+	// Tactical Insertion's owner), so a new connection in the slot is not them.
+	int hostFreeTime, hostSpawn, hostConnect, ownerConnect;
 	vec3_t		hostForward;	// a carried missile's facing in its host's axis
 	int			restNum;		// what a stopped knife rests on (MW2's missile groundEntityNum)
 	gentity_t	*activator;
@@ -281,10 +285,14 @@ struct gclient_s {
 	int			latched_buttons;
 	bg_activate_t	activate;		// MW2's use and use/reload history (BG_UpdateActivate)
 	int				knifeMax;		// throwing knives this life started with: a pickup's room
-	qboolean		cursorHint;		// MW2's cursorHint: the last end-frame found something to use
-	int				knifeHold;		// MW2's useHoldEntity: the knife a held use is taking
-	int				knifeHoldSpawn;	// its timestamp, so a reused entity number is not it
-	int				knifeHoldStart;	// MW2's useHoldTime: when the press latched it
+	int				useHold;		// MW2's useHoldEntity: the knife or Tactical Insertion a held use is taking
+	int				useHoldSpawn;	// its timestamp, so a reused entity number is not it
+	int				useHoldStart;	// MW2's useHoldTime: when the press latched it
+	// MW2's TISpawnPosition: this life's last standing spot a player could
+	// spawn on (G_InsertionSample). Cleared with the rest of this struct by
+	// every spawn, so a life that never had one plants nothing.
+	qboolean		insertionSpotValid;
+	vec3_t			insertionSpot;
 
 	vec3_t		oldOrigin;
 
@@ -490,6 +498,7 @@ void G_UpdateCursorHint(gentity_t *player);
 void G_ClearCursorHintRefs(gentity_t *ent);
 qboolean G_UseThink(gentity_t *player, usercmd_t *cmd);
 qboolean G_HoldUsable(gentity_t *player);
+float G_UseScore(gentity_t *player, const vec3_t origin, float *distance);
 void SetRespawn (gentity_t *ent, float delay);
 void G_SpawnItem (gentity_t *ent, gitem_t *item);
 void FinishSpawningItem( gentity_t *ent );
@@ -530,6 +539,8 @@ float vectoyaw( const vec3_t vec );
 
 void G_AddPredictableEvent( gentity_t *ent, int event, int eventParm );
 void G_AddEvent( gentity_t *ent, int event, int eventParm );
+void G_AgeEntityEvents( gentity_t *ent );
+void G_ClearEntityEvents( gentity_t *ent );
 void G_SetOrigin( gentity_t *ent, vec3_t origin );
 void AddRemap(const char *oldShader, const char *newShader, float timeOffset);
 const char *BuildShaderStateConfig( void );
@@ -543,6 +554,7 @@ qboolean G_RadiusDamage (vec3_t origin, gentity_t *attacker, float damage, float
 int G_InvulnerabilityEffect( gentity_t *targ, vec3_t dir, vec3_t point, vec3_t impactpoint, vec3_t bouncedir );
 void body_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, int meansOfDeath );
 void TossClientItems( gentity_t *self );
+void G_GrenadeSuicide( gentity_t *ent, int weapon );
 #ifdef MISSIONPACK
 void TossClientPersistantPowerups( gentity_t *self );
 #endif
@@ -564,9 +576,25 @@ void G_RunMissile( gentity_t *ent );
 
 gentity_t *fire_plasma (gentity_t *self, vec3_t start, vec3_t aimdir);
 gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t aimdir);
-gentity_t *fire_semtex (gentity_t *self, vec3_t start, vec3_t aimdir);
-gentity_t *fire_throwingknife (gentity_t *self, vec3_t start, vec3_t aimdir);
+gentity_t *fire_semtex (gentity_t *self, vec3_t start, vec3_t velocity);
+gentity_t *fire_throwingknife (gentity_t *self, vec3_t start, vec3_t velocity);
+gentity_t *fire_equipment (gentity_t *self, int weapon, vec3_t start, vec3_t velocity);
+gentity_t *G_ThrowOffhand (gentity_t *self, int weapon, vec3_t start, const vec3_t forward);
 void G_MoveCarriedMissiles( gentity_t *from, gentity_t *to );
+
+//
+// g_insertion.c: MW2's Tactical Insertion
+//
+qboolean G_IsInsertion( const gentity_t *ent );
+gentity_t *G_InsertionOwner( const gentity_t *ti );
+gentity_t *G_FindInsertion( gentity_t *player );
+void G_InsertionSample( gentity_t *player );
+gentity_t *G_PlantInsertion( gentity_t *player );
+void G_FreeInsertion( gentity_t *player );
+qboolean G_InsertionSpawn( gentity_t *player, vec3_t origin, vec3_t angles );
+int G_InsertionHint( gentity_t *player, const gentity_t *ti );
+gentity_t *G_FindInsertionHint( gentity_t *player, float *score );
+qboolean G_UseInsertion( gentity_t *player, gentity_t *ti );
 gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir);
 gentity_t *fire_bfg (gentity_t *self, vec3_t start, vec3_t dir);
 gentity_t *fire_grapple (gentity_t *self, vec3_t start, vec3_t dir);

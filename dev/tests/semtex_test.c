@@ -10,9 +10,10 @@ static void SemtexReady(int gun) {
  bg_class_t cl = *BG_Class(0);
  Ready(gun,gun==WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN);
  cl.slot[0]=ps.weapon; cl.slot[1]=move.cmd.weapon==WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN;
- cl.lethal=WP_SEMTEX; cl.lethalCount=2;
+ cl.lethal=WP_SEMTEX; cl.lethalCount=BG_ClassEquipmentCount(WP_SEMTEX);
  BG_ApplyClass(&ps,&cl);
- CHECK(ps.ammo[WP_SEMTEX]==2 && ps.ammo[WP_FRAG]==0);
+ CHECK(ps.ammo[WP_SEMTEX]==1 && ps.ammo[WP_FRAG]==0);	/* MW2's semtex_mp: one */
+ ps.ammo[WP_SEMTEX]=2;	/* a second, so these mechanics can chain throws */
  CHECK(ps.stats[STAT_WEAPONS]&(1<<WP_SEMTEX));
 }
 static void Hold(void) {

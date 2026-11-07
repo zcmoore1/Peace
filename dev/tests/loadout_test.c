@@ -4,7 +4,7 @@
 
 static playerState_t ps;
 static pmove_t move;
-static int checks, fired[MAX_WEAPONS];
+static int checks, fired[MAX_WEAPONS], suicides;
 #define CHECK(x) do { checks++; if (!(x)) { \
  fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); exit(1); } } while (0)
 void QDECL Com_Printf(const char *fmt, ...) { (void)fmt; }
@@ -18,17 +18,22 @@ void trap_SnapVector(float *v) { v[0] = rintf(v[0]); v[1] = rintf(v[1]); v[2] = 
 static void Ready(int primary, int secondary) {
  bg_class_t cl = *BG_Class(0);
  memset(&ps,0,sizeof(ps)); memset(&move,0,sizeof(move));
- memset(&pml,0,sizeof(pml)); memset(fired,0,sizeof(fired));
+ memset(&pml,0,sizeof(pml)); memset(fired,0,sizeof(fired)); suicides=0;
  cl.slot[0]=primary; cl.slot[1]=secondary;
  BG_ApplyClass(&ps,&cl);
+ /* The mechanics below chain throws, so they carry two of each as the presets
+  * did before MW2's counts (one frag, two flashes; the count test checks those). */
+ ps.ammo[WP_FRAG]=2; ps.ammo[WP_FLASH]=2;
  ps.stats[STAT_HEALTH]=100;
  move.ps=&ps; move.cmd.weapon=primary; pm=&move;
 }
 static void Step(int msec) {
  int seq=ps.eventSequence;
  pml.msec=msec; PM_Weapon();
- for (;seq<ps.eventSequence;seq++)
+ for (;seq<ps.eventSequence;seq++) {
   if(ps.events[seq & (MAX_PS_EVENTS-1)]==EV_FIRE_WEAPON) fired[ps.weapon]++;
+  if(ps.events[seq & (MAX_PS_EVENTS-1)]==EV_GRENADE_SUICIDE) suicides++;
+ }
 }
 static void Run(int msec) { while(msec-- > 0) Step(1); }
 static void Toggle(void) { move.cmd.weapon=BG_ToggleSlotWeapon(&ps,move.cmd.weapon); }
@@ -163,13 +168,28 @@ static void TestActions(void) {
  const int weapons[]={WP_KNIFE,WP_FRAG,WP_FLASH};
  int i,hold,count;
  for(i=0;i<3;i++) for(hold=0;hold<2;hold++) {
-  Ready(WP_MACHINEGUN,WP_SHOTGUN); count=ps.ammo[weapons[i]];
+  Ready(WP_MACHINEGUN,WP_SHOTGUN);
+  count=ps.ammo[weapons[i]];
   ps.pm_flags|=PMF_ADS;
   move.cmd.buttons=buttons[i]; Step(1);
   CHECK(!(ps.pm_flags&PMF_ADS));
   /* the knife is out on the press; equipment waits for the gun to go down */
   CHECK(i ? ps.weaponstate==WEAPON_DROPPING : ps.weapon==WP_KNIFE && ps.weaponstate==WEAPON_RAISING);
   if(!hold) move.cmd.buttons=0;
+  else if(i) {
+   /* MW2's HOLD (holdButtonToThrow 0): held, the frag or flash waits in hand
+    * once its prepare is over and never throws itself, then goes on the
+    * release (the frag held well short of its fuse) */
+   Run(BG_WeaponQuickDropTime(WP_MACHINEGUN)+BG_WeaponRaiseTime(weapons[i]));
+   CHECK(ps.weapon==weapons[i] && ps.weaponstate==WEAPON_READY && !(ps.weaponAction&WA_FIRED));
+   Run(BG_OffhandFuseTime(WP_FRAG)/2);
+   CHECK(ps.weapon==weapons[i] && ps.weaponstate==WEAPON_READY && !(ps.weaponAction&WA_FIRED));
+   CHECK(fired[weapons[i]]==0 && ps.ammo[weapons[i]]==count);
+   move.cmd.buttons=0; Step(1); CHECK(fired[weapons[i]]==1);
+   /* pressed again while it is still out, and held from there on through the
+    * recovery: lost, and never a new press, as for the knife */
+   move.cmd.buttons=buttons[i]; Step(1);
+  }
   Returned();
   CHECK(fired[weapons[i]]==1 && fired[WP_MACHINEGUN]==0);
   CHECK(ps.ammo[weapons[i]]==(i ? count-1 : -1));
@@ -316,9 +336,9 @@ static void RStep(void) {
 static int RecoverPhases(int gun, int button, int special, int *out, int *hold, int *down, int *draw) {
  int t, act, d = -1, u = -1, back = -1, other = gun == WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN;
  Ready(gun, other);
- if(special==WP_SEMTEX) {
+ if(special==WP_SEMTEX || special==WP_TACTICAL_INSERTION) {
   bg_class_t cl=*BG_Class(0);
-  cl.slot[0]=gun; cl.slot[1]=other; cl.lethal=WP_SEMTEX;
+  cl.slot[0]=gun; cl.slot[1]=other; cl.lethal=special; cl.lethalCount=BG_ClassEquipmentCount(special);
   BG_ApplyClass(&ps,&cl);
  }
  move.cmd.buttons = button;
@@ -343,8 +363,10 @@ static int RecoverPhases(int gun, int button, int special, int *out, int *hold, 
  return back - act;
 }
 static void TestRecovery(void) {
- const int buttons[] = { BUTTON_LETHAL, BUTTON_TACTICAL, BUTTON_LETHAL };
- const int specials[] = { WP_FRAG, WP_FLASH, WP_SEMTEX };
+ /* the Tactical Insertion too: Peace's one equipment recovery, not flare_mp's
+  * own fireTime 0.6 and fireDelay 0.129 */
+ const int buttons[] = { BUTTON_LETHAL, BUTTON_TACTICAL, BUTTON_LETHAL, BUTTON_LETHAL };
+ const int specials[] = { WP_FRAG, WP_FLASH, WP_SEMTEX, WP_TACTICAL_INSERTION };
  int i, a, n = BG_ClassWeaponCount();
  for (i = 0; i < n; i++) {
   int gun = BG_ClassWeapon(i), first = -1;
@@ -867,13 +889,17 @@ static void TestThrowingKnife(void) {
  const int hints[3]={0,MAX_CLIENTS+7,ENTITYNUM_NONE};
  int i,t,pull;
  for(i=0;i<3;i++) {
-  /* out at once from a gun at rest, held as long as the button is */
+  /* out at once from a gun at rest, held as long as the button is: its
+   * holdFireTime is 0, so it is in HOLD on the press think (MW2's OffHandInit,
+   * Prepare and Hold in one think), with its fuseTime, the flight lifetime */
   KnifeReady(1,hints[i]);
   move.cmd.buttons=BUTTON_LETHAL; Step(1);
-  CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_RAISING);
-  CHECK(ps.weaponTime==BG_WeaponDrawTime(&ps) && ps.weaponTime==BG_THROWING_KNIFE_PULL_MS);
+  CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_READY);
+  CHECK(BG_WeaponDrawTime(&ps)==BG_THROWING_KNIFE_PULL_MS && BG_THROWING_KNIFE_PULL_MS==0 && ps.weaponTime==0);
+  CHECK(ps.grenadeTimeLeft==BG_OffhandFuseTime(WP_THROWING_KNIFE) && ps.grenadeTimeLeft==BG_THROWING_KNIFE_LIFE);
   for(t=0;t<3000;t++) { Step(1); CHECK(ps.weapon==WP_THROWING_KNIFE && !fired[WP_THROWING_KNIFE]); }
-  CHECK(ps.weaponstate==WEAPON_READY && ps.ammo[WP_THROWING_KNIFE]==1);
+  /* it never cooks (cookOffHold 0): the fuse it was given stays whole */
+  CHECK(ps.weaponstate==WEAPON_READY && ps.ammo[WP_THROWING_KNIFE]==1 && ps.grenadeTimeLeft==BG_THROWING_KNIFE_LIFE);
   move.cmd.buttons=0; Step(1);
   CHECK(fired[WP_THROWING_KNIFE]==1 && ps.ammo[WP_THROWING_KNIFE]==0 && (ps.weaponAction&WA_FIRED));
   CHECK(ps.cursorHintEntIndex==hints[i]);
@@ -892,24 +918,29 @@ static void TestThrowingKnife(void) {
  for(t=0;t<12000 && !fired[WP_THROWING_KNIFE];t++) Step(1);
  CHECK(t==pull+1 && ps.ammo[WP_THROWING_KNIFE]==0);
  /* the next knife comes out of the gun's quick raise as directly, with the
-  * hint live; a flash pressed there still lowers the gun */
+  * hint live; a flash pressed there still lowers the gun. MW2 carries one,
+  * so the next is the thrown one taken back by use (G_TakeKnife's ammo). */
  for(i=0;i<2;i++) {
-  KnifeReady(2,0); ps.ammo[WP_FLASH]=1;
+  KnifeReady(1,0); ps.ammo[WP_FLASH]=1;
   move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
   for(t=0;t<12000 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+  CHECK(ps.ammo[WP_THROWING_KNIFE]==0);
+  ps.ammo[WP_THROWING_KNIFE]=1; BG_RebuildWeaponMask(&ps);
   Run(BG_WeaponQuickRaiseTime(WP_SHOTGUN)/2);
   move.cmd.buttons=i ? BUTTON_TACTICAL : BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
-  if(!i) CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_RAISING &&
+  if(!i) CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_READY &&
    ps.weaponTime==BG_THROWING_KNIFE_PULL_MS && ps.ammo[WP_THROWING_KNIFE]==1);
   else CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_DROPPING &&
    ps.weaponTime==BG_WeaponQuickDropTime(WP_SHOTGUN));
  }
  /* Cancelled like the Semtex: Y while it is held, before the release, sends it
   * back to the gun on the gun's quick raise with nothing thrown or spent - on
-  * the press, mid-pull or held long - and from the quick raise it comes straight
+  * the command after the press, a little later or held long
+  * (offhandHoldIsCancelable 1) - and from the quick raise it comes straight
   * out again, over and over. A Y after the throw only queues the swap. */
  {
-  const int when[3]={0,BG_THROWING_KNIFE_PULL_MS/2,BG_THROWING_KNIFE_PULL_MS*4};
+  const int when[3]={0,1,2000};
+  CHECK(BG_OffhandCancelable(WP_THROWING_KNIFE));
   for(i=0;i<3;i++) {
    int n;
    KnifeReady(1,0);
@@ -923,7 +954,8 @@ static void TestThrowingKnife(void) {
     CHECK(ps.ammo[WP_THROWING_KNIFE]==1 && !fired[WP_THROWING_KNIFE] && ps.stats[STAT_ACTIVE_SLOT]==SLOT_PRIMARY);
     Run(BG_WeaponQuickRaiseTime(WP_SHOTGUN)/3);
     move.cmd.buttons=BUTTON_LETHAL; Step(1);
-    CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_RAISING);
+    CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_READY);
+    CHECK(ps.grenadeTimeLeft==BG_THROWING_KNIFE_LIFE);
    }
    move.cmd.buttons=0; Step(1);
    for(t=0;t<12000 && !fired[WP_THROWING_KNIFE];t++) Step(1);
@@ -943,6 +975,555 @@ static void TestThrowingKnife(void) {
    cl.lethal=WP_THROWING_KNIFE; cl.lethalCount=1; CHECK(BG_ValidateClass(&cl));
    CHECK(BG_SerializeClass(&cl,text,sizeof(text)));
    memset(&cl,0,sizeof(cl)); CHECK(BG_ParseClass(text,&cl) && cl.lethal==WP_THROWING_KNIFE); }
+ /* MW2's counts, fixed per item (startAmmo = maxAmmo in its weapon data): one
+  * frag, Semtex or throwing knife, two flashes. Any other count is no class,
+  * and a class saved when counts were chosen (one to three), in either format,
+  * loads with MW2's count and the rest of the class intact. Four was never a
+  * class. */
+ { bg_class_t cl=*BG_Class(0),copy; char text[256]; int v,n,e;
+   static const int lethals[]={WP_FRAG,WP_SEMTEX,WP_THROWING_KNIFE};
+   CHECK(BG_ClassEquipmentCount(WP_FRAG)==1 && BG_ClassEquipmentCount(WP_SEMTEX)==1 &&
+    BG_ClassEquipmentCount(WP_THROWING_KNIFE)==1 && BG_ClassEquipmentCount(WP_FLASH)==2 &&
+    BG_ClassEquipmentCount(WP_NONE)==0);
+   for(i=0;i<BG_ClassCount();i++) CHECK(BG_Class(i)->lethalCount==1 && BG_Class(i)->tacticalCount==2);
+   cl.slot[0]=WP_M40A3; cl.slot[1]=WP_SHOTGUN; cl.tactical=WP_FLASH; cl.tacticalCount=2;
+   cl.perk[0]=PERK_QUICK_RELOAD; cl.attachments[0]=0; cl.attachments[1]=BG_ATTACHMENT_REDDOT;
+   strcpy(cl.name,"Counted class");
+   for(e=0;e<3;e++) {
+    cl.lethal=lethals[e]; cl.lethalCount=1; CHECK(BG_ValidateClass(&cl));
+    for(n=0;n<=4;n++) if(n!=1) { cl.lethalCount=n; CHECK(!BG_ValidateClass(&cl) && !BG_SerializeClass(&cl,text,sizeof(text))); }
+    cl.lethalCount=1;
+    for(v=1;v<=2;v++) for(n=1;n<=4;n++) {
+     int t=1+(n&1);	/* the flash saved as one or two */
+     if(v==1) Com_sprintf(text,sizeof(text),"1|%i|%i|%i|%i|%i|%i|%i|%i|%i|%s",cl.slot[0],cl.slot[1],
+      cl.lethal,n,WP_FLASH,t,cl.perk[0],cl.perk[1],cl.perk[2],cl.name);
+     else Com_sprintf(text,sizeof(text),"2|%i|%i|%i|%i|%i|%i|%i|%i|%i|%i|%i|%s",cl.slot[0],cl.slot[1],
+      cl.lethal,n,WP_FLASH,t,cl.perk[0],cl.perk[1],cl.perk[2],cl.attachments[0],cl.attachments[1],cl.name);
+     memset(&copy,0,sizeof(copy));
+     if(n==4) { CHECK(!BG_ParseClass(text,&copy)); continue; }
+     CHECK(BG_ParseClass(text,&copy) && BG_ValidateClass(&copy));
+     CHECK(copy.lethal==cl.lethal && copy.lethalCount==1 && copy.tactical==WP_FLASH && copy.tacticalCount==2);
+     CHECK(copy.slot[0]==cl.slot[0] && copy.slot[1]==cl.slot[1] && !strcmp(copy.name,cl.name) &&
+      !memcmp(copy.perk,cl.perk,sizeof(cl.perk)));
+     CHECK(v==1 ? copy.attachments[0]==-1 && copy.attachments[1]==-1 :
+      copy.attachments[0]==cl.attachments[0] && copy.attachments[1]==cl.attachments[1]);
+    }
+   }
+   cl.lethal=WP_FRAG; cl.lethalCount=1;
+   for(n=0;n<=4;n++) { cl.tacticalCount=n; CHECK(BG_ValidateClass(&cl)==(n==2)); }
+   cl.tactical=WP_NONE; cl.tacticalCount=0; CHECK(BG_ValidateClass(&cl));
+   { playerState_t spawned; memset(&spawned,0,sizeof(spawned)); cl=*BG_Class(0); BG_ApplyClass(&spawned,&cl);
+     CHECK(spawned.ammo[WP_FRAG]==1 && spawned.ammo[WP_FLASH]==2); } }
+}
+/* MW2's Tactical Insertion (flare_mp): lethal equipment, the class's one
+ * lethal. From a gun at rest it pays the gun's quick drop (weaponClass
+ * grenade), then the ignite, holdFireTime 2630, which no release cuts short: a
+ * tap is thrown (planted, server side) on the first command after it, a hold
+ * keeps it in hand for good (cookOffHold 0) until the release. Y before the
+ * release cancels it to the gun's quick raise with nothing spent, in the drop,
+ * the ignite or held, and the sea lion brings the next straight out of that
+ * raise. Nothing in pmove names it: its rows and classifiers are its data. */
+static void InsertionReady(int gun, int hint) {
+ bg_class_t cl=*BG_Class(0);
+ Ready(gun,gun==WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN);
+ cl.slot[0]=gun; cl.slot[1]=gun==WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN;
+ cl.lethal=WP_TACTICAL_INSERTION; cl.lethalCount=BG_ClassEquipmentCount(WP_TACTICAL_INSERTION);
+ CHECK(BG_ValidateClass(&cl));
+ BG_ApplyClass(&ps,&cl); move.cmd.weapon=gun; ps.cursorHintEntIndex=hint; ps.ammo[WP_FLASH]=2;
+ CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_READY && ps.ammo[WP_TACTICAL_INSERTION]==1);
+ CHECK(ps.ammo[WP_FRAG]==0 && (ps.stats[STAT_WEAPONS]&(1<<WP_TACTICAL_INSERTION)));
+ CHECK(BG_LethalWeapon(&ps)==WP_TACTICAL_INSERTION);
+}
+static void TestTacticalInsertion(void) {
+ const int hints[3]={0,MAX_CLIENTS+7,ENTITYNUM_NONE};
+ int i,t,n,gun,drop,press;
+ /* appended after the throwing knife in both numberings, inside the wire's
+  * 5-bit weapon and 32-bit masks; everything that classifies equipment knows it */
+#ifdef MISSIONPACK
+ CHECK(WP_THROWING_KNIFE==19 && WP_TACTICAL_INSERTION==20 && WP_NUM_WEAPONS==21);
+#else
+ CHECK(WP_THROWING_KNIFE==16 && WP_TACTICAL_INSERTION==17 && WP_NUM_WEAPONS==18);
+#endif
+ CHECK(WP_TACTICAL_INSERTION==WP_THROWING_KNIFE+1 && WP_NUM_WEAPONS<=MAX_WEAPONS && WP_NUM_WEAPONS<=32);
+ CHECK(BG_IsActionWeapon(WP_TACTICAL_INSERTION) && BG_OffhandHeldToThrow(WP_TACTICAL_INSERTION));
+ CHECK(!BG_OffhandPreparesAtOnce(WP_TACTICAL_INSERTION) && !BG_QuickActionInPlace(WP_TACTICAL_INSERTION));
+ CHECK(BG_WeaponRaiseTime(WP_TACTICAL_INSERTION)==BG_INSERTION_IGNITE_MS && BG_INSERTION_IGNITE_MS==2630);
+ CHECK(BG_WeaponMagSize(WP_TACTICAL_INSERTION)==1 && BG_WeaponMaxReserve(WP_TACTICAL_INSERTION)==0);
+ CHECK(BG_WeaponDropTime(WP_TACTICAL_INSERTION)==BG_RAPID_DROP_TIME && BG_WeaponFireLength(WP_TACTICAL_INSERTION)==0);
+ CHECK(BG_ClassEquipmentCount(WP_TACTICAL_INSERTION)==1 && BG_FindItemForWeapon(WP_TACTICAL_INSERTION)->giTag==WP_TACTICAL_INSERTION);
+ CHECK(!BG_WeaponScopeOverlay(WP_TACTICAL_INSERTION) && !BG_WeaponBaseSpread(WP_TACTICAL_INSERTION));
+ CHECK(BG_WeaponSprintInTime(WP_TACTICAL_INSERTION)>0 && BG_WeaponSprintOutTime(WP_TACTICAL_INSERTION)>0);
+ for(i=0;i<BG_ClassWeaponCount();i++) CHECK(BG_ClassWeapon(i)!=WP_TACTICAL_INSERTION);	/* never a gun slot */
+ for(n=0;n<BG_ClassWeaponCount();n++) {
+  gun=BG_ClassWeapon(n);
+  for(i=0;i<3;i++) {
+   /* the gun's quick drop from rest, hint or not, then the ignite */
+   InsertionReady(gun,hints[i]);
+   move.cmd.buttons=BUTTON_LETHAL; Step(1);
+   CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_DROPPING);
+   CHECK(ps.weaponTime==BG_HolsterTime(&ps) && ps.weaponTime==BG_WeaponQuickDropTime(gun));
+   drop=ps.weaponTime;
+   for(t=0;t<drop && ps.weapon==gun;t++) Step(1);
+   CHECK(t==drop && ps.weapon==WP_TACTICAL_INSERTION && ps.weaponstate==WEAPON_RAISING);
+   CHECK(ps.weaponTime==BG_WeaponDrawTime(&ps) && ps.weaponTime==BG_INSERTION_IGNITE_MS);
+   /* held: in hand for good, never thrown by itself */
+   for(t=0;t<10000;t++) { Step(1); CHECK(ps.weapon==WP_TACTICAL_INSERTION && !fired[WP_TACTICAL_INSERTION]); }
+   CHECK(ps.weaponstate==WEAPON_READY && ps.ammo[WP_TACTICAL_INSERTION]==1 && BG_OffhandOut(&ps));
+   move.cmd.buttons=0; Step(1);
+   CHECK(fired[WP_TACTICAL_INSERTION]==1 && ps.ammo[WP_TACTICAL_INSERTION]==0 && (ps.weaponAction&WA_FIRED));
+   CHECK(ps.weaponstate==WEAPON_FIRING && ps.weaponTime==BG_QUICK_ACTION_HOLD && ps.cursorHintEntIndex==hints[i]);
+   /* recovery: the one equipment hold, the rapid drop, the gun's quick raise */
+   for(t=0;t<12000 && !(ps.weapon==gun && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+   CHECK(t==BG_QUICK_ACTION_HOLD+BG_RAPID_DROP_TIME);
+   CHECK((ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==(WA_LETHAL|WA_FIRED) && ps.weaponTime==BG_WeaponQuickRaiseTime(gun));
+   Returned(); CHECK(fired[gun]==0);
+   /* none left: a press asks for nothing */
+   move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0; Step(1);
+   CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_READY && !(ps.weaponAction&WA_TYPE_MASK));
+  }
+  /* a tap during the drop or the ignite is queued: planted exactly on the
+   * first command after the ignite ends, never sooner */
+  for(i=0;i<3;i++) {
+   const int release[3]={0,BG_WeaponQuickDropTime(gun)/2,BG_WeaponQuickDropTime(gun)+BG_INSERTION_IGNITE_MS/2};
+   InsertionReady(gun,0);
+   move.cmd.buttons=BUTTON_LETHAL; Step(1); press=1;
+   for(t=0;t<release[i];t++) Step(1);
+   move.cmd.buttons=0;
+   for(t=press+release[i];t<20000 && !fired[WP_TACTICAL_INSERTION];t++) {
+    Step(1); if(!fired[WP_TACTICAL_INSERTION]) CHECK(ps.weaponstate!=WEAPON_FIRING);
+   }
+   /* commands after the press: MW2's PREPARE ends in HOLD, which throws next think */
+   CHECK(t-press==BG_WeaponQuickDropTime(gun)+BG_INSERTION_IGNITE_MS+1 && ps.ammo[WP_TACTICAL_INSERTION]==0);
+  }
+  /* Y cancels it before the release, in the drop, the ignite and held: the
+   * gun's quick raise, nothing spent, nothing thrown, the slot unchanged */
+  for(i=0;i<3;i++) {
+   const int when[3]={BG_WeaponQuickDropTime(gun)/2,BG_WeaponQuickDropTime(gun)+BG_INSERTION_IGNITE_MS/2,
+    BG_WeaponQuickDropTime(gun)+BG_INSERTION_IGNITE_MS+2000};
+   InsertionReady(gun,0);
+   move.cmd.buttons=BUTTON_LETHAL; Step(1); Run(when[i]-1);
+   CHECK(i==0 ? ps.weapon==gun && ps.weaponstate==WEAPON_DROPPING : ps.weapon==WP_TACTICAL_INSERTION);
+   move.cmd.buttons=BUTTON_LETHAL|BUTTON_WEAPON_SWAP; Step(1); move.cmd.buttons=0;
+   CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_RAISING && (ps.weaponAction&WA_RETURNING));
+   CHECK((ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==(WA_LETHAL|WA_FIRED) && ps.weaponTime==BG_WeaponQuickRaiseTime(gun));
+   CHECK(ps.ammo[WP_TACTICAL_INSERTION]==1 && !fired[WP_TACTICAL_INSERTION] && ps.stats[STAT_ACTIVE_SLOT]==SLOT_PRIMARY);
+   Returned(); CHECK(ps.ammo[WP_TACTICAL_INSERTION]==1 && !fired[WP_TACTICAL_INSERTION]);
+  }
+  /* after the release Y only queues the swap behind the recovery */
+  InsertionReady(gun,0);
+  move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+  for(t=0;t<20000 && !fired[WP_TACTICAL_INSERTION];t++) Step(1);
+  Toggle(); move.cmd.buttons=BUTTON_WEAPON_SWAP; Step(1); move.cmd.buttons=0;
+  CHECK(ps.weapon==WP_TACTICAL_INSERTION && fired[WP_TACTICAL_INSERTION]==1 && ps.ammo[WP_TACTICAL_INSERTION]==0);
+  for(t=0;t<12000 && !(ps.weapon==gun && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+  CHECK(ps.weapon==gun && !(ps.weaponAction&WA_RETURNING));
+  Returned(); CHECK(ps.weapon==move.cmd.weapon && ps.weapon!=gun);
+ }
+ /* The sea lion (MW2's CheckForOffHand 5791b0-5791ce), as for any non-knife
+  * offhand: with no hint at all, the next TI pressed in the gun's quick raise
+  * after a TI cancel comes straight out into its ignite, the gun never lowered,
+  * chain after chain - the TI's own double cancel. With a live hint, or from a
+  * gun at rest, it drops. */
+ for(i=0;i<3;i++) {
+  InsertionReady(WP_SHOTGUN,hints[i]);
+  move.cmd.buttons=BUTTON_LETHAL; Step(1);
+  CHECK(ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_WeaponQuickDropTime(WP_SHOTGUN));
+  for(t=0;t<12000 && ps.weapon!=WP_TACTICAL_INSERTION;t++) Step(1);
+  for(n=0;n<6;n++) {
+   move.cmd.buttons=BUTTON_LETHAL|BUTTON_WEAPON_SWAP; Step(1); move.cmd.buttons=0; Step(1);
+   CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING &&
+    (ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==(WA_LETHAL|WA_FIRED));
+   Run(BG_WeaponQuickRaiseTime(WP_SHOTGUN)/3);
+   move.cmd.buttons=BUTTON_LETHAL; Step(1);
+   if(hints[i]==ENTITYNUM_NONE) {
+    CHECK(ps.weapon==WP_TACTICAL_INSERTION && ps.weaponstate==WEAPON_RAISING && ps.weaponTime==BG_INSERTION_IGNITE_MS);
+   } else {
+    CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_WeaponQuickDropTime(WP_SHOTGUN));
+    for(t=0;t<12000 && ps.weapon!=WP_TACTICAL_INSERTION;t++) Step(1);
+   }
+   CHECK(ps.cursorHintEntIndex==hints[i] && ps.ammo[WP_TACTICAL_INSERTION]==1 && !fired[WP_TACTICAL_INSERTION]);
+  }
+  move.cmd.buttons=0; Step(1);
+  for(t=0;t<12000 && !fired[WP_TACTICAL_INSERTION];t++) Step(1);
+  CHECK(fired[WP_TACTICAL_INSERTION]==1);
+ }
+ /* the sea lion out of the TI's own throw: the plant spends it, so the next
+  * piece of equipment (a flash) comes straight out of that quick raise */
+ InsertionReady(WP_SHOTGUN,ENTITYNUM_NONE);
+ move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+ for(t=0;t<12000 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+ Run(BG_WeaponQuickRaiseTime(WP_SHOTGUN)/2);
+ move.cmd.buttons=BUTTON_TACTICAL; Step(1); move.cmd.buttons=0;
+ CHECK(ps.weapon==WP_FLASH && ps.weaponstate==WEAPON_RAISING && ps.weaponTime==BG_WeaponDrawTime(&ps));
+ /* the knife's return is not OFFHAND_END: the TI still drops out of it */
+ InsertionReady(WP_SHOTGUN,ENTITYNUM_NONE);
+ move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
+ for(t=0;t<12000 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+ Run(BG_WeaponQuickRaiseTime(WP_SHOTGUN)/2);
+ move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+ CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_WeaponQuickDropTime(WP_SHOTGUN));
+ /* from an empty hand: straight out with no hint, the empty hand's own time
+  * with one, and back to an empty hand */
+ for(i=0;i<2;i++) {
+  InsertionReady(WP_SHOTGUN,i ? ENTITYNUM_NONE : 0); ps.weapon=WP_NONE;
+  ps.slotFlags[0]^=BG_GUN_GENERATION; move.cmd.weapon=BG_SLOT_COMMAND;
+  move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
+  if(i) CHECK(ps.weapon==WP_TACTICAL_INSERTION && ps.weaponstate==WEAPON_RAISING && ps.weaponTime==BG_INSERTION_IGNITE_MS);
+  else CHECK(ps.weapon==WP_NONE && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_EMPTY_HAND_OFFHAND_TIME);
+  for(t=0;t<12000 && !BG_IsActionWeapon(ps.weapon);t++) Step(1);
+  for(t=0;t<12000 && BG_IsActionWeapon(ps.weapon);t++) Step(1);
+  CHECK(fired[WP_TACTICAL_INSERTION]==1 && ps.weapon==WP_NONE);
+ }
+ /* the class: one TI, a lethal only (MW2's isValidEquipment), both formats */
+ { bg_class_t cl=*BG_Class(0),copy; char text[256]; int v,c;
+   cl.lethal=WP_TACTICAL_INSERTION;
+   for(c=0;c<=3;c++) { cl.lethalCount=c; CHECK(BG_ValidateClass(&cl)==(c==1)); }
+   cl.lethalCount=1; CHECK(BG_SerializeClass(&cl,text,sizeof(text)));
+   memset(&copy,0,sizeof(copy)); CHECK(BG_ParseClass(text,&copy) && !memcmp(&copy,&cl,sizeof(cl)));
+   copy=cl; copy.tactical=WP_TACTICAL_INSERTION; copy.tacticalCount=1; CHECK(!BG_ValidateClass(&copy));
+   for(v=1;v<=2;v++) for(c=1;c<=4;c++) {
+    if(v==1) Com_sprintf(text,sizeof(text),"1|%i|%i|%i|%i|%i|2|0|0|0|TI class",WP_M40A3,WP_SHOTGUN,WP_TACTICAL_INSERTION,c,WP_FLASH);
+    else Com_sprintf(text,sizeof(text),"2|%i|%i|%i|%i|%i|2|0|0|0|0|1|TI class",WP_M40A3,WP_SHOTGUN,WP_TACTICAL_INSERTION,c,WP_FLASH);
+    memset(&copy,0,sizeof(copy));
+    if(c==4) { CHECK(!BG_ParseClass(text,&copy)); continue; }
+    CHECK(BG_ParseClass(text,&copy) && copy.lethal==WP_TACTICAL_INSERTION && copy.lethalCount==1);
+    CHECK(copy.slot[0]==WP_M40A3 && copy.slot[1]==WP_SHOTGUN && !strcmp(copy.name,"TI class"));
+    CHECK(v==1 ? copy.attachments[1]==-1 : copy.attachments[1]==1);
+   }
+   Com_sprintf(text,sizeof(text),"2|%i|%i|%i|1|%i|1|0|0|0|0|0|Tactical TI",WP_M40A3,WP_SHOTGUN,WP_FRAG,WP_TACTICAL_INSERTION);
+   CHECK(!BG_ParseClass(text,&copy));
+   { playerState_t spawned; memset(&spawned,0,sizeof(spawned)); BG_ApplyClass(&spawned,&cl);
+     CHECK(spawned.ammo[WP_TACTICAL_INSERTION]==1 && !spawned.ammo[WP_FRAG] && BG_LethalWeapon(&spawned)==WP_TACTICAL_INSERTION);
+     CHECK(spawned.stats[STAT_WEAPONS]&(1<<WP_TACTICAL_INSERTION));
+     spawned.ammo[WP_TACTICAL_INSERTION]=0; BG_RebuildWeaponMask(&spawned);
+     CHECK(!(spawned.stats[STAT_WEAPONS]&(1<<WP_TACTICAL_INSERTION)) && BG_LethalWeapon(&spawned)==WP_FRAG); } }
+}
+/* MW2's offhand HOLD (578f00-578f69) throws before it reads Y. With
+ * holdButtonToThrow 0 - every offhand's - it throws on any HOLD think unless
+ * an offhand button, the lethal or the tactical, is down on that command and
+ * one was on the one before (578f2d-578f3f, mask 0xc000); only then is the
+ * cancel bit read (578f41-578f52), and only by an offhand whose data says
+ * offhandHoldIsCancelable (the Semtex, throwing knife and Tactical Insertion;
+ * never the frag or flash). INIT and PREPARE, the gun's drop and the pull,
+ * cancel on Y whatever the buttons (577daa-577dde). The same for every
+ * offhand: pmove names none of them. Y is sent as weapnext sends it while one
+ * is out - the swap button with the slot unchanged (MW2's weapnext 59d5f0-59d622
+ * sets the cancel bit, never a weapon, so a Y the throw wins is simply eaten). */
+static int OffhandButton(int weapon) { return weapon==WP_FLASH ? BUTTON_TACTICAL : BUTTON_LETHAL; }
+static int OffhandAction(int weapon) { return weapon==WP_FLASH ? WA_TACTICAL : WA_LETHAL; }
+static void HeldLethalReady(int offhand) {
+ bg_class_t cl=*BG_Class(0);
+ Ready(WP_SHOTGUN,WP_MACHINEGUN);
+ cl.slot[0]=WP_SHOTGUN; cl.slot[1]=WP_MACHINEGUN;
+ if(offhand!=WP_FLASH) { cl.lethal=offhand; cl.lethalCount=BG_ClassEquipmentCount(offhand); }
+ CHECK(BG_ValidateClass(&cl));
+ BG_ApplyClass(&ps,&cl); move.cmd.weapon=WP_SHOTGUN; ps.cursorHintEntIndex=0;
+ ps.ammo[WP_FLASH]=offhand==WP_FLASH ? 1 : 2;
+ CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_READY && ps.ammo[offhand]==1);
+ CHECK(offhand==WP_FLASH || BG_LethalWeapon(&ps)==offhand);
+}
+/* pressed, then `buttons` until the pull has ended: the next command is HOLD's
+ * first. (With a 0 prepare, the throwing knife's, the press is the pull's last
+ * command and HOLD's first command is the one after it.) */
+static void PulledOut(int offhand, int buttons) {
+ int t;
+ move.cmd.buttons=OffhandButton(offhand); Step(1); move.cmd.buttons=buttons;
+ for(t=0;t<20000 && !(ps.weapon==offhand && ps.weaponstate==WEAPON_READY);t++) {
+  CHECK(!fired[offhand]); Step(1);
+ }
+ CHECK(t<20000 && !fired[offhand] && ps.ammo[offhand]==1 && !(ps.weaponAction&WA_FIRED));
+ CHECK(ps.grenadeTimeLeft==BG_OffhandFuseTime(offhand));	/* HOLD entry's fuse */
+}
+static void ThrownNotCancelled(int offhand) {
+ CHECK(fired[offhand]==1 && ps.ammo[offhand]==0 && ps.weapon==offhand && ps.weaponstate==WEAPON_FIRING);
+ CHECK((ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==(OffhandAction(offhand)|WA_FIRED) && !(ps.weaponAction&WA_RETURNING));
+ move.cmd.buttons=0; Returned();
+ CHECK(fired[offhand]==1 && ps.weapon==WP_SHOTGUN && ps.stats[STAT_ACTIVE_SLOT]==SLOT_PRIMARY);
+}
+static void CancelledNotThrown(int offhand) {
+ CHECK(BG_OffhandCancelable(offhand));
+ CHECK(!fired[offhand] && ps.ammo[offhand]==1 && ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);
+ CHECK((ps.weaponAction&(WA_TYPE_MASK|WA_FIRED|WA_RETURNING))==(OffhandAction(offhand)|WA_FIRED|WA_RETURNING));
+ CHECK(ps.weaponTime==BG_WeaponQuickRaiseTime(WP_SHOTGUN)-1 || ps.weaponTime==BG_WeaponQuickRaiseTime(WP_SHOTGUN));
+ CHECK(ps.grenadeTimeLeft==0);	/* IW4x's bg_weaponOffHandFix: no fuse left behind */
+ move.cmd.buttons=0; Returned(); CHECK(!fired[offhand] && ps.ammo[offhand]==1);
+}
+/* The frag and flash take no cancel: a Y anywhere before the throw changes
+ * nothing, and the release still throws it. */
+static void NotCancelled(int offhand) {
+ CHECK(!BG_OffhandCancelable(offhand));
+ CHECK(!fired[offhand] && ps.ammo[offhand]==1 && !(ps.weaponAction&WA_RETURNING));
+ CHECK((ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==OffhandAction(offhand));
+ CHECK(ps.weapon==offhand || (ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_DROPPING));
+ /* let go once it is in hand: thrown, then the ordinary recovery */
+ move.cmd.buttons=0;
+ { int t; for(t=0;t<20000 && !fired[offhand];t++) Step(1); CHECK(t<20000); }
+ ThrownNotCancelled(offhand);
+}
+static void YIn(int offhand, int buttons) {
+ move.cmd.buttons=buttons|BUTTON_WEAPON_SWAP; Step(1);
+ if(BG_OffhandCancelable(offhand)) CancelledNotThrown(offhand);
+ else NotCancelled(offhand);
+}
+static void TestHoldThrowsBeforeCancel(void) {
+ static const int offhands[]={WP_FRAG,WP_FLASH,WP_SEMTEX,WP_THROWING_KNIFE,WP_TACTICAL_INSERTION};
+ int e,offhand,t,button,other;
+ /* the data: every offhand waits in hand; only three can be cancelled */
+ CHECK(BG_OffhandHeldToThrow(WP_FRAG) && BG_OffhandHeldToThrow(WP_FLASH) && BG_OffhandHeldToThrow(WP_SEMTEX) &&
+  BG_OffhandHeldToThrow(WP_THROWING_KNIFE) && BG_OffhandHeldToThrow(WP_TACTICAL_INSERTION));
+ CHECK(!BG_OffhandHeldToThrow(WP_KNIFE) && !BG_OffhandHeldToThrow(WP_SHOTGUN) && !BG_OffhandHeldToThrow(WP_NONE));
+ CHECK(!BG_OffhandCancelable(WP_FRAG) && !BG_OffhandCancelable(WP_FLASH) && BG_OffhandCancelable(WP_SEMTEX) &&
+  BG_OffhandCancelable(WP_THROWING_KNIFE) && BG_OffhandCancelable(WP_TACTICAL_INSERTION));
+ CHECK(!BG_OffhandCancelable(WP_KNIFE) && !BG_OffhandCancelable(WP_SHOTGUN));
+ /* the prepares are holdFireTime: 600, 600, 600, 0 and 2630 */
+ CHECK(BG_WeaponRaiseTime(WP_FRAG)==600 && BG_WeaponRaiseTime(WP_FLASH)==600 && BG_WeaponRaiseTime(WP_SEMTEX)==600);
+ CHECK(BG_WeaponRaiseTime(WP_THROWING_KNIFE)==0 && BG_WeaponRaiseTime(WP_TACTICAL_INSERTION)==2630);
+ for(e=0;e<5;e++) {
+  offhand=offhands[e]; button=OffhandButton(offhand);
+  other=button==BUTTON_LETHAL ? BUTTON_TACTICAL : BUTTON_LETHAL;
+  /* held into HOLD, then let go and Y on one command: thrown, the Y eaten */
+  HeldLethalReady(offhand); PulledOut(offhand,button); Run(100);
+  move.cmd.buttons=BUTTON_WEAPON_SWAP; Step(1); ThrownNotCancelled(offhand);
+  /* the same on HOLD's very first command */
+  HeldLethalReady(offhand); PulledOut(offhand,button);
+  move.cmd.buttons=BUTTON_WEAPON_SWAP; Step(1); ThrownNotCancelled(offhand);
+  /* a tap, then Y on HOLD's first command: thrown, as the release says (with
+   * a prepare, the release was queued through it) */
+  HeldLethalReady(offhand); PulledOut(offhand,0);
+  move.cmd.buttons=BUTTON_WEAPON_SWAP; Step(1); ThrownNotCancelled(offhand);
+  /* a plain tap: never thrown early, never held - queued through the drop and
+   * the prepare (PulledOut fails on a throw there), thrown on HOLD's first
+   * command (MW2's OffHandStart, the think after OffHandHold) */
+  HeldLethalReady(offhand); PulledOut(offhand,0);
+  move.cmd.buttons=0; Step(1); ThrownNotCancelled(offhand);
+  if(BG_WeaponRaiseTime(offhand)>0) {
+   /* a tap, then pressed again during the prepare and held: down on the
+    * command before HOLD's first and on that one, so it is held (only the
+    * last two commands count), and thrown when it is let go */
+   HeldLethalReady(offhand); move.cmd.buttons=button; Step(1); move.cmd.buttons=0; Run(20);
+   for(t=0;t<20000 && !(ps.weapon==offhand && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+   CHECK(t<20000); Run(BG_WeaponRaiseTime(offhand)/2); move.cmd.buttons=button;
+   for(t=0;t<20000 && !(ps.weapon==offhand && ps.weaponstate==WEAPON_READY);t++) { CHECK(!fired[offhand]); Step(1); }
+   CHECK(t<20000); Run(100);
+   CHECK(!fired[offhand] && ps.weapon==offhand && ps.weaponstate==WEAPON_READY && ps.ammo[offhand]==1);
+   move.cmd.buttons=0; Step(1); ThrownNotCancelled(offhand);
+   /* a tap, then the button pressed again on HOLD's first command: the
+    * command before had it up, so that think throws */
+   HeldLethalReady(offhand); PulledOut(offhand,0);
+   move.cmd.buttons=button; Step(1); ThrownNotCancelled(offhand);
+   /* ... and pressed again with Y on that command: thrown all the same */
+   HeldLethalReady(offhand); PulledOut(offhand,0);
+   move.cmd.buttons=button|BUTTON_WEAPON_SWAP; Step(1); ThrownNotCancelled(offhand);
+   /* ... or the other offhand button pressed there: the command before had
+    * neither, so it throws */
+   HeldLethalReady(offhand); PulledOut(offhand,0);
+   move.cmd.buttons=other; Step(1); ThrownNotCancelled(offhand);
+  } else {
+   /* no prepare: the press is the command before HOLD's first, so a release
+    * there is the tap's throw, and the button still down holds it */
+   HeldLethalReady(offhand); PulledOut(offhand,0);
+   move.cmd.buttons=0; Step(1); ThrownNotCancelled(offhand);
+  }
+  /* held, Y with the button still down, on HOLD's first command and later:
+   * cancelled with nothing spent - or, for the frag and flash, nothing at all */
+  HeldLethalReady(offhand); PulledOut(offhand,button); YIn(offhand,button);
+  HeldLethalReady(offhand); PulledOut(offhand,button); Run(100); YIn(offhand,button);
+  if(!BG_OffhandCancelable(offhand)) {
+   /* weapnext as the client sends it for the frag and flash, which have no
+    * cancel to send (MW2's 59d5f0-59d622 cycles the weapon): the other slot,
+    * asked for while it is held. It stays in hand, is thrown on the release,
+    * and the swap waits for the gun's quick raise after it (MW2's
+    * CheckForChangeWeapon refuses every offhand state) */
+   HeldLethalReady(offhand); PulledOut(offhand,button); Run(50);
+   Toggle(); move.cmd.buttons=button|BUTTON_WEAPON_SWAP; Step(1); move.cmd.buttons=button; Run(50);
+   CHECK(ps.weapon==offhand && ps.weaponstate==WEAPON_READY && !fired[offhand] && !(ps.weaponAction&WA_RETURNING));
+   move.cmd.buttons=0; Step(1); CHECK(fired[offhand]==1);
+   for(t=0;t<20000 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
+   CHECK(t<20000 && ps.weaponTime>=BG_WeaponQuickRaiseTime(WP_SHOTGUN)-1);
+   for(t=0;t<20000 && ps.weaponstate==WEAPON_RAISING;t++) Step(1);
+   CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_WeaponDropTime(WP_SHOTGUN));
+   for(t=0;t<20000 && ps.weapon!=WP_MACHINEGUN;t++) Step(1);
+   CHECK(ps.weapon==WP_MACHINEGUN && fired[offhand]==1);
+  }
+  /* either offhand button holds it, on either command (578f2d-578f3f): its
+   * own button, then only the other one, then both, and Y there cancels too */
+  HeldLethalReady(offhand); PulledOut(offhand,button); Run(50);
+  move.cmd.buttons=other; Step(1); CHECK(!fired[offhand] && ps.weapon==offhand && ps.weaponstate==WEAPON_READY);
+  Run(50); CHECK(!fired[offhand] && ps.weapon==offhand);
+  move.cmd.buttons=button|other; Run(50); CHECK(!fired[offhand] && ps.weapon==offhand);
+  move.cmd.buttons=button; Run(50); CHECK(!fired[offhand] && ps.weapon==offhand);
+  move.cmd.buttons=other; Step(1); CHECK(!fired[offhand] && ps.weapon==offhand);
+  YIn(offhand,other);
+  /* held on the other button alone into HOLD (the press was its own button,
+   * let go at once): held, then thrown when that is let go too */
+  if(BG_WeaponRaiseTime(offhand)>0) {
+   HeldLethalReady(offhand); PulledOut(offhand,other); Run(100);
+   CHECK(!fired[offhand] && ps.weapon==offhand && ps.weaponstate==WEAPON_READY);
+   move.cmd.buttons=0; Step(1); ThrownNotCancelled(offhand);
+  }
+  /* the other button pressed only on HOLD's first command after the offhand's
+   * own was held through the prepare: the command before had an offhand
+   * button down, this one has one, so it is held */
+  HeldLethalReady(offhand); PulledOut(offhand,button);
+  move.cmd.buttons=other; Step(1); CHECK(!fired[offhand] && ps.weapon==offhand);
+  move.cmd.buttons=0; Step(1); ThrownNotCancelled(offhand);
+  if(BG_WeaponRaiseTime(offhand)>0) {
+   /* a tap, then Y on the pull's last command (PREPARE): cancelled */
+   HeldLethalReady(offhand); move.cmd.buttons=button; Step(1); move.cmd.buttons=0;
+   for(t=0;t<20000 && !(ps.weapon==offhand && ps.weaponstate==WEAPON_RAISING && ps.weaponTime==1);t++) Step(1);
+   CHECK(t<20000 && !fired[offhand]);
+   YIn(offhand,0);
+  }
+  /* a tap, then Y in the gun's quick drop (INIT), where there is one: cancelled */
+  HeldLethalReady(offhand); move.cmd.buttons=button; Step(1); move.cmd.buttons=0;
+  if(ps.weapon==WP_SHOTGUN) {
+   CHECK(ps.weaponstate==WEAPON_DROPPING); Run(ps.weaponTime/2);
+   YIn(offhand,0);
+  } else CHECK(BG_OffhandPreparesAtOnce(offhand) && ps.weapon==offhand);
+  /* let go on one command, Y on the next: thrown on the release, the Y queued
+   * behind the recovery as after any throw */
+  HeldLethalReady(offhand); PulledOut(offhand,button);
+  move.cmd.buttons=0; Step(1); CHECK(fired[offhand]==1);
+  move.cmd.buttons=BUTTON_WEAPON_SWAP; Step(1); ThrownNotCancelled(offhand);
+ }
+}
+/* MW2's cook (cookOffHold 1: the frag alone). OffHandHold writes fuseTime
+ * (3500) into grenadeTimeLeft at HOLD entry; PM_UpdateGrenadeThrow counts it
+ * down by each think's msec from the next think, before anything else the
+ * think does, so the frag explodes 3500 after HOLD entry whenever it is let go:
+ * a release throws it with what is left (the server's fuse), and the countdown
+ * stops at the throw. Held to the end it is MW2's grenade suicide: -1, the
+ * predictable EV_GRENADE_SUICIDE and the frag spent (577c37-577c75), and a
+ * release on that very think loses to it. The event names the frag (MW2's
+ * parm, offHandIndex), so the server's death drop never has to find it in
+ * hand. A hand that lives (the server kills it unless in god mode) ends it on
+ * the next think as a cancel does: the gun's quick raise, nothing thrown. The
+ * -1 stays, as MW2's OffHandEnd never writes it, until the next offhand's
+ * start clears it (OffHandInit). Every other offhand keeps its whole fuseTime,
+ * held as long as you like. Every time here is the data's. */
+static int FragHeld(int gun, int msec) {
+ int t, other=gun==WP_SHOTGUN ? WP_MACHINEGUN : WP_SHOTGUN;
+ Ready(gun,other); ps.ammo[WP_FRAG]=2;
+ move.cmd.buttons=BUTTON_LETHAL; Step(msec);
+ CHECK(ps.grenadeTimeLeft==0 && ps.weaponstate==WEAPON_DROPPING);
+ for(t=msec;t<20000 && !(ps.weapon==WP_FRAG && ps.weaponstate==WEAPON_READY);t+=msec) {
+  CHECK(ps.grenadeTimeLeft==0); Step(msec);	/* no fuse through INIT and PREPARE */
+ }
+ CHECK(t<20000 && !fired[WP_FRAG] && ps.ammo[WP_FRAG]==2 && !(ps.weaponAction&WA_FIRED));
+ CHECK(ps.grenadeTimeLeft==BG_OffhandFuseTime(WP_FRAG));
+ return t-msec;	/* from the press */
+}
+static void TestFragCook(void) {
+ static const int offhands[]={WP_FLASH,WP_SEMTEX,WP_THROWING_KNIFE,WP_TACTICAL_INSERTION};
+ static const int msecs[]={1,8,16,33};
+ int fuse=BG_OffhandFuseTime(WP_FRAG), t, k, m, i, entry, msec;
+ CHECK(fuse==3500 && BG_OffhandCooks(WP_FRAG));
+ CHECK(BG_OffhandFuseTime(WP_FLASH)==1500 && BG_OffhandFuseTime(WP_SEMTEX)==2000 &&
+  BG_OffhandFuseTime(WP_THROWING_KNIFE)==30000 && BG_OffhandFuseTime(WP_TACTICAL_INSERTION)==50);
+ CHECK(!BG_OffhandCooks(WP_FLASH) && !BG_OffhandCooks(WP_SEMTEX) && !BG_OffhandCooks(WP_THROWING_KNIFE) &&
+  !BG_OffhandCooks(WP_TACTICAL_INSERTION) && !BG_OffhandCooks(WP_KNIFE) && !BG_OffhandFuseTime(WP_SHOTGUN));
+ /* HOLD entry is the gun's quick drop and the frag's prepare after the press */
+ entry=FragHeld(WP_SHOTGUN,1);
+ CHECK(entry==BG_WeaponQuickDropTime(WP_SHOTGUN)+BG_WeaponRaiseTime(WP_FRAG));
+ /* released k ms after HOLD entry: thrown on that think with fuse-k left,
+  * which the countdown never touches again */
+ { const int when[]={1,2,100,1750,fuse-2,fuse-1};
+   for(k=0;k<ARRAY_LEN(when);k++) {
+    FragHeld(WP_SHOTGUN,1);
+    for(t=1;t<when[k];t++) { Step(1); CHECK(ps.grenadeTimeLeft==fuse-t && !fired[WP_FRAG]); }
+    move.cmd.buttons=0; Step(1);
+    CHECK(fired[WP_FRAG]==1 && !suicides && ps.ammo[WP_FRAG]==1 && ps.grenadeTimeLeft==fuse-when[k]);
+    Run(fuse); CHECK(ps.grenadeTimeLeft==fuse-when[k] && !suicides);
+    Returned(); CHECK(fired[WP_FRAG]==1 && ps.weapon==WP_SHOTGUN);
+   } }
+ /* held to the end, at every think length: the think its fuse runs out on is
+  * the suicide - nothing thrown, the frag spent, -1 left - and that is all the
+  * think does. A hand that lives ends it on the next think: the gun's quick
+  * raise straight away, no throw, no fuse; then the gun is back as after any
+  * cancel, the latch held until it is drawn. */
+ for(m=0;m<ARRAY_LEN(msecs);m++) for(k=0;k<2;k++) {
+  int thinks=0;
+  msec=msecs[m];
+  FragHeld(WP_SHOTGUN,msec);
+  while(ps.grenadeTimeLeft>0 && thinks<20000) {
+   int left=ps.grenadeTimeLeft;
+   /* k: let go on the very think it runs out */
+   if(k && left<=msec) move.cmd.buttons=0;
+   Step(msec); thinks++;
+   if(left>msec) CHECK(ps.grenadeTimeLeft==left-msec && !suicides && !fired[WP_FRAG]);
+  }
+  CHECK(thinks==(fuse+msec-1)/msec);	/* the think whose msec takes it to 0 or past */
+  CHECK(ps.grenadeTimeLeft==-1 && suicides==1 && !fired[WP_FRAG] && ps.ammo[WP_FRAG]==1);
+  CHECK(ps.weapon==WP_FRAG && ps.weaponstate==WEAPON_READY && (ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==WA_LETHAL);
+  /* the suicide names the frag that cooked out (MW2's parm, 577c37) */
+  CHECK(ps.events[(ps.eventSequence-1)&(MAX_PS_EVENTS-1)]==EV_GRENADE_SUICIDE &&
+   ps.eventParms[(ps.eventSequence-1)&(MAX_PS_EVENTS-1)]==WP_FRAG);
+  move.cmd.buttons=0; Step(msec);
+  CHECK(ps.grenadeTimeLeft==-1 && suicides==1 && !fired[WP_FRAG] && ps.ammo[WP_FRAG]==1);
+  CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING && ps.weaponTime==BG_WeaponQuickRaiseTime(WP_SHOTGUN));
+  CHECK((ps.weaponAction&(WA_TYPE_MASK|WA_FIRED|WA_RETURNING))==(WA_LETHAL|WA_FIRED));
+  Returned(); CHECK(!fired[WP_FRAG] && suicides==1 && !(ps.weaponAction&WA_TYPE_MASK) && ps.grenadeTimeLeft==-1);
+  /* the next offhand's start clears it (OffHandInit, 578e00): the next frag,
+   * or the flash, has no fuse until its own HOLD */
+  move.cmd.buttons=k ? BUTTON_TACTICAL : BUTTON_LETHAL; Step(msec);
+  CHECK(ps.grenadeTimeLeft==0 && ps.weaponstate==WEAPON_DROPPING);
+ }
+ /* one command over several pmove steps (pmove_fixed, or a hitch past 66ms,
+  * here n steps of 8 on the same buttons): a cook-out on any step but the
+  * last is followed, on that same command, by the next think's OffHandEnd,
+  * before the server reads the command's events. The -1 and the event's frag
+  * survive it, so the server's death drop still has both. Without a gun the
+  * hand is empty again at once, the latch gone a step later. */
+ for(m=2;m<=4;m++) for(k=0;k<m;k++) for(i=0;i<2;i++) {
+  int step=8, seq, s, n=0;
+  if(i) { /* an empty hand whose gun is stale stays empty (as above) */
+   HeldLethalReady(WP_FRAG); ps.weapon=WP_NONE; ps.cursorHintEntIndex=ENTITYNUM_NONE;
+   ps.slotFlags[0]^=BG_GUN_GENERATION; move.cmd.weapon=BG_SLOT_COMMAND;
+   move.cmd.buttons=BUTTON_LETHAL; Step(step);
+   while(!(ps.weapon==WP_FRAG && ps.weaponstate==WEAPON_READY)) Step(step);
+   CHECK(ps.weaponAction&WA_LEFT_EMPTY); }
+  else FragHeld(WP_SHOTGUN,step);
+  while(ps.grenadeTimeLeft>step*(k+1)) Step(step);
+  seq=ps.eventSequence;
+  for(s=0;s<m;s++) Step(step);	/* the cook-out lands on step k+1 of the command's m */
+  CHECK(suicides==1 && ps.grenadeTimeLeft==-1 && !fired[WP_FRAG]);
+  for(s=seq;s<ps.eventSequence;s++) if(ps.events[s&(MAX_PS_EVENTS-1)]==EV_GRENADE_SUICIDE) {
+   n++; CHECK(ps.eventParms[s&(MAX_PS_EVENTS-1)]==WP_FRAG); }
+  CHECK(n==1);
+  if(k==m-1) CHECK(ps.weapon==WP_FRAG && ps.weaponstate==WEAPON_READY);	/* the last step: it ends next command */
+  else if(i) CHECK(ps.weapon==WP_NONE && ps.weaponstate==WEAPON_READY);	/* ended on a later step */
+  else CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);
+ }
+ /* held on the other offhand button alone, it still cooks; Y (which cannot
+  * cancel a frag) changes nothing either */
+ FragHeld(WP_SHOTGUN,1); Run(100);
+ move.cmd.buttons=BUTTON_TACTICAL; Run(100);
+ move.cmd.buttons=BUTTON_TACTICAL|BUTTON_WEAPON_SWAP; Step(1); move.cmd.buttons=BUTTON_TACTICAL; Run(99);
+ CHECK(ps.grenadeTimeLeft==fuse-300 && ps.weapon==WP_FRAG && !fired[WP_FRAG] && !suicides);
+ move.cmd.buttons=0; Step(1); CHECK(fired[WP_FRAG]==1 && ps.grenadeTimeLeft==fuse-301);
+ /* killed while cooking: pmove empties the hand and leaves the fuse for the
+  * server's death drop (G_DropOffhand) to fire */
+ FragHeld(WP_SHOTGUN,1); Run(1000);
+ ps.stats[STAT_HEALTH]=0; Step(1);
+ CHECK(ps.weapon==WP_NONE && ps.grenadeTimeLeft==fuse-1000 && !fired[WP_FRAG] && !suicides);
+ Run(fuse); CHECK(ps.grenadeTimeLeft==fuse-1000 && !suicides);
+ /* a ladder grabbed while cooking takes the frag with its fuse: no throw, no
+  * suicide, ever */
+ FragHeld(WP_SHOTGUN,1); Run(1000);
+ ps.stats[STAT_LADDER]=LADDER_ATTACHED; Step(1);
+ CHECK(ps.grenadeTimeLeft==0 && !(ps.weaponAction&WA_TYPE_MASK));
+ Run(fuse); CHECK(!fired[WP_FRAG] && !suicides && ps.grenadeTimeLeft==0 && ps.ammo[WP_FRAG]==2);
+ ps.stats[STAT_LADDER]=0;
+ /* every other offhand: its whole fuseTime from HOLD entry, held for good */
+ for(k=0;k<ARRAY_LEN(offhands);k++) {
+  int offhand=offhands[k];
+  HeldLethalReady(offhand); PulledOut(offhand,OffhandButton(offhand));
+  CHECK(ps.grenadeTimeLeft==BG_OffhandFuseTime(offhand));
+  Run(2*fuse);
+  CHECK(ps.weapon==offhand && ps.grenadeTimeLeft==BG_OffhandFuseTime(offhand) && !suicides && !fired[offhand]);
+  move.cmd.buttons=0; Step(1);
+  CHECK(fired[offhand]==1 && ps.grenadeTimeLeft==BG_OffhandFuseTime(offhand));
+ }
 }
 static void TestSeaLion(void) {
  const int hints[3]={0,MAX_CLIENTS+7,ENTITYNUM_NONE};
@@ -1061,7 +1642,7 @@ static void TestSeaLion(void) {
   KnifeReady(1,i ? ENTITYNUM_NONE : 0); ps.weapon=WP_NONE;
   ps.slotFlags[0]^=BG_GUN_GENERATION; move.cmd.weapon=BG_SLOT_COMMAND;
   move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
-  CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_RAISING && ps.weaponTime==BG_THROWING_KNIFE_PULL_MS);
+  CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_READY && ps.weaponTime==BG_THROWING_KNIFE_PULL_MS);
   for(t=0;t<12000 && BG_IsActionWeapon(ps.weapon);t++) Step(1);
   CHECK(fired[WP_THROWING_KNIFE]==1 && ps.weapon==WP_NONE);
  }
@@ -1115,7 +1696,9 @@ static void TestLethalFromEmptyHand(void) {
   ps.weapon=WP_NONE; ps.slotFlags[0]^=BG_GUN_GENERATION; ps.slotFlags[0]|=BG_GUN_FIRST_DRAW;
   ps.cursorHintEntIndex=ENTITYNUM_NONE; move.cmd.weapon=BG_SLOT_COMMAND;
   move.cmd.buttons=BUTTON_LETHAL; Step(1); move.cmd.buttons=0;
-  CHECK(ps.weapon==lethal && ps.weaponstate==WEAPON_RAISING && (ps.weaponAction&WA_LEFT_EMPTY));
+  /* in its prepare, or with none (the throwing knife's) already in HOLD */
+  CHECK(ps.weapon==lethal && (ps.weaponAction&WA_LEFT_EMPTY) &&
+   ps.weaponstate==(BG_WeaponRaiseTime(lethal) ? WEAPON_RAISING : WEAPON_READY));
   if(y==1) move.cmd.weapon=BG_SlotCommand(&ps,SLOT_SECONDARY);
   thrown=empty=drawn=-1;
   for(t=0;t<12000 && drawn<0 && (empty<0 || t<empty+3000);t++) {
@@ -1156,9 +1739,10 @@ static void KnifeOutAndBack(int gun) {
  int t, shots=fired[gun], ammo=ps.ammo[gun], reserve=ps.ammoReserve[gun];
  int owed=ps.stats[STAT_UNCHAMBERED]&(1<<gun);
  move.cmd.buttons=BUTTON_LETHAL|BUTTON_ATTACK; Step(1);
- CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_RAISING &&
+ /* holdFireTime 0: in hand and in HOLD on the press think */
+ CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_READY &&
   ps.weaponTime==BG_THROWING_KNIFE_PULL_MS && ps.weaponAnimTime==-1);
- Run(BG_THROWING_KNIFE_PULL_MS);
+ Run(100);
  CHECK(ps.weapon==WP_THROWING_KNIFE && !fired[WP_THROWING_KNIFE]);
  move.cmd.buttons=BUTTON_ATTACK;
  for(t=0;t<12000 && (ps.weaponAction&WA_TYPE_MASK);t++) {
@@ -1734,7 +2318,7 @@ static void TestHeldThroughRespawn(void) {
 }
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
- TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestNoSwapInQuickAction(); TestSemtexCancelKeepsLock(); TestThrowingKnife(); TestSeaLion(); TestLethalFromEmptyHand(); TestKnifeOutOfReload(); TestKnifeOutOfReloadSettle(); TestKnifeOutOfAction(); TestKnifeInKnife(); TestMeleeNoDrop(); TestKnifeTimeline(); TestRecovery();
+ TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestNoSwapInQuickAction(); TestSemtexCancelKeepsLock(); TestThrowingKnife(); TestTacticalInsertion(); TestHoldThrowsBeforeCancel(); TestFragCook(); TestSeaLion(); TestLethalFromEmptyHand(); TestKnifeOutOfReload(); TestKnifeOutOfReloadSettle(); TestKnifeOutOfAction(); TestKnifeInKnife(); TestMeleeNoDrop(); TestKnifeTimeline(); TestRecovery();
  TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestAirSprintSwap(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;

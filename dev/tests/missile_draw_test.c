@@ -2,7 +2,9 @@
  * (cg_weapons.c) and snapshot lerp: missiles met by a client that never saw
  * their weapon held, a throwing knife riding its carrier between snapshots
  * (MW2 re-places it with pos and apos TR_INTERPOLATE, 0x43B9D0), the knife in
- * flight and at rest, and the Semtex's own placement, which is unchanged. */
+ * flight and at rest, the Semtex's own placement, which is unchanged, and a
+ * planted Tactical Insertion: upright at its yaw, glowing green to its owner
+ * and their team and red to everyone else. */
 #include "../../code/cgame/cg_ents.c"
 cg_t cg;
 cgs_t cgs;
@@ -13,6 +15,8 @@ vmCvar_t cg_smoothClients;
 static snapshot_t snap, nextSnap;
 static refEntity_t drawn;
 static int checks, draws, models;
+static char modelNames[256][MAX_QPATH];
+static char clipNames[MAX_WEAPONS][MAX_QPATH];
 #define CHECK(x) do { checks++; if (!(x)) { fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x); exit(1); } } while(0)
 #define NEAR(a,b) (fabs((a)-(b))<.01f)
 void QDECL Com_Printf(const char *fmt,...) { (void)fmt; }
@@ -22,20 +26,32 @@ void QDECL CG_Error(const char *fmt,...) {
  va_list args; va_start(args,fmt); vfprintf(stderr,fmt,args); va_end(args); exit(1);
 }
 /* The renderer: every name is a model, each its own handle (0 is the null model). */
-qhandle_t trap_R_RegisterModel(const char *name) { (void)name; return ++models; }
+qhandle_t trap_R_RegisterModel(const char *name) {
+ CHECK(models+1<256);Q_strncpyz(modelNames[++models],name,MAX_QPATH);return models;
+}
 qhandle_t trap_R_RegisterShader(const char *name) { (void)name; return 1; }
 sfxHandle_t trap_S_RegisterSound(const char *name,qboolean compressed) { (void)name; (void)compressed; return 1; }
+/* No optional sound is there (CG_RegisterWeapon's MW2 pullbacks). */
+int trap_FS_FOpenFile(const char *path,fileHandle_t *f,fsMode_t mode) { (void)path; (void)mode; *f=0; return -1; }
+void trap_FS_FCloseFile(fileHandle_t f) { (void)f; abort(); }
 void trap_R_ModelBounds(clipHandle_t model,vec3_t mins,vec3_t maxs) { (void)model; VectorClear(mins); VectorClear(maxs); }
 void trap_R_AddRefEntityToScene(const refEntity_t *re) { drawn=*re; draws++; }
 void CG_AddRefEntityWithPowerups(refEntity_t *ent,entityState_t *state,int team) {
  (void)state; (void)team; trap_R_AddRefEntityToScene(ent);
 }
-void CG_WeapAnim_RegisterClips(int weapon,qhandle_t model,const char *path) { (void)weapon; (void)model; (void)path; }
+void CG_WeapAnim_RegisterClips(int weapon,qhandle_t model,const char *path) {
+ (void)model; Q_strncpyz(clipNames[weapon],path ? path : "",MAX_QPATH);
+}
 void CG_Sights_Register(int weapon,const char *path) { (void)weapon; (void)path; }
 /* Trails, brass, lights and sounds are not what is checked here: cg_noProjectileTrail
  * is set, and the rest is only linked because CG_RegisterWeapon names it. */
 vmCvar_t cg_noProjectileTrail, cg_brassTime, cg_oldPlasma;
-void trap_R_AddLightToScene(const vec3_t o,float i,float r,float g,float b) { (void)o;(void)i;(void)r;(void)g;(void)b; abort(); }
+/* Only a Tactical Insertion lights its missile here (its glow). */
+static int lightAllowed, lights; static vec3_t lightAt, lightColor; static float lightIntensity;
+void trap_R_AddLightToScene(const vec3_t o,float i,float r,float g,float b) {
+ if(!lightAllowed) abort();
+ lights++; VectorCopy(o,lightAt); VectorSet(lightColor,r,g,b); lightIntensity=i;
+}
 void trap_S_AddLoopingSound(int n,const vec3_t o,const vec3_t v,sfxHandle_t s) { (void)n;(void)o;(void)v;(void)s; abort(); }
 int CG_PointContents(const vec3_t p,int pass) { (void)p; (void)pass; abort(); return 0; }
 void CG_BubbleTrail(vec3_t a,vec3_t b,float spacing) { (void)a; (void)b; (void)spacing; abort(); }
@@ -88,6 +104,13 @@ static void TestFirstSight(int weapon) {
  Draw(c);
  CHECK(cg_weapons[weapon].registered && cg_weapons[weapon].missileModel);
  CHECK(drawn.hModel==cg_weapons[weapon].missileModel);
+ if(weapon==WP_THROWING_KNIFE) {
+  CHECK(cg_weapons[weapon].missileModel==cg_weapons[weapon].weaponModel);
+  CHECK(!strcmp(modelNames[drawn.hModel],"models/weapons2/throwingknife/knife.md3"));
+  CHECK(!strcmp(modelNames[cg_weapons[weapon].handsModel],"models/weapons2/throwingknife/knife_hand.md3"));
+  CHECK(!strcmp(cg_weapons[weapon].item->icon,"icons/peace_throwingknife"));
+  CHECK(!cg_weapons[weapon].flashModel && !cg_weapons[weapon].barrelModel);
+ }
  /* registered once: later frames cost a flag test */
  registered=models; Draw(c); CHECK(models==registered && drawn.hModel==cg_weapons[weapon].missileModel);
  /* vid_restart re-runs CG_Init, which forgets it: it is registered again */
@@ -136,7 +159,7 @@ static void TestFlightAndRest(void) {
  knife=Entity(MAX_CLIENTS,ET_MISSILE,WP_THROWING_KNIFE);
  VectorSet(knife->currentState.angles,90,90,90);
  knife->currentState.pos.trType=TR_GRAVITY; knife->currentState.pos.trTime=1000;
- VectorSet(knife->currentState.pos.trDelta,BG_THROWING_KNIFE_SPEED,0,0);
+ VectorSet(knife->currentState.pos.trDelta,1400,0,40);	/* throwingknife_mp: 1400 along the aim, 40 up */
  knife->currentState.apos.trType=TR_LINEAR; knife->currentState.apos.trTime=1000;
  knife->currentState.apos.trBase[PITCH]=-120; knife->currentState.apos.trDelta[PITCH]=BG_THROWING_KNIFE_SPIN;
  knife->nextState=knife->currentState; knife->interpolate=qtrue;
@@ -172,13 +195,58 @@ static void TestSemtex(void) {
  CHECK(drawn.hModel && drawn.hModel==cg_weapons[WP_SEMTEX].missileModel);
 }
 
+static void TestMeleeModel(void) {
+ Reset(1000,50); CG_RegisterWeapon(WP_KNIFE); CG_RegisterWeapon(WP_THROWING_KNIFE);
+ CHECK(!strcmp(modelNames[cg_weapons[WP_KNIFE].weaponModel],modelNames[cg_weapons[WP_THROWING_KNIFE].weaponModel]));
+ CHECK(!strcmp(modelNames[cg_weapons[WP_KNIFE].handsModel],modelNames[cg_weapons[WP_THROWING_KNIFE].handsModel]));
+ CHECK(!strcmp(cg_weapons[WP_KNIFE].item->icon,"icons/peace_throwingknife"));
+ CHECK(!strcmp(clipNames[WP_KNIFE],"models/weapons2/throwingknife/melee.cfg"));
+ CHECK(!strcmp(clipNames[WP_THROWING_KNIFE],"models/weapons2/throwingknife/throw.cfg"));
+ CHECK(!cg_weapons[WP_KNIFE].flashModel && !cg_weapons[WP_KNIFE].barrelModel && !cg_weapons[WP_KNIFE].flashSound[0]);
+}
+
+/* Planted: TR_STATIONARY at its ground point, angles (0, owner's yaw, 0). The
+ * glow is picture only, from what the state carries: the owner (clientNum) in
+ * FFA, the owner's team (generic1) in a team game. */
+static int Green(void) { return lightColor[1]>lightColor[0]; }
+static void TestInsertion(void) {
+ centity_t *ti; vec3_t axis[3],angles;
+ Reset(1000,50); lightAllowed=1; lights=0;
+ ti=Entity(MAX_CLIENTS,ET_MISSILE,WP_TACTICAL_INSERTION);
+ Place(&ti->currentState.pos,TR_STATIONARY,64,32,1);
+ VectorSet(ti->currentState.angles,0,135,0); ti->currentState.clientNum=0; ti->currentState.generic1=TEAM_FREE;
+ ti->nextState=ti->currentState;
+ Draw(ti);
+ CHECK(cg_weapons[WP_TACTICAL_INSERTION].registered && drawn.hModel==cg_weapons[WP_TACTICAL_INSERTION].missileModel);
+ CHECK(cg_weapons[WP_TACTICAL_INSERTION].missileModel==cg_weapons[WP_TACTICAL_INSERTION].weaponModel);
+ CHECK(!strcmp(modelNames[drawn.hModel],"models/weapons2/grenadel/grenadel.md3"));	/* the placeholder */
+ CHECK(!strcmp(cg_weapons[WP_TACTICAL_INSERTION].item->icon,"icons/iconw_grenade"));
+ CHECK(!cg_weapons[WP_TACTICAL_INSERTION].flashModel && !cg_weapons[WP_TACTICAL_INSERTION].barrelModel);
+ VectorSet(angles,0,135,0); AnglesToAxis(angles,axis);
+ CHECK(SameAxis(drawn.axis,axis) && NEAR(drawn.origin[0],64) && NEAR(drawn.origin[1],32) && NEAR(drawn.origin[2],1));
+ /* it never spins, whatever the clock */
+ At(.75f); cg.time+=777; Draw(ti); CHECK(SameAxis(drawn.axis,axis));
+ /* FFA: green to its owner, red to anyone else */
+ CHECK(lights==2 && Green() && lightIntensity==CG_INSERTION_GLOW);
+ CHECK(NEAR(lightAt[0],64) && NEAR(lightAt[2],1+CG_INSERTION_GLOW_HEIGHT));
+ snap.ps.clientNum=3; Draw(ti); CHECK(lights==3 && !Green());
+ /* a team game: green to the owner's team, red to the other */
+ cgs.gametype=GT_TEAM; ti->currentState.clientNum=3; ti->currentState.generic1=TEAM_RED; ti->nextState=ti->currentState;
+ snap.ps.clientNum=1; snap.ps.persistant[PERS_TEAM]=TEAM_RED; Draw(ti); CHECK(Green());
+ snap.ps.persistant[PERS_TEAM]=TEAM_BLUE; Draw(ti); CHECK(!Green());
+ snap.ps.clientNum=3; snap.ps.persistant[PERS_TEAM]=TEAM_RED; Draw(ti); CHECK(Green());
+ CHECK(CG_InsertionFriendly(&ti->currentState));
+ lightAllowed=0;
+}
 int main(void) {
+ TestMeleeModel();
  TestFirstSight(WP_THROWING_KNIFE);
  TestFirstSight(WP_SEMTEX);
  TestFirstSight(WP_GRENADE_LAUNCHER);	/* a frag or a flash: fire_grenade's weapon, held by no one */
  TestCarried();
  TestFlightAndRest();
  TestSemtex();
+ TestInsertion();
  printf("PASS: %i missile drawing checks\n",checks);
  return 0;
 }

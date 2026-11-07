@@ -157,7 +157,8 @@ static gentity_t *SpawnModelOnVictoryPad( gentity_t *pad, vec3_t offset, gentity
 	body->timestamp = level.time;
 	body->physicsObject = qtrue;
 	body->physicsBounce = 0;		// don't bounce
-	body->s.event = 0;
+	// nor the player's ring: the model is a new entity with no events of its own
+	G_ClearEntityEvents( body );
 	body->s.pos.trType = TR_STATIONARY;
 	body->s.groundEntityNum = ENTITYNUM_WORLD;
 	body->s.legsAnim = LEGS_IDLE;

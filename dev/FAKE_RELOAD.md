@@ -16,6 +16,11 @@ scripts do every one of these with `+usereload`.
   held X is a real reload.
 - **Fake bullet.** Tap X just before a shot. The gun shows the shot, but the
   shot never happened and no round is spent: the server reloaded instead.
+  Bullets are drawn by the clients (MW2's `sv_clientSideBullets`), so the
+  shooter also sees its tracer and impact, blood on a player included, with no
+  damage, as in MW2. Only the picture is new; the window below did not move
+  (`dev/tests/run-bullets.sh` checks the drawn shot, `run-fakereload.sh` the
+  windows).
 - **Wild scope.** With a scoped gun (the M300), hold aim, do the fake reload,
   and knife straight after. The knife plays while you stay scoped (a fake
   knife).
@@ -27,6 +32,12 @@ scripts do every one of these with `+usereload`.
 - On your own host every window is tight, with MW2's sure zone: let go of X
   within about 16ms of the gun coming up and the fake reload always happens
   (MW2's client clock, below). With ping every window is much wider.
+- **The silent shot** is the same family on another set of MW2's pieces: shoot,
+  then press the throwing knife within a server frame, and the round's
+  killcam shows no shot and a kicked-over view, while the shooter, the
+  opponents and the server all got it. It comes from the four-event rings,
+  client-side bullets and the view kick, through the same client and server
+  clocks; `dev/SILENT_SHOT.md` has it and its windows.
 
 ## The rules that make it
 
@@ -102,6 +113,13 @@ The SPAS and the M300 in hand, 125 fps client, sv_fps 20 (MW2's fixed 50ms
 frame, and the shipped autoexec's). Times are from the moment the client sees
 the gun at rest.
 
+Re-measured at protocol 86, with MW2's event rings, the view kick and
+client-side bullets in: every number on this page is unchanged (the suite's
+summary, `FAKERELOAD_PHASES=1` and `FAKERELOAD_MAXPACKETS=30`, compared line
+for line with the build before them). None of them touches `Pmove`, the
+use/reload bit or the clocks; the kick moves only the aim, and the knife's
+press adds events, not time.
+
 Fake reload. What matters is when X is let go: by the moment the gun is fully
 up, and as close to it as you can. The X press must also be held across the
 snapshot the client predicts from as the gun comes up, which you cannot see,
@@ -110,9 +128,14 @@ a knife, a frag and a Semtex cancel (`FAKERELOAD_PHASES=1`):
 
 | let go of X, before the gun is up | 0 ms | 8 ms | 16 ms   | 24 ms  | 32 ms  | 40 ms  | 48 ms  | 56 ms  | 64 ms   | 72 ms  | 80 ms  | 88 ms  |
 |-----------------------------------|------|------|---------|--------|--------|--------|--------|--------|---------|--------|--------|--------|
-| own host (0 ms ping)              | 100% | 100% | 84–100% | 68–84% | 52–68% | 36–52% | 20–36% | 12–16% | 0%      | 0%     | 0%     | 0%     |
-| 50 ms ping                        | 100% | 100% | 100%    | 100%   | 100%   | 100%   | 100%   | 100%   | 84–100% | 68–84% | 60–68% | 48–52% |
+| own host (0 ms ping)              | 100% | 100% | 84%     | 68%    | 48–52% | 32–36% | 16–20% | 0–12%  | 0%      | 0%     | 0%     | 0%     |
+| 50 ms ping                        | 100% | 100% | 100%    | 100%   | 100%   | 100%   | 100%   | 100%   | 84%     | 68%    | 48–60% | 32–48% |
 | 100 ms ping and up                | 100% | 100% | 100%    | 100%   | 100%   | 100%   | 100%   | 100%   | 100%    | 100%   | 100%   | 100%   |
+
+(Measured with MW2's offhand prepares: the frag and Semtex pull for 600ms,
+holdFireTime, and are thrown or cancelled from HOLD. The frag rows moved by a
+snapshot phase or so from the old 150ms/350ms pulls; the windows are still
+counted from the gun at rest.)
 
 Let go after the gun is up (even 8ms) and it is a real reload, at any ping.
 So on your own host it is certain if you let go within the clock's 16ms of
@@ -132,10 +155,10 @@ time and tap length on the SPAS, and shows `+reload` never fakes):
 |---------------|------|----------|-----------|-----------|-----------|
 | knife         | SPAS | 104–48   | 128–48    | 200–48    | 296–48    |
 | knife         | M300 | 104–48   | 128–48    | 152–48    | 256–48    |
-| frag          | SPAS | 80–48    | 152–48    | 168–48    | 264–48    |
-| frag          | M300 | 80–48    | 104–48    | 168–48    | 256–48    |
-| Semtex cancel | SPAS | 104–48   | 128–48    | 200–48    | 280–48    |
-| Semtex cancel | M300 | 104–48   | 128–48    | 152–48    | 256–48    |
+| frag          | SPAS | 72–48    | 152–48    | 176–48    | 272–48    |
+| frag          | M300 | 80–48    | 152–48    | 176–48    | 256–48    |
+| Semtex cancel | SPAS | 96–48    | 120–48    | 200–48    | 296–48    |
+| Semtex cancel | M300 | 104–48   | 128–48    | 200–48    | 248–48    |
 
 Fake bullet: a shot this long after a 16ms X tap is fake, on both guns, from
 the very next command:
@@ -147,14 +170,28 @@ the very next command:
 Fired first, or on the same command, the shot is real and the reload follows
 at once.
 
+The 8ms is one command at 125 fps. The window opens one command after X at
+any frame rate: 16ms at `com_maxfps 60`, about 12ms at MW2's default 85. MW2
+is the same. Its server runs `Pmove` (0x493686) and fires the bullet that
+command (the event loop, 0x5d7000) before `Player_UpdateActivate` (0x4939a1,
+the only writer of the flag) looks at X. The flag is read on the next command
+(0x5786E3). So X and RT in one command give a real shot in both games. The
+input side matches too. IW4x polls the pad once a frame and sends X and RT in
+the same pass, in that order (`Controller/Engine/Key.cpp`). Its trigger engages
+at 13% of travel, Peace's at 15% (`joy_threshold`). The IW4x fake shot script
+below leaves two frames between X and the shot.
+
+`cl_debugButtons 1` prints, for each X and RT press, the command it went out
+in and the gap between them ("SAME command" means a real shot).
+
 Wild scope (M300, aim held): a knife this long after the gun is back, from
 16ms (the command aim is in; a knife before that is a real hip-fired one):
 
 | after         | 0 ms  | 50 ms | 100 ms | 200 ms |
 |---------------|-------|-------|--------|--------|
 | knife         | ≤56   | ≤80   | ≤152   | ≤256   |
-| frag          | ≤32   | ≤104  | ≤136   | ≤232   |
-| Semtex cancel | ≤56   | ≤80   | ≤152   | ≤224   |
+| frag          | ≤32   | ≤104  | ≤128   | ≤232   |
+| Semtex cancel | ≤56   | ≤80   | ≤152   | ≤256   |
 
 These are measured with a packet every frame (loopback and LAN) and a
 snapshot every 50ms: the shipped autoexec's `sv_fps 20` with the default

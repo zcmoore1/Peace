@@ -12,8 +12,14 @@ and **CREATE A CLASS** entries and the existing console commands remain availabl
    slot is marked **IN USE** and cannot be duplicated. Choosing a gun returns to
    the loadout overview; Back returns one level without changing that choice.
 3. Open a gun's **Attachments** row to fit/remove compatible attachments. Open
-   **LETHAL** or **TACTICAL**, choose equipment, then choose 1–3 charges. Choosing
-   None empties that slot. Back from the quantity screen cancels that selection.
+   **LETHAL** or **TACTICAL** and choose equipment. LETHAL offers MW2's
+   equipment: Frag grenade, Semtex, Throwing knife and **Tactical Insertion**
+   ("Plant it where you stand; your next life starts there; pick it back up
+   with use."); TACTICAL offers the flash. Counts are MW2's weapon data, fixed
+   per item (`BG_ClassEquipmentCount`): one frag, Semtex, throwing knife or
+   Tactical Insertion, two flashes. There is no quantity screen. A class saved
+   when counts were chosen (1–3) loads with MW2's count and the rest of the
+   class unchanged. Choosing None empties that slot.
 4. Open any **PERK** card to read descriptions and select a perk. Perks already in
    another slot are marked **IN USE**. Choose the name row to rename the class.
 5. **SAVE & EQUIP** saves the class and resumes the match. It applies on the next
@@ -59,9 +65,15 @@ perks/attachments are rejected rather than stacked.
 Class serialization version 2 adds the two attachment masks; version 1 classes
 still load and inherit the old `cg_sight` preference at spawn. New editor saves
 store explicit choices, so changing `cg_sight` will not overwrite them. The active
-perk mask is a predicted/replayed playerstate field. The combined use/reload
-build uses protocol **82**, game **-11**: rebuild the executable, server and all
-modules together. Changing class during a life takes effect only at the next spawn.
+perk mask is a predicted/replayed playerstate field. The current build (MW2's
+event rings: four playerstate events and every entity's own ring, with the
+view kick's cgame import and client-side bullets) uses protocol **86**, game
+**-15**; protocol 85 / game -14 was MW2's `grenadeTimeLeft` playerstate field,
+and protocol 84 / game -13 the Tactical Insertion's 3-bit use hint type.
+Rebuild the executable, server and all modules together. A saved class stores
+raw weapon numbers, so a Tactical Insertion class saved in baseq3 (17) is not
+the same number in missionpack (20), as for every appended weapon. Changing
+class during a life takes effect only at the next spawn.
 
 Custom names allow 1–23 letters, numbers, spaces, hyphens and underscores. Leaving
 an edited draft requires confirming discard. Editing an already selected class updates its next-spawn
@@ -79,7 +91,7 @@ in archived cvars; this is local persistence, not cloud account synchronization.
 | Name entry | Keyboard | Keep the default name or use a keyboard |
 | Toggle weapon slots | `weapnext` / `weapprev` | Y |
 | Melee | `+melee` | B |
-| Frag / tactical | `+lethal` / `+tactical` | Existing shoulder bindings |
+| Lethal (frag, Semtex, knife, Tactical Insertion) / tactical | `+lethal` / `+tactical` | Existing shoulder bindings |
 
 Copy the updated `dev/peace-gamepad.cfg` to the build's `baseq3` directory if
 using the supplied controller config. Classes can also be selected with
@@ -129,11 +141,16 @@ Sprint + Y and sprint + YY use the ordinary slot-toggle/drop-cancellation path.
 On cancellation a retained draw/drop or sprint transition returns along its
 visible clip. A swap does not end a sprint (a sprint latches, as in MW2), so
 its entry resumes without jumping back to frame zero. Sprint, Y, end the
-sprint (a fresh sprint press, aim, letting go of forward), Y retraces the
-partial entry toward ready through the same move-layer return. Sprint entry
-and exit retrace their authored easing at twice the ordinary exit rate
-(a full return takes 125ms for SPAS, 130ms for M300). They do not ease the
-clock a second time, which previously made the start nearly motionless.
+sprint (a fresh sprint press, aim, letting go of forward), Y brings the
+retained entry, carry or exit home through the same move-layer return, as
+the ordinary sprint exit would bring that posture home. A carry (finished
+entry or the loop) plays the whole exit, `BG_WeaponSprintOutTime` (250ms
+for SPAS, 260ms for M300); a partial entry runs back over the same whole
+exit time, like a sprint tap's reversal, so a slight entry eases home rather
+than flicking back; an exit under way keeps its pace. The clock is linear
+and uncapped by `MOVE_RETURN_MS`: the authored clip already eases the pose,
+and easing the clock as well made the start nearly motionless. A carry loop
+drops its bob onto the exit's first frame, as an ordinary stop in the loop does.
 This is only visual travel after gameplay has already become ready. Firing owns
 the picture immediately once gameplay permits it. The blend never changes a
 busy timer, ammunition or chamber debt.
@@ -158,26 +175,54 @@ the knife is out on the press command itself, the hit lands
 over `BG_MELEE_TIME` (800ms, MW2's meleeTime) after it, where the gun's quick
 raise (`BG_WeaponQuickRaiseTime`) starts with nothing put down in between. Both
 numbers are MW2 weapon data, the same for every MW2 MP gun. Equipment (frag,
-flash, Semtex, throwing knife) goes the other way: the gun goes down on its
-quick drop (250ms; the throwing knife comes straight out), the grenade is held
-`BG_QUICK_ACTION_HOLD` (500ms) after the throw and goes away in
-`BG_RAPID_DROP_TIME` (50ms), then the same quick raise. Neither can be sprinted
+flash, Semtex, throwing knife, Tactical Insertion) goes the other way, through
+MW2's offhand machine with each item's own weapon data (the IW4 dump's
+`weapons/mp` files; the table in `bg_loadout.c` and the raise table in
+`bg_pmove.c`): the gun goes down on its quick drop (250ms; the throwing knife
+comes straight out), then the item's prepare, its holdFireTime (600ms for the
+frag, flash and Semtex, none for the throwing knife, the TI's 2.63s ignite).
+Then it waits in hand (MW2's HOLD) while an offhand button - the lethal or the
+tactical, either one - is down on this command and the one before, and is
+thrown on the first command that is not so. A tap is queued through the drop
+and the prepare; nothing is ever thrown early, and nothing throws itself. Only
+the Semtex, the throwing knife and the TI take a Y cancel (offhandHoldIsCancelable);
+with the frag or flash out, Y only asks for the other slot. The frag cooks
+(cookOffHold): its 3.5s fuse starts when it is in hand and runs while it is
+held, a release throws it with what is left, and held to the end it goes off
+in the hand and kills its holder (MW2's grenade suicide; in god mode the frag
+is simply gone and the gun comes back on its quick raise). The flash's fuse is
+1.5s and the Semtex's 2s, from the throw. Frag, flash and Semtex leave at 940
+along the view and 120 up, the throwing knife at 1400 and 40 up, each plus the
+thrower's own velocity along the throw. Held at death, any of them is dropped
+at the body with the fuse it has (a TI is planted). After the throw the item
+is held `BG_QUICK_ACTION_HOLD` (500ms) and goes away in `BG_RAPID_DROP_TIME`
+(50ms), then the same quick raise. Neither can be sprinted
 through: the latch holds until the gun is fully back. Empty equipment does nothing; a ladder
-grab clears queued actions. Every knife and grenade defers a Y until the gun it
+grab clears queued actions, and takes a cooking frag with it. Every knife and grenade defers a Y until the gun it
 left is fully back on its quick raise (MW2's CheckForChangeWeapon); YY cannot
-cancel that raise. Semtex adds hold/release and a pre-throw cancel; see
-`dev/SEMTEX.md` for controls, timing, art and compatibility notes. The throwing
-knife is a lethal choice too: it comes out without lowering the gun, throws on
-release, sticks where it lands and is taken back with use; see
-`dev/THROWING_KNIFE.md`.
+cancel that raise. The Semtex's hold/release and pre-throw cancel (MW2's: in
+the drop or the pull Y always cancels; once held ready only while an offhand
+button is still down, so letting go with Y on one command throws) are
+described in `dev/SEMTEX.md` with its controls, timing, art and compatibility
+notes. The throwing knife is a lethal choice too: it is in hand on the press
+without lowering the gun, throws on release, sticks where it lands and is
+taken back with use; see `dev/THROWING_KNIFE.md`. The Tactical Insertion is
+MW2's lethal equipment as well: the gun's quick drop, a 2.63s ignite no release
+cuts short, held until released, Y-cancelable before the release like the
+Semtex, then the same recovery. It is planted at your last standing spot; your
+next spawn is there (never in S&D), its owner picks it up with use and enemies
+smash it with use or 21 damage; see `dev/TACTICAL_INSERTION.md`.
 
 Only the selected validated definition is sent in `peace_loadout` userinfo.
 `peace_class_0`–`peace_class_4` stay local. The server rejects malformed names,
 invalid guns, duplicate slots, unsupported perks, and impossible counts without
 partially replacing the last valid selection.
 
-The nine-bit `weaponAction` field is carried by playerstate deltas so prediction
-replays do not forget a tap or replay it twice. **Rebuild the executable, server
+The ten-bit `weaponAction` field is carried by playerstate deltas so prediction
+replays do not forget a tap or replay it twice. So is MW2's `grenadeTimeLeft`
+(signed 16 bits, protocol 85): the fuse of the offhand in hand, written on
+both sides by pmove and zeroed by the server at the throw or the death drop;
+-1 after a cook-out until the next offhand starts. **Rebuild the executable, server
 and all modules together; mixing old and new network/module layouts is unsupported.**
 QVM build rules now depend on shared headers to avoid stale structure offsets.
 The engine also translates the skeletal pose's nested 32-bit QVM address at

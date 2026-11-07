@@ -1867,6 +1867,7 @@ static const int bg_weaponMagSize[MAX_WEAPONS] = {
 	1,      // WP_SEMTEX
 	M40_MAG_SIZE,
 	1,		// WP_THROWING_KNIFE (one in hand)
+	1,		// WP_TACTICAL_INSERTION (one in hand)
 };
 
 // ---------------------------------------------------------------------------
@@ -2009,7 +2010,8 @@ static const bg_weaponAnimSeg_t bg_weaponFire[MAX_WEAPONS] = {
 	/* WP_FLASH           */ { 0, bgnotes_none },
 	/* WP_SEMTEX          */ { 0, bgnotes_none },
 	/* WP_M40A3           */ { M40_FIRE_MS, bgnotes_m40_fire },
-	/* WP_THROWING_KNIFE  */ { 0, bgnotes_none }
+	/* WP_THROWING_KNIFE  */ { 0, bgnotes_none },
+	/* WP_TACTICAL_INSERTION */ { 0, bgnotes_none }
 };
 
 int BG_WeaponFireLength( int weapon ) {
@@ -2044,6 +2046,7 @@ static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
 	                             { M40_RELOAD_LOOP_MS, bgnotes_m40_loop },
 	                             { M40_RELOAD_END_MS, bgnotes_m40_end } }, qtrue },
 	/* WP_THROWING_KNIFE  */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
+	/* WP_TACTICAL_INSERTION */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 };
 
 // Holster / deploy lengths. Always stamped on a weapon change - never 0, so a
@@ -2071,6 +2074,7 @@ static const int bg_weaponDropTime[MAX_WEAPONS] = {
 	BG_RAPID_DROP_TIME,	// WP_SEMTEX
 	M40_DROP_MS,
 	BG_RAPID_DROP_TIME,	// WP_THROWING_KNIFE
+	BG_RAPID_DROP_TIME,	// WP_TACTICAL_INSERTION
 };
 
 static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
@@ -2089,11 +2093,14 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 	300, 300, 300,
 #endif
 	BG_MELEE_DELAY,	// WP_KNIFE: MW2's meleeDelay, out on the press and ending in the hit
-	150,	// WP_FRAG
-	150,	// WP_FLASH
-	350,    // WP_SEMTEX pull back into held pose
+	// Equipment's rows are its prepare, MW2's holdFireTime (OffHandPrepare
+	// 577800), which BG_WeaponRaiseTime never raises to the swap floor.
+	BG_GRENADE_HOLD_FIRE_MS,	// WP_FRAG: frag_grenade_mp holdFireTime 0.6
+	BG_GRENADE_HOLD_FIRE_MS,	// WP_FLASH: flash_grenade_mp holdFireTime 0.6
+	BG_GRENADE_HOLD_FIRE_MS,	// WP_SEMTEX: semtex_mp holdFireTime 0.6
 	M40_RAISE_MS,
-	BG_THROWING_KNIFE_PULL_MS,	// WP_THROWING_KNIFE: MW2's iHoldFireTime (weapon data)
+	BG_THROWING_KNIFE_PULL_MS,	// WP_THROWING_KNIFE: throwingknife_mp holdFireTime 0, in hand on the press
+	BG_INSERTION_IGNITE_MS,	// WP_TACTICAL_INSERTION: flare_mp's holdFireTime, the ignite
 };
 
 // MW2's quickDropTime and quickRaiseTime (its weapon files): the gun going
@@ -2110,6 +2117,7 @@ static const int bg_weaponQuickDropTime[MAX_WEAPONS] = {
 	250, 250, 250, 250,	// WP_KNIFE, WP_FRAG, WP_FLASH, WP_SEMTEX
 	M40_QUICK_DROP_MS,
 	250,	// WP_THROWING_KNIFE
+	250,	// WP_TACTICAL_INSERTION
 };
 static const int bg_weaponQuickRaiseTime[MAX_WEAPONS] = {
 	250,	// WP_NONE
@@ -2129,6 +2137,7 @@ static const int bg_weaponQuickRaiseTime[MAX_WEAPONS] = {
 	250, 250, 250, 250,	// WP_KNIFE, WP_FRAG, WP_FLASH, WP_SEMTEX
 	M40_QUICK_RAISE_MS,	// MW2's Intervention
 	250,	// WP_THROWING_KNIFE
+	250,	// WP_TACTICAL_INSERTION
 };
 
 int BG_WeaponMagSize( int weapon ) {
@@ -2167,14 +2176,14 @@ static const int bg_weaponSprintInTime[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	250, 250, 250,
 #endif
-	150, 150, 150, 150, M40_SPRINT_IN_MS, 150
+	150, 150, 150, 150, M40_SPRINT_IN_MS, 150, 150	// ..., WP_THROWING_KNIFE, WP_TACTICAL_INSERTION
 };
 static const int bg_weaponSprintOutTime[MAX_WEAPONS] = {
 	180, 180, 250, 250, 300, 300, 250, 300, 250, 350, 150,
 #ifdef MISSIONPACK
 	300, 300, 300,
 #endif
-	180, 180, 180, 180, M40_SPRINT_OUT_MS, 180
+	180, 180, 180, 180, M40_SPRINT_OUT_MS, 180, 180	// ..., WP_THROWING_KNIFE, WP_TACTICAL_INSERTION
 };
 
 int BG_WeaponSprintInTime( int weapon ) {
@@ -2245,6 +2254,10 @@ int BG_WeaponRaiseTime( int weapon ) {
 	int t;
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return WEAPON_MIN_SWAP_TIME;
 	t = bg_weaponRaiseTime[weapon];
+	// An offhand's prepare is no deploy but its holdFireTime, which may be 0:
+	// the throwing knife is in HOLD on the think it is pressed (MW2's
+	// OffHandInit, Prepare and Hold in one think). Nothing is put down for it.
+	if ( BG_OffhandHeldToThrow( weapon ) ) return t;
 	return ( t < WEAPON_MIN_SWAP_TIME ) ? WEAPON_MIN_SWAP_TIME : t;
 }
 
@@ -2480,12 +2493,24 @@ qboolean BG_UpdateWeaponPickup(playerState_t *ps, const usercmd_t *cmd,
 	return reload;
 }
 
+// The knife or equipment a quick action uses.
+int BG_QuickActionWeapon( const playerState_t *ps, int action ) {
+	switch ( action & WA_TYPE_MASK ) {
+	case WA_MELEE: return WP_KNIFE;
+	case WA_LETHAL: return BG_LethalWeapon( ps );
+	case WA_TACTICAL: return WP_FLASH;
+	default: return WP_NONE;
+	}
+}
+
 int BG_LethalWeapon( const playerState_t *ps ) {
 	// Keep the action's identity through its last throw and inventory rebuilds.
 	if (ps->weapon == WP_SEMTEX || ps->ammo[WP_SEMTEX] > 0 ||
 		(ps->stats[STAT_WEAPONS] & (1 << WP_SEMTEX))) return WP_SEMTEX;
 	if (ps->weapon == WP_THROWING_KNIFE || ps->ammo[WP_THROWING_KNIFE] > 0 ||
 		(ps->stats[STAT_WEAPONS] & (1 << WP_THROWING_KNIFE))) return WP_THROWING_KNIFE;
+	if (ps->weapon == WP_TACTICAL_INSERTION || ps->ammo[WP_TACTICAL_INSERTION] > 0 ||
+		(ps->stats[STAT_WEAPONS] & (1 << WP_TACTICAL_INSERTION))) return WP_TACTICAL_INSERTION;
 	return WP_FRAG;
 }
 
@@ -2511,6 +2536,7 @@ static const int bg_weaponMaxReserve[MAX_WEAPONS] = {
 	0,      // WP_SEMTEX
 	M40_RESERVE,
 	0,		// WP_THROWING_KNIFE
+	0,		// WP_TACTICAL_INSERTION
 };
 
 int BG_WeaponMaxReserve( int weapon ) {
@@ -2544,6 +2570,7 @@ static const int bg_weaponSpread[MAX_WEAPONS] = {
 	0,      // WP_SEMTEX
 	M40_HIP_SPREAD,
 	0,		// WP_THROWING_KNIFE
+	0,		// WP_TACTICAL_INSERTION
 };
 
 static const float bg_weaponAdsSpreadScale[MAX_WEAPONS] = {
@@ -2551,7 +2578,7 @@ static const float bg_weaponAdsSpreadScale[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	.15f, .15f, .15f,
 #endif
-	.15f, .15f, .15f, .15f, M40_ADS_SPREAD_SCALE, .15f
+	.15f, .15f, .15f, .15f, M40_ADS_SPREAD_SCALE, .15f, .15f	// ..., WP_THROWING_KNIFE, WP_TACTICAL_INSERTION
 };
 
 // Aimed through an overlay scope rather than over the sights (MW2's
@@ -2561,7 +2588,7 @@ static const int bg_weaponScopeOverlay[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	0, 0, 0,
 #endif
-	0, 0, 0, 0, M40_SCOPE_OVERLAY, 0
+	0, 0, 0, 0, M40_SCOPE_OVERLAY, 0, 0	// ..., WP_THROWING_KNIFE, WP_TACTICAL_INSERTION
 };
 
 int BG_WeaponScopeOverlay( int weapon ) {
@@ -2572,6 +2599,132 @@ int BG_WeaponScopeOverlay( int weapon ) {
 int BG_WeaponBaseSpread( int weapon ) {
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
 	return bg_weaponSpread[weapon];
+}
+
+/*
+===============
+MW2's view kick (weapon data)
+
+From the IW4 dump's weapons/mp files: hip/adsViewKickPitchMin/Max,
+hip/adsViewKickYawMin/Max and hip/adsViewKickCenterSpeed, in degrees per
+second and per second squared. Each Peace gun has the MW2 gun it already
+models: the machinegun MW2's M4 (m4_mp), the shotgun its SPAS-12
+(spas12_mp), the rocket launcher its RPG and AT4 (rpg_mp and at4_mp, whose
+view kicks are the same), and the M300 the Intervention (cheytac_mp, owner's
+choice; its numbers live in weapon.json). Equipment is MW2's own: frag, flash,
+Semtex, throwing knife and flare all have zero kick and zero centre speed.
+A weapon with no row has no MW2 weapon def: no shot of it kicks, and the
+centre speed is weapon 0's. That is WP_NONE, and every gun with no MW2
+counterpart: the gauntlet, grenade launcher, lightning gun, railgun, plasma
+gun, BFG, grappling hook and missionpack's nailgun, prox launcher and
+chaingun. The knife has none either: MW2's melee is no weapon of its own
+(BG_ViewmodelWeapon). Keyed by weapon, never positional. Word-only, as q3asm
+needs.
+===============
+*/
+static const struct {
+	int weapon;
+	float hipPitchMin, hipPitchMax, hipYawMin, hipYawMax, hipCenterSpeed;
+	float adsPitchMin, adsPitchMax, adsYawMin, adsYawMax, adsCenterSpeed;
+} bg_viewKick[] = {
+	{ WP_MACHINEGUN,	-30,  50,  40, -40, 1500,	-30, 50,  40, -40, 1500 },	// m4_mp
+	{ WP_SHOTGUN,		 85,  95, -45,  45, 1000,	 85, 95, -45,  45, 1000 },	// spas12_mp
+	{ WP_ROCKET_LAUNCHER,	100, 150, -50, -80, 1500,	 20, 95, -10,  30, 2500 },	// rpg_mp, at4_mp
+	{ WP_M40A3,
+		M40_HIP_VIEW_KICK_PITCH_MIN, M40_HIP_VIEW_KICK_PITCH_MAX,
+		M40_HIP_VIEW_KICK_YAW_MIN, M40_HIP_VIEW_KICK_YAW_MAX, M40_HIP_VIEW_KICK_CENTER_SPEED,
+		M40_ADS_VIEW_KICK_PITCH_MIN, M40_ADS_VIEW_KICK_PITCH_MAX,
+		M40_ADS_VIEW_KICK_YAW_MIN, M40_ADS_VIEW_KICK_YAW_MAX, M40_ADS_VIEW_KICK_CENTER_SPEED },	// cheytac_mp
+	{ WP_FRAG,		0, 0, 0, 0, 0,	0, 0, 0, 0, 0 },	// frag_grenade_mp
+	{ WP_FLASH,		0, 0, 0, 0, 0,	0, 0, 0, 0, 0 },	// flash_grenade_mp
+	{ WP_SEMTEX,		0, 0, 0, 0, 0,	0, 0, 0, 0, 0 },	// semtex_mp
+	{ WP_THROWING_KNIFE,	0, 0, 0, 0, 0,	0, 0, 0, 0, 0 },	// throwingknife_mp
+	{ WP_TACTICAL_INSERTION,	0, 0, 0, 0, 0,	0, 0, 0, 0, 0 }	// flare_mp
+};
+
+static int BG_ViewKickRow( int weapon ) {
+	int row;
+	for ( row = 0; row < ARRAY_LEN( bg_viewKick ); row++ ) {
+		if ( bg_viewKick[row].weapon == weapon ) return row;
+	}
+	return -1;
+}
+
+/*
+===============
+BG_ViewmodelWeapon
+
+MW2's BG_GetViewmodelWeaponIndex (0x4be4d0): the offhand from its prepare
+(weapFlags & 2, set in OffHandPrepare at 57781f) to OffHandEnd, otherwise
+the gun. Peace's ps.weapon is that offhand over the same span: a grenade's
+quick drop keeps the gun, and the throwing knife is in hand on its press
+(BG_OffhandPreparesAtOnce, OffHandInit's same-think Prepare). MW2's knife is
+no weapon change (MeleeInit writes over the gun's state,
+BG_QuickActionInPlace), so under it the view reads the gun it was written
+over, or none from an empty hand.
+===============
+*/
+int BG_ViewmodelWeapon( const playerState_t *ps ) {
+	if ( BG_QuickActionInPlace( ps->weapon ) ) {
+		return ( ps->weaponAction & WA_LEFT_EMPTY ) ? WP_NONE : BG_ActiveSlotWeapon( ps );
+	}
+	return ps->weapon;
+}
+
+// MW2's CG_KickAngles (596840-5968a3): the ADS centre speed above half aimed,
+// the hip one otherwise; weapon 0 (no def) 2400. Peace has no perk that
+// scales a scope's centring (MW2's perk_fastSnipeScale).
+float BG_WeaponViewKickCenterSpeed( int weapon, float adsFrac ) {
+	int row = BG_ViewKickRow( weapon );
+	if ( row < 0 ) return BG_KICK_NO_DEF_CENTER_SPEED;
+	return adsFrac > 0.5f ? bg_viewKick[row].adsCenterSpeed : bg_viewKick[row].hipCenterSpeed;
+}
+
+// MW2's random (0x44c590): seed = seed * 0x343fd + 0x269ec3, its top 15 bits over 32768.
+static float BG_KickRandom( unsigned int *holdrand ) {
+	*holdrand = *holdrand * 0x343fdu + 0x269ec3u;
+	return (float)( *holdrand >> 17 ) * ( 1.0f / 32768.0f );
+}
+
+/*
+===============
+BG_WeaponFireRecoil
+
+The view part of MW2's BG_WeaponFireRecoil (0x4a5fe0), for a shot of the
+weapon in hand: the ADS view kick when exactly fully aimed, the hip one
+otherwise, each min + r * (max - min) from the caller's seed, pitch drawn
+before yaw. It ASSIGNS the angular velocity (pitch up, yaw, and a roll of
+-0.5 times the yaw, 0x71a990); it never adds. MW2's reduced kick never applies
+to these guns (ReducedKickBullets 0 and fireDelay 0 leave
+weaponRestrictKickTime 0), and Peace sets neither of the weapFlags that scale
+it (recoil scale, pitch times 5). MW2 has no kick on a melee hit or an
+offhand throw, which are not its gun's fire event; Peace raises EV_FIRE_WEAPON
+for those too, so a quick action's fire (BG_IsActionWeapon, as pmove marks
+it fired) kicks nothing. A weapon with no MW2 def kicks nothing.
+===============
+*/
+qboolean BG_WeaponFireRecoil( const playerState_t *ps, float adsFrac, vec3_t kickAVel, unsigned int *holdrand ) {
+	int row;
+	float pitch, yaw;
+
+	if ( BG_IsActionWeapon( ps->weapon ) ) {
+		return qfalse;
+	}
+	row = BG_ViewKickRow( ps->weapon );
+	if ( row < 0 ) {
+		return qfalse;
+	}
+	if ( adsFrac == 1.0f ) {
+		pitch = BG_KickRandom( holdrand ) * ( bg_viewKick[row].adsPitchMax - bg_viewKick[row].adsPitchMin ) + bg_viewKick[row].adsPitchMin;
+		yaw = BG_KickRandom( holdrand ) * ( bg_viewKick[row].adsYawMax - bg_viewKick[row].adsYawMin ) + bg_viewKick[row].adsYawMin;
+	} else {
+		pitch = BG_KickRandom( holdrand ) * ( bg_viewKick[row].hipPitchMax - bg_viewKick[row].hipPitchMin ) + bg_viewKick[row].hipPitchMin;
+		yaw = BG_KickRandom( holdrand ) * ( bg_viewKick[row].hipYawMax - bg_viewKick[row].hipYawMin ) + bg_viewKick[row].hipYawMin;
+	}
+	kickAVel[PITCH] = -pitch;
+	kickAVel[YAW] = yaw;
+	kickAVel[ROLL] = yaw * -0.5f;
+	return qtrue;
 }
 
 /*
@@ -2666,6 +2819,7 @@ void BG_RebuildWeaponMask( playerState_t *ps ) {
 	if ( ps->ammo[WP_FLASH] > 0 ) mask |= ( 1 << WP_FLASH );
 	if ( ps->ammo[WP_SEMTEX] > 0 ) mask |= ( 1 << WP_SEMTEX );
 	if ( ps->ammo[WP_THROWING_KNIFE] > 0 ) mask |= ( 1 << WP_THROWING_KNIFE );
+	if ( ps->ammo[WP_TACTICAL_INSERTION] > 0 ) mask |= ( 1 << WP_TACTICAL_INSERTION );
 
 	ps->stats[STAT_WEAPONS] = mask;
 }
@@ -3059,12 +3213,7 @@ static void PM_AdvanceReloadSegments( void ) {
 }
 
 static int PM_QuickActionWeapon( int action ) {
-	switch ( action & WA_TYPE_MASK ) {
-	case WA_MELEE: return WP_KNIFE;
-	case WA_LETHAL: return BG_LethalWeapon(pm->ps);
-	case WA_TACTICAL: return WP_FLASH;
-	default: return WP_NONE;
-	}
+	return BG_QuickActionWeapon( pm->ps, action );
 }
 
 static int PM_ActionWeapon( void ) {
@@ -3076,6 +3225,38 @@ static int PM_HeldActionButtons( void ) {
 	return (pm->cmd.buttons >> 15) & 7;
 }
 
+// MW2's offhand HOLD (578f00-578f69): an offhand in hand and ready stays
+// there only while an offhand button - the lethal or the tactical, either one
+// (mask 0xc000) - is down on this command and one was on the command before
+// (heldBefore: weaponAction's held bits as the last command left them,
+// 578f2d-578f3f). The two commands are asked separately, so lethal then
+// tactical still holds. Any other HOLD think throws it, and does so before the
+// cancel is read (578f41-578f52), so a Y on that think is spent on nothing.
+// With holdButtonToThrow 0 the throw waits for that, never for a timer.
+static qboolean PM_OffhandHeld( int heldBefore ) {
+	return ( heldBefore & 6 ) && ( pm->cmd.buttons & ( BUTTON_LETHAL | BUTTON_TACTICAL ) );
+}
+
+// MW2's OffHandEnd (577a10), for an offhand that ends without a throw: a Y
+// cancel, or a cooked grenade that ran out in its holder's hand. The offhand
+// is gone with nothing more spent, and the gun it left comes back on its quick
+// raise (BG_WeaponDrawTime: the latch reads as fired); from an empty hand the
+// hand is empty again. Like MW2's it never touches grenadeTimeLeft: a cook-out
+// leaves its -1 (577bf7), which the next offhand's start clears (OffHandInit,
+// 578e00), and a cancel's caller zeroes the fuse (IW4x's fix, at 0x578F52).
+static void PM_OffhandEnd( void ) {
+	pm->ps->weaponAction |= WA_FIRED;
+	pm->ps->weapon = ( pm->ps->weaponAction & WA_LEFT_EMPTY ) ? WP_NONE : BG_ActiveSlotWeapon( pm->ps );
+	if ( pm->ps->weapon == WP_NONE ) {
+		pm->ps->weaponstate = WEAPON_READY;
+		pm->ps->weaponTime = 0;
+		pm->ps->weaponAnimTime = -1;
+		pm->ps->pm_flags &= ~PMF_PENDING_MAG;
+	} else {
+		BG_BeginWeaponDraw( pm->ps );
+	}
+}
+
 // Whether step 1 may begin a weapon change this think. A shot's fire lock
 // holds a swap (MW2's CheckForChangeWeapon refuses FIRING), but not a knife or
 // grenade still to come: MW2's melee and offhand checks take FIRING, and its
@@ -3084,6 +3265,59 @@ static qboolean PM_WeaponChangeOpen( void ) {
 	return pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ||
 		( ( BG_IsActionWeapon( pm->ps->weapon ) || ( pm->ps->weaponAction & WA_TYPE_MASK ) ) &&
 		  !( pm->ps->weaponAction & WA_FIRED ) );
+}
+
+/*
+===============
+PM_UpdateGrenadeThrow
+
+MW2's (577bc0), for an offhand in hand and not yet thrown. HOLD entry wrote
+its fuseTime into grenadeTimeLeft; only a cookOffHold offhand (the frag)
+counts it down, by each think's msec, so it explodes fuseTime after HOLD
+entry whenever it is let go. Run out in hand, it is MW2's grenade suicide: -1,
+the predictable EV_GRENADE_SUICIDE with the grenade as its parm (577c37
+passes offHandIndex: the server kills its holder, and the death drop sets that
+grenade off at once) and the grenade spent (577c37-577c75). The next think
+ends the offhand, as a Y cancel does (OffHandEnd, 577bf7), and keeps the -1.
+That think may be a later step of this same command, run before the server
+reads the event, which is why the event names the grenade. Either think is
+over at once: returns qtrue.
+
+The throw is Peace's release command (MW2's fireDelay is not modelled), so
+the countdown stops there: the server reads what is left and zeroes it. In
+hand and ready with its latch unfired is HOLD, the only place the server ever
+holds a fuse; a client still showing a thrown frag's fuse until the snapshot
+that zeroed it never counts it down in the next one's drop or prepare.
+===============
+*/
+static qboolean PM_UpdateGrenadeThrow( void ) {
+	int weapon = pm->ps->weapon;
+	if ( !pm->ps->grenadeTimeLeft || !BG_OffhandHeldToThrow( weapon ) ||
+	     PM_ActionWeapon() != weapon || ( pm->ps->weaponAction & WA_FIRED ) ||
+	     pm->ps->weaponstate != WEAPON_READY ) {
+		return qfalse;
+	}
+	if ( pm->ps->grenadeTimeLeft < 0 ) {
+		if ( BG_OffhandCooks( weapon ) ) {
+			PM_OffhandEnd();
+			return qtrue;
+		}
+		pm->ps->grenadeTimeLeft = 0;
+		return qfalse;
+	}
+	if ( !BG_OffhandCooks( weapon ) ) {
+		return qfalse;
+	}
+	pm->ps->grenadeTimeLeft -= pml.msec;
+	if ( pm->ps->grenadeTimeLeft > 0 ) {
+		return qfalse;
+	}
+	pm->ps->grenadeTimeLeft = -1;
+	BG_AddPredictableEventToPlayerstate( EV_GRENADE_SUICIDE, weapon, pm->ps );
+	if ( pm->ps->ammo[weapon] > 0 ) {
+		pm->ps->ammo[weapon]--;
+	}
+	return qtrue;
 }
 
 // Latch a press through holster/deploy. Releasing the button cannot lose a tap,
@@ -3105,7 +3339,8 @@ static void PM_UpdateWeaponAction( void ) {
 		  !( pm->ps->weaponAction & ( WA_RETURNING | WA_RECOVERING ) ) &&
 		  BG_RequestedSlot( pm->ps, pm->cmd.weapon ) != pm->ps->stats[STAT_ACTIVE_SLOT] );
 	int held = PM_HeldActionButtons();
-	int pressed = held & ~((pm->ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT);
+	int heldBefore = (pm->ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT;
+	int pressed = held & ~heldBefore;
 	int action = pm->ps->weaponAction & (WA_TYPE_MASK | WA_FIRED);
 	int returning = pm->ps->weaponAction & WA_RETURNING;
 	int recovering = pm->ps->weaponAction & WA_RECOVERING;
@@ -3129,6 +3364,7 @@ static void PM_UpdateWeaponAction( void ) {
 		action = 0;
 		returning = 0;
 		recovering = 0;
+		pm->ps->grenadeTimeLeft = 0;	// an offhand the ladder took is gone, fuse and all
 	} else {
 		// A quick action is not over when it fires. It is over when the gun is
 		// back in hand and fully drawn: that whole recovery keeps the latch, and
@@ -3182,25 +3418,53 @@ static void PM_UpdateWeaponAction( void ) {
 				// only reads it. The throwing knife comes out at once anyway,
 				// and so does the knife, which never reads the hint: MW2's
 				// MeleeInit writes the melee state straight over the gun's.
-				prepare = ( nextAction != WA_MELEE &&
+				qboolean straightOut = nextAction != WA_MELEE &&
 					pm->ps->cursorHintEntIndex == ENTITYNUM_NONE &&
-					( pm->ps->weapon == WP_NONE || offhandEnd ) ) ||
+					( pm->ps->weapon == WP_NONE || offhandEnd );
+				prepare = straightOut ||
 					BG_OffhandPreparesAtOnce( nextWeapon ) || BG_QuickActionInPlace( nextWeapon );
+				// MW2's events for the offhand, in its order: CheckForOffHand's
+				// EV_SWITCH_OFFHAND (579168), then OffHandInit's start of the
+				// switch and its ADS reset (578e10, 578e5e) unless the offhand
+				// comes straight out. OffHandPrepare adds EV_PREP_OFFHAND when
+				// its pull begins (PM_FinishWeaponChange): this think for one
+				// coming straight out or the throwing knife, after the quick
+				// drop for the rest. The knife is MeleeInit, not an offhand.
+				if ( nextAction != WA_MELEE ) {
+					BG_AddPredictableEventToPlayerstate( EV_SWITCH_OFFHAND, nextWeapon, pm->ps );
+					if ( !straightOut ) {
+						BG_AddPredictableEventToPlayerstate( EV_WEAPON_SWITCH_STARTED, nextWeapon, pm->ps );
+						PM_AddEvent( EV_RESET_ADS );
+					}
+				}
 				action = nextAction;
 				returning = recovering = 0;
 				leftEmpty = pm->ps->weapon == WP_NONE ? WA_LEFT_EMPTY : 0;
+				// MW2's OffHandInit (578e00) clamps a negative fuse: a
+				// cook-out's -1 is cleared by the next offhand's start.
+				if ( BG_OffhandHeldToThrow( nextWeapon ) && pm->ps->grenadeTimeLeft < 0 ) {
+					pm->ps->grenadeTimeLeft = 0;
+				}
 			}
 		}
-		if (swapPressed && !(action & WA_FIRED) && (action & WA_TYPE_MASK) == WA_LETHAL &&
-			BG_OffhandHeldToThrow(BG_LethalWeapon(pm->ps))) {
+		// Only an offhand whose data says offhandHoldIsCancelable takes the
+		// cancel (MW2's 59d5f0-59d622 sends the cancel bit for no other): the
+		// frag and flash cannot be cancelled. MW2 takes it in INIT and PREPARE
+		// (the drop and the pull) whatever the buttons (577daa-577dde), but
+		// HOLD (in hand and ready) throws first unless an offhand button is
+		// held across this command and the last (PM_OffhandHeld): a release
+		// and Y on one command, or a Y on HOLD's first command after a tap, is
+		// the throw, as the release says.
+		if (swapPressed && !(action & WA_FIRED) && BG_OffhandCancelable(PM_QuickActionWeapon(action)) &&
+			( pm->ps->weapon != PM_QuickActionWeapon( action ) ||
+			  pm->ps->weaponstate != WEAPON_READY || PM_OffhandHeld( heldBefore ) ) ) {
 			// Equipment never changes the active slot. Do not refund a throw
 			// already emitted. Use the same gun raise as the melee return, and
 			// the same recovery: the latch holds until that gun is fully drawn.
 			// From an empty hand it is MW2's OffHandEnd with no gun: the hand
 			// is empty again, and the selection brings a gun as from any.
-			action = WA_LETHAL | WA_FIRED;
+			action = (action & WA_TYPE_MASK) | WA_FIRED;
 			returning = leftEmpty ? 0 : WA_RETURNING;
-			pm->ps->weapon = leftEmpty ? WP_NONE : BG_ActiveSlotWeapon(pm->ps);
 			cancelDraw = qtrue;
 		}
 	}
@@ -3208,13 +3472,13 @@ static void PM_UpdateWeaponAction( void ) {
 	pm->ps->weaponAction = action | (held << WA_HELD_SHIFT) | returning | recovering |
 		(swap ? WA_SWAP_HELD : 0) | leftEmpty;
 	// Drawn once the latch says it is a return, so it is the quick raise.
-	if ( cancelDraw && pm->ps->weapon == WP_NONE ) {
-		pm->ps->weaponstate = WEAPON_READY;
-		pm->ps->weaponTime = 0;
-		pm->ps->weaponAnimTime = -1;
-		pm->ps->pm_flags &= ~PMF_PENDING_MAG;
-	} else if ( cancelDraw ) {
-		BG_BeginWeaponDraw( pm->ps );
+	// The cancel leaves no fuse: IW4x's bg_weaponOffHandFix zeroes
+	// grenadeTimeLeft after the HOLD cancel's OffHandEnd (0x578F52), where
+	// stock MW2 left one for the death drop to fire; in INIT and PREPARE there
+	// is none yet.
+	if ( cancelDraw ) {
+		pm->ps->grenadeTimeLeft = 0;
+		PM_OffhandEnd();
 	}
 	if ( prepare ) {
 		PM_FinishWeaponChange();
@@ -3371,7 +3635,11 @@ static void PM_BeginWeaponChange( int weapon ) {
 		return;
 	}
 
-	PM_AddEvent( EV_CHANGE_WEAPON );
+	// The drop for equipment is MW2's OffHandInit, whose events the press
+	// raised (PM_UpdateWeaponAction); it puts nothing else on the ring.
+	if ( !BG_OffhandHeldToThrow( weapon ) ) {
+		PM_AddEvent( EV_CHANGE_WEAPON );
+	}
 	// Read before the state flips: a raise's lock is not a drop to keep.
 	pm->ps->weaponTime  = BG_HolsterTime( pm->ps );
 	pm->ps->weaponstate = WEAPON_DROPPING;
@@ -3410,6 +3678,11 @@ static void PM_FinishWeaponChange( void ) {
 		return;
 	}
 	BG_BeginWeaponDraw(pm->ps);
+	// An offhand's draw is its prepare, MW2's OffHandPrepare (5778e6): its
+	// pullback, with the offhand as the parm.
+	if ( BG_OffhandHeldToThrow( weapon ) ) {
+		BG_AddPredictableEventToPlayerstate( EV_PREP_OFFHAND, weapon, pm->ps );
+	}
 }
 
 // An alternate holster DESTINATION, not an alternate reload or swap. Leave the
@@ -3625,6 +3898,7 @@ Generates weapon events and modifes the weapon counter
 static void PM_Weapon( void ) {
 	int		addTime;
 	int		oldElapsed;
+	int		heldBefore;
 	qboolean ladderWeapon;
 	qboolean reload;
 	qboolean chamberClosed = qfalse;
@@ -3702,6 +3976,18 @@ static void PM_Weapon( void ) {
 		pm->ps->weaponTime -= pml.msec;
 	}
 
+	// MW2 counts a cooking grenade down here, after the timers and before
+	// any of its checks, and a think it ends is over (PM_UpdateGrenadeThrow,
+	// 44c3f7). That think's buttons are still the last ones the next think
+	// compares with, as MW2's oldcmd always is.
+	if ( PM_UpdateGrenadeThrow() ) {
+		pm->ps->weaponAction = ( pm->ps->weaponAction & ~( WA_HELD_MASK | WA_SWAP_HELD ) ) |
+			( PM_HeldActionButtons() << WA_HELD_SHIFT ) |
+			( ( pm->cmd.buttons & BUTTON_WEAPON_SWAP ) ? WA_SWAP_HELD : 0 );
+		return;
+	}
+
+	heldBefore = ( pm->ps->weaponAction & WA_HELD_MASK ) >> WA_HELD_SHIFT;
 	PM_UpdateWeaponAction();
 	ladderWeapon = PM_LadderWeapon();
 
@@ -3896,6 +4182,13 @@ static void PM_Weapon( void ) {
 		} else {
 			PM_StartTorsoAnim( TORSO_STAND );
 		}
+		// An offhand's prepare that ends is MW2's OffHandHold (577920): in
+		// hand, waiting for the release, with its fuse (577958-577961). Only
+		// a cooking one counts it down from the next think.
+		if ( BG_OffhandHeldToThrow( pm->ps->weapon ) && PM_ActionWeapon() == pm->ps->weapon &&
+		     !( pm->ps->weaponAction & WA_FIRED ) ) {
+			pm->ps->grenadeTimeLeft = BG_OffhandFuseTime( pm->ps->weapon );
+		}
 		if ( !BG_QuickActionInPlace( pm->ps->weapon ) ) {
 			return;
 		}
@@ -3927,9 +4220,12 @@ static void PM_Weapon( void ) {
 	}
 
 	// A quick action fires once from its own button, never from the trigger.
-	// Release-to-throw. A short tap stays queued through holster and deploy.
+	// Release-to-throw. A short tap stays queued through holster and deploy,
+	// and is thrown on HOLD's first command, a button pressed again on that
+	// command included: MW2's HOLD keeps it in hand only for a button down on
+	// this command and the last (PM_OffhandHeld).
 	if (BG_OffhandHeldToThrow(pm->ps->weapon) &&
-		(pm->cmd.buttons & BUTTON_LETHAL)) return;	// held: raised until it is let go
+		PM_OffhandHeld( heldBefore )) return;	// held: raised until it is let go
 	if ( BG_IsActionWeapon( pm->ps->weapon ) &&
 		(PM_ActionWeapon() != pm->ps->weapon || (pm->ps->weaponAction & WA_FIRED)) ) {
 		return;
@@ -4004,25 +4300,25 @@ static void PM_Weapon( void ) {
 		}
 	}
 
-	// fire weapon
-	PM_AddEvent( EV_FIRE_WEAPON );
+	// fire weapon. The parm names the gun that fired: the ring can still hold
+	// the shot after an offhand has taken the hand (MW2's es.weapon stays the
+	// gun through an offhand; Peace's ps.weapon does not).
+	BG_AddPredictableEventToPlayerstate( EV_FIRE_WEAPON, pm->ps->weapon, pm->ps );
 	if ( BG_IsActionWeapon( pm->ps->weapon ) ) {
 		pm->ps->weaponAction |= WA_FIRED;
 	}
 
-	switch( pm->ps->weapon ) {
+	// One hold: every piece of equipment recovers alike (the knife has its own
+	// meleeTime instead, BG_QuickActionInPlace).
+	if ( BG_IsActionWeapon( pm->ps->weapon ) && !BG_QuickActionInPlace( pm->ps->weapon ) ) {
+		addTime = BG_QUICK_ACTION_HOLD;
+	} else switch( pm->ps->weapon ) {
 	default:
 	case WP_GAUNTLET:
 		addTime = 400;
 		break;
 	case WP_KNIFE:
 		addTime = BG_MELEE_TIME - BG_MELEE_DELAY;	// MW2's meleeTime runs from the press
-		break;
-	case WP_SEMTEX:
-	case WP_FRAG:
-	case WP_FLASH:
-	case WP_THROWING_KNIFE:
-		addTime = BG_QUICK_ACTION_HOLD;	// one hold: equipment recovers alike
 		break;
 	case WP_LIGHTNING:
 		addTime = 50;

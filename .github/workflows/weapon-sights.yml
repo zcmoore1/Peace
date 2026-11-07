@@ -34,7 +34,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Check generated optic assets
@@ -82,6 +82,12 @@ jobs:
           PICKUP_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-pickups.sh
           sh dev/tests/run-fakereload.sh
           FAKERELOAD_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-fakereload.sh
+          sh dev/tests/run-kick.sh
+          KICK_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-kick.sh
+          sh dev/tests/run-bullets.sh
+          BULLETS_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-bullets.sh
+          sh dev/tests/run-silentshot.sh
+          SILENTSHOT_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-silentshot.sh
       - name: Build native and QVM game modules
         run: |
           cmake -S . -B out/ci -DBUILD_CLIENT=OFF -DBUILD_SERVER=OFF -DBUILD_RENDERER_GL1=OFF -DBUILD_RENDERER_GL2=OFF -DBUILD_GAME_LIBRARIES=ON -DBUILD_GAME_QVMS=ON

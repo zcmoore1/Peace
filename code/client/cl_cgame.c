@@ -181,6 +181,19 @@ void CL_SetUserCmdValue( int userCmdValue, float sensitivityScale, float aimFrac
 
 /*
 =====================
+CL_SetUserCmdKickAngles
+
+MW2's cl.cgameKickAngles (0x47bc30, 0xb2f890): cgame's view kick, which
+CL_FinishMove adds into each command's angles. It is never added into
+cl.viewangles, so the kick runs out without moving the player's own aim.
+=====================
+*/
+void CL_SetUserCmdKickAngles( float pitch, float yaw, float roll ) {
+	VectorSet( cl.cgameKickAngles, pitch, yaw, roll );
+}
+
+/*
+=====================
 CL_AddCgameCommand
 =====================
 */
@@ -388,6 +401,8 @@ CL_ShutdownCGame
 void CL_ShutdownCGame( void ) {
 	Key_SetCatcher( Key_GetCatcher( ) & ~KEYCATCH_CGAME );
 	cls.cgameStarted = qfalse;
+	// no cgame, no kick: commands made without one aim where the player does
+	VectorClear( cl.cgameKickAngles );
 	if ( !cgvm ) {
 		return;
 	}
@@ -700,6 +715,13 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 
 	case CG_R_BLENDMODELPOSES:
 		re.BlendModelPoses( VMA(1), VMA(2), VMF(3), VMA(4), VMF(5) );
+		return 0;
+
+	case CG_KEY_GETBINDINGNAME:
+		return Key_GetBindingName( VMA(1), args[2], VMA(3), args[4] );
+
+	case CG_SETUSERCMDKICKANGLES:
+		CL_SetUserCmdKickAngles( VMF(1), VMF(2), VMF(3) );
 		return 0;
 
 	default:

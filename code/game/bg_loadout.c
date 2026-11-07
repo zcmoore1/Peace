@@ -7,11 +7,11 @@
 // inline char arrays with integers does NOT preserve struct layout in a QVM.
 // Keep the source table word-only and populate the editable definitions at run
 // time, identically in native modules and VMs.
-static const struct { const char *name; int primary, secondary, lethal, tactical; } presets[] = {
-	{ "Assault", WP_MACHINEGUN, WP_SHOTGUN, 2, 2 },
-	{ "Sniper", WP_M40A3, WP_MACHINEGUN, 1, 3 },
-	{ "Demolition", WP_ROCKET_LAUNCHER, WP_SHOTGUN, 3, 1 },
-	{ "Support", WP_PLASMAGUN, WP_LIGHTNING, 2, 2 }
+static const struct { const char *name; int primary, secondary; } presets[] = {
+	{ "Assault", WP_MACHINEGUN, WP_SHOTGUN },
+	{ "Sniper", WP_M40A3, WP_MACHINEGUN },
+	{ "Demolition", WP_ROCKET_LAUNCHER, WP_SHOTGUN },
+	{ "Support", WP_PLASMAGUN, WP_LIGHTNING }
 };
 static bg_class_t bg_classes[ARRAY_LEN(presets)];
 static qboolean classesReady;
@@ -108,17 +108,84 @@ qboolean BG_QuickActionInPlace( int weapon ) {
 	return weapon == WP_KNIFE;
 }
 
-// MW2's holdButtonToThrow and offhandHoldIsCancelable (weapon data, the owner's
-// choice): the Semtex and the throwing knife stay raised while the lethal button
-// is held, are thrown on its release, and a Y before that release cancels them
-// back to the gun with nothing spent.
+// MW2's offhand weapon data, from the IW4 dump's weapons/mp files
+// (frag_grenade_mp, flash_grenade_mp, semtex_mp, throwingknife_mp, flare_mp).
+// Word-only, as q3asm needs. The prepare, holdFireTime, is the equipment's row
+// in bg_pmove.c's raise table. holdButtonToThrow is 0 and timedDetonation 1
+// for all five, so none has a row of its own: every one waits in HOLD for its
+// release, and every fuse is timed.
+static const struct {
+	int weapon;
+	int fuseTime;			// fuseTime: written into grenadeTimeLeft at HOLD entry (OffHandHold 577958)
+	int cookOffHold;		// the fuse runs down in hand from HOLD entry (PM_UpdateGrenadeThrow 577c1e)
+	int cancelable;			// offhandHoldIsCancelable: Y ends it before the throw (59d5f0, 577d70, 578f41)
+	int speed, speedUp, speedForward;	// projectileSpeed, projectileSpeedUp, projectileSpeedForward (4c3690)
+} offhands[] = {
+	{ WP_FRAG,               3500,                  1, 0,  940,    120,  0 },
+	{ WP_FLASH,              1500,                  0, 0,  940,    120,  0 },
+	{ WP_SEMTEX,             2000,                  0, 1,  940,    120,  0 },
+	{ WP_THROWING_KNIFE,     BG_THROWING_KNIFE_LIFE, 0, 1, 1400,     40,  0 },
+	{ WP_TACTICAL_INSERTION, 50,                    0, 1,  100, -10000, 50 }	// an invisible flare; Peace plants instead
+};
+static int BG_OffhandRow( int weapon ) {
+	int i;
+	for ( i = 0; i < ARRAY_LEN(offhands); i++ )
+		if ( offhands[i].weapon == weapon ) return i;
+	return -1;
+}
+
+// Every offhand (holdButtonToThrow 0): once its prepare is over it waits in
+// hand, MW2's HOLD (578f00-578f69), while either offhand button is down on
+// this command and the one before, and is thrown on the first think it is not.
 qboolean BG_OffhandHeldToThrow( int weapon ) {
-	return weapon == WP_SEMTEX || weapon == WP_THROWING_KNIFE;
+	return BG_OffhandRow( weapon ) >= 0;
+}
+
+// offhandHoldIsCancelable: the Semtex, the throwing knife and the Tactical
+// Insertion. A Y before the throw ends them back to the gun with nothing spent
+// (MW2's OffHandEnd). The frag and flash cannot be cancelled: a Y only asks for
+// the other slot, which waits for the gun's return (CheckForChangeWeapon).
+qboolean BG_OffhandCancelable( int weapon ) {
+	int row = BG_OffhandRow( weapon );
+	return row >= 0 && offhands[row].cancelable;
+}
+
+// cookOffHold: only the frag. Its fuse runs in hand from HOLD entry, so it
+// explodes fuseTime after it, whenever it is released.
+qboolean BG_OffhandCooks( int weapon ) {
+	int row = BG_OffhandRow( weapon );
+	return row >= 0 && offhands[row].cookOffHold;
+}
+
+int BG_OffhandFuseTime( int weapon ) {
+	int row = BG_OffhandRow( weapon );
+	return row >= 0 ? offhands[row].fuseTime : 0;
+}
+
+// MW2's throw (4c3690): the view's forward at projectileSpeed, projectileSpeedUp
+// added straight up, and projectileSpeedForward along the flattened forward.
+// The thrower's own velocity along the result is added after the missile's
+// trajectory is snapped (4c375f-4c37c3), by the server.
+void BG_OffhandLaunchVelocity( int weapon, const vec3_t forward, vec3_t velocity ) {
+	int row = BG_OffhandRow( weapon );
+	float flat;
+	VectorClear( velocity );
+	if ( row < 0 ) return;
+	VectorScale( forward, offhands[row].speed, velocity );
+	velocity[2] += offhands[row].speedUp;
+	if ( offhands[row].speedForward ) {
+		flat = sqrt( forward[0] * forward[0] + forward[1] * forward[1] );
+		if ( flat > 0 ) {
+			velocity[0] += forward[0] / flat * offhands[row].speedForward;
+			velocity[1] += forward[1] / flat * offhands[row].speedForward;
+		}
+	}
 }
 
 qboolean BG_IsActionWeapon( int weapon ) {
 	return weapon == WP_KNIFE || weapon == WP_FRAG ||
-		weapon == WP_FLASH || weapon == WP_SEMTEX || weapon == WP_THROWING_KNIFE;
+		weapon == WP_FLASH || weapon == WP_SEMTEX || weapon == WP_THROWING_KNIFE ||
+		weapon == WP_TACTICAL_INSERTION;
 }
 
 static const struct { int weapon; const char *name; int attachments; } classWeapons[] = {
@@ -145,9 +212,9 @@ const bg_class_t *BG_Class( int index ) {
 			bg_classes[i].slot[0] = presets[i].primary;
 			bg_classes[i].slot[1] = presets[i].secondary;
 			bg_classes[i].lethal = WP_FRAG;
-			bg_classes[i].lethalCount = presets[i].lethal;
+			bg_classes[i].lethalCount = BG_ClassEquipmentCount(WP_FRAG);
 			bg_classes[i].tactical = WP_FLASH;
-			bg_classes[i].tacticalCount = presets[i].tactical;
+			bg_classes[i].tacticalCount = BG_ClassEquipmentCount(WP_FLASH);
 			bg_classes[i].attachments[0] = bg_classes[i].attachments[1] = -1;
 		}
 		classesReady = qtrue;
@@ -185,18 +252,28 @@ static qboolean BG_ClassNameValid( const char *name ) {
 	}
 	return qfalse;
 }
+// How many of a piece of equipment a class carries each life: MW2's weapon
+// data, startAmmo = maxAmmo (frag_grenade_mp, semtex_mp, throwingknife_mp and
+// flare_mp, the Tactical Insertion, 1; flash_grenade_mp 2). It is fixed, as in
+// MW2: there is no count to choose.
+#define BG_CLASS_EQUIPMENT_LEGACY_MAX 3	// every count a class could save before MW2's counts
+int BG_ClassEquipmentCount( int weapon ) {
+	if ( weapon == WP_NONE ) return 0;
+	return weapon == WP_FLASH ? 2 : 1;
+}
+
 qboolean BG_ValidateClass( const bg_class_t *loadout ) {
 	int i, limit = perks[PERK_NONE].attachmentLimit;
 	if ( !loadout || !BG_ClassNameValid(loadout->name) ) return qfalse;
 	if ( !BG_IsClassWeapon(loadout->slot[0]) || !BG_IsClassWeapon(loadout->slot[1]) ||
 		loadout->slot[0] == loadout->slot[1] ) return qfalse;
+	// MW2's equipment (isValidEquipment): the Tactical Insertion is a lethal
+	// beside the frag, Semtex and throwing knife, thrown with the same button.
 	if ( loadout->lethal != WP_NONE && loadout->lethal != WP_FRAG && loadout->lethal != WP_SEMTEX &&
-		loadout->lethal != WP_THROWING_KNIFE ) return qfalse;
+		loadout->lethal != WP_THROWING_KNIFE && loadout->lethal != WP_TACTICAL_INSERTION ) return qfalse;
 	if ( loadout->tactical != WP_NONE && loadout->tactical != WP_FLASH ) return qfalse;
-	if ( loadout->lethalCount < 0 || loadout->lethalCount > 3 ||
-		loadout->tacticalCount < 0 || loadout->tacticalCount > 3 ) return qfalse;
-	if ( (loadout->lethal == WP_NONE) != (loadout->lethalCount == 0) ||
-		(loadout->tactical == WP_NONE) != (loadout->tacticalCount == 0) ) return qfalse;
+	if ( loadout->lethalCount != BG_ClassEquipmentCount(loadout->lethal) ||
+		loadout->tacticalCount != BG_ClassEquipmentCount(loadout->tactical) ) return qfalse;
 	if ( !BG_ClassPerksValid(loadout) ) return qfalse;
 	for ( i = 0; i < BG_PERK_SLOTS; i++ )
 		if ( perks[loadout->perk[i]].attachmentLimit > limit ) limit = perks[loadout->perk[i]].attachmentLimit;
@@ -240,6 +317,13 @@ qboolean BG_ParseClass( const char *text, bg_class_t *loadout ) {
 	}
 	if ( strlen(text) >= sizeof(result.name) ) return qfalse;
 	Q_strncpyz(result.name, text, sizeof(result.name));
+	// A class saved when counts were chosen (one to three of each) keeps the
+	// rest of its loadout: any count that rule took becomes MW2's count, never
+	// the class refused or reset. Anything else is still invalid.
+	if ( result.lethal != WP_NONE && result.lethalCount >= 1 && result.lethalCount <= BG_CLASS_EQUIPMENT_LEGACY_MAX )
+		result.lethalCount = BG_ClassEquipmentCount(result.lethal);
+	if ( result.tactical != WP_NONE && result.tacticalCount >= 1 && result.tacticalCount <= BG_CLASS_EQUIPMENT_LEGACY_MAX )
+		result.tacticalCount = BG_ClassEquipmentCount(result.tactical);
 	if ( !BG_ValidateClass(&result) ) return qfalse;
 	*loadout = result; // invalid data never partly overwrites the live choice
 	return qtrue;

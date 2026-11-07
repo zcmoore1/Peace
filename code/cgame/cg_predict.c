@@ -621,6 +621,8 @@ void CG_PredictPlayerState( void ) {
 		replayBefore = cg.predictedPlayerState;
 		Pmove (&cg_pmove);
 		CG_WeapPicture_ReplayStep( &replayBefore, &cg.predictedPlayerState, cg_pmove.pickupItem );
+		// the state each shot's command left, which the server fires it from
+		CG_RecordShots( &replayBefore, &cg.predictedPlayerState );
 
 		moved = qtrue;
 

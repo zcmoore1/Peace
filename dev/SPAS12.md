@@ -23,11 +23,15 @@
   stdlib animation baker preserve this curve.
 - For the sprint glide: start sprint and press Y quickly, end the sprint (a
   sprint latches, as in MW2: tap sprint again, aim, or let go of forward),
-  then press Y again. The visible sprint entry retraces its motion toward
-  ready using the existing transition return, at twice the ordinary exit
-  rate (at most 125ms of travel). It uses the authored easing once, so it
-  begins returning promptly. Sprint exit is continuous too.
-  Gameplay is ready immediately; firing takes over the picture at once.
+  then press Y again. The gun comes back to ready exactly as it does when a
+  sprint stops, using the existing transition return: from the carry (entry
+  finished, or the carry loop) it plays the **250ms** sprint-out; a partial
+  entry runs back over the same 250ms, as a sprint tap reverses it; an exit
+  already under way keeps its pace. The authored easing is used once, on a
+  linear clock, so it leaves the carry at the exit's pace and settles into
+  ready as gently. Gameplay is ready immediately; firing takes over the
+  picture at once. Aiming during the return looks like aiming out of a
+  sprint: the 150ms aim finishes while the gun is still settling.
 - Sprint can begin or continue in the air, as in MW2. Its entry/carry/exit
   animations use the same weapon states as on the ground. Holding jump ends a
   sprint (MW2), and a held sprint button sprints again once jump is let go.

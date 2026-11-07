@@ -160,18 +160,28 @@ void SnapVectorTowards( vec3_t v, vec3_t to ) {
 #define	MACHINEGUN_DAMAGE	7
 #define	MACHINEGUN_TEAM_DAMAGE	5		// wimpier MG in teamplay
 
+/*
+======================
+Bullet_Fire
+
+MW2's sv_clientSideBullets: the server traces the bullet for its damage only.
+No impact or tracer is sent; the shooter's client and everyone else's trace
+the same bullet from the fire event and draw them (CG_FireBullets). The
+bullet comes from the shot command's time, as MW2's Bullet_Fire seeds it with
+its gameTime, through the shared BG_BulletEnd, so the shooter's client repeats
+it exactly. Every hitscan shooter is a client: FireWeapon is reached only
+from ClientEvents.
+======================
+*/
 void Bullet_Fire (gentity_t *ent, int damage, int mod ) {
 	trace_t		tr;
 	vec3_t		end;
 #ifdef MISSIONPACK
 	vec3_t		impactpoint, bouncedir;
 #endif
-	float		r;
-	float		u;
 	float		spread;
-	gentity_t	*tent;
 	gentity_t	*traceEnt;
-	int			i, passent;
+	int			i, passent, seed;
 
 	damage *= s_quadFactor;
 
@@ -179,12 +189,8 @@ void Bullet_Fire (gentity_t *ent, int damage, int mod ) {
 	// exactly (ADS tightens, movement/air widen). Same code in campaign and MP.
 	spread = BG_WeaponSpread( &ent->client->ps );
 
-	r = random() * M_PI * 2.0f;
-	u = sin(r) * crandom() * spread * 16;
-	r = cos(r) * crandom() * spread * 16;
-	VectorMA (muzzle, 8192*16, forward, end);
-	VectorMA (end, r, right, end);
-	VectorMA (end, u, up, end);
+	seed = BG_BulletSeed( ent->client->ps.commandTime );
+	BG_BulletEnd( &seed, spread, muzzle, forward, right, up, end );
 
 	passent = ent->s.number;
 	for (i = 0; i < 10; i++) {
@@ -199,18 +205,12 @@ void Bullet_Fire (gentity_t *ent, int damage, int mod ) {
 		// snap the endpos to integers, but nudged towards the line
 		SnapVectorTowards( tr.endpos, muzzle );
 
-		// send bullet impact
+		// no impact is sent (MW2's sv_clientSideBullets): the clients draw it
 		if ( traceEnt->takedamage && traceEnt->client ) {
-			tent = G_TempEntity( tr.endpos, EV_BULLET_HIT_FLESH );
-			tent->s.eventParm = traceEnt->s.number;
 			if( LogAccuracyHit( traceEnt, ent ) ) {
 				ent->client->accuracy_hits++;
 			}
-		} else {
-			tent = G_TempEntity( tr.endpos, EV_BULLET_HIT_WALL );
-			tent->s.eventParm = DirToByte( tr.plane.normal );
 		}
-		tent->s.otherEntityNum = ent->s.number;
 
 		if ( traceEnt->takedamage) {
 #ifdef MISSIONPACK
@@ -321,27 +321,18 @@ qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent ) {
 	return qfalse;
 }
 
-// this should match CG_ShotgunPattern
-void ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, gentity_t *ent ) {
+// the same pattern every client draws (CG_ShotgunPattern), from the shared bg code
+void ShotgunPattern( vec3_t origin, vec3_t aim, int seed, gentity_t *ent ) {
 	int			i;
-	float		r, u;
 	vec3_t		end;
 	vec3_t		localForward, localRight, localUp;
 	qboolean	hitClient = qfalse;
 
-	// derive the right and up vectors from the forward vector, because
-	// the client won't have any other information
-	VectorNormalize2( origin2, localForward );
-	PerpendicularVector( localRight, localForward );
-	CrossProduct( localForward, localRight, localUp );
+	BG_ShotgunAxes( aim, localForward, localRight, localUp );
 
 	// generate the "random" spread pattern
 	for ( i = 0 ; i < DEFAULT_SHOTGUN_COUNT ; i++ ) {
-		r = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
-		u = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
-		VectorMA( origin, 8192 * 16, localForward, end);
-		VectorMA (end, r, localRight, end);
-		VectorMA (end, u, localUp, end);
+		BG_ShotgunPelletEnd( &seed, origin, localForward, localRight, localUp, end );
 		if( ShotgunPellet( origin, end, ent ) && !hitClient ) {
 			hitClient = qtrue;
 			ent->client->accuracy_hits++;
@@ -350,17 +341,17 @@ void ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, gentity_t *ent ) {
 }
 
 
+/*
+======================
+weapon_supershotgun_fire
+
+No blast is sent (MW2's sv_clientSideBullets): every client draws the
+pellets from the fire event. One seed, the shot command's time, makes the
+whole pattern, as MW2's Bullet_Fire seeds once for every pellet.
+======================
+*/
 void weapon_supershotgun_fire (gentity_t *ent) {
-	gentity_t		*tent;
-
-	// send shotgun blast
-	tent = G_TempEntity( muzzle, EV_SHOTGUN );
-	VectorScale( forward, 4096, tent->s.origin2 );
-	SnapVector( tent->s.origin2 );
-	tent->s.eventParm = rand() & 255;		// seed for spread pattern
-	tent->s.otherEntityNum = ent->s.number;
-
-	ShotgunPattern( tent->s.pos.trBase, tent->s.origin2, tent->s.eventParm, ent );
+	ShotgunPattern( muzzle, forward, BG_BulletSeed( ent->client->ps.commandTime ), ent );
 }
 
 
@@ -444,7 +435,9 @@ void weapon_railgun_fire (gentity_t *ent) {
 	vec3_t impactpoint, bouncedir;
 #endif
 	trace_t		trace;
+#ifdef MISSIONPACK
 	gentity_t	*tent;
+#endif
 	gentity_t	*traceEnt;
 	int			damage;
 	int			i;
@@ -511,34 +504,16 @@ void weapon_railgun_fire (gentity_t *ent) {
 		unlinked++;
 	} while ( unlinked < MAX_RAIL_HITS );
 
-	// link back in any entities we unlinked
+	// link back in any entities we unlinked, but not one the beam destroyed
+	// (a Tactical Insertion's damage frees it)
 	for ( i = 0 ; i < unlinked ; i++ ) {
-		trap_LinkEntity( unlinkedEntities[i] );
+		if ( unlinkedEntities[i]->inuse ) {
+			trap_LinkEntity( unlinkedEntities[i] );
+		}
 	}
 
-	// the final trace endpos will be the terminal point of the rail trail
-
-	// snap the endpos to integers to save net bandwidth, but nudged towards the line
-	SnapVectorTowards( trace.endpos, muzzle );
-
-	// send railgun beam effect
-	tent = G_TempEntity( trace.endpos, EV_RAILTRAIL );
-
-	// set player number for custom colors on the railtrail
-	tent->s.clientNum = ent->s.clientNum;
-
-	VectorCopy( muzzle, tent->s.origin2 );
-	// move origin a bit to come closer to the drawn gun muzzle
-	VectorMA( tent->s.origin2, 4, right, tent->s.origin2 );
-	VectorMA( tent->s.origin2, -1, up, tent->s.origin2 );
-
-	// no explosion at end if SURF_NOIMPACT, but still make the trail
-	if ( trace.surfaceFlags & SURF_NOIMPACT ) {
-		tent->s.eventParm = 255;	// don't make the explosion at the end
-	} else {
-		tent->s.eventParm = DirToByte( trace.plane.normal );
-	}
-	tent->s.clientNum = ent->s.clientNum;
+	// No beam or impact is sent (MW2's sv_clientSideBullets): every client
+	// traces the same beam from the fire event and draws it (CG_RailShot).
 
 	// give the shooter a reward sound if they have made two railgun hits in a row
 	if ( hits == 0 ) {
@@ -615,7 +590,10 @@ void Weapon_LightningFire( gentity_t *ent ) {
 #ifdef MISSIONPACK
 	vec3_t impactpoint, bouncedir;
 #endif
-	gentity_t	*traceEnt, *tent;
+	gentity_t	*traceEnt;
+#ifdef MISSIONPACK
+	gentity_t	*tent;
+#endif
 	int			damage, i, passent;
 
 	damage = 8 * s_quadFactor;
@@ -668,16 +646,8 @@ void Weapon_LightningFire( gentity_t *ent ) {
 			G_Damage( traceEnt, ent, ent, forward, tr.endpos, damage, 0, MOD_LIGHTNING);
 		}
 
-		if ( traceEnt->takedamage && traceEnt->client ) {
-			tent = G_TempEntity( tr.endpos, EV_MISSILE_HIT );
-			tent->s.otherEntityNum = traceEnt->s.number;
-			tent->s.eventParm = DirToByte( tr.plane.normal );
-			tent->s.weapon = ent->s.weapon;
-		} else if ( !( tr.surfaceFlags & SURF_NOIMPACT ) ) {
-			tent = G_TempEntity( tr.endpos, EV_MISSILE_MISS );
-			tent->s.eventParm = DirToByte( tr.plane.normal );
-		}
-
+		// no impact is sent (MW2's sv_clientSideBullets): every client
+		// draws it from the fire event (CG_LightningImpact)
 		break;
 	}
 }
@@ -774,11 +744,8 @@ set muzzle location relative to pivoting eye
 ===============
 */
 void CalcMuzzlePoint ( gentity_t *ent, vec3_t localForward, vec3_t localRight, vec3_t localUp, vec3_t muzzlePoint ) {
-	VectorCopy( ent->s.pos.trBase, muzzlePoint );
-	muzzlePoint[2] += ent->client->ps.viewheight;
-	VectorMA( muzzlePoint, 14, localForward, muzzlePoint );
-	// snap to integer coordinates for more efficient network bandwidth usage
-	SnapVector( muzzlePoint );
+	// snapped to integer coordinates; the clients start their bullets here too
+	BG_ShotMuzzle( ent->s.pos.trBase, ent->client->ps.viewheight, localForward, muzzlePoint );
 }
 
 /*
@@ -789,11 +756,8 @@ set muzzle location relative to pivoting eye
 ===============
 */
 void CalcMuzzlePointOrigin ( gentity_t *ent, vec3_t origin, vec3_t localForward, vec3_t localRight, vec3_t localUp, vec3_t muzzlePoint ) {
-	VectorCopy( ent->s.pos.trBase, muzzlePoint );
-	muzzlePoint[2] += ent->client->ps.viewheight;
-	VectorMA( muzzlePoint, 14, localForward, muzzlePoint );
-	// snap to integer coordinates for more efficient network bandwidth usage
-	SnapVector( muzzlePoint );
+	// snapped to integer coordinates; the clients start their bullets here too
+	BG_ShotMuzzle( ent->s.pos.trBase, ent->client->ps.viewheight, localForward, muzzlePoint );
 }
 
 
@@ -833,24 +797,24 @@ void Weapon_Knife( gentity_t *ent ) {
 		KNIFE_DAMAGE * s_quadFactor, 0, MOD_GAUNTLET );
 }
 
-// Both equipment types are thrown the same way; only the payload differs.
-void Weapon_ThrowEquipment( gentity_t *ent, qboolean lethal ) {
+/*
+===============
+Weapon_ThrowEquipment
+
+MW2's throw (G_ThrowOffhand): every offhand at its own data's velocity, plus
+the thrower's along it, with what its fuse has left. The start is Peace's
+muzzle point. The flash has no effect yet.
+===============
+*/
+void Weapon_ThrowEquipment( gentity_t *ent ) {
 	gentity_t	*m;
 
-	m = ent->s.weapon == WP_SEMTEX ? fire_semtex(ent, muzzle, forward) :
-		ent->s.weapon == WP_THROWING_KNIFE ? fire_throwingknife(ent, muzzle, forward) :
-		fire_grenade( ent, muzzle, forward );
+	m = G_ThrowOffhand( ent, ent->s.weapon, muzzle, forward );
 	if ( !m ) {
 		return;
 	}
-	if ( lethal ) {
-		m->damage       *= s_quadFactor;
-		m->splashDamage *= s_quadFactor;
-	} else {
-		// Tactical: no damage yet - the flash effect lands with the HUD work.
-		m->damage       = 0;
-		m->splashDamage = 0;
-	}
+	m->damage       *= s_quadFactor;
+	m->splashDamage *= s_quadFactor;
 }
 
 /*
@@ -897,12 +861,17 @@ void FireWeapon( gentity_t *ent ) {
 		Weapon_Knife( ent );
 		break;
 	case WP_FRAG:
+	case WP_FLASH:
 	case WP_SEMTEX:
 	case WP_THROWING_KNIFE:
-		Weapon_ThrowEquipment( ent, qtrue );
+		Weapon_ThrowEquipment( ent );
 		break;
-	case WP_FLASH:
-		Weapon_ThrowEquipment( ent, qfalse );
+	case WP_TACTICAL_INSERTION:
+		// MW2 throws an invisible flare it ignores; the TI is planted at the
+		// owner's last standing spot (monitorTIUse on 'grenade_fire'). The
+		// flare's G_FireGrenade spends the fuse HOLD wrote.
+		G_PlantInsertion( ent );
+		ent->client->ps.grenadeTimeLeft = 0;
 		break;
 	case WP_LIGHTNING:
 		Weapon_LightningFire( ent );

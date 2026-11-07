@@ -407,6 +407,85 @@ void CheckAlmostScored( gentity_t *self, gentity_t *attacker ) {
 
 /*
 ==================
+G_DropOffhand
+
+MW2's death drop (5df920, the first thing player_die does, 42bd08): an
+offhand with a fuse in grenadeTimeLeft - from HOLD until the server's throw
+spends it - is fired where its holder dies: from 40 above MW2's feet
+(BG_OFFHAND_DEATH_HEIGHT above Peace's origin), at a random velocity of up to
+160 on each axis and none of the holder's, with the fuse it has left (MW2's
+fuse spends grenadeTimeLeft). A cooked frag that ran out (-1) goes off at
+once. Every class drops: a flash goes off at the body (with no effect yet), a
+Semtex sticks where it lands, a throwing knife falls too slowly to hurt and
+can be picked up. A Tactical Insertion's flare is planted, as monitorTIUse
+plants on its 'grenade_fire', which player_die sends before 'death'. Ammo is
+not touched.
+
+weapon is the offhand: player_die's is the one in hand, and a cook-out's is
+the one its event names (G_GrenadeSuicide). Peace's throw is the release
+command's FireWeapon, so an offhand let go on the command whose own events
+kill its holder before that FireWeapon (a fatal fall's EV_FALL_FAR comes
+first) still has its fuse: that is MW2's death in FIRE before the throw
+(fireDelay), and it is dropped. player_die then leaves the later FireWeapon
+nothing to throw (s.weapon is WP_NONE). With no offhand there is nothing to
+fire and no fuse is kept.
+==================
+*/
+static void G_DropOffhand( gentity_t *self, int weapon ) {
+	gclient_t	*client = self->client;
+	vec3_t		origin, velocity;
+
+	if ( !client || !client->ps.grenadeTimeLeft ) {
+		return;
+	}
+	if ( !BG_OffhandHeldToThrow( weapon ) ) {
+		client->ps.grenadeTimeLeft = 0;
+		return;
+	}
+	if ( weapon == WP_TACTICAL_INSERTION ) {
+		// its flare is never thrown (FireWeapon's case): it is planted
+		G_PlantInsertion( self );
+		client->ps.grenadeTimeLeft = 0;
+		return;
+	}
+	velocity[0] = crandom() * BG_OFFHAND_DEATH_SPEED;
+	velocity[1] = crandom() * BG_OFFHAND_DEATH_SPEED;
+	velocity[2] = crandom() * BG_OFFHAND_DEATH_SPEED;
+	VectorCopy( self->r.currentOrigin, origin );
+	origin[2] += BG_OFFHAND_DEATH_HEIGHT;
+	fire_equipment( self, weapon, origin, velocity );
+}
+
+/*
+==================
+G_GrenadeSuicide
+
+MW2's EV_GRENADE_SUICIDE (ClientEvents 5d6df1): a cooked grenade ran out in
+its holder's hand (pmove's PM_UpdateGrenadeThrow), and the event's parm names
+it (577c37: offHandIndex, which 5d6df1 hands player_die as its weapon).
+Unless in god mode the holder is killed, health and all, as a suicide
+(MOD_SUICIDE, no attacker but themselves - Peace has no throwback to credit),
+and the death drop sets that grenade off at once: its fuse is -1. The drop is
+of the grenade the event names, not of whatever is in hand when the server
+reads it: a later pmove step of the same command may already have ended the
+offhand and brought the gun back, keeping the -1. player_die's own drop then
+finds no fuse. A holder this does not kill - god mode, or a death player_die
+would refuse (S&D between rounds) - keeps their life and the -1; pmove ends
+the offhand on its next think with nothing thrown.
+==================
+*/
+void G_GrenadeSuicide( gentity_t *ent, int weapon ) {
+	if ( !ent->client || ent->health <= 0 || ( ent->flags & FL_GODMODE ) ||
+	     !G_SNDCanDamage( ent ) || level.intermissiontime ) {
+		return;
+	}
+	G_DropOffhand( ent, weapon );
+	ent->client->ps.stats[STAT_HEALTH] = ent->health = 0;
+	player_die( ent, ent, ent, 100000, MOD_SUICIDE );
+}
+
+/*
+==================
 player_die
 ==================
 */
@@ -444,6 +523,8 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		self->activator->nextthink = level.time;
 	}
 #endif
+	// MW2 fires a held offhand before anything marks its holder dead.
+	G_DropOffhand( self, self->client->ps.weapon );
 	self->client->ps.pm_type = PM_DEAD;
 	G_SNDClientDied( self );
 	G_SNDRecordKill( self, attacker );

@@ -64,9 +64,12 @@ Model plug-in: `assets/source/masterkey/README.md`.
   - A sprint lowers it into the carry from its pump.
   - A sprint meanwhile holds a raise or drop to its end, then lowers into the
     carry, as MW2's sprint check refuses states 1-5 for every gun. Sprint never
-    cuts a raise or drop in Peace or in MW2. If that is what the "sprint swap"
-    should do, it is a rule for every gun, not this one (step 1b in
-    `PM_Weapon`).
+    cuts a raise or drop in Peace or in MW2 (owner's decision: keep MW2's
+    rule). Verified in iw4x.exe: the sprint's own start and keep-going gates
+    (56ED10, 56ED80) test only melee, offhand and night-vision states, so you
+    run at sprint speed through a raise or drop; the weapon's sprint step
+    (578060) waits out states 1-7 before its sprint-in (577EE0); and
+    BeginWeaponChange (575F70) stamps the full drop time out of a sprint.
 - **Ammo** belongs to the gun: 4 in the tube, 12 spare at spawn (MW2's
   `startAmmo`), at most 24 (`maxAmmo`), in `slotAltAmmo` and `slotAltReserve`,
   with its chamber debt in `BG_GUN_ALT_UNCHAMBERED`. A dropped rifle carries all

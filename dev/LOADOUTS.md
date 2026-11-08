@@ -137,6 +137,20 @@ whole drop. A one-shot finishes and holds its final pose; a looping clip keeps
 playing. Sprinting into a ladder uses the same ownership rule. Reload clips
 are excluded, and equipment actions/recovery block sprint.
 
+During a fire/bolt cycle the sprint flag runs (speed, meter) while pmove keeps
+what the gun is doing: as MW2's `PM_Weapon_CheckForSprint`, step 1b never
+lowers a shot in progress or `WEAPON_BOLTING`, just as it never lowers a raise
+or a drop. MW2's shot ends READY with the action owed and its sprint check
+comes before the rechamber, so a sprint already on when the shot ends (the
+think the fire clock reaches the open note, `PM_ShotOver`) lowers the gun
+there: the picture carries the fire clip it was showing, the action stays
+owed, and once the gun is back up it plays the whole cycle from its start. A
+sprint begun once the action is under way lets the fire clip play to its end;
+the cycle ends `WEAPON_READY` and chambered, and the next think starts the
+sprint entry from rest. A sprint therefore never cuts the pump or bolt, and
+the close note never meets a sprint lock. A reload is still lowered at once
+(MW2's sprint raise is taken out of its reload states).
+
 Sprint + Y and sprint + YY use the ordinary slot-toggle/drop-cancellation path.
 On cancellation a retained draw/drop or sprint transition returns along its
 visible clip. A swap does not end a sprint (a sprint latches, as in MW2), so

@@ -116,6 +116,8 @@ gentity_t *SelectCTFSpawnPoint(team_t team,int state,vec3_t origin,vec3_t angles
 void MoveClientToIntermission(gentity_t *e) { (void)e; }
 void FindIntermissionPoint(void) { }
 void CalculateRanks(void) { }
+/* player_die's final killcam: nothing here reaches a score limit (above) */
+int trap_ReplayStart(int killer,int from,int to,int begin) { (void)killer;(void)from;(void)to;(void)begin; abort(); return 0; }
 int BotAIShutdownClient(int n,qboolean r) { (void)n;(void)r; return 0; }
 void G_RemoveQueuedBotBegin(int n) { (void)n; }
 void BotTestAAS(vec3_t o) { (void)o; }

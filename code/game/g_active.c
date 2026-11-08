@@ -731,6 +731,41 @@ void BotTestSolid(vec3_t origin);
 
 /*
 ==============
+ClientGameEndFrozen
+
+MW2's endGame freezes every player in every mode: its waitframe, then
+freezePlayerForRoundEnd( 1.0 ) (_gamelogic.gsc, before the round/game
+branch), ROUNDEND_FREEZE_DELAY after the game ended. Until then everyone keeps
+full control through Pmove, with damage already off (G_Damage refuses once the
+intermission is queued). S&D freezes its own round ends (G_SNDClientThink),
+and missionpack's single-player arena keeps its own queued-intermission path
+(in ClientThink_real). As in S&D's freeze, a frozen player's command runs no
+Pmove: only the view turns.
+==============
+*/
+static qboolean ClientGameEndFrozen( gentity_t *ent, usercmd_t *ucmd ) {
+	gclient_t *client = ent->client;
+#ifdef MISSIONPACK
+	if ( g_singlePlayer.integer ) {
+		return qfalse;
+	}
+#endif
+	if ( g_gametype.integer == GT_SND || !level.intermissionQueued ||
+	     level.time < level.intermissionQueued + ROUNDEND_FREEZE_DELAY ||
+	     client->sess.sessionTeam == TEAM_SPECTATOR ) {
+		return qfalse;
+	}
+	client->ps.commandTime = ucmd->serverTime;
+	if ( client->ps.stats[STAT_HEALTH] > 0 ) {
+		client->ps.pm_type = PM_FREEZE;
+		PM_UpdateViewAngles( &client->ps, ucmd );
+	}
+	VectorClear( client->ps.velocity );
+	return qtrue;
+}
+
+/*
+==============
 ClientThink
 
 This will be called once for each client frame, which will
@@ -809,6 +844,7 @@ void ClientThink_real( gentity_t *ent ) {
 	}
 
 	if ( G_SNDClientThink( ent, ucmd ) ) return;
+	if ( ClientGameEndFrozen( ent, ucmd ) ) return;
 
 	// spectators don't do much
 	if ( client->sess.sessionTeam == TEAM_SPECTATOR ) {

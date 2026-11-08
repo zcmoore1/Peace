@@ -349,17 +349,6 @@ static void TestPumpSwapBeforeChamberCosts( void ) {
 	CHECK( testPs.weaponTime == BG_WeaponDropTime( WP_SHOTGUN ) );
 }
 
-static void TestSprintCancelsThePump( void ) {
-	/* Sprint is a timed action with its own lock, so it collides with the
-	   chamber note the same way a holster does and collapses to nothing. */
-	ReadyToFire();
-	testMove.cmd.buttons = 0;
-	RunFor( FireNote( WNOTE_BOLT_CLOSED ) - 1, 1 );
-	testPs.pm_flags |= PMF_SPRINTING;
-	Step( 1 );
-	CHECK( testPs.weaponstate == WEAPON_SPRINTING );
-}
-
 static void SwapAwayAndBack( void ) {
 	int t;
 	testMove.cmd.weapon = WP_MACHINEGUN;
@@ -472,12 +461,17 @@ static void TestChamberDebtIsPerWeapon( void ) {
    step is a simulation think: early, exact and late mean one whole think
    either side of the close note, including thinks longer than a millisecond.
    Mode 3 uses two instances of the same base gun, so debt cannot accidentally
-   migrate to the newly selected instance when the shared working bit changes. */
+   migrate to the newly selected instance when the shared working bit changes.
+   Mode 1, the sprint, is not a transition out of the action at all (MW2's
+   PM_Weapon_CheckForSprint returns on RECHAMBERING): the gun keeps working
+   it, the close note commits on its own think, and the gun lowers only once
+   the cycle is over, so nothing is owed whichever think the sprint began on. */
 static void TestChamberCompletionOrdering( int weapon, int mode, int offset, int step, int perk ) {
 	bg_weaponInstance_t original, other;
 	int sameBase = mode == 3;
 	int close = NoteTime( weapon, ASEQ_FIRE, WNOTE_BOLT_CLOSED );
-	int owesCycle = offset <= 0;
+	int debtAfterPress = mode == 1 ? offset < 0 : offset <= 0;
+	int owesCycle = mode == 1 ? 0 : offset <= 0;
 	int originalAmmo = BG_WeaponMagSize( weapon ) - 1;
 	int otherWeapon = sameBase ? weapon : WP_MACHINEGUN;
 	memset( &testPs, 0, sizeof(testPs) );
@@ -505,16 +499,25 @@ static void TestChamberCompletionOrdering( int weapon, int mode, int offset, int
 	Step( step );
 	BG_GetSlot( &testPs, SLOT_PRIMARY, &original );
 	BG_GetSlot( &testPs, SLOT_SECONDARY, &other );
-	CHECK( !!(original.flags & BG_GUN_UNCHAMBERED) == owesCycle );
+	CHECK( !!(original.flags & BG_GUN_UNCHAMBERED) == debtAfterPress );
 	CHECK( original.ammo == originalAmmo && original.reserve == BG_WeaponMaxReserve( weapon ) );
 	CHECK( !(other.flags & BG_GUN_UNCHAMBERED) );
 	CHECK( other.ammo == BG_WeaponMagSize( otherWeapon ) );
 	CHECK( shots == 1 );
 	CHECK( !(testPs.pm_flags & PMF_PENDING_MAG) );
 	if ( mode == 1 ) {
-		CHECK( testPs.weaponstate == (offset == 0 ? WEAPON_SPRINTING : WEAPON_SPRINT_IN) );
-		CHECK( testPs.weaponTime == (offset == 0 ? 0 : BG_WeaponSprintInTime( weapon )) );
-		if ( offset != 0 ) RunFor( testPs.weaponTime, 1 );
+		int t;
+		CHECK( testPs.weaponstate == WEAPON_BOLTING );
+		for ( t = 0; t < BG_WeaponFireLength( weapon ) && testPs.weaponstate == WEAPON_BOLTING; t += step )
+			Step( step );
+		/* The cycle ends READY; the next think lowers it with the whole entry. */
+		CHECK( testPs.weaponstate == WEAPON_READY && testPs.weaponAnimTime == -1 );
+		CHECK( !(testPs.stats[STAT_UNCHAMBERED] & (1 << weapon)) );
+		Step( step );
+		CHECK( testPs.weaponstate == WEAPON_SPRINT_IN );
+		CHECK( testPs.weaponTime == BG_WeaponSprintInTime( weapon ) );
+		RunFor( testPs.weaponTime, 1 );
+		CHECK( testPs.weaponstate == WEAPON_SPRINTING );
 		testPs.pm_flags &= ~PMF_SPRINTING;
 		Step( 1 );
 		RunFor( BG_WeaponSprintOutTime( weapon ), 1 );
@@ -539,8 +542,9 @@ static void TestChamberCompletionOrdering( int weapon, int mode, int offset, int
 	CHECK( testPs.ammo[weapon] == originalAmmo );
 	CHECK( !!(testPs.stats[STAT_UNCHAMBERED] & (1 << weapon)) == owesCycle );
 	if ( owesCycle ) {
-		/* Sprint-out reaches the debt gate on its completion think; a raise
-		   reaches READY and returns, so it reaches that gate next think. */
+		/* Only a swap or a ladder owes it here (a sprint waited for the
+		   cycle). A raise reaches READY and returns, so it reaches the debt
+		   gate on the next think. */
 		if ( testPs.weaponstate == WEAPON_READY ) Step( 1 );
 		CHECK( testPs.weaponstate == WEAPON_BOLTING && testPs.weaponAnimTime == 0 );
 		testMove.cmd.buttons = BUTTON_ATTACK;
@@ -852,6 +856,202 @@ static void TestShootReload( int step ) {
 	}
 }
 
+/* ---- a sprint over the shot and the action ----
+ * MW2's PM_Weapon_CheckForSprint (iw4x 0x578060) returns while the gun is
+ * FIRING or RECHAMBERING, and its sprint gates never test those states: the
+ * sprint runs and the gun keeps what it is doing. MW2's shot ends READY with
+ * the action owed, and on the next think the sprint check comes before
+ * CheckForRechamber (0x575a30, which starts the action only from READY). So:
+ *  - a sprint already on when the shot ends takes the gun there, and the
+ *    action is still owed: once the gun is back up it works ALL of it (a
+ *    deferral that costs the whole cycle, never a cancel). Peace's shot ends
+ *    on the think its clock reaches the open note; that think lowers.
+ *  - a sprint begun once the action is under way waits for it - in the
+ *    action, on the think before the close note, on the close think (the
+ *    owner's "bolt NAC into a sprint") or on the think after it - and the gun
+ *    lowers chambered, owing nothing: the close note never meets a sprint lock.
+ * (MW2's READY think comes one think after the shot's last; Peace lowers on
+ * that last think, so a sprint begun on the think after it already waits.) */
+enum { SP_SHOT, SP_SHOT_END, SP_AFTER_OPEN, SP_ACTION, SP_BEFORE_CLOSE, SP_ON_CLOSE, SP_AFTER_CLOSE, SP_COUNT };
+/* One think: PM_Weapon alone with the flag set, or the whole Pmove with a
+   real sprint press, where PM_CheckSprint raises the flag itself. */
+static void CycleThink( int full, int step ) {
+	int sequence = testPs.eventSequence;
+	if ( !full ) {
+		Step( step );
+		return;
+	}
+	MoveTick( step );
+	for ( ; sequence < testPs.eventSequence; sequence++ ) {
+		if ( testPs.events[sequence & (MAX_PS_EVENTS - 1)] == EV_FIRE_WEAPON ) {
+			shots++;
+		}
+	}
+}
+/* The sprint ends (forward let go), the gun rises, and - if the action is
+   still owed - works the whole of it from 0 before the trigger fires again. */
+static void SprintOutAndFire( int weapon, int full, int step, int owed ) {
+	int t, worked = 0;
+	if ( full ) testMove.cmd.forwardmove = 0;
+	else testPs.pm_flags &= ~PMF_SPRINTING;
+	CycleThink( full, step );
+	CHECK( !( testPs.pm_flags & PMF_SPRINTING ) );
+	CHECK( testPs.weaponstate == WEAPON_SPRINT_OUT );
+	CHECK( testPs.weaponTime == BG_WeaponSprintOutTime( weapon ) );
+	for ( t = 0; t < BG_WeaponSprintOutTime( weapon ) && testPs.weaponstate == WEAPON_SPRINT_OUT; t += step )
+		CycleThink( full, step );
+	CHECK( !!( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) ) == owed );
+	if ( owed ) {
+		/* the sprint-out's last think hands a ready gun to the debt gate */
+		CHECK( testPs.weaponstate == WEAPON_BOLTING && testPs.weaponAnimTime == 0 );
+		CHECK( testPs.weaponTime == BG_WeaponFireLength( weapon ) );
+		testMove.cmd.buttons = BUTTON_ATTACK;
+		while ( testPs.weaponstate == WEAPON_BOLTING ) {
+			CHECK( shots == 1 );
+			CycleThink( full, step ); worked += step;
+		}
+		/* the whole cycle, and the trigger fires on the think it ends */
+		CHECK( worked >= BG_WeaponFireLength( weapon ) && worked < BG_WeaponFireLength( weapon ) + step );
+		CHECK( shots == 2 && testPs.weaponstate == WEAPON_FIRING );
+	} else {
+		CHECK( testPs.weaponstate == WEAPON_READY );
+		CycleThink( full, step );
+		CHECK( testPs.weaponstate == WEAPON_READY );	/* no action worked again */
+		testMove.cmd.buttons = BUTTON_ATTACK;
+		CycleThink( full, step );
+		CHECK( shots == 2 && testPs.weaponstate == WEAPON_FIRING );
+	}
+	CHECK( testPs.ammo[weapon] == BG_WeaponMagSize( weapon ) - 2 );
+	testMove.cmd.buttons = 0;
+}
+static void TestSprintOverTheCycle( int weapon, int point, int step, int full ) {
+	int open = GunNote( bg_weaponFire[weapon].notes, WNOTE_BOLT_OPEN );
+	int close = GunNote( bg_weaponFire[weapon].notes, WNOTE_BOLT_CLOSED );
+	int length = BG_WeaponFireLength( weapon );
+	int lowersAtShotEnd = point == SP_SHOT || point == SP_SHOT_END;
+	/* the anim time the press think carries the clock up to */
+	int target[SP_COUNT];
+	int elapsed, thinks = 0, t;
+	CHECK( 0 < open && open < close && close < length );
+	target[SP_SHOT] = open / 2;
+	target[SP_SHOT_END] = open;
+	target[SP_AFTER_OPEN] = open + step;
+	target[SP_ACTION] = ( open + close ) / 2;
+	target[SP_BEFORE_CLOSE] = close - step;
+	target[SP_ON_CLOSE] = close;
+	target[SP_AFTER_CLOSE] = close + step;
+
+	ShootGun( weapon );
+	CHECK( testPs.weaponAnimTime == 0 );
+	if ( full ) {
+		testMove.trace = ClearWorldTrace;
+		testMove.pointcontents = NoWorldContents;
+		testMove.tracemask = MASK_PLAYERSOLID;
+		testPs.speed = 320;
+		testPs.groundEntityNum = ENTITYNUM_NONE;	/* MW2's sprint starts in the air too */
+		testMove.cmd.forwardmove = 127;
+	}
+	while ( testPs.weaponAnimTime + step < target[point] ) CycleThink( full, step );
+
+	/* The press think is the one that carries the clock across its target. */
+	elapsed = testPs.weaponAnimTime + step;
+	switch ( point ) {
+	case SP_SHOT:         CHECK( elapsed < open ); break;
+	case SP_SHOT_END:     CHECK( elapsed - step < open && elapsed >= open ); break;
+	case SP_AFTER_OPEN:   CHECK( elapsed - step >= open && elapsed - 2 * step < open ); break;
+	case SP_ACTION:       CHECK( elapsed - step >= open && elapsed < close ); break;
+	case SP_BEFORE_CLOSE: CHECK( elapsed < close && elapsed + step >= close ); break;
+	case SP_ON_CLOSE:     CHECK( elapsed - step < close && elapsed >= close ); break;
+	case SP_AFTER_CLOSE:  CHECK( elapsed - step >= close ); break;
+	}
+	CHECK( elapsed < length );
+	if ( full ) testMove.cmd.buttons = BUTTON_SPRINT;	/* a tap: the sprint latches */
+	else testPs.pm_flags |= PMF_SPRINTING;
+
+	/* Every think until the shot ends (lowersAtShotEnd) or the cycle does: the
+	   gun stays in the shot or the action, the anim clock runs on, and the
+	   close note settles the debt on its own think. */
+	for ( ;; ) {
+		CycleThink( full, step );
+		testMove.cmd.buttons = 0;
+		CHECK( testPs.pm_flags & PMF_SPRINTING );
+		/* The sprint meter runs from the think after the press, as it always does. */
+		if ( full ) CHECK( testPs.sprintUsed == thinks * step );
+		thinks++;
+		CHECK( shots == 1 );
+		if ( lowersAtShotEnd ? elapsed >= open : elapsed >= length ) break;
+		CHECK( testPs.weaponstate == ( elapsed < open ? WEAPON_FIRING : WEAPON_BOLTING ) );
+		CHECK( testPs.weaponAnimTime == elapsed );
+		CHECK( !!( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) ) == ( elapsed < close ) );
+		elapsed += step;
+	}
+	if ( lowersAtShotEnd ) {
+		/* The think the shot ends lowers the gun with the gun's whole sprint
+		   entry. The action never starts: the clock stays where the shot
+		   ended, and the pump or bolt is still owed. */
+		CHECK( testPs.weaponstate == WEAPON_SPRINT_IN );
+		CHECK( testPs.weaponTime == BG_WeaponSprintInTime( weapon ) );
+		CHECK( testPs.weaponAnimTime == elapsed );
+		CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) );
+	} else {
+		/* The think the cycle reaches its length: READY and chambered, not lowered. */
+		CHECK( testPs.weaponstate == WEAPON_READY && testPs.weaponAnimTime == -1 );
+		CHECK( !( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) ) );
+		/* The next think lowers it, with the gun's whole sprint entry. */
+		CycleThink( full, step );
+		CHECK( testPs.pm_flags & PMF_SPRINTING );
+		CHECK( testPs.weaponstate == WEAPON_SPRINT_IN );
+		CHECK( testPs.weaponTime == BG_WeaponSprintInTime( weapon ) );
+	}
+	for ( t = 0; t < BG_WeaponSprintInTime( weapon ) && testPs.weaponstate == WEAPON_SPRINT_IN; t += step )
+		CycleThink( full, step );
+	CHECK( testPs.weaponstate == WEAPON_SPRINTING && testPs.weaponAnimTime == -1 );
+	CHECK( !!( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) ) == lowersAtShotEnd );
+	CHECK( shots == 1 );
+
+	/* End the sprint (let go of forward). Lowered at the shot's end, the gun
+	   works its whole action before it fires again; lowered after the cycle,
+	   it owes nothing and the next trigger fires at once. */
+	SprintOutAndFire( weapon, full, step, lowersAtShotEnd );
+}
+
+/* MW2 asks for the sprint pose before the rechamber (CheckForSprint, then
+   CheckForRechamber): a gun at rest that still owes its action - here after a
+   swap out before the close note - lowers first, keeps the debt through the
+   whole sprint, and works the WHOLE action once it is back up. A deferral that
+   costs the full cycle, never a cancel. */
+static void TestSprintDefersAnOwedAction( int weapon ) {
+	int close = GunNote( bg_weaponFire[weapon].notes, WNOTE_BOLT_CLOSED ), t;
+	ShootGun( weapon );
+	RunFor( close - 2, 1 );
+	testMove.cmd.weapon = otherGun; Step( 1 );
+	CHECK( testPs.weapon == weapon && testPs.weaponstate == WEAPON_DROPPING );
+	for ( t = 0; t < 10000 && !( testPs.weapon == otherGun && testPs.weaponstate == WEAPON_READY ); t++ ) Step( 1 );
+	testMove.cmd.weapon = weapon;
+	for ( t = 0; t < 10000 && !( testPs.weapon == weapon && testPs.weaponstate == WEAPON_READY ); t++ ) Step( 1 );
+	CHECK( testPs.weapon == weapon && testPs.weaponstate == WEAPON_READY );
+	CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) );
+
+	testPs.pm_flags |= PMF_SPRINTING;
+	Step( 1 );
+	CHECK( testPs.weaponstate == WEAPON_SPRINT_IN && testPs.weaponTime == BG_WeaponSprintInTime( weapon ) );
+	RunFor( BG_WeaponSprintInTime( weapon ), 1 );
+	CHECK( testPs.weaponstate == WEAPON_SPRINTING );
+	CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) );
+	testPs.pm_flags &= ~PMF_SPRINTING;
+	Step( 1 );
+	CHECK( testPs.weaponstate == WEAPON_SPRINT_OUT );
+	RunFor( BG_WeaponSprintOutTime( weapon ), 1 );
+	/* the sprint-out's last think hands a ready gun to the debt gate */
+	CHECK( testPs.weaponstate == WEAPON_BOLTING && testPs.weaponAnimTime == 0 );
+	shots = 0; testMove.cmd.buttons = BUTTON_ATTACK;
+	RunFor( BG_WeaponFireLength( weapon ) - 1, 1 );
+	CHECK( shots == 0 );
+	Step( 1 );
+	CHECK( shots == 1 );
+	testMove.cmd.buttons = 0;
+}
+
 /* The trigger and a reload request held together: a reload is never asked of
    a gun that is reloading, so after each reload the trigger gets its shot -
    the guns alternate and never lock in their reload. */
@@ -881,7 +1081,7 @@ static void TestTriggerAndReloadHeld( int step ) {
 }
 
 int main( void ) {
-	int i, offset, weapon, mode, perk;
+	int i, offset, weapon, mode, perk, full;
 	const int steps[] = { 1, 8, 16, 33, 66 };
 	for ( i = 0; i < 5; i++ ) {
 		TestAttackInterrupt( steps[i] );
@@ -904,7 +1104,13 @@ int main( void ) {
 	TestChamberDebtIsPerWeapon();
 	TestPumpCancelIsFree();
 	TestPumpSwapBeforeChamberCosts();
-	TestSprintCancelsThePump();
+	for ( weapon = 0; weapon < 2; weapon++ )
+		for ( mode = 0; mode < SP_COUNT; mode++ )
+			for ( i = 0; i < ARRAY_LEN(steps); i++ )
+				for ( full = 0; full < 2; full++ )
+					TestSprintOverTheCycle( weapon ? WP_M40A3 : WP_SHOTGUN, mode, steps[i], full );
+	TestSprintDefersAnOwedAction( WP_SHOTGUN );
+	TestSprintDefersAnOwedAction( WP_M40A3 );
 	for ( offset = -1; offset <= 1; offset++ ) {
 		TestSwapSprintPreserved( 0, offset );
 		TestSwapSprintPreserved( 1, offset );

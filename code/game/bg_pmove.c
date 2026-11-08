@@ -3040,6 +3040,31 @@ static int PM_PendingMagAmount( void ) {
 
 /*
 ===============
+PM_ShotOver
+
+The shot of a gun with a worked action is over once its fire clip's clock has
+reached the open note (MW2's fireTime: the shot ends there, the action is what
+follows). Read from the gun's table; a gun with no open note shoots until its
+lock runs out, so its shot is never over here.
+===============
+*/
+static qboolean PM_ShotOver( void ) {
+	const bg_weaponNote_t *n;
+
+	if ( pm->ps->weaponstate != WEAPON_FIRING || pm->ps->weaponAnimSeq != ASEQ_FIRE ||
+	     pm->ps->weaponAnimTime < 0 ) {
+		return qfalse;
+	}
+	for ( n = bg_weaponFire[pm->ps->weapon].notes; n->note != WNOTE_NONE; n++ ) {
+		if ( n->note == WNOTE_BOLT_OPEN ) {
+			return pm->ps->weaponAnimTime >= n->time;
+		}
+	}
+	return qfalse;
+}
+
+/*
+===============
 PM_ReloadSettleCrossed
 
 MW2's reload delayed action on a gun that still owes its pump or bolt
@@ -4025,8 +4050,24 @@ static void PM_Weapon( void ) {
 	//     like a holster. Stamped here - before the notes - so the mag-in note
 	//     can take the lock away in the same think. Nothing here knows that is
 	//     possible; it just stamps honestly and lets step 3b notice.
-	//     Held off while a switch is resolving, so the drop/raise finishes first.
-	if ( !ladderWeapon && pm->ps->weaponstate != WEAPON_DROPPING && pm->ps->weaponstate != WEAPON_RAISING ) {
+	//     This is MW2's PM_Weapon_CheckForSprint (578060): no sprint pose out
+	//     of the shot or the action (FIRING 6, RECHAMBERING 7), nor out of a
+	//     raise or drop, so a switch resolves first. The sprint flag, its speed
+	//     and its meter still run (PM_CheckSprint: MW2's start and end gates,
+	//     56ED10/56ED80, never test those states).
+	//     MW2's shot ends READY, owing its action, and the sprint check runs
+	//     before the rechamber can start (575A30 starts it only from READY),
+	//     so a sprint that is on as the shot ends takes the gun first and the
+	//     action stays owed; step 4d works all of it once the gun is back up.
+	//     The open note that ends the shot here runs in step 2, after this, so
+	//     the shot is over on the think its clock reaches that note
+	//     (PM_ShotOver): that think lowers, and step 2 then finds no shot to
+	//     move into the action. Once the action is under way the sprint waits:
+	//     you run while it finishes, and the gun lowers on the think after
+	//     step 4c ends it, already chambered. So no sprint lock is ever stamped
+	//     while BOLTING, and the close note never has one to take away.
+	if ( !ladderWeapon && pm->ps->weaponstate != WEAPON_DROPPING && pm->ps->weaponstate != WEAPON_RAISING &&
+	     ( pm->ps->weaponstate != WEAPON_FIRING || PM_ShotOver() ) && pm->ps->weaponstate != WEAPON_BOLTING ) {
 		if ( pm->ps->pm_flags & PMF_SPRINTING ) {
 			if ( pm->ps->weaponstate != WEAPON_SPRINT_IN &&
 			     pm->ps->weaponstate != WEAPON_SPRINTING ) {
@@ -4104,7 +4145,10 @@ static void PM_Weapon( void ) {
 	//    and ammo fill. Both a close note and a reload's delayed action settle
 	//    chamber debt here. A holster, sprint or ladder that finished above
 	//    skipped all of it - that is the NAC: the swap is instant, the round is
-	//    not loaded and the pump or bolt is still owed.
+	//    not loaded and the pump or bolt is still owed. (What a sprint skips
+	//    here is only ever a reload's: step 1b lowers the gun at the shot's end
+	//    or after the action, never in it, so the close note never meets a
+	//    sprint lock.)
 	//    Still RELOADING afterwards: the settle note has not arrived yet, and
 	//    the state alone is what keeps the gun from firing during the tail.
 	if ( chamberClosed || reloadSettled ) {

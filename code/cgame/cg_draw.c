@@ -2877,8 +2877,8 @@ static qboolean CG_SNDUseInRange( void ) {
 			VectorSubtract(ps->origin,origin,delta);
 			if ( VectorLengthSquared(delta) <= radius*radius ) return qtrue;
 		}
-	} else if ( phase == SND_PLANTED && cgs.clientinfo[cg.clientNum].team != TEAM_SPECTATOR &&
-		cgs.clientinfo[cg.clientNum].team != attack ) {
+	} else if ( phase == SND_PLANTED && !atoi(Info_ValueForKey(state,"result")) &&
+		cgs.clientinfo[cg.clientNum].team != TEAM_SPECTATOR && cgs.clientinfo[cg.clientNum].team != attack ) {
 		VectorSet(origin,atoi(Info_ValueForKey(state,"x")),atoi(Info_ValueForKey(state,"y")),atoi(Info_ValueForKey(state,"z")));
 		VectorSubtract(ps->origin,origin,delta);
 		if ( VectorLengthSquared(delta) <= 72*72 ) return qtrue;
@@ -2924,6 +2924,9 @@ static void CG_DrawSND( void ) {
 		status = result == SND_DEFUSED ? "BOMB DEFUSED" : result == SND_EXPLODED ? "BOMB DETONATED" :
 			result == SND_TIME ? "TIME EXPIRED" : result == SND_DRAW ? "DRAW" : "TEAM ELIMINATED";
 		Com_sprintf(text,sizeof(text),"%s - %s",status,winner == TEAM_RED ? "RED WINS" : winner == TEAM_BLUE ? "BLUE WINS" : "NO WINNER");
+	} else if ( result == SND_DEFUSED || result == SND_EXPLODED ) {
+		// the bomb is done; play goes on until the round ends (sd.gsc's delay)
+		Com_sprintf(text,sizeof(text),"%s",result == SND_DEFUSED ? "BOMB DEFUSED" : "BOMB DETONATED");
 	} else {
 		Com_sprintf(text,sizeof(text),"%s  %i:%02i  %s",status,seconds/60,seconds%60,
 			phase == SND_PLANTED ? "BOMB PLANTED" : carrier == cg.clientNum ? "YOU HAVE THE BOMB" :
@@ -2943,7 +2946,7 @@ static void CG_DrawSND( void ) {
 		if ( phase == SND_LIVE && carrier == cg.clientNum && VectorLengthSquared(delta) <= radius*radius )
 			prompt = "Hold USE to plant - stay still";
 	}
-	if ( phase == SND_PLANTED || (phase == SND_LIVE && carrier < 0 && ownTeam == attack) ) {
+	if ( (phase == SND_PLANTED && result == SND_NONE) || (phase == SND_LIVE && carrier < 0 && ownTeam == attack) ) {
 		VectorSet(origin,atoi(Info_ValueForKey(state,"x")),atoi(Info_ValueForKey(state,"y")),atoi(Info_ValueForKey(state,"z")));
 		CG_SNDMarker(origin,"BOMB",gold);
 		VectorSubtract(ps->origin,origin,delta);

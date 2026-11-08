@@ -828,7 +828,7 @@ extern	vmCvar_t	g_localTeamPref;
 
 void	trap_Print( const char *text );
 void trap_ReplayReset( qboolean enabled );
-int trap_ReplayStart( int clientNum, int fromTime, int toTime );
+int trap_ReplayStart( int clientNum, int fromTime, int toTime, int beginTime );
 void	trap_Error( const char *text ) Q_NO_RETURN;
 int		trap_Milliseconds( void );
 int	trap_RealTime( qtime_t *qtime );

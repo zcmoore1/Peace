@@ -118,7 +118,21 @@ source for MW2 behaviour; the owner rejects it.
 - **Bolting is a state, not a phase of firing.** `WEAPON_FIRING` is the shot;
   `WEAPON_BOLTING` is the action being worked. "Bolting" covers bolt, pump,
   cock and lever — they differ only in cycle length and note placement, never
-  in code. It cannot fire and CAN be holstered out of. A knife waits for
+  in code. It cannot fire, it cannot be sprinted out of, and it CAN be
+  holstered out of. Sprint is MW2's `PM_Weapon_CheckForSprint` (iw4x
+  0x578060), which does nothing while the gun is FIRING or RECHAMBERING;
+  the sprint flag, speed and meter run as usual (MW2's sprint gates never
+  test those states). MW2's shot ends READY owing its action, and the sprint
+  check comes before `CheckForRechamber` (0x575a30, which starts the action
+  only from READY), so a sprint already on when the shot ends takes the gun
+  there and the action stays owed: step 4d works all of it once the gun is
+  back up (a deferral, never a cancel). The shot ends on the think its clock
+  reaches `WNOTE_BOLT_OPEN` (`PM_ShotOver`; that note moves the state in
+  step 2, after step 1b), and that think lowers. Once the action is under
+  way step 1b never lowers `WEAPON_BOLTING`: you run while it finishes and
+  the gun lowers the think after step 4c ends it, chambered. (MW2 lowers on
+  the READY think after the shot's last; Peace on that last think, so its
+  window ends a think sooner.) A knife waits for
   `WNOTE_BOLT_CLOSED` (MW2's knife refuses the rechamber's pending bolt-close
   delay): a press before it is lost, one after it cuts the tail short. It ends on the anim
   clock, never on the lock. A reload is taken at once out of the shot or the
@@ -129,10 +143,12 @@ source for MW2 behaviour; the owner rejects it.
 - **The bolt cancel is the reload cancel.** `WNOTE_BOLT_CLOSED` on the fire
   animation carries no rounds. Like `WNOTE_MAG_IN` it clears the lock on its
   think and only queues its completion: the chambering commits in step 4, the
-  same commit point as a reload's fill and delayed action. A swap, sprint or
-  ladder grab that completes on that exact think is still instant, but it
-  returns before step 4, so the chamber debt stays owed (owner's
-  rule: a successful NAC does not complete the pump). One think later — the
+  same commit point as a reload's fill and delayed action. A swap or ladder
+  grab that completes on that exact think is still instant, but it returns
+  before step 4, so the chamber debt stays owed (owner's rule: a successful
+  NAC does not complete the pump). A sprint is not one of them: it never
+  lowers a gun in the action, so the note has no sprint lock to take and
+  there is no "bolt NAC into a sprint" (MW2 has none). One think later — the
   late cancel — the chambering has committed and is kept. It is the same note,
   in the same place, that opens the reload's window. Never write a second
   cancel.
@@ -581,12 +597,46 @@ source for MW2 behaviour; the owner rejects it.
   trigger on the same command, as MW2 checks reload before it fires. Never
   predict the bit on the client, never hold the gun back after a quick action,
   and never name a trick. How wide the window is comes only from the client's
-  clock, which is MW2's (`CL_DriftTimeDelta`, 0x5a1ad0): it sits one snapshot
-  interval plus 16ms behind the newest snapshot, and prediction replays from
-  the time-selected `cg.nextSnap`, so on your own host a release up to ~16ms
-  before the gun is up always fakes and up to ~66ms sometimes does (sv_fps 20,
-  MW2's fixed frame). Never move that clock toward the newest snapshot.
-  `dev/FAKE_RELOAD.md` has the measured windows.
+  clock and the host's frame, both MW2's. The clock (`CL_DriftTimeDelta`,
+  0x5a1ad0) sits one snapshot interval plus 16ms behind the newest snapshot,
+  and prediction replays from the time-selected `cg.nextSnap`. The host reads
+  its own server's snapshot a frame after the server sent it (below). So on
+  your own host (sv_fps 20, MW2's fixed frame, 125 fps) a release up to 16ms
+  before the gun is up always fakes and up to 64ms sometimes does, and a
+  trigger pull up to 24ms after X (three commands at 125 fps, two at 85) is
+  always a fake bullet and up to ~75ms sometimes is. Never move that clock
+  toward the newest snapshot. `dev/FAKE_RELOAD.md` has the measured windows.
+- **A host reads its own snapshots a frame late, as MW2's does (owner's rule:
+  do what MW2 does).** MW2 runs its server in a thread of its own: `SV_Frame`
+  (0x627610) only signals it (0x627695) and returns, and the thread's game
+  frame and snapshots (0x415cd0, 0x4517b0) come after the main thread's second
+  event loop (0x47dfc6), so the snapshot is read in the next frame (0x47dd80).
+  Peace's `Com_Frame` holds what `SV_Frame` sends the local client
+  (`NET_HoldLoopPackets`) and releases it before the next frame's first event
+  loop. Nothing else waits: commands, the server's answers to the client's own
+  packets, and remote clients keep ioquake3's timing. Over every snapshot
+  phase it moves the own-host fake reload and fake bullet exactly one frame
+  later (the suite checks the fake bullet gap by gap); the wild scope rides
+  on the fake reload. Never read the host's snapshot in the frame that made
+  it, and never touch Pmove, the use/reload bit, the clock or the picture rule
+  for these windows. `run-fakereload.sh` runs every own-host case through the
+  real `Com_Frame` and loopback and checks it against the harness's model.
+- **Snapshots come at MW2's rate, not the client's (owner's rule: do what MW2
+  does).** MW2's `SV_UserinfoChanged` parses `snaps` and replaces it
+  (0x401a8a): a snapshot every 100ms while `onlinegame` is set (default 1;
+  IW4x's dedicated server sets it too), else 50ms, and
+  `SV_SendMessageToClient` sends a loopback or LAN client one every server
+  frame regardless (0x48ff84, 0x490033). Peace's server does the same
+  (`sv_onlineGame`, default 1; `SV_ClientSnapshotMsec`,
+  `SV_SnapshotEveryFrame`, `SV_SnapshotDue`; a bot or the dummy, sent
+  nothing, keeps every frame); `snaps` has no say. Online,
+  half the snapshots make the base older and every window wider, which is
+  most of why MW2 felt easier there, though X must now be held across one of
+  them to be seen at all; your own host and LAN are unchanged.
+  `sv_lanForceRate 0` treats a LAN client (127.0.0.1 included) as an internet
+  one. Never honour `snaps` again or move this into Pmove, the use/reload bit
+  or the clocks; `replay_test.c` checks the rule and the fake reload harness
+  models it for every ping row (`dev/FAKE_RELOAD.md`).
 - **The gun never un-plays an action it showed (owner's rule).**
   `cg_weappicture.c` draws the viewmodel from its own run of the client's
   commands through the real `Pmove` once prediction is corrected away from a
@@ -797,7 +847,11 @@ which `#include`s `bg_pmove.c` and drives `PM_Weapon` directly — reload
 segments, ammo conservation, swap/sprint ordering and the fire cycle, plus
 shoot-reload resets (instant reload, fastest NAC, Fayde, YY too early) on every
 gun with a worked action, the close note's chamber commit (early, exact and
-late cancels by swap, sprint and ladder, at every think length) and the aim a
+late cancels by swap and ladder, at every think length), a sprint begun in the
+shot or on its last think lowering the gun where the shot ends with the whole
+action still owed, and one begun on the think after it, in the action or on any
+think around the close note waiting for the whole cycle (`PM_Weapon` alone and
+full `Pmove` with a real sprint press, SPAS and M300, at every think length) and the aim a
 NAC carries onto the incoming gun through full `Pmove`. Every
 timing in it is read from the shipped tables; never write a literal there, or
 retiming a weapon breaks the test without telling you anything.
@@ -830,8 +884,11 @@ kill in its raise, the death drop of every class, and a release on the
 command a fall kills its holder.
 Pose checks cover source retention, ladder holsters, loop/endpoint semantics,
 reload/action exclusions, ordinary sprint reversal and frame-only crossfades,
-plus YY flow (reversed draw, eased return, fire cut-in) through the real
-`PM_Weapon`, which is why the pose test links `pickup_pmove_driver.c`.
+plus YY flow (reversed draw, eased return, fire cut-in) and a sprint over the
+shot (lowered where it ends, carrying the fire clip, the whole action played
+from its start once back up) or the action (fire clip to its end, entry from
+rest after it) through the real `PM_Weapon`, which is why the pose test links
+`pickup_pmove_driver.c`.
 The glide return is compared frame by frame with the ordinary sprint exit
 from the same posture (carry, loop, exit under way, partial entry), in both
 rendering paths, for SPAS and M300.
@@ -873,11 +930,20 @@ TI's checks in every suite.
 (MW2's client time base through the real `CL_DriftTimeDelta`, snapshot
 selection by the client clock, sv_fps frames, ping) with the real `Pmove` on both
 sides, the server's use/reload step after each command, and the real `cg_anim`
-+ `cg_weappicture.c` on the client. On the SPAS and the M300 it checks the fake
++ `cg_weappicture.c` on the client. 0 ms is your own host, in `Com_Frame`'s
+order with the snapshot held a frame; the `.sh` also runs every own-host case
+through the real `Com_Frame` and loopback (`common.c`, `net_chan.c`,
+`fake_reload_engine.c`), requires the same outcome, and checks that only
+`SV_Frame`'s packets wait. On the SPAS and the M300 it checks the fake
 reload after knife/frag/Semtex cancel, tap vs hold, aiming/shooting/real reload
 during it, `+reload` never faking, no fake shot, the lone knife, the fake bullet
-and the M300 wild scope at 0/50/100/200 ms. `FAKERELOAD_PROBE=1` prints every
-tap timing; `FAKERELOAD_SVFPS` changes the server rate.
+(per tap, and over every snapshot phase on your own host, one frame later than
+ioquake3's host) and the M300 wild scope at 0/50/100/200 ms.
+`FAKERELOAD_PROBE=1` prints every tap timing; `FAKERELOAD_SVFPS` changes the
+server rate; `FAKERELOAD_BULLETS=1` prints the fake bullet over every phase
+(`FAKERELOAD_CLFRAME`, `FAKERELOAD_ONLINEGAME=0` for 50ms snapshots online,
+`FAKERELOAD_MAXPACKETS`, `FAKERELOAD_HOSTHOLD=0` for ioquake3's host). Every
+ping row is an internet client of Peace's server: a snapshot every 100ms.
 
 `dev/tests/run-bullets.sh` (`BULLETS_TEST_FLAGS` for -DMISSIONPACK) runs
 client-side bullets end to end: the real `ClientThink`, `Pmove`, `FireWeapon`
@@ -944,16 +1010,55 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   `SND_WaitForPlayers` frees it too (MW2's round restart frees everything).
 - QVM `sscanf` returns zero even after parsing! Do not use its return count
   to validate HUD data. The S&D site reader uses `COM_Parse` instead.
+- **The round end is MW2's endGame (owner's rule: do what MW2 does).** A round
+  is postgame the moment it ends - no damage, no use - but alive players keep
+  full control (`G_SNDClientThink` returns qfalse, so the real Pmove runs) until
+  `snd.freezeTime`: the deciding moment plus `ROUNDEND_FREEZE_DELAY` (1050:
+  endGame's waitframe and `freezePlayerForRoundEnd( 1.0 )`). The deciding moment
+  is the decisive death's time for an elimination, else the frame the result
+  comes. That window is why a knife pressed after the round-winning shot comes
+  out; never shorten it or freeze on the kill's frame. An elimination is
+  decided inside the death, as MW2's onDeadEvent is (`player_die` ->
+  `G_SNDRecordKill` -> `SND_CheckElimination`): from that moment nothing later
+  in the same frame - a missile landing, a grenade going off, the rest of a
+  blast - deals damage or changes the result, so the first decisive death
+  decides. `G_SNDRunFrame` only catches teams emptied without a death
+  (disconnects, team changes); that is the only draw. A detonation or defuse
+  first waits out sd.gsc's delay (`SND_DETONATION_DELAY` 3000,
+  `SND_DEFUSE_DELAY` 1500) with phase still `SND_PLANTED` and `snd.result`
+  set: play and damage go on, eliminations are ignored, nothing more can be
+  used. Timeouts end at once. The freeze is still `PM_FREEZE` (MW2's
+  `PMF_FROZEN` would keep running the weapon; that needs the owner's OK and a
+  protocol bump).
 - Round-winning killcams use a bounded engine snapshot history in
   `sv_snapshot.c`, including the killer's player state and original visibility.
-  `trap_ReplayStart` returns the shared playback deadline; S&D must wait for it
-  before spawning the next round, and `LogExit` must reuse it on the final round.
+  The window is MW2's final killcam: `KILLCAM_REWIND` 4000 before the death to
+  `KILLCAM_LINGER` 1950 after it. `trap_ReplayStart( killer, from, to, begin )`
+  records on to `to`, pins the clip, and plays it from `begin` at a constant
+  offset: S&D passes the death plus `KILLCAM_ROUND_DELAY` (5050, roundEndWait(
+  4, true )) or, on the match-winning round, `KILLCAM_MATCH_DELAY` (4550).
+  Elsewhere only the kill whose score ended the match gets one (MW2's
+  `finalKill`, _gamescore.gsc): `player_die` asks for it with the kill plus
+  `KILLCAM_GAME_DELAY` (6050) when that kill's `AddScore` queued the
+  intermission; a time or capture limit never replays an earlier kill. It
+  returns the shared playback deadline; S&D starts the next round
+  `SND_KILLCAM_RESTART` (100) after it, and the intermission waits for it.
+  Every mode freezes its survivors `ROUNDEND_FREEZE_DELAY` after the game
+  ends (MW2's endGame freezes before its round/game branch):
+  `ClientGameEndFrozen` in `ClientThink_real`, with `PM_FREEZE` as in S&D.
+  `SV_ReplayStart` refuses a window longer than the history
+  (`REPLAY_HISTORY_MSEC` 6500), one ending more than `KILLCAM_LINGER` ahead, or a
+  `begin` before the last sample. This changed the game/server syscall, not the
+  wire: rebuild the server and game modules together.
   `SNAPFLAG_REPLAY` disables client prediction and marks presentation cuts.
   Playback rebases absolute clocks only; never rewind live entities, change
   weapon/note timers, predict the viewer's input, or use their local PVS history.
   Reset capture each round and on map restart. Objective/world/disconnect wins
   without a decisive enemy kill use the normal result pause. Run
-  `dev/tests/run-replay.sh` alongside the S&D tests.
+  `dev/tests/run-replay.sh` alongside the S&D tests; `run-snd.sh` includes
+  `snd_roundend_test.c`, the round-winning shot and the knife after it, a
+  defender's knife still in the air at the deciding death, and a team game's
+  score-limit and time-limit ends through the real server.
 
 ## Adding a weapon — touches TWO lists
 

@@ -43,21 +43,52 @@ side.
 - Defenders win by preventing a plant until time expires, eliminating attackers
   before the plant, or defusing. Attackers win by eliminating defenders or by
   detonation. Killing all attackers **after** a plant does not cancel the bomb.
+- As in MW2's `sd.gsc`, the bomb's own wins wait: a detonation ends the round
+  3 s later (`SND_DETONATION_DELAY`), a defuse 1.5 s later (`SND_DEFUSE_DELAY`).
+  Play goes on meanwhile, damage and all, but no elimination ends the round or
+  makes a killcam (`onDeadEvent` returns). The bomb is stopped and can no longer
+  be defused; the HUD reads BOMB DETONATED or BOMB DEFUSED.
 - The HUD shows roles, round scores, living players, objective markers, the active
   timer and hold progress. The first team to four round wins takes the match.
+- **The round end is MW2's (`_gamelogic.gsc` endGame).** The moment a round
+  ends (the last death of an elimination; the frame time runs out; the end of a
+  detonation's or defuse's delay) it is over: no damage, no plant or defuse. But
+  every survivor keeps full control - moving, shooting, reloading, a knife or
+  grenade thrown - for endGame's waitframe and `freezePlayerForRoundEnd( 1.0 )`:
+  1.05 s (`ROUNDEND_FREEZE_DELAY`). Then they freeze. So a throwing knife pressed
+  right after the round-winning shot comes out (and hurts nobody). Peace's
+  freeze stops the player's Pmove whole; MW2's `PMF_FROZEN` keeps only stance
+  and still runs the weapon, so a knife or grenade held at the freeze is still
+  thrown there and here stays in hand (not modelled yet).
+- **An elimination is decided in the death itself**, as MW2's is
+  (`PlayerKilled` -> `removeFromAliveCount` -> `onDeadEvent` -> endGame,
+  postgame before anything else). So nothing later in the same frame - a
+  knife or rocket still in the air, a grenade the dying defender dropped, the
+  rest of the same blast - can hurt anyone or change the result: the first
+  decisive death wins the round, and its killer gets the killcam. A draw comes
+  only from both teams emptying without a deciding death (disconnects, team
+  changes), which the frame's own check catches.
 - A decisive enemy elimination plays **ROUND WINNING KILLCAM** for the entire
-  lobby, including the victim, surviving players and spectators. It shows up to
-  five seconds before the shot and 750 ms afterwards from the killer's first-person
-  view, including weapon actions and ADS. Everyone returns on the server's shared
-  deadline; individual input cannot steer or skip the replay. The match-winning
-  round finishes its replay before the scoreboard.
+  lobby, including the victim, surviving players and spectators. It is MW2's
+  final killcam: 4 s before the death to 1.95 s after it (`KILLCAM_REWIND`,
+  `KILLCAM_LINGER`; `_killcam.gsc`'s camtime 4.0 and postdelay 2 less its 0.05 s
+  settle frame), so whatever the killer did in the 1.05 s of control is in it.
+  It plays when MW2's round-end wait is over: 5.05 s after the death
+  (`KILLCAM_ROUND_DELAY`: the waitframe and `roundEndWait( 4, true )`), 4.55 s on
+  the match-winning round (`KILLCAM_MATCH_DELAY`: `roundEndWait( 4, false )`).
+  It shows the killer's first-person view, including weapon actions and ADS, at
+  game speed (MW2 also slows the last second down; Peace does not yet). Everyone
+  returns on the server's shared deadline; individual input cannot steer or skip
+  the replay. The next round follows 0.1 s after it (doFinalKillcam's wait 0.1,
+  then `map_restart`); the match-winning round finishes its replay before the
+  scoreboard.
 - Bomb, timer and draw results, suicides and disconnect eliminations have no
   unrelated kill replay. If there is too little history, the normal pause applies.
 
 Default round time is 2:30; after planting, a separate 45-second bomb timer runs.
-There is a five-second deployment countdown and five-second round-result pause.
-An elimination replay extends the result pause as needed, with one second after
-playback before the next deployment. Detonation currently
+There is a five-second deployment countdown and five-second round-result pause
+(MW2's 0.05 + `roundEndWait( 4, true )`) when there is no killcam.
+Detonation currently
 uses an existing impact effect; dedicated planting/defusing hand animations,
 announcer audio and a cinematic explosion are not included.
 
@@ -127,11 +158,15 @@ this first pass; the supported ladder map has none.
 
 The engine records complete entity states once per sample (at most 40 Hz) and
 each connected player's visibility and player state into a bounded 262-frame
-history. It streams the selected killer's snapshots through the ordinary delta
-channel to every recipient. This works outside a viewer's original PVS and for
-clients arriving during playback; no client replay buffer or bulk reliable
-transfer is required. Storage is allocated outside the fixed engine zone and
-released on shutdown. Recording is pinned during playback and reset each round.
+history. `trap_ReplayStart( killer, from, to, begin )` keeps recording to `to`,
+pins the clip, and from `begin` streams the selected killer's snapshots, at a
+constant offset and game speed (MW2's archive playback), through the ordinary delta
+channel to every recipient. It refuses a window longer than the history, one
+ending more than `KILLCAM_LINGER` ahead, and a `begin` before the last sample.
+This works outside a viewer's original PVS and for clients arriving during
+playback; no client replay buffer or bulk reliable transfer is required. Storage
+is allocated outside the fixed engine zone and released on shutdown. Recording
+is pinned from `to` through playback and reset each round.
 Only snapshot copies are rebased to the live transport clock. Game simulation,
 ammo, reload notes and weapon readiness are never rewound or changed by playback.
 Client presentation clears old effects/animation ownership at each replay cut.
@@ -142,12 +177,32 @@ Client presentation clears old effects/animation ownership at each replay cut.
 actual server implementation, HUD site parser and host menu. Linux can repeat
 with `SND_TEST_DEFINES=-DMISSIONPACK`. Tests cover deadlines, holds, interrupted
 actions, carrier loss/recovery, late joins, teammate spectating, side changes,
-round limits, empty teams, cheat-only practice and menu launch settings.
+round limits, empty teams, cheat-only practice and menu launch settings, the
+round end's 1.05 s of control, the detonation and defuse delays, and the
+killcam's window and start.
+
+`snd_roundend_test.c` (in `run-snd.sh` only: it links whole game files, as
+`offhand_server_test.c` does) plays the owner's case through the real server:
+the real `g_snd.c`, `ClientSpawn`, `ClientThink`, `Pmove`, `FireWeapon`,
+`G_Damage`, `player_die` and the knife's flight, in `G_RunFrame`'s order with a
+command every 8 ms. The shot wins the round; the throwing knife tapped at the
+shooter's teammate (friendly fire on) any time up to level time D + 1000 is
+pulled and thrown and hurts nobody, a press from D + 1050 does nothing, the
+killcam is asked for with MW2's window and start, and the next round comes 0.1 s
+after it. A control shows the same throw in live play does hurt. The last
+defender's own knife, still in the air when the shooter kills him, lands on the
+next frame and does nothing: the attackers win (deciding at the end of that
+frame let the knife kill the shooter first, a draw). A team game ends the same
+way: the kill that reaches the score limit gets MW2's final killcam 6.05 s
+later, a time limit's end gets none, and both freeze everyone 1.05 s after the
+end.
 
 `sh dev/tests/run-replay.sh` also drives the actual engine recorder and snapshot
 builder: disjoint visibility areas, all lobby recipients, early kills, different
-server frame rates, ADS/weapon clocks, projectile trajectories, late arrival,
-camera retention, immutable live state and history reset. Repeat with
+server frame rates (25 ms, the sampling floor, included), ADS/weapon clocks,
+projectile trajectories, late arrival, camera retention, immutable live state and
+history reset, and the S&D killcam's timeline: live snapshots and recording on to
+the window's end, then the pinned clip from its first frame at `begin`. Repeat with
 `REPLAY_TEST_FLAGS=-DMISSIONPACK`; sanitizers can be supplied through the same
 variable. The Windows S&D runner includes this engine test.
 

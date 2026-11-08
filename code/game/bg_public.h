@@ -57,9 +57,28 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define INVUL_RADIUS		42
 
 //
-// The server captures this window, then streams it to every client.
-#define	KILLCAM_REWIND			5000	// how far before the kill the replay starts
-#define KILLCAM_LINGER           750     // include the impact and immediate aftermath
+// The server captures this window, then streams it to every client. MW2's
+// final killcam (_killcam.gsc): camtime 4.0 before the death, postdelay 2.0
+// after it less the script's 0.05s settle frame, so 5.95s of playback.
+#define	KILLCAM_REWIND			4000	// how far before the kill the replay starts
+#define KILLCAM_LINGER			1950	// how far after it the replay ends
+
+// MW2's round end (_gamelogic.gsc endGame), from the deciding death or event:
+// endGame's waitframe (0.05s), then freezePlayerForRoundEnd( 1.0 ). Until
+// then everyone keeps full control, with damage already off (postgame).
+#define ROUNDEND_FREEZE_DELAY	1050
+// When the final killcam starts after the death: the waitframe plus
+// displayRoundEnd's roundEndWait( 4, matchBonus ) - its splash waits (0.5s
+// each, at least once) around the two 2s halves of the match bonus - or, on
+// the match-winning round, roundEndWait( 4, false ) = 0.5 + 4. Modes without
+// rounds reach it through displayGameEnd's roundEndWait( postRoundTime 5, true ).
+#define KILLCAM_ROUND_DELAY		5050
+#define KILLCAM_MATCH_DELAY		4550
+#define KILLCAM_GAME_DELAY		6050
+// sd.gsc: a detonation ends the round 3s later (bombPlanted's wait 3), a
+// defuse 1.5s later (bombDefused's wait 1.5); play goes on meanwhile.
+#define SND_DETONATION_DELAY	3000
+#define SND_DEFUSE_DELAY		1500
 
 // config strings are a general means of communicating variable length strings
 // from the server to all connected clients.

@@ -292,6 +292,7 @@ extern	cvar_t	*sv_gametype;
 extern	cvar_t	*sv_pure;
 extern	cvar_t	*sv_floodProtect;
 extern	cvar_t	*sv_lanForceRate;
+extern	cvar_t	*sv_onlineGame;
 #ifndef STANDALONE
 extern	cvar_t	*sv_strictAuth;
 #endif
@@ -401,8 +402,11 @@ void SV_WriteFrameToClient (client_t *client, msg_t *msg);
 void SV_SendMessageToClient( msg_t *msg, client_t *client );
 void SV_SendClientMessages( void );
 void SV_SendClientSnapshot( client_t *client );
+int SV_ClientSnapshotMsec( void );
+qboolean SV_SnapshotEveryFrame( const client_t *client );
+qboolean SV_SnapshotDue( const client_t *client );
 void SV_ReplayReset( qboolean enabled );
-int SV_ReplayStart( int clientNum, int fromTime, int toTime );
+int SV_ReplayStart( int clientNum, int fromTime, int toTime, int beginTime );
 void SV_RecordReplayFrame( void );
 
 //

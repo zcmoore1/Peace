@@ -6,6 +6,18 @@ ${CC:-cc} -std=c99 -O0 -ffunction-sections -fdata-sections ${SND_TEST_DEFINES:-}
   dev/tests/snd_test.c code/qcommon/q_math.c code/qcommon/q_shared.c \
   -Wl,--gc-sections -lm -o out/tests/snd-test
 out/tests/snd-test
+# MW2's round end through the real server: the round-winning shot, then the
+# throwing knife in the 1.05s before the freeze (the real g_snd.c, ClientThink,
+# Pmove, FireWeapon, G_Damage, ClientSpawn and the knife's flight). No .cmd
+# mirror: like offhand_server_test.c it links whole game files and relies on
+# GNU ld's --gc-sections; MSVC resolves every external first.
+${CC:-cc} -std=c99 -O0 -ffunction-sections -fdata-sections ${SND_TEST_DEFINES:-} \
+  dev/tests/snd_roundend_test.c code/game/g_active.c code/game/g_combat.c code/game/g_weapon.c \
+  code/game/g_missile.c code/game/g_client.c code/game/g_utils.c code/game/g_items.c \
+  code/game/g_insertion.c code/game/g_cmds.c code/game/bg_pmove.c code/game/bg_loadout.c \
+  code/game/bg_misc.c code/game/bg_slidemove.c code/qcommon/q_math.c code/qcommon/q_shared.c \
+  -Wl,--gc-sections -lm -o out/tests/snd-roundend-test
+out/tests/snd-roundend-test
 ${CC:-cc} -std=c99 -O0 -ffunction-sections -fdata-sections ${SND_TEST_DEFINES:-} \
   dev/tests/snd_hud_test.c code/qcommon/q_math.c code/qcommon/q_shared.c \
   -Wl,--gc-sections -lm -o out/tests/snd-hud-test

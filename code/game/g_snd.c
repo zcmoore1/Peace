@@ -18,9 +18,15 @@ static sndCvar_t sndCvars[] = {
     { &sndPractice, "g_sndPractice", "0", CVAR_CHEAT }
 };
 
+// MW2's map_restart follows the final killcam by doFinalKillcam's wait 0.1
+// (then 0.05s polls until nobody is in the killcam).
+#define SND_KILLCAM_RESTART 100
+
 typedef struct {
     sndPhase_t phase;
-    int round, deadline, carrier, plantedSite, winner, result;
+    // result is also set, with phase still SND_PLANTED, while a detonation or
+    // defuse waits out its delay; freezeTime ends the round's last control.
+    int round, deadline, carrier, plantedSite, winner, result, freezeTime;
     team_t attacking;
     qboolean spawning, practice;
     int roundMs, bombMs, plantMs, defuseMs, winLimit, switchRounds, pauseMs;
@@ -205,19 +211,25 @@ void G_SNDClientDied( gentity_t *ent ) {
     SND_ClearUse(n);
 }
 
+static void SND_CheckElimination( void );
+
+// Every death in a round comes here from player_die, after G_SNDClientDied.
+// An enemy's kill is remembered for the killcam; then the death decides the
+// round there and then, as MW2's does (below).
 void G_SNDRecordKill( gentity_t *victim, gentity_t *attacker ) {
     int n;
     team_t team;
-    if ( g_gametype.integer != GT_SND ||
-         (snd.phase != SND_LIVE && snd.phase != SND_PLANTED) ||
-         !attacker || !attacker->client || !victim || !victim->client ||
-         attacker == victim ) return;
-    n = attacker - g_entities;
-    team = victim->client->sess.sessionTeam;
-    if ( !SND_Player(n) || (team != TEAM_RED && team != TEAM_BLUE) ||
-         attacker->client->sess.sessionTeam == team ) return;
-    snd.lastDeath[team].killer = n;
-    snd.lastDeath[team].time = level.time;
+    if ( g_gametype.integer != GT_SND || (snd.phase != SND_LIVE && snd.phase != SND_PLANTED) ) return;
+    if ( attacker && attacker->client && victim && victim->client && attacker != victim ) {
+        n = attacker - g_entities;
+        team = victim->client->sess.sessionTeam;
+        if ( SND_Player(n) && (team == TEAM_RED || team == TEAM_BLUE) &&
+             attacker->client->sess.sessionTeam != team ) {
+            snd.lastDeath[team].killer = n;
+            snd.lastDeath[team].time = level.time;
+        }
+    }
+    SND_CheckElimination();
 }
 
 qboolean G_SNDCanDamage( gentity_t *ent ) {
@@ -290,7 +302,10 @@ qboolean G_SNDClientThink( gentity_t *ent, usercmd_t *cmd ) {
     if ( g_gametype.integer != GT_SND || ent->client->sess.sessionTeam == TEAM_SPECTATOR ||
          snd.phase == SND_WAITING ) return qfalse;
     alive = SND_Alive(n);
-    if ( alive && (snd.phase == SND_LIVE || snd.phase == SND_PLANTED) ) return qfalse;
+    // A round that has ended keeps everyone's full control until its freeze
+    // (MW2's endGame: freezePlayerForRoundEnd), with damage and use already off.
+    if ( alive && (snd.phase == SND_LIVE || snd.phase == SND_PLANTED ||
+         (snd.phase == SND_ROUND_OVER && level.time < snd.freezeTime)) ) return qfalse;
     if ( !alive && (cmd->buttons & BUTTON_ATTACK) && !(snd.buttons[n] & BUTTON_ATTACK) ) {
         snd.following[n] = SND_Follow(n, snd.following[n]);
     }
@@ -348,18 +363,32 @@ static qboolean SND_Near( gentity_t *ent, vec3_t point, float radius ) {
     return !tr.startsolid && tr.fraction == 1;
 }
 
-static void SND_EndRound( team_t winner, sndResult_t result ) {
-    int n;
+// The decisive elimination's death, or now when nobody killed them.
+static int SND_EliminationTime( team_t team ) {
+    return snd.lastDeath[team].killer >= 0 ? snd.lastDeath[team].time : level.time;
+}
+
+// MW2's sd_endGame/endGame. eventTime is the deciding moment: the last death
+// of an elimination, else the frame the result came. The game is postgame at
+// once (no damage, no use); everyone keeps control for endGame's waitframe and
+// freezePlayerForRoundEnd( 1.0 ). The round-winning killcam plays when
+// displayRoundEnd's roundEndWait is over, and the next round follows it.
+static void SND_EndRound( team_t winner, sndResult_t result, int eventTime ) {
+    int n, death;
+    qboolean matchWon;
     team_t losing = winner == TEAM_RED ? TEAM_BLUE : TEAM_RED;
     if ( snd.phase != SND_LIVE && snd.phase != SND_PLANTED ) return;
     snd.phase = SND_ROUND_OVER;
     snd.winner = winner; snd.result = result;
+    snd.freezeTime = eventTime + ROUNDEND_FREEZE_DELAY;
     snd.deadline = level.time + snd.pauseMs;
+    matchWon = (winner == TEAM_RED || winner == TEAM_BLUE) && level.teamScores[winner] + 1 >= snd.winLimit;
     if ( result == SND_ELIMINATION && snd.lastDeath[losing].killer >= 0 ) {
+        death = snd.lastDeath[losing].time;
         level.replayEndTime = trap_ReplayStart(snd.lastDeath[losing].killer,
-            snd.lastDeath[losing].time - KILLCAM_REWIND, snd.lastDeath[losing].time + KILLCAM_LINGER);
-        if ( level.replayEndTime && snd.deadline < level.replayEndTime + INTERMISSION_DELAY_TIME )
-            snd.deadline = level.replayEndTime + INTERMISSION_DELAY_TIME;
+            death - KILLCAM_REWIND, death + KILLCAM_LINGER,
+            death + (matchWon ? KILLCAM_MATCH_DELAY : KILLCAM_ROUND_DELAY));
+        if ( level.replayEndTime ) snd.deadline = level.replayEndTime + SND_KILLCAM_RESTART;
     }
     snd.carrier = -1;
     if ( winner == TEAM_RED || winner == TEAM_BLUE ) level.teamScores[winner]++;
@@ -370,16 +399,33 @@ static void SND_EndRound( team_t winner, sndResult_t result ) {
         (winner == TEAM_BLUE ? "Blue wins the round" : "Round drawn")));
     CalculateRanks();
     SND_Publish();
-    if ( (winner == TEAM_RED || winner == TEAM_BLUE) && level.teamScores[winner] >= snd.winLimit ) {
-        LogExit("Search and Destroy round limit reached.");
-    }
+    if ( matchWon ) LogExit("Search and Destroy round limit reached.");
+}
+
+// MW2 decides an elimination inside the death: PlayerKilled_internal ->
+// removeFromAliveCount -> updateGameEvents -> onDeadEvent -> sd_endGame, whose
+// endGame makes the game postgame before anything else can happen
+// (_damage.gsc:588, _gamelogic.gsc:2044-2053). So once the last of a team is
+// down, nothing later in the same frame - a grenade going off, a missile
+// landing, the rest of a blast - can hurt anyone (G_SNDCanDamage) or change
+// the result: the first decisive death decides. Not after a detonation or
+// defuse (onDeadEvent returns), nor once the deadline is due (it wins ties).
+static void SND_CheckElimination( void ) {
+    team_t defending = snd.attacking == TEAM_RED ? TEAM_BLUE : TEAM_RED;
+    int attackers, defenders;
+    if ( (snd.phase != SND_LIVE && snd.phase != SND_PLANTED) || snd.result != SND_NONE ||
+         level.time >= snd.deadline || snd.practice ) return;
+    attackers = SND_Count(snd.attacking,qtrue); defenders = SND_Count(defending,qtrue);
+    if ( !attackers && !defenders && snd.phase == SND_LIVE ) SND_EndRound(TEAM_FREE,SND_DRAW,level.time);
+    else if ( !defenders ) SND_EndRound(snd.attacking,SND_ELIMINATION,SND_EliminationTime(defending));
+    else if ( !attackers && snd.phase == SND_LIVE ) SND_EndRound(defending,SND_ELIMINATION,SND_EliminationTime(snd.attacking));
 }
 
 // The site a carrier can plant at or the bomb a defender can defuse, in range
 // and in view; SND_MAX_SITES is the bomb.
 static int SND_UseTarget( gentity_t *ent, int *duration ) {
     int n = ent-g_entities, i;
-    if ( g_gametype.integer != GT_SND || !SND_Alive(n) ||
+    if ( g_gametype.integer != GT_SND || !SND_Alive(n) || snd.result != SND_NONE ||
          (snd.phase != SND_LIVE && snd.phase != SND_PLANTED) || level.time >= snd.deadline ) return -1;
     if ( snd.phase == SND_LIVE && snd.carrier == n ) {
         for ( i = 0; i < SND_MAX_SITES; i++ ) if ( snd.sites[i] &&
@@ -424,7 +470,14 @@ qboolean G_SNDUse( gentity_t *ent, usercmd_t *cmd ) {
     ps->stats[STAT_USE_PROGRESS] = SND_Clamp(elapsed*1000/duration, 0, 1000);
     if ( elapsed < duration ) return qtrue;
     if ( target == SND_MAX_SITES ) {
-        SND_EndRound(ent->client->sess.sessionTeam, SND_DEFUSED);
+        // sd.gsc bombDefused: the bomb stops and the defuse is spent; play
+        // goes on, eliminations ignored, until the round ends 1.5s later.
+        snd.result = SND_DEFUSED;
+        snd.deadline = level.time + SND_DEFUSE_DELAY;
+        for ( i = 0; i < level.maxclients; i++ ) SND_ClearUse(i);
+        trap_SendServerCommand(-1, "cp \"Bomb defused\"");
+        G_LogPrintf("SND defuse: %i\n", n);
+        SND_Publish();
     } else {
         snd.phase = SND_PLANTED;
         snd.carrier = -1; snd.plantedSite = target;
@@ -527,7 +580,7 @@ static void SND_StartRound( void ) {
 }
 
 void G_SNDRunFrame( void ) {
-    int n, red, blue;
+    int n;
     team_t defending;
     if ( g_gametype.integer != GT_SND || level.intermissiontime || level.intermissionQueued ) return;
     for ( n = 0; n < ARRAY_LEN(sndCvars); n++ ) trap_Cvar_Update(sndCvars[n].value);
@@ -555,14 +608,22 @@ void G_SNDRunFrame( void ) {
         // Deadline wins ties with late input. A completed plant replaces the
         // round clock; killing the last attacker cannot cancel a planted bomb.
         if ( level.time >= snd.deadline ) {
-            if ( snd.phase == SND_PLANTED ) {
+            if ( snd.result == SND_EXPLODED ) SND_EndRound(snd.attacking, SND_EXPLODED, level.time);
+            else if ( snd.result == SND_DEFUSED ) SND_EndRound(defending, SND_DEFUSED, level.time);
+            else if ( snd.phase == SND_PLANTED ) {
+                // sd.gsc bombPlanted: the bomb goes off and every objective
+                // is disabled; the round ends 3s later, play going on with
+                // eliminations ignored (onDeadEvent returns).
                 gentity_t *effect = G_TempEntity(snd.bombOrigin, EV_MISSILE_MISS);
                 effect->s.weapon = WP_ROCKET_LAUNCHER;
                 effect->s.eventParm = DirToByte(tv(0,0,1));
-                SND_EndRound(snd.attacking, SND_EXPLODED);
                 SND_HideBomb();
-            } else SND_EndRound(defending, SND_TIME);
-        } else {
+                snd.result = SND_EXPLODED;
+                snd.deadline = level.time + SND_DETONATION_DELAY;
+                for ( n = 0; n < level.maxclients; n++ ) SND_ClearUse(n);
+                G_LogPrintf("SND detonation: site %i\n", snd.plantedSite);
+            } else SND_EndRound(defending, SND_TIME, level.time);
+        } else if ( snd.result == SND_NONE ) {
             if ( snd.phase == SND_LIVE && snd.carrier >= 0 && !SND_Alive(snd.carrier) ) {
                 SND_DropBomb(&g_entities[snd.carrier]);
             }
@@ -574,12 +635,8 @@ void G_SNDRunFrame( void ) {
                     trap_SendServerCommand(n, "cp \"You have the bomb\""); break;
                 }
             }
-            red = SND_Count(snd.attacking,qtrue); blue = SND_Count(defending,qtrue);
-            if ( !snd.practice ) {
-                if ( !red && !blue && snd.phase == SND_LIVE ) SND_EndRound(TEAM_FREE,SND_DRAW);
-                else if ( !blue ) SND_EndRound(snd.attacking,SND_ELIMINATION);
-                else if ( !red && snd.phase == SND_LIVE ) SND_EndRound(defending,SND_ELIMINATION);
-            }
+            // A team emptied without a death: a disconnect or a team change.
+            SND_CheckElimination();
         }
     }
     SND_Publish();

@@ -86,7 +86,7 @@ static void Place(gentity_t *e,float x,float y) {
 }
 static void Spawn(gentity_t *e,float x,float y) {
  e->health=e->client->ps.stats[STAT_HEALTH]=100; e->client->ps.persistant[PERS_SPAWN_COUNT]++;
- VectorSet(e->r.mins,-15,-15,-24); VectorSet(e->r.maxs,15,15,32); e->r.contents=CONTENTS_BODY;
+ VectorSet(e->r.mins,-PLAYER_WIDTH,-PLAYER_WIDTH,MINS_Z); VectorSet(e->r.maxs,PLAYER_WIDTH,PLAYER_WIDTH,DEFAULT_HEIGHT); e->r.contents=CONTENTS_BODY;
  e->s.groundEntityNum=ENTITYNUM_WORLD; e->client->respawnTime=level.time; Place(e,x,y);	/* as ClientSpawn */
 }
 /* one server frame for everything that runs */
@@ -129,7 +129,7 @@ int main(void) {
  level.clients=cl; level.gentities=g_entities;
  for(i=0;i<2;i++) {
   gentity_t *e=&g_entities[i]; e->client=&cl[i]; e->inuse=qtrue; e->s.number=i; e->takedamage=qtrue;
-  BG_ApplyClass(&cl[i].ps,BG_Class(0)); cl[i].ps.clientNum=i; cl[i].ps.pm_type=PM_NORMAL; cl[i].ps.viewheight=26;
+  BG_ApplyClass(&cl[i].ps,BG_Class(0)); cl[i].ps.clientNum=i; cl[i].ps.pm_type=PM_NORMAL; cl[i].ps.viewheight=DEFAULT_VIEWHEIGHT;
   cl[i].pers.connected=CON_CONNECTED; cl[i].pers.enterTime=i+1; cl[i].lastCmdTime=level.time;
   Spawn(e,i*100,0);
  }

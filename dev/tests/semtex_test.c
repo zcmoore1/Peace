@@ -125,9 +125,24 @@ static void TestSemtex(void) {
  Returned();
  CHECK(fired[WP_SEMTEX]==1 && fired[WP_FLASH]==1 && ps.weapon==WP_SHOTGUN);
  CHECK(ps.ammo[WP_SEMTEX]==1 && !(ps.weaponAction&WA_RECOVERING));
- SemtexReady(WP_SHOTGUN); Hold();
- ps.stats[STAT_LADDER]=LADDER_ATTACHED; Step(1);
- CHECK(!(ps.weaponAction&WA_TYPE_MASK) && !fired[WP_SEMTEX]);
+ /* A ladder grabbed with the Semtex held takes nothing from it (MW2's ladder
+  * drop is a weapon change, refused in every offhand state): it is thrown on
+  * the release, or Y cancels it (k 1), the gun comes back on its quick raise,
+  * and the ladder drop starts on the think the latch clears. */
+ for(phase=0;phase<2;phase++) {
+  SemtexReady(WP_SHOTGUN); Hold();
+  ps.stats[STAT_LADDER]=LADDER_ATTACHED; Step(1);
+  CHECK(ps.weapon==WP_SEMTEX && (ps.weaponAction&WA_TYPE_MASK)==WA_LETHAL && !fired[WP_SEMTEX]);
+  CHECK(!(ps.stats[STAT_LADDER]&LADDER_HOLSTER));
+  if(phase) { move.cmd.buttons|=BUTTON_WEAPON_SWAP; Step(1); CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING); }
+  else { move.cmd.buttons=0; Step(1); CHECK(fired[WP_SEMTEX]==1); }
+  move.cmd.buttons=0;
+  for(t=0;t<10000 && (ps.weaponAction&WA_TYPE_MASK);t++) { CHECK(!(ps.stats[STAT_LADDER]&LADDER_HOLSTER)); Step(1); }
+  CHECK((ps.stats[STAT_LADDER]&LADDER_HOLSTER) && ps.weapon==WP_SHOTGUN && ps.weaponTime==BG_LADDER_DROP_TIME);
+  Run(BG_LADDER_DROP_TIME);
+  CHECK(ps.weaponstate==WEAPON_LADDER && fired[WP_SEMTEX]==!phase && ps.ammo[WP_SEMTEX]==2-!phase);
+  ps.stats[STAT_LADDER]=0;
+ }
 }
 static playerState_t history[500];
 static usercmd_t commands[500];

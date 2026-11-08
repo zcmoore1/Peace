@@ -341,7 +341,7 @@ intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		SV_ReplayReset( args[1] );
 		return 0;
 	case G_REPLAY_START:
-		return SV_ReplayStart( args[1], args[2], args[3] );
+		return SV_ReplayStart( args[1], args[2], args[3], args[4] );
 
 	case G_LOCATE_GAME_DATA:
 		SV_LocateGameData( VMA(1), args[2], args[3], VMA(4), args[5] );

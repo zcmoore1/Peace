@@ -68,8 +68,8 @@ void SE_Frame( int svTime ) {
 	SV_RecordReplayFrame();
 }
 
-int SE_ReplayStart( int client, int fromTime, int toTime ) {
-	return SV_ReplayStart( client, fromTime, toTime );
+int SE_ReplayStart( int client, int fromTime, int toTime, int beginTime ) {
+	return SV_ReplayStart( client, fromTime, toTime, beginTime );
 }
 
 /* one delta through the codec: written by the server, read by the client */

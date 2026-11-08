@@ -55,13 +55,16 @@ Model plug-in: `assets/source/masterkey/README.md`.
   switch). Y from the rifle goes to the other slot, and Y from there comes back
   to the rifle, never the underbarrel. Peace's slot toggle carries this
   (`BG_ToggleSlotWeapon`).
-- **Swap or sprint out of its raise, drop and pump** is the same as every
-  other gun, through the same code:
+- **Swap out of its raise, drop and pump, and sprint over them,** is the
+  same as every other gun, through the same code:
   - Y cancels its raise: an alt switch, or a holster from the raise.
   - YY returns its drop to it, ready on that command.
   - A swap is taken out of its pump. When the 1 ms close lands on the swap's
     own think, the holster is instant and the pump stays owed (Peace's NAC).
-  - A sprint lowers it into the carry from its pump.
+  - A sprint never lowers it out of its pump (MW2's sprint check refuses
+    RECHAMBERING). A sprint on as its shot ends lowers it then, with the pump
+    owed, which is worked whole once it is back up. With the close 1 ms into
+    the pump, a sprint begun later finds the pump under way and waits for it.
   - A sprint meanwhile holds a raise or drop to its end, then lowers into the
     carry, as MW2's sprint check refuses states 1-5 for every gun. Sprint never
     cuts a raise or drop in Peace or in MW2 (owner's decision: keep MW2's
@@ -116,7 +119,7 @@ was instant.
 `dev/tests/run-masterkey.sh` drives the real `PM_Weapon` in both numberings at
 think lengths from 1 to 50 ms: MW2's data, the class, the alt switch and its
 sprint exception, `weapnext`, the moni NAC (with the SPAS as the contrast),
-swap and sprint out of raise, drop and pump, the UAV trigger and its Y, the
+swap out of raise, drop and pump and sprint over them, the UAV trigger and its Y, the
 instance's ammo through swaps, drops and scavenges, and the reload. Every rule
 was mutation-checked. `dev/tests/run-shotgun-reload.cmd`, and its CI line,
 runs the Masterkey through every shoot-reload check, because it has a worked

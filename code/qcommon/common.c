@@ -3176,6 +3176,11 @@ void Com_Frame( void ) {
 	IN_Frame();
 
 	lastTime = com_frameTime;
+#ifndef DEDICATED
+	// the snapshots last frame's SV_Frame made for the local client are read
+	// now, ahead of this frame's server packets (see below)
+	NET_ReleaseLoopPackets( NS_CLIENT );
+#endif
 	com_frameTime = Com_EventLoop();
 	
 	msec = com_frameTime - lastTime;
@@ -3197,6 +3202,21 @@ void Com_Frame( void ) {
 	if ( com_speeds->integer ) {
 		timeBeforeServer = Sys_Milliseconds ();
 	}
+
+#ifndef DEDICATED
+	// A host reads its own server's snapshots a frame late, as MW2's does.
+	// MW2 runs its server in a thread of its own: its SV_Frame (0x627610)
+	// only adds msec to the residual and, at 50ms, signals the thread
+	// (0x627695) and returns without waiting for it. The thread (0x627040)
+	// then reads the clients' packets (0x458160), runs the game frame
+	// (0x415cd0) and sends the snapshots (0x4517b0), while the main thread
+	// goes straight on to its second event loop (0x47dfc6) and the client
+	// frame (0x47dfe1). So the host reads each snapshot in the next frame's
+	// event loop (0x47dd80), and predicts from a base one frame older.
+	// Hold what SV_Frame sends the local client until then; everything else
+	// in the loopback, and every other packet, keeps its timing.
+	NET_HoldLoopPackets( NS_CLIENT );
+#endif
 
 	SV_Frame( msec );
 
@@ -3220,7 +3240,8 @@ void Com_Frame( void ) {
 	//
 	//
 	// run event loop a second time to get server to client packets
-	// without a frame of latency
+	// without a frame of latency: the server's answers to the packets the
+	// first loop gave it. This frame's snapshots wait for the next frame.
 	//
 	if ( com_speeds->integer ) {
 		timeBeforeEvents = Sys_Milliseconds ();

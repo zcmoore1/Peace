@@ -13,17 +13,27 @@
  * A plain reload (+reload) is read by the weapon itself on both sides, so it
  * is predicted exactly and none of this happens with it.
  *
- * The network is ioquake3's transport with MW2's client clock: the server
- * ticks level.time in sv_fps frames and snapshots each frame; the client keeps
- * cl.serverTime one snapshot interval plus 16ms behind the newest snapshot
- * (CL_SetCGameTime, and CL_AdjustTimeDelta through the REAL CL_DriftTimeDelta
- * of code/client/cl_timedelta.c) and stamps commands with it; cgame keeps the
- * snapshots either side of that time and predicts from the later one, nextSnap
- * (CG_ProcessSnapshots, CG_PredictPlayerState); the server runs each command
- * on arrival (ClientThink_real clamps), then the use code. Both sides run the
- * REAL Pmove; the client draws with the REAL cg_anim through the REAL picture
- * rule. Gameplay timings come from the shipped tables; only the network (frame
- * rate, ping, offsets) and MW2's clock constants are set here.
+ * The network is ioquake3's transport with MW2's client clock and MW2's host:
+ * the server ticks level.time in sv_fps frames and snapshots each frame; the
+ * client keeps cl.serverTime one snapshot interval plus 16ms behind the newest
+ * snapshot (CL_SetCGameTime, and CL_AdjustTimeDelta through the REAL
+ * CL_DriftTimeDelta of code/client/cl_timedelta.c) and stamps commands with it;
+ * cgame keeps the snapshots either side of that time and predicts from the
+ * later one, nextSnap (CG_ProcessSnapshots, CG_PredictPlayerState); the server
+ * runs each command on arrival (ClientThink_real clamps), then the use code.
+ * At 0ms ping the client is your own host, and everything happens in
+ * Com_Frame's order, with each snapshot read a frame after the server sent it
+ * (HostFrame); with ping it is a remote server's client, by the millisecond.
+ * The server sends snapshots as Peace's does, which is MW2's rule
+ * (SV_SnapshotDue): your own host one every server frame, an internet client
+ * one every 100ms while the server is an online game (sv_onlineGame, MW2's
+ * onlinegame, on by default), else every 50ms.
+ * The run-fakereload.sh build runs every own-host case through the REAL
+ * Com_Frame and loopback as well (fake_reload_engine.c) and requires the same
+ * outcome. Both sides run the REAL Pmove; the client draws with the REAL
+ * cg_anim through the REAL picture rule. Gameplay timings come from the
+ * shipped tables; only the network (frame rate, ping, offsets) and MW2's clock
+ * constants are set here.
  *
  * FAKERELOAD_PROBE=1 prints the outcome of every tap time instead of checking.
  * FAKERELOAD_PHASES=1 prints the fake reload success rate against when X is
@@ -34,7 +44,14 @@
  * default and the shipped autoexec's sv_fps).
  * FAKERELOAD_CLOCK=1 prints the client's clock frame by frame, with no input.
  * FAKERELOAD_MAXPACKETS batches commands as cl_maxpackets does over the
- * internet; by default every frame sends, as on loopback and LAN. */
+ * internet; by default every frame sends, as on loopback and LAN (your own
+ * host always does).
+ * FAKERELOAD_BULLETS=1 prints the fake bullet's success over every snapshot
+ * phase at every ping. With it (or the other print modes) FAKERELOAD_CLFRAME
+ * sets the client frame (com_maxfps 85 is 12), FAKERELOAD_ONLINEGAME=0 gives
+ * an internet client a snapshot every 50ms (sv_onlineGame 0) and
+ * FAKERELOAD_HOSTHOLD=0 gives ioquake3's own host, which read its snapshots
+ * without the held frame. */
 #include "../../code/qcommon/q_shared.h"
 #include "../../code/game/bg_public.h"
 #include <stdio.h>
@@ -57,12 +74,14 @@ const playerState_t *CG_WeapPicture_State(const playerState_t *predicted);
 
 static int checks;
 #define CHECK(x) do { checks++; if (!(x)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); exit(1); } } while (0)
+#ifndef FAKERELOAD_ENGINE	/* else the real ones, common.c's */
 void QDECL Com_Printf(const char *fmt, ...) { (void)fmt; }
 void QDECL Com_Error(int level, const char *fmt, ...) { (void)level; fprintf(stderr, "Com_Error %s\n", fmt); exit(1); }
+#endif
 
 static int SV_FRAME = 50;	/* sv_fps 20, MW2's; FAKERELOAD_SVFPS overrides */
-#define SV_FRAME_FAST	8	/* sv_fps 125 with snaps 125 */
-#define CL_FRAME	8		/* 125 fps, one command per frame */
+#define SV_FRAME_FAST	8	/* sv_fps 125: your own host gets every frame */
+static int CL_FRAME = 8;	/* 125 fps, one command per frame; FAKERELOAD_CLFRAME in the print modes */
 /* MW2's client clock (iw4x.exe), kept here so the engine is checked against
  * MW2 and not against itself. */
 #define CL_TIME_BACKOFF	16	/* target behind newest - interval, CL_AdjustTimeDelta 0x5a1aee */
@@ -121,6 +140,23 @@ static int snapInterval;				/* measured between received snapshots */
 /* The clock seen at every client frame once it has settled. */
 static struct { int leadMin, leadMax, ageMin, ageMax, intervalMin, intervalMax; } clk;
 static int pictureDetached, sawGunActionInPicture;
+static int clSeen;						/* the client has seen the gun go away */
+static int onlineGame = 1;				/* sv_onlineGame; FAKERELOAD_ONLINEGAME in the print modes */
+static int ownHost;						/* this run's client is the server's own host */
+static int lastSnapTime;				/* the server's lastSnapshotTime for its one client */
+/* SV_ClientSnapshotMsec, on the server's frames: what an internet client waits. */
+static int RemoteInterval(void) {
+	int msec = onlineGame ? 100 : 50;
+	return (msec + SV_FRAME - 1) / SV_FRAME * SV_FRAME;
+}
+/* The interval the client of this ping gets: your own host every frame. */
+static int SnapInterval(int rtt) { return rtt ? RemoteInterval() : SV_FRAME; }
+/* The slow drift moves the delta at least 1ms a snapshot, from exactly on the
+ * first snapshot to one interval plus the backoff behind. */
+static int Settle(int rtt) { return (CL_TIME_BACKOFF + SnapInterval(rtt)) * SnapInterval(rtt); }
+#ifdef FAKERELOAD_ENGINE
+static int engineRuns;					/* runs on your own host also run through the real Com_Frame */
+#endif
 
 static int Buttons(int now) {
 	int b = 0, t;
@@ -258,14 +294,169 @@ static void Record(const playerState_t *pic, int clip) {
 	pictureDetached = detached;
 }
 
-static void Run(int rtt, const script_t *sc, int at) {
+/* CL_ParseSnapshot: keep it, and the time of the one before (MW2 0x5ac0ce) */
+static void ReceiveSnapshot(int i) {
+	if (!rsLatest || sq[i].serverTime > clSnapTime) {
+		rsLatest++;
+		rs[rsLatest % RS_BACKUP].serverTime = sq[i].serverTime; rs[rsLatest % RS_BACKUP].ps = sq[i].ps;
+		clPrevSnapTime = clSnapTime; clSnapTime = sq[i].serverTime; clNewSnap = 1;
+	}
+}
+/* The snapshot after a server frame (SV_SendClientMessages and
+ * SV_SnapshotDue): your own host's every frame, an internet client's once its
+ * interval has run out. */
+static int Snapshot(void) {
+	if (!ownHost && lastSnapTime && levelTime - lastSnapTime < RemoteInterval()) return -1;
+	lastSnapTime = levelTime;
+	sq[sqTail].arrive = PENDING; sq[sqTail].serverTime = levelTime; sq[sqTail].ps = svPs;
+	return sqTail++;
+}
+
+/* CL_Frame: a command stamped with the clock (CL_CreateNewCommands, before
+ * CL_SetCGameTime), then the clock and cgame's frame. Returns the command. */
+static int ClientFrame(int now) {
+	usercmd_t *c;
+	const playerState_t *pic; playerState_t copy; int clip;
+	if (!rsLatest) return -1;	/* nothing until the first snapshot */
+	c = &cmds[numCmds++];
+	memset(c, 0, sizeof(*c));
+	c->serverTime = clServerTime ? clServerTime : clSnapTime;
+	c->buttons = Buttons(now); c->weapon = BG_SLOT_COMMAND + SLOT_PRIMARY;
+	cq[cqTail].arrive = PENDING; cq[cqTail].cmd = *c;
+	SetCGameTime(now);
+	ProcessSnapshots();
+	Predict();
+	if (getenv("FAKERELOAD_CLOCK") && base == NONE)
+		printf("clock t%5d lead %3d age %3d delta %d\n", now, clSnapTime - clServerTime, clServerTime - clBase->commandTime, clDelta);
+	if (now >= settle) {
+		int lead = clSnapTime - clServerTime, age = clServerTime - clBase->commandTime, iv = clSnapTime - clPrevSnapTime;
+		if (lead < clk.leadMin) clk.leadMin = lead;
+		if (lead > clk.leadMax) clk.leadMax = lead;
+		if (age < clk.ageMin) clk.ageMin = age;
+		if (age > clk.ageMax) clk.ageMax = age;
+		if (iv < clk.intervalMin) clk.intervalMin = iv;
+		if (iv > clk.intervalMax) clk.intervalMax = iv;
+	}
+	if (!clSeen && clPred.weapon != GUN) clSeen = 1;
+	if (S.action == ACT_NONE ? now >= startPress : clSeen && GunAtRest(&clPred)) {
+		if (O.anchor == NONE) O.anchor = now;
+	}
+	pic = CG_WeapPicture_State(&clPred);
+	copy = *pic; clip = FakeReloadPicture(&copy, now, CL_FRAME);
+	if (base != NONE ? now >= recordFrom : O.anchor != NONE) Record(pic, clip);
+	if (getenv("FAKERELOAD_TRACE") && base != NONE && now >= base - 120 && now <= base + 400)
+		printf("t%+5d st%d b%06x | cl w%2d s%2d A%d act%03x ws%d | pic w%2d s%2d %s | sv w%2d s%2d A%d act%03x wf%d | snap ct%d\n",
+			now - base, c->serverTime, Buttons(now), clPred.weapon, clPred.weaponstate, !!(clPred.pm_flags & PMF_ADS), clPred.weaponAction & 0x107,
+			clPred.weapFlags, pic->weapon, pic->weaponstate, pic != &clPred ? "DET" : "   ",
+			svPs.weapon, svPs.weaponstate, !!(svPs.pm_flags & PMF_ADS), svPs.weaponAction & 0x107, svPs.weapFlags, clBase->commandTime);
+	return cqTail++;
+}
+
+/* Your own host is ioquake3's Com_Frame (code/qcommon/common.c), one frame a
+ * command. Its first event loop gives the client the snapshots its server
+ * sent last frame, then gives the server the commands its client sent last
+ * frame (the server runs each as it arrives); SV_Frame runs the server frames
+ * the elapsed time owes and sends the snapshot; the second event loop gives
+ * the client nothing of that snapshot, which waits for the next frame (as
+ * MW2's host reads its server thread's snapshot a frame late); CL_Frame makes
+ * the next command. A loopback client sends every frame (CL_ReadyToSendPacket)
+ * and gets every snapshot (no rate). The engine build runs the same halves
+ * through the REAL Com_Frame and loopback (fake_reload_engine.c). */
+static int svResidual;
+/* How long the host holds its snapshots: a frame, Com_Frame's. 0 (only in
+ * the print modes, FAKERELOAD_HOSTHOLD=0) is ioquake3's own Com_Frame, whose
+ * second event loop read them at once. */
+static int hostHold = -1;
+/* SV_Frame: the frames the time owes, then their snapshot. */
+static int HostServerFrame(int msec) {
+	int ran = 0;
+	svResidual += msec;
+	while (svResidual >= SV_FRAME) { svResidual -= SV_FRAME; levelTime += SV_FRAME; ran = 1; }
+	return ran ? Snapshot() : -1;
+}
+static void HostFrame(int now) {
+	int snap, cmd;
+	curNow = now;
+	while (sqHead < sqTail && sq[sqHead].arrive <= now) ReceiveSnapshot(sqHead++);	/* first event loop */
+	while (cqHead < cqTail && cq[cqHead].arrive <= now) ServerThink(&cq[cqHead++].cmd);
+	snap = HostServerFrame(CL_FRAME);
+	if (snap >= 0) sq[snap].arrive = now + hostHold;
+	while (sqHead < sqTail && sq[sqHead].arrive <= now) ReceiveSnapshot(sqHead++);	/* second */
+	cmd = ClientFrame(now);
+	if (cmd >= 0) cq[cmd].arrive = now + CL_FRAME;
+}
+
+/* A client of a remote server, by the millisecond: the server ticks its own
+ * frames, and every packet takes oneWay. */
+static void NetworkMs(int now) {
+	int cmd;
+	curNow = now;
+	while (cqHead < cqTail && cq[cqHead].arrive != PENDING && cq[cqHead].arrive <= now) ServerThink(&cq[cqHead++].cmd);
+	while (sqHead < sqTail && sq[sqHead].arrive <= now) ReceiveSnapshot(sqHead++);
+	if (now % SV_FRAME == 0) {
+		int snap;
+		levelTime += SV_FRAME;
+		if ((snap = Snapshot()) >= 0) sq[snap].arrive = now + oneWay;
+	}
+	if (now % CL_FRAME == 0 && (cmd = ClientFrame(now)) >= 0) {
+		if (!maxPackets || now - lastPacket >= 1000 / maxPackets) {	/* CL_ReadyToSendPacket */
+			int q;
+			for (q = cmd; q >= cqHead && cq[q].arrive == PENDING; q--) cq[q].arrive = now + oneWay;
+			lastPacket = now;
+		}
+	}
+}
+
+#ifdef FAKERELOAD_ENGINE
+/* The REAL Com_Frame and loopback run the host's halves (fake_reload_engine.c).
+ * They hand over what crosses the loopback, and the harness checks that it
+ * arrives exactly when HostFrame says. */
+void FakeReloadEngineRun(int frameMsec, int end);
+int  FakeReloadEngineLoopback(int frameMsec);
+static int engineFrame = NONE, enginePhase;
+static void EngineStep(int now, int phase) {
+	if (now != engineFrame) { CHECK(now == engineFrame + CL_FRAME || engineFrame == NONE); engineFrame = now; enginePhase = 0; }
+	CHECK(phase >= enginePhase); enginePhase = phase; curNow = now;
+}
+void FakeReloadHostSnapshot(int i, int now) {	/* CL_PacketEvent */
+	EngineStep(now, 0);
+	CHECK(i == sqHead && sq[i].arrive == now); sqHead++;
+	ReceiveSnapshot(i);
+}
+void FakeReloadHostCommand(int i, int now) {	/* SV_PacketEvent */
+	EngineStep(now, 1);
+	CHECK(i == cqHead && cq[i].arrive == now); cqHead++;
+	ServerThink(&cq[i].cmd);
+}
+int FakeReloadHostServer(int msec, int now) {	/* SV_Frame */
+	int snap;
+	EngineStep(now, 2);
+	CHECK(msec == CL_FRAME && now % CL_FRAME == 0);
+	snap = HostServerFrame(msec);
+	if (snap >= 0) sq[snap].arrive = now + hostHold;
+	return snap;
+}
+int FakeReloadHostClient(int msec, int now) {	/* CL_Frame */
+	int cmd;
+	EngineStep(now, 3);
+	CHECK(msec == CL_FRAME);
+	cmd = ClientFrame(now);
+	if (cmd >= 0) cq[cmd].arrive = now + CL_FRAME;
+	return cmd;
+}
+static int viaEngine;	/* run the host through the real Com_Frame */
+#endif
+
+static void Run1(int rtt, const script_t *sc, int at) {
 	bg_class_t cl = *BG_Class(0);
-	int now, end, seen = 0;
+	int now, end;
 	memset(&O, 0, sizeof(O)); O.anchor = NONE; O.svMinAmmo = 1000; S = *sc; base = at;
 	/* From well before the gun is back, so a press that changes when it comes back is still seen. */
 	recordFrom = base != NONE ? base - 400 : 1 << 30; lastPacket = -1000;
 	/* Pressed once the client's clock has settled, and run as long after. */
+	settle = Settle(rtt);
 	oneWay = rtt / 2; startPress = (settle > 1500 ? settle : 1500) + startShift; end = startPress + 7500;
+	ownHost = rtt == 0; svResidual = 0; clSeen = 0; lastSnapTime = 0;
 	cqHead = cqTail = sqHead = sqTail = numCmds = 0;
 	clDelta = clServerTime = clOldServerTime = clActive = clNewSnap = clSnapTime = clPrevSnapTime = 0;
 	clExtrap = qfalse; rsLatest = cgProcessed = cgSnap = cgNext = 0; clBase = NULL;
@@ -279,68 +470,38 @@ static void Run(int rtt, const script_t *sc, int at) {
 	svPs.ammo[cl.lethal] = 2;	/* as before MW2's counts: a scenario may use one before its own */
 	svPs.stats[STAT_HEALTH] = 100; svPs.pm_type = PM_NORMAL; svPs.weapon = GUN; svPs.weaponstate = WEAPON_READY;
 	svPs.ammo[GUN] = svPs.slotAmmo[SLOT_PRIMARY] = startAmmo = BG_WeaponMagSize(GUN) - 2;
-	svPs.viewheight = 26; svPs.origin[2] = 24.125f; svPs.groundEntityNum = ENTITYNUM_WORLD;
+	svPs.viewheight = DEFAULT_VIEWHEIGHT; svPs.origin[2] = 24.125f; svPs.groundEntityNum = ENTITYNUM_WORLD;
 	levelTime = 1000;
-	for (now = 0; now < end; now++) {
-		curNow = now;
-		while (cqHead < cqTail && cq[cqHead].arrive != PENDING && cq[cqHead].arrive <= now) ServerThink(&cq[cqHead++].cmd);
-		while (sqHead < sqTail && sq[sqHead].arrive <= now) {
-			/* CL_ParseSnapshot: keep it, and the time of the one before (MW2 0x5ac0ce) */
-			if (!rsLatest || sq[sqHead].serverTime > clSnapTime) {
-				rsLatest++;
-				rs[rsLatest % RS_BACKUP].serverTime = sq[sqHead].serverTime; rs[rsLatest % RS_BACKUP].ps = sq[sqHead].ps;
-				clPrevSnapTime = clSnapTime; clSnapTime = sq[sqHead].serverTime; clNewSnap = 1;
-			}
-			sqHead++;
-		}
-		if (now % SV_FRAME == 0) {
-			levelTime += SV_FRAME;
-			sq[sqTail].arrive = now + oneWay; sq[sqTail].serverTime = levelTime; sq[sqTail].ps = svPs; sqTail++;
-		}
-		if (now % CL_FRAME == 0 && rsLatest) {
-			usercmd_t *c = &cmds[numCmds++];
-			const playerState_t *pic; playerState_t copy; int clip;
-			memset(c, 0, sizeof(*c));
-			c->serverTime = clServerTime ? clServerTime : clSnapTime;
-			c->buttons = Buttons(now); c->weapon = BG_SLOT_COMMAND + SLOT_PRIMARY;
-			cq[cqTail].arrive = PENDING; cq[cqTail].cmd = *c; cqTail++;
-			if (!maxPackets || now - lastPacket >= 1000 / maxPackets) {	/* CL_ReadyToSendPacket */
-				int q;
-				for (q = cqTail - 1; q >= cqHead && cq[q].arrive == PENDING; q--) cq[q].arrive = now + oneWay;
-				lastPacket = now;
-			}
-			SetCGameTime(now);
-			ProcessSnapshots();
-			Predict();
-			if (getenv("FAKERELOAD_CLOCK") && base == NONE)
-				printf("clock t%5d lead %3d age %3d delta %d\n", now, clSnapTime - clServerTime, clServerTime - clBase->commandTime, clDelta);
-			if (now >= settle) {
-				int lead = clSnapTime - clServerTime, age = clServerTime - clBase->commandTime, iv = clSnapTime - clPrevSnapTime;
-				if (lead < clk.leadMin) clk.leadMin = lead;
-				if (lead > clk.leadMax) clk.leadMax = lead;
-				if (age < clk.ageMin) clk.ageMin = age;
-				if (age > clk.ageMax) clk.ageMax = age;
-				if (iv < clk.intervalMin) clk.intervalMin = iv;
-				if (iv > clk.intervalMax) clk.intervalMax = iv;
-			}
-			if (!seen && clPred.weapon != GUN) seen = 1;
-			if (S.action == ACT_NONE ? now >= startPress : seen && GunAtRest(&clPred)) {
-				if (O.anchor == NONE) O.anchor = now;
-			}
-			pic = CG_WeapPicture_State(&clPred);
-			copy = *pic; clip = FakeReloadPicture(&copy, now, CL_FRAME);
-			if (base != NONE ? now >= recordFrom : O.anchor != NONE) Record(pic, clip);
-			if (getenv("FAKERELOAD_TRACE") && base != NONE && now >= base - 120 && now <= base + 400)
-				printf("t%+5d st%d b%06x | cl w%2d s%2d A%d act%03x ws%d | pic w%2d s%2d %s | sv w%2d s%2d A%d act%03x wf%d | snap ct%d\n",
-					now - base, c->serverTime, Buttons(now), clPred.weapon, clPred.weaponstate, !!(clPred.pm_flags & PMF_ADS), clPred.weaponAction & 0x107,
-					clPred.weapFlags, pic->weapon, pic->weaponstate, pic != &clPred ? "DET" : "   ",
-					svPs.weapon, svPs.weaponstate, !!(svPs.pm_flags & PMF_ADS), svPs.weaponAction & 0x107, svPs.weapFlags, clBase->commandTime);
-		}
-	}
+#ifdef FAKERELOAD_ENGINE
+	if (ownHost && viaEngine) {
+		engineFrame = NONE;
+		FakeReloadEngineRun(CL_FRAME, end);
+		CHECK(engineFrame + CL_FRAME >= end && engineFrame < end);
+	} else
+#endif
+	if (ownHost) for (now = 0; now < end; now += CL_FRAME) HostFrame(now);
+	else for (now = 0; now < end; now++) NetworkMs(now);
 	CHECK(O.anchor != NONE);
 	CHECK(!O.unpredictedPic);
 	O.converged = clPred.weapon == svPs.weapon && clPred.weaponstate == svPs.weaponstate &&
 		clPred.ammo[GUN] == svPs.ammo[GUN] && CG_WeapPicture_State(&clPred) == &clPred;
+}
+
+/* In the engine build every run on your own host goes through the REAL
+ * Com_Frame too, and must end exactly as HostFrame's did. */
+static void Run(int rtt, const script_t *sc, int at) {
+#ifdef FAKERELOAD_ENGINE
+	if (rtt == 0 && hostHold == CL_FRAME) {
+		outcome_t model; playerState_t modelSv, modelCl;
+		Run1(rtt, sc, at);
+		model = O; modelSv = svPs; modelCl = clPred;
+		viaEngine = 1; Run1(rtt, sc, at); viaEngine = 0;
+		CHECK(!memcmp(&model, &O, sizeof(O)) && !memcmp(&modelSv, &svPs, sizeof(svPs)) && !memcmp(&modelCl, &clPred, sizeof(clPred)));
+		engineRuns++;
+		return;
+	}
+#endif
+	Run1(rtt, sc, at);
 }
 
 static script_t Script(int action, int button) {
@@ -430,7 +591,7 @@ static int FakeWindow(int a, int r, int len, int *first, int *last) {
 }
 
 static void FakeReloads(void) {
-	int a, r, x, len, first, last, count[ACT_NONE][4], firstAt[ACT_NONE][4], lastAt[ACT_NONE][4];
+	int a, r, x, len, first, last, count[ACT_NONE][4], held[ACT_NONE][4], firstAt[ACT_NONE][4], lastAt[ACT_NONE][4];
 	for (a = 0; a < ACT_NONE; a++) for (r = 0; r < 4; r++) {
 		script_t s;
 		/* A use/reload TAP as the gun comes back plays the reload and reloads
@@ -441,9 +602,13 @@ static void FakeReloads(void) {
 			x = FakeWindow(a, r, len, &first, &last);
 			CHECK(x > 0);
 			if (len == 48) { count[a][r] = x; firstAt[a][r] = first; lastAt[a][r] = last; }
+			if (len == 112) held[a][r] = x;
 		}
-		/* The window grows with ping. */
-		if (r) CHECK(count[a][r] >= count[a][r - 1]);
+		/* The window grows with ping, for a press held across one of the
+		 * server's snapshots: online they come every 100ms, so a shorter tap
+		 * is seen only at some phases. */
+		CHECK(112 > SnapInterval(rtts[r]));
+		if (r) CHECK(held[a][r] >= held[a][r - 1]);
 		/* A HOLD is a real reload: the server asks again on every command. */
 		s = Script(a, X); s.reloadAt = firstAt[a][r]; s.reloadLen = 600; Run(rtts[r], &s, anchorAt[a][r]);
 		CHECK(O.svReload && O.converged);
@@ -524,6 +689,71 @@ static void FakeBullets(void) {
 	}
 }
 
+/* The owner's fake bullet: a one-command X tap, then a one-command trigger
+ * pull `gap` ms later, over every phase of the server's frames and snapshots
+ * against the tap (the player cannot see that phase). The percentage that
+ * fake. */
+static int FakeBulletRate(int r, int gap) {
+	int ok = 0, n = 0, shift, period = SnapInterval(rtts[r]) * CL_FRAME, wait = Settle(rtts[r]);
+	for (shift = 0; shift < period; shift += CL_FRAME) {
+		script_t sc = Script(ACT_NONE, X);
+		int at;
+		startShift = shift;
+		at = ((wait > 1500 ? wait : 1500) + shift + CL_FRAME - 1) / CL_FRAME * CL_FRAME;	/* a frame */
+		sc.reloadAt = 0; sc.reloadLen = CL_FRAME; sc.fireAt = gap; sc.fireLen = CL_FRAME;
+		Run(rtts[r], &sc, at);
+		CHECK(O.converged && O.svReload);
+		/* on the same command the shot is real (FakeBullet also requires no round spent) */
+		if (!gap) CHECK(O.svShot && O.predShot);
+		ok += FakeBullet(); n++;
+	}
+	startShift = 0;
+	return 100 * ok / n;
+}
+/* On your own host: sure while the trigger goes out within the clock's backoff
+ * and the host's held frame of X, then falling across one snapshot interval
+ * as the base's age runs over one, and gone a frame past that. The held frame
+ * moves the whole window exactly one frame later than ioquake3's own host. */
+static void FakeBulletWindows(void) {
+	int k, gap, expect, keep = hostHold, hold[14], nohold[14];
+	if (maxPackets || SV_FRAME < 50 || CL_FRAME != 8) return;	/* the shipped rates, a packet a frame */
+	for (k = 0; k < 14; k++) hold[k] = FakeBulletRate(0, k * CL_FRAME);
+	hostHold = 0;
+	for (k = 1; k < 11; k++) nohold[k] = FakeBulletRate(0, k * CL_FRAME);
+	hostHold = keep;
+	CHECK(!hold[0]);	/* X and the trigger in one command: a real shot */
+	for (k = 1; k * CL_FRAME <= CL_TIME_BACKOFF + hostHold; k++) CHECK(hold[k] == 100);
+	gap = CL_TIME_BACKOFF + hostHold + snapInterval / 2;
+	k = gap / CL_FRAME; gap = k * CL_FRAME;
+	expect = 100 * (CL_TIME_BACKOFF + hostHold + snapInterval - gap) / snapInterval;
+	CHECK(hold[k] >= expect - 20 && hold[k] <= expect + 20);
+	for (k = (CL_TIME_BACKOFF + hostHold + snapInterval + 2 * CL_FRAME - 1) / CL_FRAME; k < 14; k++) CHECK(!hold[k]);
+	/* exactly a frame later than ioquake3's own host, at every gap */
+	for (k = 1; k < 11; k++) CHECK(hold[k + 1] == nohold[k]);
+	printf("  %-4s fake bullet over every phase, your own host:", GUN == WP_M40A3 ? "M300" : "SPAS");
+	for (k = 1; k < 14; k++) { printf(" %d:%d%%", k * CL_FRAME, hold[k]); if (!hold[k]) break; }
+	printf("\n       (ioquake3's own host, without the held frame:");
+	for (k = 1; k < 11; k++) { printf(" %d:%d%%", k * CL_FRAME, nohold[k]); if (!nohold[k]) break; }
+	printf(")\n");
+}
+/* FAKERELOAD_BULLETS=1: FakeBulletRate for every RTT, at FAKERELOAD_CLFRAME,
+ * FAKERELOAD_ONLINEGAME, FAKERELOAD_MAXPACKETS and FAKERELOAD_HOSTHOLD. */
+static void FakeBulletTable(void) {
+	int r, gap, last = (CL_TIME_BACKOFF + 2 * CL_FRAME + 3 * RemoteInterval() + 200) / CL_FRAME * CL_FRAME;
+	printf("fake bullet over every snapshot phase: %dms frames, sv frame %dms, a snapshot every %dms to your own host and %dms online, %s, host hold %dms\n",
+		CL_FRAME, SV_FRAME, SV_FRAME, RemoteInterval(), maxPackets ? "cl_maxpackets batching (not your own host)" : "a packet a frame", hostHold);
+	for (r = 0; r < 4; r++) {
+		printf("  RTT %3d%s:", rtts[r], r ? "" : " (your own host)");
+		for (gap = CL_FRAME; gap <= last; gap += CL_FRAME) {
+			int rate = FakeBulletRate(r, gap);
+			printf(" %d:%d%%", gap, rate);
+			fflush(stdout);
+			if (!rate) break;
+		}
+		putchar('\n');
+	}
+}
+
 /* The wild scope. MW2 starts no knife while a scoped gun is aimed. Through a
  * fake reload the client is not aiming - it thinks the gun is reloading - so a
  * knife pressed then starts on the client and not on the server: the gun stays
@@ -557,7 +787,8 @@ static void WildScopes(void) {
 			}
 		}
 		CHECK(fakeTaps > 0);
-		/* Snapshots every 8ms on your own host leave no room for it at all. */
+		/* Snapshots every 8ms on your own host leave it little room (24ms
+		 * with the host's held frame, none without). */
 		CHECK(lastKnife != NONE || (rtts[r] == 0 && SV_FRAME < 50));
 		/* from the command aim is in, the one after the gun is back */
 		CHECK(lastKnife == NONE || firstKnife == 2 * CL_FRAME);
@@ -654,10 +885,16 @@ static void TestPictureHandsBack(void) {
  * fake reload, over every phase of the server's snapshots against the quick
  * action (the player cannot see that phase, so this is the success rate). */
 static int allReal;	/* every run of the last SuccessRate reloaded on the server */
+static int Gcd(int a, int b) { return b ? Gcd(b, a % b) : a; }
+/* Over a server frame in `step` ms steps; on your own host, where everything
+ * happens on a frame, over every frame of one cycle of the server's frames
+ * against the client's. */
 static int SuccessRate(int a, int r, int d, int hold, int step) {
-	int ok = 0, n = 0, phase;
+	int ok = 0, n = 0, phase, span = 50;
 	allReal = 1;
-	for (phase = 0; phase < 50; phase += step) {
+	if (rtts[r] == 0) { span = SV_FRAME / Gcd(SV_FRAME, CL_FRAME) * CL_FRAME; step = CL_FRAME; }
+	else span = RemoteInterval();	/* every phase of an internet client's snapshots */
+	for (phase = 0; phase < span; phase += step) {
 		script_t s = Script(a, X);
 		int at;
 		startShift = phase;
@@ -682,12 +919,14 @@ static void Phases(void) {
 		putchar('\n');
 	}
 }
-/* MW2's window on your own host, from MW2's clock alone. The client predicts
- * from a snapshot one interval plus CL_TIME_BACKOFF behind, so a tap let go
- * within the backoff of the gun being up always fakes; earlier, the chance
- * falls across one snapshot interval, and past the clock's whole lag it is
- * gone. The player cannot see the snapshot phase, so this is over all of them.
- * With ping the base is older still, so the windows only widen. */
+/* MW2's window on your own host, from MW2's clock and MW2's host. The client
+ * predicts from a snapshot one interval plus CL_TIME_BACKOFF behind, and the
+ * host reads each snapshot a frame after its server sent it (hostHold), so a
+ * tap let go within the backoff and that frame of the gun being up always
+ * fakes; earlier, the chance falls across one snapshot interval, and past the
+ * clock's whole lag it is gone. The player cannot see the snapshot phase, so
+ * this is over all of them. With ping the base is older still, so the windows
+ * only widen. */
 static void Windows(void) {
 	int a, d, rate, expect;
 	/* The phase sweep is of snapshots against a packet every frame (your own
@@ -695,17 +934,20 @@ static void Windows(void) {
 	 * own that it does not cover. */
 	if (maxPackets) return;
 	for (a = 0; a < ACT_NONE; a++) {
-		CHECK(SuccessRate(a, 1, 40, 64, 5) == 100);
-		CHECK(SuccessRate(a, 2, 72, 64, 5) == 100);
-		for (d = 0; d <= CL_TIME_BACKOFF - CL_FRAME; d += CL_FRAME) CHECK(SuccessRate(a, 0, d, 64, 5) == 100);
+		/* Online, X must be held across one of the server's snapshots to be
+		 * seen at all: held longer than their interval, it always is, and
+		 * the windows are wide. (A shorter tap is a gamble on the phase.) */
+		CHECK(SuccessRate(a, 1, 40, RemoteInterval() + 2 * CL_FRAME, 5) == 100);
+		CHECK(SuccessRate(a, 2, 72, RemoteInterval() + 2 * CL_FRAME, 5) == 100);
+		for (d = 0; d <= CL_TIME_BACKOFF + hostHold - CL_FRAME; d += CL_FRAME) CHECK(SuccessRate(a, 0, d, 64, 5) == 100);
 		/* the fall, where an interval spans more than a couple of commands */
 		if (snapInterval > 2 * CL_FRAME) {
-			d = CL_TIME_BACKOFF + snapInterval / 2;
+			d = CL_TIME_BACKOFF + hostHold + snapInterval / 2;
 			rate = SuccessRate(a, 0, d, 64, 5);
-			expect = 100 * (CL_TIME_BACKOFF + snapInterval - d) / snapInterval;
+			expect = 100 * (CL_TIME_BACKOFF + hostHold + snapInterval - d) / snapInterval;
 			CHECK(rate >= expect - 20 && rate <= expect + 20);
 		}
-		for (d = CL_TIME_BACKOFF + snapInterval + 2 * CL_FRAME; d <= CL_TIME_BACKOFF + 2 * snapInterval; d += snapInterval / 2)
+		for (d = CL_TIME_BACKOFF + hostHold + snapInterval + 2 * CL_FRAME; d <= CL_TIME_BACKOFF + hostHold + 2 * snapInterval; d += snapInterval / 2)
 			CHECK(SuccessRate(a, 0, d, 64, 5) == 0);
 		/* let go after it is up: a real reload */
 		CHECK(SuccessRate(a, 0, -CL_FRAME, 64, 5) == 0 && allReal);
@@ -775,32 +1017,39 @@ static void TestExtrapolationGuard(void) {
  * newest snapshot to the backoff behind it, and the snapshot prediction starts
  * from as old. Snapshots every frame do not take the floor away. */
 static void TestClockBase(void) {
-	int i, keep = SV_FRAME, keepSettle = settle;
+	int i, keep = SV_FRAME;
 	for (i = 0; i < 2; i++) {
 		script_t s = Script(ACT_NONE, X);
 		SV_FRAME = i ? SV_FRAME_FAST : keep;
-		settle = (CL_TIME_BACKOFF + SV_FRAME) * SV_FRAME;
 		Run(0, &s, NONE);
 		printf("  clock at sv_fps %d: %d..%dms behind the newest snapshot, predicting from %d..%dms back\n",
 			1000 / SV_FRAME, clk.leadMin, clk.leadMax, clk.ageMin, clk.ageMax);
 		CHECK(clk.intervalMin == SV_FRAME && clk.intervalMax == SV_FRAME);
 		CHECK(clk.leadMin >= CL_TIME_BACKOFF && clk.leadMax <= CL_TIME_BACKOFF + clk.intervalMax + CL_FRAME);
-		/* plus a command's way to the server: a frame, or a packet (in whole frames) when batched */
-		CHECK(clk.ageMin >= CL_TIME_BACKOFF && clk.ageMax <= CL_TIME_BACKOFF + clk.intervalMax + CL_FRAME +
-			(maxPackets ? (1000 / maxPackets + CL_FRAME - 1) / CL_FRAME * CL_FRAME : CL_FRAME));
+		/* plus a command's way to the server, a frame (your own host sends
+		 * every frame, whatever cl_maxpackets says), and the frame the host
+		 * holds its snapshot for */
+		CHECK(clk.ageMin >= CL_TIME_BACKOFF + hostHold && clk.ageMax <= CL_TIME_BACKOFF + clk.intervalMax + 2 * CL_FRAME + hostHold);
 		if (!i) snapInterval = clk.intervalMax;	/* the shipped rate, for the windows */
 	}
-	SV_FRAME = keep; settle = keepSettle;
+	SV_FRAME = keep;
 }
 
 int main(void) {
 	FakeReloadPictureInit();
 	if (getenv("FAKERELOAD_SVFPS")) SV_FRAME = 1000 / atoi(getenv("FAKERELOAD_SVFPS"));
 	if (getenv("FAKERELOAD_MAXPACKETS")) maxPackets = atoi(getenv("FAKERELOAD_MAXPACKETS"));
-	/* The slow drift moves the delta at least 1ms a snapshot, from exactly on
-	 * the first snapshot to one interval plus the backoff behind. */
-	settle = (CL_TIME_BACKOFF + SV_FRAME) * SV_FRAME;
+	/* The print modes only: another frame rate (com_maxfps), sv_onlineGame
+	 * 0, and ioquake3's own host, which read its snapshots without the held
+	 * frame. */
+	if (getenv("FAKERELOAD_BULLETS") || getenv("FAKERELOAD_PHASES") || getenv("FAKERELOAD_PROBE") || getenv("FAKERELOAD_CLOCK")) {
+		if (getenv("FAKERELOAD_CLFRAME")) CL_FRAME = atoi(getenv("FAKERELOAD_CLFRAME"));
+		if (getenv("FAKERELOAD_ONLINEGAME")) onlineGame = atoi(getenv("FAKERELOAD_ONLINEGAME"));
+	}
+	hostHold = getenv("FAKERELOAD_HOSTHOLD") && (getenv("FAKERELOAD_BULLETS") || getenv("FAKERELOAD_PHASES") ||
+		getenv("FAKERELOAD_PROBE") || getenv("FAKERELOAD_CLOCK")) ? atoi(getenv("FAKERELOAD_HOSTHOLD")) : CL_FRAME;
 	if (getenv("FAKERELOAD_CLOCK")) { script_t sc = Script(ACT_NONE, X); Run(0, &sc, NONE); return 0; }
+	if (getenv("FAKERELOAD_BULLETS")) { FakeBulletTable(); return 0; }
 	MeasureAnchors();
 	if (getenv("FAKERELOAD_PROBE")) { Probe(); return 0; }
 	if (getenv("FAKERELOAD_PHASES")) { Phases(); return 0; }
@@ -812,16 +1061,22 @@ int main(void) {
 		Run(rtts[r], &sc, anchorAt[a][r]);
 		return 0;
 	}
+#ifdef FAKERELOAD_ENGINE
+	CHECK(FakeReloadEngineLoopback(CL_FRAME));
+#endif
 	TestDriftTimeDelta();
 	TestExtrapolationGuard();
 	TestClockBase();
 	TestSwapOnlyCorrection();
 	TestPictureHandsBack();
 	Windows();
-	FakeReloads(); FakeBullets();
+	FakeReloads(); FakeBullets(); FakeBulletWindows();
 	GUN = WP_M40A3; MeasureAnchors();
 	Windows();
-	FakeReloads(); FakeBullets(); WildScopes();
+	FakeReloads(); FakeBullets(); FakeBulletWindows(); WildScopes();
+#ifdef FAKERELOAD_ENGINE
+	printf("  %d runs on your own host also run through the real Com_Frame and loopback, identically\n", engineRuns);
+#endif
 	printf("PASS: %d fake reload, fake bullet and wild scope checks\n", checks);
 	return 0;
 }

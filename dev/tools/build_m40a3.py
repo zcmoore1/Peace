@@ -362,7 +362,7 @@ def build():
                     signs=[(b[0]-a[0])*(y-a[1])-(b[1]-a[1])*(x-a[0]) for a,b in zip(pts,pts[1:]+pts[:1])]
                     if min(signs)>=0 or max(signs)<=0: silhouette.add((x,y))
     eye=add(ORIGIN,(-6,0,3.5))
-    sights=f'// Eye behind the modeled ocular; scope is integral, not a red-dot attachment.\niron {eye[0]} {eye[1]} {eye[2]} 0 0 0\ntiming {data["ads_in_ms"]} {data["ads_out_ms"]}\nfov {data["fov_scale"]}\n'+('scope peace/m40_scope\n' if data['scope_overlay'] else '')
+    sights=f'// Eye behind the modeled ocular; scope is integral, not a red-dot attachment.\niron {eye[0]} {eye[1]} {eye[2]} 0 0 0\ntiming {data["ads_in_ms"]} {data["ads_out_ms"]}\nzoomfov {data["ads_zoom_fov"]}\n'+('scope peace/m40_scope\n' if data['scope_overlay'] else '')
     flash=Mesh()
     flash.face('flash',0,[(8,-2,0),(12,-2,0),(12,2,0),(8,2,0)])
     flash.face('flash',0,[(8,0,-2),(12,0,-2),(12,0,2),(8,0,2)])

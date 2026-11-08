@@ -54,6 +54,12 @@ typedef struct {
 	vec3_t		ladderNormal;
 	qboolean	ladderGrabbed;	// contact this think, even if we immediately jump off
 	qboolean	jumped;			// a jump left the ground this think
+
+	// This think's copy of the command's rightmove, which MW2's sprint strafe
+	// scales in PM_WalkMove (MW2 writes it into the command; Pmove's substeps
+	// reuse the command, so here it is a per-think copy that cannot compound).
+	// The walk, the take-off's air move and the bob read it.
+	int			rightmove;
 } pml_t;
 
 extern	pmove_t		*pm;
@@ -61,15 +67,17 @@ extern	pml_t		pml;
 
 // movement parameters
 extern	float	pm_stopspeed;
-extern	float	pm_duckScale;
 extern	float	pm_swimScale;
 
 extern	float	pm_accelerate;
+extern	float	pm_duckaccelerate;
+extern	float	pm_noclipaccelerate;
 extern	float	pm_airaccelerate;
 extern	float	pm_wateraccelerate;
 extern	float	pm_flyaccelerate;
 
 extern	float	pm_friction;
+extern	float	pm_noclipfriction;
 extern	float	pm_waterfriction;
 extern	float	pm_flightfriction;
 

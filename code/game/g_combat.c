@@ -529,7 +529,8 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	G_SNDClientDied( self );
 	G_SNDRecordKill( self, attacker );
 	G_KillstreakKill( attacker, self );
-	// Record before AddScore/CalculateRanks can end a non-round match.
+	// Record before AddScore/CalculateRanks can end a non-round match: the
+	// final killcam below is this kill's.
 	if ( attacker && attacker->client && attacker != self && !OnSameTeam( self, attacker ) &&
 	     attacker->s.number < MAX_CLIENTS && self->s.number < MAX_CLIENTS ) {
 		level.lastKillerNum = attacker->s.number;
@@ -581,7 +582,21 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		if ( attacker == self || OnSameTeam (self, attacker ) ) {
 			AddScore( attacker, self->r.currentOrigin, -1 );
 		} else {
+			int queued = level.intermissionQueued;
 			AddScore( attacker, self->r.currentOrigin, 1 );
+			// MW2's final killcam belongs to the kill whose score ended the
+			// match (_gamescore.gsc: scoreEndedMatch && event == "kill" sets
+			// finalKill; _damage.gsc starts doFinalKillcam only for it). Here
+			// that is a kill whose AddScore reached a score limit and queued
+			// the intermission (CalculateRanks -> CheckExitRules -> LogExit).
+			// A time or capture limit, or a match S&D ends, shows none: S&D
+			// asks for its own round-winning killcam (SND_EndRound).
+			if ( !queued && level.intermissionQueued && g_gametype.integer != GT_SND &&
+			     level.lastKillTime == level.time && level.lastVictimNum == self->s.number ) {
+				level.replayEndTime = trap_ReplayStart( level.lastKillerNum,
+					level.lastKillTime - KILLCAM_REWIND, level.lastKillTime + KILLCAM_LINGER,
+					level.lastKillTime + KILLCAM_GAME_DELAY );
+			}
 
 			if( meansOfDeath == MOD_GAUNTLET ) {
 				

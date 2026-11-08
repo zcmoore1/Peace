@@ -166,7 +166,7 @@ static void TestReloadTail(void) {
 static void TestActions(void) {
  const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL};
  const int weapons[]={WP_KNIFE,WP_FRAG,WP_FLASH};
- int i,hold,count;
+ int i,hold,count,t,clear=0;
  for(i=0;i<3;i++) for(hold=0;hold<2;hold++) {
   Ready(WP_MACHINEGUN,WP_SHOTGUN);
   count=ps.ammo[weapons[i]];
@@ -203,10 +203,30 @@ static void TestActions(void) {
  CHECK(!(ps.weaponAction&WA_TYPE_MASK) && ps.weaponstate==WEAPON_READY);
  move.cmd.weapon=WP_KNIFE; move.cmd.buttons=0; Step(1);
  CHECK(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_READY);
- Ready(WP_MACHINEGUN,WP_SHOTGUN);
- move.cmd.buttons=BUTTON_MELEE; Step(1);
- ps.stats[STAT_LADDER]=LADDER_ATTACHED; Step(1);
- CHECK(!(ps.weaponAction&WA_TYPE_MASK) && fired[WP_KNIFE]==0);
+ /* A ladder grabbed with the knife out takes nothing from it: MW2's ladder
+  * drop is a weapon change, refused in the melee states and the quick raise
+  * after them (CheckForChangeWeapon 578bc0-578c04). The knife lands, the gun
+  * comes back, and the ladder drop starts on the think the latch would clear
+  * with no ladder (i 0). Nothing new starts on the ladder meanwhile. */
+ for(i=0;i<2;i++) {
+  Ready(WP_MACHINEGUN,WP_SHOTGUN);
+  move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
+  if(i) ps.stats[STAT_LADDER]=LADDER_ATTACHED;
+  Step(1);
+  CHECK(ps.weapon==WP_KNIFE && (ps.weaponAction&WA_TYPE_MASK)==WA_MELEE && !(ps.stats[STAT_LADDER]&LADDER_HOLSTER));
+  for(t=0;t<10000 && (ps.weaponAction&WA_TYPE_MASK);t++) {
+   CHECK(!(ps.stats[STAT_LADDER]&LADDER_HOLSTER));
+   move.cmd.buttons=i && t==BG_MELEE_TIME ? BUTTON_LETHAL : 0;	/* the gun's quick raise */
+   Step(1);
+  }
+  move.cmd.buttons=0;
+  CHECK(fired[WP_KNIFE]==1 && ps.weapon==WP_MACHINEGUN && !(ps.weaponAction&WA_TYPE_MASK));
+  if(!i) { clear=t; CHECK(ps.weaponstate==WEAPON_READY && ps.ammo[WP_FRAG]==2); continue; }
+  CHECK(t==clear && (ps.stats[STAT_LADDER]&LADDER_HOLSTER) && ps.ammo[WP_FRAG]==2);
+  CHECK(ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_LADDER_DROP_TIME);
+  Run(BG_LADDER_DROP_TIME); CHECK(ps.weaponstate==WEAPON_LADDER);
+  ps.stats[STAT_LADDER]=0;
+ }
 }
 /* MW2's knife puts nothing down: MeleeInit writes the melee state straight
  * over the gun's. Whatever gun is out, the knife is in hand on the press
@@ -1507,13 +1527,32 @@ static void TestFragCook(void) {
  ps.stats[STAT_HEALTH]=0; Step(1);
  CHECK(ps.weapon==WP_NONE && ps.grenadeTimeLeft==fuse-1000 && !fired[WP_FRAG] && !suicides);
  Run(fuse); CHECK(ps.grenadeTimeLeft==fuse-1000 && !suicides);
- /* a ladder grabbed while cooking takes the frag with its fuse: no throw, no
-  * suicide, ever */
- FragHeld(WP_SHOTGUN,1); Run(1000);
- ps.stats[STAT_LADDER]=LADDER_ATTACHED; Step(1);
- CHECK(ps.grenadeTimeLeft==0 && !(ps.weaponAction&WA_TYPE_MASK));
- Run(fuse); CHECK(!fired[WP_FRAG] && !suicides && ps.grenadeTimeLeft==0 && ps.ammo[WP_FRAG]==2);
- ps.stats[STAT_LADDER]=0;
+ /* a ladder grabbed while cooking takes nothing (MW2's ladder drop is a
+  * weapon change, refused in every offhand state, 578bc0-578c04): the fuse
+  * runs on, the release throws with what is left (k 0) or the frag goes off
+  * in the hand at the end of it (k 1), and the ladder drop waits for the
+  * gun's quick raise, starting on the think the latch would clear with no
+  * ladder (i 0) */
+ for(k=0;k<2;k++) {
+  int clear=0;
+  for(i=0;i<2;i++) {
+   FragHeld(WP_SHOTGUN,1); Run(1000);
+   if(i) ps.stats[STAT_LADDER]=LADDER_ATTACHED;
+   Step(1);
+   CHECK(ps.grenadeTimeLeft==fuse-1001 && ps.weapon==WP_FRAG && ps.weaponstate==WEAPON_READY);
+   CHECK((ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==WA_LETHAL && !(ps.stats[STAT_LADDER]&LADDER_HOLSTER));
+   if(k) { for(t=0;t<fuse && ps.grenadeTimeLeft>0;t++) Step(1); CHECK(suicides==1 && ps.ammo[WP_FRAG]==1); }
+   move.cmd.buttons=0; Step(1);
+   if(!k) CHECK(fired[WP_FRAG]==1 && ps.grenadeTimeLeft==fuse-1002 && ps.ammo[WP_FRAG]==1);
+   for(t=0;t<10000 && (ps.weaponAction&WA_TYPE_MASK);t++) { CHECK(!(ps.stats[STAT_LADDER]&LADDER_HOLSTER)); Step(1); }
+   CHECK(ps.weapon==WP_SHOTGUN && fired[WP_FRAG]==!k && suicides==k);
+   if(!i) { clear=t; CHECK(ps.weaponstate==WEAPON_READY); continue; }
+   CHECK(t==clear && (ps.stats[STAT_LADDER]&LADDER_HOLSTER));
+   CHECK(ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_LADDER_DROP_TIME);
+   Run(BG_LADDER_DROP_TIME); CHECK(ps.weaponstate==WEAPON_LADDER);
+   ps.stats[STAT_LADDER]=0;
+  }
+ }
  /* every other offhand: its whole fuseTime from HOLD entry, held for good */
  for(k=0;k<ARRAY_LEN(offhands);k++) {
   int offhand=offhands[k];
@@ -2005,29 +2044,116 @@ static void TestSprintLatch(void) {
   CHECK(!(ps.pm_flags&PMF_SPRINTING) && !!(ps.pm_flags&PMF_ADS)==i);
  }
 }
+/* MW2's walk scale (PM_CmdScale_Walk 0x572DB0) at IW4x's exe defaults: first
+ * the numbers themselves, then every posture and class through the scale. */
+static const struct { int primary, secondary, moveClass; float factor, run, sprint, crouch, aim; } moveClasses[] = {
+ /* MW2's weaponClass of each gun's twin (_weapons.gsc updateMoveSpeedScale);
+  * aim is with the primary in hand (spas12_mp's adsMoveSpeedScale is 2) */
+ { WP_MACHINEGUN, WP_SHOTGUN, MOVECLASS_RIFLE, 0.95f, 180.5f, 270.75f, 117.325f, 72.2f },
+ { WP_SHOTGUN, WP_MACHINEGUN, MOVECLASS_SPREAD, 0.95f, 180.5f, 270.75f, 117.325f, 144.4f },
+ { WP_M40A3, WP_MACHINEGUN, MOVECLASS_SNIPER, 1.0f, 190, 285, 123.5f, 76 },
+ { WP_ROCKET_LAUNCHER, WP_SHOTGUN, MOVECLASS_ROCKETLAUNCHER, 0.8f, 152, 228, 98.8f, 60.8f },
+ /* no MW2 twin: the script's default class (owner's choice) */
+ { WP_RAILGUN, WP_SHOTGUN, MOVECLASS_NONE, 1.0f, 190, 285, 123.5f, 76 },
+ { WP_GRENADE_LAUNCHER, WP_SHOTGUN, MOVECLASS_NONE, 1.0f, 190, 285, 123.5f, 76 },
+ { WP_LIGHTNING, WP_SHOTGUN, MOVECLASS_NONE, 1.0f, 190, 285, 123.5f, 76 },
+ { WP_PLASMAGUN, WP_SHOTGUN, MOVECLASS_NONE, 1.0f, 190, 285, 123.5f, 76 },
+ { WP_BFG, WP_SHOTGUN, MOVECLASS_NONE, 1.0f, 190, 285, 123.5f, 76 }
+};
 static void TestMovementScale(void) {
- const int flags[]={0,PMF_SPRINTING,PMF_ADS};
+ const int flags[]={0,PMF_SPRINTING,PMF_ADS,PMF_DUCKED,PMF_DUCKED|PMF_ADS};
+ const float most[]={1,BG_SPRINT_SPEED_SCALE,BG_ADS_SPEED_SCALE,BG_CROUCH_SPEED_SCALE,BG_CROUCH_SPEED_SCALE*BG_ADS_SPEED_SCALE};
+ usercmd_t before;
  int i,j;
  float scale,normal;
- Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.speed=320; pml.walking=qtrue;
- move.cmd.forwardmove=127; normal=PM_CmdScale(&move.cmd);
+ /* MW2's numbers (iw4x.exe and the IW4 dump's scripts), the exe's strafe
+  * and back scales and pitch clamp (owner's choice over the playlist) */
+ CHECK(BG_PLAYER_SPEED==190 && BG_SPRINT_SPEED_SCALE==1.5f && BG_SPRINT_STRAFE_SCALE==0.667f);
+ CHECK(BG_ADS_SPEED_SCALE==0.4f && BG_CROUCH_SPEED_SCALE==0.65f);
+ CHECK(BG_STRAFE_SPEED_SCALE==0.8f && BG_BACK_SPEED_SCALE==0.7f);
+ CHECK(pm_friction==5.5f && pm_stopspeed==100.0f && pm_accelerate==9.0f && pm_duckaccelerate==12.0f);
+ CHECK(pm_airaccelerate==1.0f && pm_noclipaccelerate==10.0f);
+ CHECK(BG_VIEW_PITCH_UP==85 && BG_VIEW_PITCH_DOWN==85);
+ CHECK(BG_MoveClassFactor(MOVECLASS_NONE)==1.0f && BG_MoveClassFactor(MOVECLASS_RIFLE)==0.95f);
+ CHECK(BG_MoveClassFactor(MOVECLASS_SMG)==1.0f && BG_MoveClassFactor(MOVECLASS_PISTOL)==1.0f);
+ CHECK(BG_MoveClassFactor(MOVECLASS_MG)==0.875f && BG_MoveClassFactor(MOVECLASS_SPREAD)==0.95f);
+ CHECK(BG_MoveClassFactor(MOVECLASS_ROCKETLAUNCHER)==0.8f && BG_MoveClassFactor(MOVECLASS_SNIPER)==1.0f);
+ CHECK(BG_MoveClassFactor(MOVECLASS_RIOTSHIELD)==0.8f);
+ CHECK(BG_MoveClassFactor(-1)==1.0f && BG_MoveClassFactor(MOVECLASS_COUNT)==1.0f);
+ CHECK(BG_WeaponAdsMoveScale(WP_SHOTGUN)==2.0f && BG_WeaponAdsMoveScale(WP_MACHINEGUN)==1.0f);
+ CHECK(BG_WeaponAdsMoveScale(WP_FRAG)==1.0f && BG_WeaponAdsMoveScale(WP_NONE)==1.0f);
+
+ /* A class-1 player (the M300's sniper class): MW2's steady wish speeds */
+ Ready(WP_M40A3,WP_MACHINEGUN); ps.speed=BG_PLAYER_SPEED; pml.walking=qtrue;
+ CHECK(ps.moveClass==MOVECLASS_SNIPER && BG_MoveClassScale(&ps)==1.0f);
+ move.cmd.forwardmove=127; normal=PM_WalkScale(127,0);
+ CHECK(fabs(normal*127-190)<.001f);
  for(i=0;i<ARRAY_LEN(flags);i++) {
-  ps.pm_flags=flags[i]; scale=PM_CmdScale(&move.cmd);
-  if(i==1) CHECK(scale>normal);
-  if(i==2) CHECK(scale<normal);
-  /* Prediction may replay many commands from one snapshot; no command may
-   * compound the modifier into the authoritative base speed. */
+  ps.pm_flags=flags[i]; scale=PM_WalkScale(127,0);
+  CHECK(fabs(scale*127-BG_PLAYER_SPEED*most[i])<.001f);
+  /* Prediction may replay many commands from one snapshot, and Pmove's
+   * substeps reuse one command; no evaluation may compound the modifier
+   * into the authoritative base speed or the command. */
+  before=move.cmd;
   for(j=0;j<100;j++) {
-   CHECK(fabs(PM_CmdScale(&move.cmd)-scale)<.0001f);
-   CHECK(ps.speed==320);
+   CHECK(fabs(PM_WalkScale(127,0)-scale)<.0001f);
+   CHECK(ps.speed==BG_PLAYER_SPEED && !memcmp(&before,&move.cmd,sizeof(before)));
   }
  }
- move.cmd.forwardmove=0; ps.pm_flags=PMF_SPRINTING;
- CHECK(PM_CmdScale(&move.cmd)==0 && ps.speed==320);
- /* Sprint speed is the walk's: off the ground it adds nothing (MW2). */
- move.cmd.forwardmove=127; ps.pm_flags=0; normal=PM_CmdScale(&move.cmd);
- pml.walking=qfalse; ps.pm_flags=PMF_SPRINTING;
- CHECK(fabs(PM_CmdScale(&move.cmd)-normal)<.0001f);
+ ps.pm_flags=PMF_SPRINTING; CHECK(fabs(PM_WalkScale(127,0)*127-285)<.001f);
+ ps.pm_flags=PMF_ADS; CHECK(fabs(PM_WalkScale(127,0)*127-76)<.001f);
+ ps.pm_flags=PMF_DUCKED; CHECK(fabs(PM_WalkScale(127,0)*127-123.5f)<.001f);
+ ps.pm_flags=PMF_DUCKED|PMF_ADS; CHECK(fabs(PM_WalkScale(127,0)*127-49.4f)<.001f);
+ CHECK(PM_WalkScale(0,0)==0);
+ /* Strafe and backpedal change the magnitude when they win the max, never
+  * the direction: D 152, S 133, S+D 152, W+D and W+A 190. */
+ ps.pm_flags=0;
+ CHECK(fabs(PM_WalkScale(0,127)*127-152)<.001f && fabs(PM_WalkScale(0,-127)*127-152)<.001f);
+ CHECK(fabs(PM_WalkScale(-127,0)*127-133)<.001f);
+ CHECK(fabs(PM_WalkScale(-127,127)*sqrt(2.0f)*127-152)<.01f);
+ CHECK(fabs(PM_WalkScale(127,127)*sqrt(2.0f)*127-190)<.01f && fabs(PM_WalkScale(127,-127)*sqrt(2.0f)*127-190)<.01f);
+ /* A half stick crouched walks half of the crouch (Quake 3's clamp gave the
+  * whole of it), and the crouch's upmove is no part of the scale. */
+ ps.pm_flags=PMF_DUCKED;
+ CHECK(fabs(PM_WalkScale(64,0)*64-BG_PLAYER_SPEED*BG_CROUCH_SPEED_SCALE*64/127)<.001f);
+ /* The sprint strafe only bends the sprint: 84 of 127 aside is 33.5 degrees
+  * off forward, at the sprint's full speed. */
+ ps.pm_flags=PMF_SPRINTING;
+ CHECK((int)(127*BG_SPRINT_STRAFE_SCALE)==84 && (int)(-127*BG_SPRINT_STRAFE_SCALE)==-84);
+ CHECK(fabs(PM_WalkScale(127,84)*sqrt(127*127+84*84.0f)-285)<.01f);
+ /* Every class: its factor last, the aimed gun's adsMoveSpeedScale */
+ for(i=0;i<ARRAY_LEN(moveClasses);i++) {
+  Ready(moveClasses[i].primary,moveClasses[i].secondary); ps.speed=BG_PLAYER_SPEED; pml.walking=qtrue;
+  CHECK(ps.weapon==moveClasses[i].primary && ps.moveClass==moveClasses[i].moveClass);
+  CHECK(BG_WeaponMoveClass(moveClasses[i].primary)==moveClasses[i].moveClass);
+  CHECK(fabs(BG_MoveClassScale(&ps)-moveClasses[i].factor)<1e-6f);
+  ps.pm_flags=0; CHECK(fabs(PM_WalkScale(127,0)*127-moveClasses[i].run)<.01f);
+  ps.pm_flags=PMF_SPRINTING; CHECK(fabs(PM_WalkScale(127,0)*127-moveClasses[i].sprint)<.01f);
+  ps.pm_flags=PMF_DUCKED; CHECK(fabs(PM_WalkScale(127,0)*127-moveClasses[i].crouch)<.01f);
+  ps.pm_flags=PMF_ADS; CHECK(fabs(PM_WalkScale(127,0)*127-moveClasses[i].aim)<.01f);
+  /* the gun's scale is the aimed one's only: hip is the class run */
+  ps.pm_flags=0; ps.weapon=WP_SHOTGUN; CHECK(fabs(PM_WalkScale(127,0)*127-moveClasses[i].run)<.01f);
+  ps.pm_flags=PMF_ADS; CHECK(fabs(PM_WalkScale(127,0)*127-BG_PLAYER_SPEED*BG_ADS_SPEED_SCALE*2*moveClasses[i].factor)<.01f);
+  /* The air is the base speed alone: no class, sprint, crouch or gun. */
+  ps.pm_flags=PMF_SPRINTING|PMF_DUCKED; CHECK(fabs(PM_AirScale(127,0)*127-190)<.001f);
+  ps.pm_flags=PMF_ADS; CHECK(fabs(PM_AirScale(127,0)*127-76)<.001f);
+  /* Swimming, flying and noclip (Quake 3's scale) take aim alone. */
+  ps.pm_flags=PMF_SPRINTING|PMF_DUCKED; move.cmd.forwardmove=127; move.cmd.upmove=0;
+  CHECK(fabs(PM_CmdScale(&move.cmd)*127-190)<.001f);
+  ps.pm_flags=PMF_ADS; CHECK(fabs(PM_CmdScale(&move.cmd)*127-76)<.001f);
+  move.cmd.forwardmove=0;
+ }
+ /* The hip spread's move term is over the player's own base speed: a full
+  * run adds 0.6 whatever g_speed is; a state built from an entity (no
+  * speed) reads g_speed's default. */
+ Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.groundEntityNum=ENTITYNUM_WORLD;
+ for(i=0;i<3;i++) {
+  const int speeds[]={BG_PLAYER_SPEED,2*BG_PLAYER_SPEED,0};	/* g_speed default, an admin's, none */
+  ps.speed=speeds[i]; ps.velocity[0]=speeds[i] ? speeds[i] : BG_PLAYER_SPEED;
+  CHECK(fabs(BG_SpreadScale(&ps)-1.6f)<1e-4f);
+ }
+ ps.speed=BG_PLAYER_SPEED; ps.velocity[0]=0; CHECK(fabs(BG_SpreadScale(&ps)-1)<1e-6f);
+ move.cmd.forwardmove=0;
 }
 /* Full Pmove reaches the respawn gate; PM_Weapon alone cannot cover it. */
 static void RespawnTrace(trace_t *tr, const vec3_t start, const vec3_t mins,
@@ -2050,18 +2176,18 @@ static void TestAirSprint(void) {
  for(s=0;s<2;s++) {
   Ready(WP_MACHINEGUN,WP_SHOTGUN);
   move.trace=RespawnTrace; move.pointcontents=RespawnContents;
-  move.tracemask=MASK_PLAYERSOLID; ps.speed=320; ps.gravity=800; ps.pm_type=PM_NORMAL;
-  ps.origin[2]=4000; ps.velocity[0]=320; ps.groundEntityNum=ENTITYNUM_NONE;
+  move.tracemask=MASK_PLAYERSOLID; ps.speed=BG_PLAYER_SPEED; ps.gravity=800; ps.pm_type=PM_NORMAL;
+  ps.origin[2]=4000; ps.velocity[0]=BG_PLAYER_SPEED; ps.groundEntityNum=ENTITYNUM_NONE;
   move.cmd.forwardmove=127; move.cmd.upmove=0;
   for(t=0;t<400;t+=8) RespawnMove(s ? BUTTON_SPRINT : 0,PM_NORMAL);
   CHECK(ps.groundEntityNum==ENTITYNUM_NONE && !!(ps.pm_flags&PMF_SPRINTING)==s);
   speed[s]=sqrt(ps.velocity[0]*ps.velocity[0]+ps.velocity[1]*ps.velocity[1]);
  }
- CHECK(fabs(speed[1]-speed[0])<.01f);
+ CHECK(fabs(speed[1]-speed[0])<.01f && fabs(speed[0]-BG_PLAYER_SPEED)<.01f);	/* an air sprint stays at 190 */
  /* Holding jump keeps it from starting, as MW2's jump button does. */
  Ready(WP_MACHINEGUN,WP_SHOTGUN);
  move.trace=RespawnTrace; move.pointcontents=RespawnContents;
- move.tracemask=MASK_PLAYERSOLID; ps.speed=320; ps.gravity=800;
+ move.tracemask=MASK_PLAYERSOLID; ps.speed=BG_PLAYER_SPEED; ps.gravity=800;
  ps.origin[2]=4000; ps.groundEntityNum=ENTITYNUM_NONE;
  move.cmd.forwardmove=127; move.cmd.upmove=127;
  for(t=0;t<200;t+=8) RespawnMove(BUTTON_SPRINT,PM_NORMAL);
@@ -2072,34 +2198,37 @@ static void TestAirSprint(void) {
 }
 /* MW2's air move: the stick alone sets the push - base speed, slowed while
  * aiming, never sprint or the jump button - and pushing against your motion
- * always takes speed away, at least as hard as at pm_stopspeed. One 50ms command
- * in open air from horizontal speed vx; Pmove truncates velocity, so these
- * pushes are whole. */
+ * always takes speed away, at least as hard as at pm_stopspeed. One 40ms command
+ * in open air from horizontal speed vx; Pmove rounds velocity to whole units. */
+#define AIR_STEP_MS 40
 static float AirStep(int forward, int up, int flags, float vx) {
  Ready(WP_MACHINEGUN,WP_SHOTGUN);
  move.trace=RespawnTrace; move.pointcontents=RespawnContents;
- move.tracemask=MASK_PLAYERSOLID; ps.speed=320; ps.gravity=800; ps.pm_type=PM_NORMAL;
+ move.tracemask=MASK_PLAYERSOLID; ps.speed=BG_PLAYER_SPEED; ps.gravity=800; ps.pm_type=PM_NORMAL;
  ps.origin[2]=4000; ps.velocity[0]=vx; ps.groundEntityNum=ENTITYNUM_NONE;
  ps.pm_flags|=flags|(up ? PMF_JUMP_HELD : 0);
  move.cmd.forwardmove=forward; move.cmd.rightmove=0; move.cmd.upmove=up; move.cmd.buttons=0;
- move.cmd.serverTime=ps.commandTime+50; Pmove(&move);
+ move.cmd.serverTime=ps.commandTime+AIR_STEP_MS; Pmove(&move);
  move.cmd.forwardmove=move.cmd.upmove=0;
  return ps.velocity[0];
 }
 static void TestAirControl(void) {
- const int flags[]={0,PMF_SPRINTING,PMF_ADS};
- const float floor=100*.05f, light=320*10/127.f;
+ const int flags[]={0,PMF_SPRINTING,PMF_ADS,PMF_DUCKED};
+ const float dt=AIR_STEP_MS*.001f, floor=pm_stopspeed*dt, light=BG_PLAYER_SPEED*10/127.f;
+ const float sprint=BG_PLAYER_SPEED*BG_SPRINT_SPEED_SCALE;	/* off a sprint jump */
  int i,up;
  for(i=0;i<ARRAY_LEN(flags);i++) for(up=0;up<2;up++) {
-  const float push=(flags[i]==PMF_ADS ? (int)(320*pm_adsScale) : 320)*.05f;
-  CHECK(push>floor);
-  CHECK(AirStep(127,up ? 127 : 0,flags[i],0)==push);
-  CHECK(AirStep(-127,up ? 127 : 0,flags[i],448)==448-push);	/* pull back off a sprint jump */
-  CHECK(AirStep(127,up ? 127 : 0,flags[i],448)==448);			/* forward: already faster */
+  /* 190 at the hip, 76 aimed: under stopspeed, so aimed it pushes at the floor */
+  const float wish=flags[i]==PMF_ADS ? BG_PLAYER_SPEED*BG_ADS_SPEED_SCALE : BG_PLAYER_SPEED;
+  const float push=(wish>pm_stopspeed ? wish : pm_stopspeed)*dt;
+  CHECK(push>=floor);
+  CHECK(AirStep(127,up ? 127 : 0,flags[i],0)==rintf(push));
+  CHECK(AirStep(-127,up ? 127 : 0,flags[i],sprint)==rintf(sprint-push));	/* pull back off a sprint jump */
+  CHECK(AirStep(127,up ? 127 : 0,flags[i],sprint)==sprint);			/* forward: already faster */
  }
- CHECK(light>floor);
- CHECK(AirStep(10,0,0,0)==floor);			/* a light stick pushes at stopspeed... */
- CHECK(AirStep(-10,0,0,448)==448-floor);	/* ...and brakes at it */
+ CHECK(light*dt<floor);
+ CHECK(AirStep(10,0,0,0)==rintf(floor));			/* a light stick pushes at stopspeed... */
+ CHECK(AirStep(-10,0,0,sprint)==rintf(sprint-floor));	/* ...and brakes at it */
  /* A ladder keeps the plain rate, as MW2's ladder branch of accelerate does. */
  {
   vec3_t up={0,0,1}; const float wish=25, rate=wish*.05f*BG_LADDER_ACCELERATE;
@@ -2117,25 +2246,27 @@ static void TestSprintCancelsAirAim(void) {
  float v;
  Ready(WP_MACHINEGUN,WP_SHOTGUN);
  move.trace=RespawnTrace; move.pointcontents=RespawnContents;
- move.tracemask=MASK_PLAYERSOLID; ps.speed=320; ps.gravity=800; ps.pm_type=PM_NORMAL;
+ move.tracemask=MASK_PLAYERSOLID; ps.speed=BG_PLAYER_SPEED; ps.gravity=800; ps.pm_type=PM_NORMAL;
  ps.origin[2]=4000; ps.groundEntityNum=ENTITYNUM_NONE;
  move.cmd.forwardmove=127; move.cmd.upmove=0;
  RespawnMove(BUTTON_ADS,PM_NORMAL);
  CHECK(ps.pm_flags&PMF_ADS);
- v=ps.velocity[0]; move.cmd.serverTime=ps.commandTime+50; Pmove(&move);
- CHECK((ps.pm_flags&PMF_ADS) && ps.velocity[0]-v==(int)(320*pm_adsScale)*.05f);
+ /* aimed, 76 is under stopspeed: the push is the floor's, 4 in 40ms */
+ v=ps.velocity[0]; move.cmd.serverTime=ps.commandTime+AIR_STEP_MS; Pmove(&move);
+ CHECK((ps.pm_flags&PMF_ADS) && ps.velocity[0]-v==rintf(pm_stopspeed*AIR_STEP_MS*.001f));
  move.cmd.buttons=BUTTON_ADS|BUTTON_SPRINT;
- move.cmd.serverTime=ps.commandTime+50; Pmove(&move);
+ move.cmd.serverTime=ps.commandTime+AIR_STEP_MS; Pmove(&move);
  CHECK(!(ps.pm_flags&(PMF_ADS|PMF_SPRINTING)));
- v=ps.velocity[0]; move.cmd.serverTime=ps.commandTime+50; Pmove(&move);
- CHECK(ps.velocity[0]-v==320*.05f);
+ /* the full base speed's push, 7.6 in 40ms, rounded onto a whole speed */
+ v=ps.velocity[0]; move.cmd.serverTime=ps.commandTime+AIR_STEP_MS; Pmove(&move);
+ CHECK(ps.velocity[0]-v==rintf(BG_PLAYER_SPEED*AIR_STEP_MS*.001f));
  move.cmd.forwardmove=0; move.cmd.buttons=0;
 }
 /* Off the ground during a landing's slowdown, the jump state is cleared. */
 static void TestLedgeClearsLanding(void) {
  Ready(WP_MACHINEGUN,WP_SHOTGUN);
  move.trace=RespawnTrace; move.pointcontents=RespawnContents;
- move.tracemask=MASK_PLAYERSOLID; ps.speed=320; ps.gravity=800; ps.pm_type=PM_NORMAL;
+ move.tracemask=MASK_PLAYERSOLID; ps.speed=BG_PLAYER_SPEED; ps.gravity=800; ps.pm_type=PM_NORMAL;
  ps.origin[2]=4000; ps.groundEntityNum=ENTITYNUM_NONE; ps.jumpLand=900; ps.jumpOriginZ=1;
  RespawnMove(0,PM_NORMAL);
  CHECK(ps.jumpLand==0 && ps.jumpOriginZ==0);
@@ -2147,7 +2278,7 @@ static void TestLedgeClearsLanding(void) {
  * switching there moves the eye. Its cadence (PM_Footsteps): speed over the
  * posture's most, times MW2's rate, truncated each think. */
 static void TestViewBob(void) {
- const float speed=320, c0=BG_ViewBobCycle(&ps);
+ const float speed=BG_PLAYER_SPEED, c0=BG_ViewBobCycle(&ps);
  float c,v,h,vs,hs;
  int i,steps,before;
  Ready(WP_MACHINEGUN,WP_SHOTGUN);
@@ -2165,23 +2296,41 @@ static void TestViewBob(void) {
  CHECK(fabs(BG_HorizontalViewBob(&ps,c,1000,0)-sin(c)*8)<1e-3f);		/* capped */
  ps.pm_flags=PMF_DUCKED;
  CHECK(fabs(BG_HorizontalViewBob(&ps,c,speed,0)-sin(c)*0.0075f*speed)<1e-3f);
- /* Cadence: an 8ms think at the posture's full speed. */
- for(i=0;i<5;i++) {
-  const int flags[]={0,PMF_SPRINTING,PMF_DUCKED,PMF_ADS,PMF_BACKWARDS_RUN};
-  const float rate[]={0.335f,0.5f,0.34f,0.305f,0.36f};
-  const float most[]={1,1.4f,pm_duckScale,pm_adsScale,1};
-  Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.speed=320; ps.groundEntityNum=0; ps.pm_flags=flags[i];
-  move.cmd.forwardmove=i==4 ? -127 : 127; ps.velocity[0]=320*most[i]; ps.bobCycle=10;
+ /* Cadence: a think at the posture's full speed, MW2's PM_GetMaxSpeed:
+  * the sprint, aim, crouch and back scales, and MW2's own mix of the strafe
+  * and back scales for a diagonal or a strafe. */
+ for(i=0;i<9;i++) {
+  const int flags[]={0,PMF_SPRINTING,PMF_DUCKED,PMF_ADS,PMF_BACKWARDS_RUN,0,0,PMF_BACKWARDS_RUN,PMF_ADS};
+  const int fm[]={127,127,127,127,-127,0,127,-127,127}, rm[]={0,0,0,0,0,127,127,127,0};
+  const float rate[]={0.335f,0.5f,0.34f,0.305f,0.36f,0.335f,0.335f,0.36f,0.305f};
+  const float strafe=(BG_STRAFE_SPEED_SCALE-1)*0.75f+1;
+  const float most[]={1,BG_SPRINT_SPEED_SCALE,BG_CROUCH_SPEED_SCALE,BG_ADS_SPEED_SCALE,BG_BACK_SPEED_SCALE,
+   strafe,(strafe+1)*0.5f,(strafe+1)*0.5f*(BG_BACK_SPEED_SCALE+1)*0.5f,BG_ADS_SPEED_SCALE*2};
+  Ready(i==8 ? WP_SHOTGUN : WP_M40A3,WP_MACHINEGUN); ps.speed=BG_PLAYER_SPEED; ps.groundEntityNum=0; ps.pm_flags=flags[i];
+  move.cmd.forwardmove=fm[i]; move.cmd.rightmove=rm[i]; pml.rightmove=rm[i];
+  ps.velocity[0]=BG_PLAYER_SPEED*most[i]; ps.bobCycle=10;
   pml.msec=100; PM_Footsteps();	/* long enough that each rate truncates apart */
+  CHECK(fabs(PM_BobMaxSpeed()-ps.velocity[0])<.001f);
   CHECK(ps.bobCycle==10+(int)(rate[i]*100));
  }
+ /* The class speed is the walk's alone (0x573850 leaves it out): a rifle
+  * class's full run bobs at 95% of the rate, Lightweight's 7% faster. */
+ for(i=0;i<2;i++) {
+  Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.speed=BG_PLAYER_SPEED; ps.groundEntityNum=0;
+  if(i) ps.perks=1<<(PERK_LIGHTWEIGHT-1);
+  move.cmd.forwardmove=127; move.cmd.rightmove=pml.rightmove=0;
+  ps.velocity[0]=BG_PLAYER_SPEED*BG_MoveClassScale(&ps); ps.bobCycle=10; pml.msec=100;
+  CHECK(PM_BobMaxSpeed()==BG_PLAYER_SPEED); PM_Footsteps();
+  CHECK(ps.bobCycle==10+(int)(0.335f*BG_MoveClassScale(&ps)*100));
+ }
+ move.cmd.rightmove=pml.rightmove=0;
  /* Held still too slow to bob, and in the air; reset once stopped. */
  ps.velocity[0]=9.5f; ps.bobCycle=50; pml.msec=1000; PM_Footsteps(); CHECK(ps.bobCycle==50);
  pml.msec=8;
- ps.velocity[0]=320; ps.groundEntityNum=ENTITYNUM_NONE; PM_Footsteps(); CHECK(ps.bobCycle==50);
+ ps.velocity[0]=BG_PLAYER_SPEED; ps.groundEntityNum=ENTITYNUM_NONE; PM_Footsteps(); CHECK(ps.bobCycle==50);
  ps.groundEntityNum=0; ps.velocity[0]=0; move.cmd.forwardmove=0; PM_Footsteps(); CHECK(ps.bobCycle==0);
  /* Over a second of running the cycle keeps MW2's per-think truncation. */
- Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.speed=320; ps.groundEntityNum=0; ps.velocity[0]=320;
+ Ready(WP_M40A3,WP_MACHINEGUN); ps.speed=BG_PLAYER_SPEED; ps.groundEntityNum=0; ps.velocity[0]=BG_PLAYER_SPEED;
  move.cmd.forwardmove=127; pml.msec=8; ps.bobCycle=0; before=0;
  for(steps=0;steps<100;steps++) { PM_Footsteps(); before+=(int)(0.335f*8); }
  CHECK(ps.bobCycle==(before&255));
@@ -2215,7 +2364,7 @@ static void TestAirSprintEndsSameThink(void) {
  for(extra=0;extra<2;extra++) {
   Ready(WP_MACHINEGUN,WP_SHOTGUN);
   move.trace=FloorTrace; move.pointcontents=RespawnContents; move.tracemask=MASK_PLAYERSOLID;
-  ps.speed=320; ps.gravity=800; ps.pm_type=PM_NORMAL; ps.origin[2]=24; ps.groundEntityNum=ENTITYNUM_WORLD;
+  ps.speed=BG_PLAYER_SPEED; ps.gravity=800; ps.pm_type=PM_NORMAL; ps.origin[2]=24; ps.groundEntityNum=ENTITYNUM_WORLD;
   for(t=0;t<20;t++) FloorMove(BUTTON_SPRINT,0);
   FloorMove(BUTTON_SPRINT|BUTTON_MELEE,0); FloorMove(BUTTON_SPRINT,0);
   CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_MELEE);
@@ -2231,9 +2380,204 @@ static int AllWater(const vec3_t point, int pass) { (void)point; (void)pass; ret
 static void TestWaterEndsJump(void) {
  Ready(WP_MACHINEGUN,WP_SHOTGUN);
  move.trace=RespawnTrace; move.pointcontents=AllWater; move.tracemask=MASK_PLAYERSOLID;
- ps.speed=320; ps.gravity=800; ps.pm_type=PM_NORMAL; ps.origin[2]=4000; ps.groundEntityNum=ENTITYNUM_NONE;
+ ps.speed=BG_PLAYER_SPEED; ps.gravity=800; ps.pm_type=PM_NORMAL; ps.origin[2]=4000; ps.groundEntityNum=ENTITYNUM_NONE;
  ps.jumpLand=-1; ps.jumpOriginZ=5; RespawnMove(0,PM_NORMAL);
  CHECK(ps.jumpLand==0 && ps.jumpOriginZ==0);
+}
+/* Full Pmove on the flat floor: a straight run from rest, 8ms commands. */
+static void FlatReady(int primary, int secondary) {
+ Ready(primary,secondary);
+ move.trace=FloorTrace; move.pointcontents=RespawnContents; move.tracemask=MASK_PLAYERSOLID;
+ ps.speed=BG_PLAYER_SPEED; ps.gravity=800; ps.pm_type=PM_NORMAL;
+ ps.origin[2]=-MINS_Z; ps.groundEntityNum=ENTITYNUM_WORLD;
+}
+static void FlatMove(int forward, int right, int up, int buttons, int msec) {
+ move.cmd.forwardmove=forward; move.cmd.rightmove=right; move.cmd.upmove=up; move.cmd.buttons=buttons;
+ move.cmd.serverTime=ps.commandTime+msec; Pmove(&move);
+ /* the command is never the scale's scratch space (MW2 writes it) */
+ CHECK(move.cmd.forwardmove==forward && move.cmd.rightmove==right);
+}
+static float FlatSpeed(void) { return sqrt(ps.velocity[0]*ps.velocity[0]+ps.velocity[1]*ps.velocity[1]); }
+typedef struct { float steady, t90, t99, dist1; } runStats_t;
+/* Run from rest for 2s; aim is taken standing still first, so the run is
+ * aimed from its first think (MW2 decides aim before the move, Peace after). */
+static runStats_t FlatRun(int primary, int forward, int right, int up, int buttons) {
+ runStats_t r={0,0,0,0}; float x0,y0,v[250]; int t,n;
+ FlatReady(primary,primary==WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN);
+ if(buttons&BUTTON_ADS) { for(t=0;t<5;t++) FlatMove(0,0,up,buttons,8); CHECK(ps.pm_flags&PMF_ADS); }
+ if(up<0) for(t=0;t<5;t++) FlatMove(0,0,up,buttons&~BUTTON_SPRINT,8);
+ x0=ps.origin[0]; y0=ps.origin[1];
+ for(n=0;n<250;n++) {
+  FlatMove(forward,right,up,buttons,8); v[n]=FlatSpeed();
+  CHECK(ps.groundEntityNum!=ENTITYNUM_NONE);
+  if(n==124) r.dist1=sqrt((ps.origin[0]-x0)*(ps.origin[0]-x0)+(ps.origin[1]-y0)*(ps.origin[1]-y0));
+ }
+ r.steady=v[249];
+ for(n=0;n<250 && v[n]<0.9f*r.steady;n++) {}
+ r.t90=8*(n+1);
+ for(n=0;n<250 && v[n]<0.99f*r.steady;n++) {}
+ r.t99=8*(n+1);
+ return r;
+}
+/* Stop from a steady run: the time to rest and the distance slid. */
+static void FlatStop(int buttons, float *ms, float *dist) {
+ float x0; int t;
+ FlatReady(WP_M40A3,WP_MACHINEGUN);
+ for(t=0;t<250;t++) FlatMove(127,0,0,buttons,8);
+ CHECK(!(buttons&BUTTON_SPRINT) || (ps.pm_flags&PMF_SPRINTING));
+ x0=ps.origin[0];
+ for(t=8;t<2000 && FlatSpeed()>0;t+=8) FlatMove(0,0,0,0,8);
+ *ms=t-8; *dist=ps.origin[0]-x0;
+}
+/* MW2's walk through the real Pmove against MW2's own arithmetic at 8ms (the
+ * decoded rules in float32 with the round-to-nearest snap: wf16's mw2sim.py,
+ * its published results), to one think: MW2 decides the sprint before the
+ * move and Peace after it, so Peace's sprint pays off a think later. */
+static void TestWalkMatchesMW2(void) {
+ static const struct { int primary, forward, right, up, buttons; float steady, t90, t99, dist1; } runs[] = {
+  { WP_M40A3, 127, 0, 0, 0, 190, 160, 184, 175.1f },			/* walk */
+  { WP_MACHINEGUN, 127, 0, 0, 0, 180, 160, 184, 166.7f },		/* rifle class (x0.95) */
+  { WP_M40A3, 127, 0, 0, BUTTON_SPRINT, 285, 152, 176, 264.8f },	/* sprint */
+  { WP_M40A3, 0, 127, 0, 0, 152, 168, 184, 139.7f },			/* strafe (x0.8) */
+  { WP_M40A3, -127, 0, 0, 0, 133, 184, 208, 120.4f },			/* backpedal (x0.7) */
+  { WP_M40A3, 127, 0, -127, 0, 124, 128, 136, 116.0f },		/* crouch (x0.65, accel 12) */
+  { WP_M40A3, 127, 0, 0, BUTTON_ADS, 76, 176, 192, 69.3f }		/* aim (x0.4) */
+ };
+ runStats_t r; float ms, dist; int i;
+ for(i=0;i<ARRAY_LEN(runs);i++) {
+  r=FlatRun(runs[i].primary,runs[i].forward,runs[i].right,runs[i].up,runs[i].buttons);
+  /* the crouch's 123.5 is a tie that float32 rounding sends either way */
+  CHECK(fabs(r.steady-runs[i].steady)<=(i==5 ? 1 : 0));
+  CHECK(fabs(r.t90-runs[i].t90)<=8 && fabs(r.t99-runs[i].t99)<=8);
+  CHECK(fabs(r.dist1-runs[i].dist1)<=runs[i].steady*.008f);
+ }
+ /* stops: 320ms over 25.2 from a walk, 392ms over 41.7 from a sprint */
+ FlatStop(0,&ms,&dist); CHECK(ms==320 && fabs(dist-25.2f)<.1f);
+ FlatStop(BUTTON_SPRINT,&ms,&dist); CHECK(fabs(ms-392)<=8 && fabs(dist-41.7f)<.5f);
+}
+/* Every class's steady speeds through the real Pmove, rounded as the engine
+ * snaps: run, sprint, crouch, aim, crouched aim, a half stick crouched. The
+ * class is the primary's at spawn: the secondary in hand keeps it (only its
+ * own aim scale counts), and so does a gun picked up into the primary slot. */
+/* the engine snaps each think to whole units, so a steady speed is MW2's
+ * number to within half a unit (123.5 lands on 123: 0.65f is under 0.65) */
+static int Near(float v, float want) { return fabs(v-want)<=0.5f; }
+static float Steady(int forward, int right, int up, int buttons) {
+ int t;
+ if(buttons&BUTTON_ADS) for(t=0;t<5;t++) FlatMove(0,0,up,buttons,8);
+ for(t=0;t<250;t++) FlatMove(forward,right,up,buttons,8);
+ return FlatSpeed();
+}
+static void TestClassSpeeds(void) {
+ bg_weaponInstance_t gun;
+ int i,t;
+ for(i=0;i<ARRAY_LEN(moveClasses);i++) {
+  const float factor=moveClasses[i].factor;
+  FlatReady(moveClasses[i].primary,moveClasses[i].secondary);
+  CHECK(Near(Steady(127,0,0,0),moveClasses[i].run));
+  CHECK(Near(Steady(127,0,0,BUTTON_SPRINT),moveClasses[i].sprint) && (ps.pm_flags&PMF_SPRINTING));
+  FlatReady(moveClasses[i].primary,moveClasses[i].secondary);
+  CHECK(Near(Steady(127,0,-127,0),moveClasses[i].crouch) && (ps.pm_flags&PMF_DUCKED));
+  FlatReady(moveClasses[i].primary,moveClasses[i].secondary);
+  CHECK(Near(Steady(127,0,0,BUTTON_ADS),moveClasses[i].aim) && (ps.pm_flags&PMF_ADS));
+  CHECK(Near(Steady(127,0,-127,BUTTON_ADS),moveClasses[i].aim*BG_CROUCH_SPEED_SCALE));
+  CHECK(Near(Steady(64,0,-127,0),BG_PLAYER_SPEED*BG_CROUCH_SPEED_SCALE*factor*64/127));
+  /* the secondary in hand: the primary's class, its own aim scale */
+  FlatReady(moveClasses[i].primary,moveClasses[i].secondary);
+  move.cmd.weapon=moveClasses[i].secondary;
+  for(t=0;t<4000 && !(ps.weapon==moveClasses[i].secondary && ps.weaponstate==WEAPON_READY);t+=8) FlatMove(0,0,0,0,8);
+  CHECK(ps.weapon==moveClasses[i].secondary && ps.moveClass==moveClasses[i].moveClass);
+  CHECK(Near(Steady(127,0,0,0),moveClasses[i].run));
+  CHECK(Near(Steady(127,0,0,BUTTON_ADS),BG_PLAYER_SPEED*BG_ADS_SPEED_SCALE*
+   BG_WeaponAdsMoveScale(moveClasses[i].secondary)*factor));
+  /* a gun picked up into the primary slot never changes the class */
+  memset(&gun,0,sizeof(gun)); gun.weapon=moveClasses[i].primary==WP_M40A3 ? WP_ROCKET_LAUNCHER : WP_M40A3;
+  gun.ammo=BG_WeaponMagSize(gun.weapon); BG_PutSlot(&ps,SLOT_PRIMARY,&gun);
+  CHECK(ps.moveClass==moveClasses[i].moveClass);
+  move.cmd.weapon=gun.weapon;
+  for(t=0;t<4000 && !(ps.weapon==gun.weapon && ps.weaponstate==WEAPON_READY);t+=8) FlatMove(0,0,0,0,8);
+  CHECK(ps.weapon==gun.weapon && ps.moveClass==moveClasses[i].moveClass);
+  CHECK(Near(Steady(127,0,0,0),moveClasses[i].run));
+ }
+ /* Lightweight: the class speed times 1.07, on the ground (Demolition's
+  * rocket: 152 x 1.07 = 162.64) */
+ FlatReady(WP_ROCKET_LAUNCHER,WP_SHOTGUN); ps.perks=1<<(PERK_LIGHTWEIGHT-1);
+ CHECK(Near(Steady(127,0,0,0),152*1.07f));
+}
+/* MW2's sprint strafe: rightmove 127 becomes 84 while sprinting, before the
+ * jump check, on this think's copy. W+D sprints 33.5 degrees off forward at
+ * the full sprint, a 132ms command (two Pmove substeps) scales it once, and
+ * a jump out of it keeps the bend for its take-off think only. */
+static void TestSprintStrafe(void) {
+ const float bend=atan2(84,127)*180/M_PI;
+ int msec,t;
+ for(msec=8;msec<=132;msec+=124) {
+  FlatReady(WP_M40A3,WP_MACHINEGUN);
+  for(t=0;t<2000;t+=msec) FlatMove(127,127,0,BUTTON_SPRINT,msec);
+  CHECK((ps.pm_flags&PMF_SPRINTING) && fabs(FlatSpeed()-285)<=1);
+  CHECK(fabs(atan2(-ps.velocity[1],ps.velocity[0])*180/M_PI-bend)<.5f);
+ }
+ /* not sprinting, W+D is 45 degrees at the walk */
+ FlatReady(WP_M40A3,WP_MACHINEGUN);
+ for(t=0;t<2000;t+=8) FlatMove(127,127,0,0,8);
+ CHECK(fabs(FlatSpeed()-190)<=1 && fabs(atan2(-ps.velocity[1],ps.velocity[0])*180/M_PI-45)<.5f);
+}
+/* MW2's pitch clamp (player_view_pitch_up/down, exe defaults 85/85): the
+ * view stops at the limit both ways and the excess comes out of
+ * delta_angles, so the first movement back moves the view at once. A view
+ * kick (the client adds it into the command's aim) at the limit stays
+ * clamped. Yaw is free. */
+static void TestPitchClamp(void) {
+ const float limit=SHORT2ANGLE(BG_PITCH_SHORT(85));
+ int dir,kick;
+ CHECK(limit<=85 && limit>84.99f);
+ for(dir=-1;dir<=1;dir+=2) for(kick=0;kick<2;kick++) {
+  FlatReady(WP_M40A3,WP_MACHINEGUN);
+  move.cmd.angles[PITCH]=ANGLE2SHORT(dir*89.0f); move.cmd.angles[YAW]=ANGLE2SHORT(170);
+  FlatMove(0,0,0,0,8);
+  CHECK(fabs(AngleNormalize180(ps.viewangles[PITCH])-dir*limit)<1e-3f);
+  CHECK(fabs(AngleNormalize180(ps.viewangles[YAW])-170)<.01f);
+  /* further past it - more mouse, or a kick added into the aim - holds */
+  move.cmd.angles[PITCH]+=ANGLE2SHORT(kick ? 2.0f : 30.0f)*dir; FlatMove(0,0,0,0,8);
+  CHECK(fabs(AngleNormalize180(ps.viewangles[PITCH])-dir*limit)<1e-3f);
+  /* one degree back leaves the limit at once: no wind-up */
+  move.cmd.angles[PITCH]-=ANGLE2SHORT(1.0f)*dir; FlatMove(0,0,0,0,8);
+  CHECK(fabs(AngleNormalize180(ps.viewangles[PITCH])-dir*(limit-1))<.01f);
+ }
+}
+/* MW2's body (PM_CheckDuck 0x570A90): 70 tall standing with the eye at 60,
+ * 50 crouched with the eye at 40, 30 wide, all above the feet. Peace's
+ * origin stays MINS_Z above them, so the box and eye are those less 24. A
+ * room is the flat floor under a ceiling at roomTop; a box poking into it is
+ * solid. A crouched player stands up under a 70-unit gap, not under 69. */
+static float roomTop;
+static void RoomTrace(trace_t *tr, const vec3_t start, const vec3_t mins,
+ const vec3_t maxs, const vec3_t end, int pass, int mask) {
+ FloorTrace(tr,start,mins,maxs,end,pass,mask);
+ if(start[2]+maxs[2]>roomTop) { tr->startsolid=tr->allsolid=qtrue; tr->fraction=0;
+  VectorCopy(start,tr->endpos); tr->entityNum=ENTITYNUM_WORLD; }
+}
+static void TestBodyHeights(void) {
+ int top,t;
+ CHECK(PLAYER_WIDTH*2==30 && DEFAULT_HEIGHT-MINS_Z==70 && CROUCH_HEIGHT-MINS_Z==50);
+ CHECK(DEFAULT_VIEWHEIGHT-MINS_Z==60 && CROUCH_VIEWHEIGHT-MINS_Z==40);
+ CHECK(DEAD_VIEWHEIGHT-MINS_Z==8);	/* the dead eye was already MW2's */
+ for(top=60;top<=80;top++) {
+  FlatReady(WP_M40A3,WP_MACHINEGUN); move.trace=RoomTrace; roomTop=1e9f;
+  FlatMove(0,0,0,0,8);
+  CHECK(!(ps.pm_flags&PMF_DUCKED) && move.mins[2]==MINS_Z && move.maxs[2]==DEFAULT_HEIGHT);
+  CHECK(ps.viewheight==DEFAULT_VIEWHEIGHT && move.maxs[0]==PLAYER_WIDTH && move.mins[1]==-PLAYER_WIDTH);
+  FlatMove(0,0,-127,0,8);
+  CHECK((ps.pm_flags&PMF_DUCKED) && move.maxs[2]==CROUCH_HEIGHT && ps.viewheight==CROUCH_VIEWHEIGHT);
+  /* the ceiling comes down to top above the feet; let go of crouch */
+  roomTop=ps.origin[2]+MINS_Z+top;
+  for(t=0;t<5;t++) FlatMove(0,0,0,0,8);
+  CHECK(!!(ps.pm_flags&PMF_DUCKED)==(top<70) && ps.origin[2]==-MINS_Z);
+  CHECK(ps.viewheight==(top<70 ? CROUCH_VIEWHEIGHT : DEFAULT_VIEWHEIGHT));
+  CHECK(move.maxs[2]==(top<70 ? CROUCH_HEIGHT : DEFAULT_HEIGHT));
+  /* and the crouched jump stays refused under it */
+  if(top<70) { FlatMove(0,0,127,0,8); CHECK(ps.groundEntityNum==ENTITYNUM_WORLD && ps.velocity[2]==0); }
+ }
 }
 /* The sprint carry and the sprint glide run in midair with the ground's weapon
  * states: begun after leaving the ground, the sprint goes on through the apex
@@ -2247,7 +2591,7 @@ static void TestAirSprintSwap(void) {
   move.trace=RespawnTrace; move.pointcontents=RespawnContents;
   move.tracemask=MASK_PLAYERSOLID; move.cmd.forwardmove=127;
   move.cmd.weapon=BG_SLOT_COMMAND+SLOT_PRIMARY;
-  ps.speed=320; ps.gravity=800; ps.origin[2]=2048; ps.velocity[2]=200;
+  ps.speed=BG_PLAYER_SPEED; ps.gravity=800; ps.origin[2]=2048; ps.velocity[2]=200;
   ammo=ps.ammo[ps.weapon];
   /* Begin sprint after leaving the ground, then keep it through the apex. */
   RespawnMove(BUTTON_SPRINT,PM_NORMAL);
@@ -2257,7 +2601,7 @@ static void TestAirSprintSwap(void) {
    RespawnMove(0,PM_NORMAL);	/* let go: it latches */
   CHECK(ps.weaponstate==WEAPON_SPRINTING && (ps.pm_flags&PMF_SPRINTING));
   CHECK(ps.velocity[2]<0 && ps.groundEntityNum==ENTITYNUM_NONE);
-  CHECK(ps.speed==320 && ps.ammo[ps.weapon]==ammo);
+  CHECK(ps.speed==BG_PLAYER_SPEED && ps.ammo[ps.weapon]==ammo);
   RespawnMove(BUTTON_SPRINT,PM_NORMAL);	/* a fresh press ends it */
   CHECK(ps.weaponstate==WEAPON_SPRINT_OUT && !(ps.pm_flags&PMF_SPRINTING));
   for(t=0;t<BG_WeaponSprintOutTime(ps.weapon)+8;t+=8) RespawnMove(BUTTON_SPRINT,PM_NORMAL);
@@ -2294,7 +2638,7 @@ static void TestHeldThroughRespawn(void) {
    BG_ApplyClass(&ps,&cl);
   }
   move.trace=RespawnTrace; move.pointcontents=RespawnContents;
-  move.tracemask=MASK_PLAYERSOLID; ps.speed=320; ps.gravity=800;
+  move.tracemask=MASK_PLAYERSOLID; ps.speed=BG_PLAYER_SPEED; ps.gravity=800;
   ps.pm_flags|=PMF_RESPAWNED; count=ps.ammo[specials[i]];
   /* Ordinary spawn, frozen countdown, and attack delaying the spawn gate. */
   if(mode==1) RespawnMove(buttons[i],PM_FREEZE);
@@ -2319,7 +2663,7 @@ static void TestHeldThroughRespawn(void) {
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
  TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestNoSwapInQuickAction(); TestSemtexCancelKeepsLock(); TestThrowingKnife(); TestTacticalInsertion(); TestHoldThrowsBeforeCancel(); TestFragCook(); TestSeaLion(); TestLethalFromEmptyHand(); TestKnifeOutOfReload(); TestKnifeOutOfReloadSettle(); TestKnifeOutOfAction(); TestKnifeInKnife(); TestMeleeNoDrop(); TestKnifeTimeline(); TestRecovery();
- TestMovementScale(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestAirSprintSwap(); TestHeldThroughRespawn();
+ TestMovementScale(); TestWalkMatchesMW2(); TestClassSpeeds(); TestSprintStrafe(); TestPitchClamp(); TestBodyHeights(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestAirSprintSwap(); TestHeldThroughRespawn();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;
 }

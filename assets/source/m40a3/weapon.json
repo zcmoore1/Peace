@@ -20,7 +20,7 @@
   "sprint_out_ms": 260,
   "ads_in_ms": 300,
   "ads_out_ms": 200,
-  "fov_scale": 0.26,
+  "ads_zoom_fov": 15,
   "scope_overlay": 1,
   "fps": 60,
   "hip_view_kick_pitch_min": 80,

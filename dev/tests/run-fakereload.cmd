@@ -1,6 +1,8 @@
 @echo off
 setlocal
 rem Run from an x64 Native Tools Command Prompt for Visual Studio.
+rem The model alone: run-fakereload.sh also runs your own host through the real
+rem Com_Frame (common.c), which MSVC cannot link without the whole engine.
 where cl >nul 2>nul
 if errorlevel 1 exit /b 1
 pushd "%~dp0..\.."

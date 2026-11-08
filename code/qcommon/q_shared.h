@@ -1149,6 +1149,7 @@ typedef struct {
 // so if a playerState_t is transmitted, the entityState_t can be fully derived
 // from it.
 #define PS_PERK_BITS 5
+#define PS_MOVECLASS_BITS 4	// moveClass_t (bg_public.h): MW2's nine weapon classes
 #define PS_CURSOR_HINT_BITS 3	// cursorHint_t (bg_public.h): six types
 
 typedef struct playerState_s {
@@ -1200,6 +1201,7 @@ typedef struct playerState_s {
 	int             weaponDraw;     // 0 ordinary raise, BG_DRAW_FIRST first deployment, BG_DRAW_ALT the raise after an alt switch
 	int             weapFlags;      // PWF_* (MW2's name): PWF_USE_RELOAD is the server's use/reload request
 	int             perks;          // spawn-owned perk mask, predicted and replayed
+	int             moveClass;      // spawn-owned: MW2's class speed, from the class's primary (moveClass_t); never rebased
 	int             jumpLand;       // MW2's jump state: 0 none, -1 jumped and not landed, >0 ms of landing slowdown left
 	int             jumpWait;       // ms before the next jump (MW2: 500 after a jump)
 	float           jumpOriginZ;    // take-off height, for the landing slowdown's step test

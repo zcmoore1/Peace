@@ -6,7 +6,8 @@
 iron   5 -2.692 -0.989   -0.615 0.055 0
 reddot 5 -2.700  0.600    0 0 0
 timing 150 120
-fov 0.72
+// zoomfov: the aimed FOV in cg_fov's 4:3 degrees, MW2's spas12_mp adsZoomFov.
+zoomfov 55
 
 // Original low-poly optic, attached to the animated, parentless Base joint.
 // mount: jointName jointIndex originX originY originZ pitch yaw roll

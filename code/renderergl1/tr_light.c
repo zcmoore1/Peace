@@ -375,6 +375,12 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 	ent->lightDir[0] = DotProduct( lightDir, ent->e.axis[0] );
 	ent->lightDir[1] = DotProduct( lightDir, ent->e.axis[1] );
 	ent->lightDir[2] = DotProduct( lightDir, ent->e.axis[2] );
+	// scaled axes (a player model drawn to fill its box) scale the dot
+	// products too, which would brighten the directed light by the scale;
+	// the direction is all that is wanted
+	if ( ent->e.nonNormalizedAxes ) {
+		VectorNormalize( ent->lightDir );
+	}
 }
 
 /*

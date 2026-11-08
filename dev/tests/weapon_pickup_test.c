@@ -68,7 +68,7 @@ static playerState_t *Reset(void) {
   gentity_t *e=&g_entities[i]; e->client=&clients[i]; e->inuse=qtrue;
   e->s.number=i; e->health=100; BG_ApplyClass(&clients[i].ps,BG_Class(0));
   clients[i].ps.clientNum=i; clients[i].ps.stats[STAT_HEALTH]=100;
-  clients[i].ps.viewheight=26; clients[i].ps.pm_type=PM_NORMAL;
+  clients[i].ps.viewheight=DEFAULT_VIEWHEIGHT; clients[i].ps.pm_type=PM_NORMAL;
  }
  move.ps=&clients[0].ps; move.cmd.weapon=BG_SLOT_COMMAND;
  return move.ps;
@@ -137,6 +137,9 @@ static void TestHold(void) {
   Step(BG_USE_RELOAD_HOLD_TIME-elapsed);
   CHECK(pickups==1 && !item->r.contents && ps->stats[STAT_SLOT_PRIMARY]==WP_RAILGUN);
   CHECK(ps->ammo[WP_RAILGUN]==2 && ps->ammoReserve[WP_RAILGUN]==9);
+  /* the move class stays the spawn primary's (MW2's self.primaryWeapon,
+   * set once in _class.gsc): the rifle's, not the railgun's default */
+  CHECK(ps->moveClass==BG_WeaponMoveClass(WP_MACHINEGUN) && ps->moveClass!=BG_WeaponMoveClass(WP_RAILGUN));
   /* MW2's take: no gun in hand until the client's selection names the new
    * one, which it does with the next command here. */
   CHECK(ps->weapon==WP_NONE && !BG_SlotCommandCurrent(ps,move.cmd.weapon));

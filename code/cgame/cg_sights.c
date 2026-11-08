@@ -14,7 +14,7 @@ typedef struct {
 
 typedef struct {
 	sightPose_t iron, redDot;
-	float inTime, outTime, fovScale, aperture;
+	float inTime, outTime, zoomFov, aperture;
 	char mountTag[MAX_QPATH];
 	int rootJoint;                 // parentless joint; matches mountTag
 	vec3_t mountOrigin, mountAngles, lensOrigin;
@@ -77,7 +77,7 @@ void CG_Sights_Register( int weapon, const char *path ) {
 	memset( &def, 0, sizeof(def) );
 	def.inTime = 150.0f;
 	def.outTime = 120.0f;
-	def.fovScale = 0.72f;
+	def.zoomFov = CG_SIGHTS_DEFAULT_ZOOM_FOV;
 	def.aperture = 0.78f;
 	def.rootJoint = -1;
 	optic[0] = reticle[0] = scope[0] = '\0';
@@ -95,10 +95,11 @@ void CG_Sights_Register( int weapon, const char *path ) {
 			if ( !valid || values[0] <= 0 || values[1] <= 0 ) { valid = qfalse; break; }
 			def.inTime = values[0];
 			def.outTime = values[1];
-		} else if ( !Q_stricmp( token, "fov" ) ) {
+		} else if ( !Q_stricmp( token, "zoomfov" ) ) {
+			// MW2's adsZoomFov: degrees, in cg_fov's own 4:3 measure
 			valid = CG_Sights_Numbers( &cursor, values, 1 );
-			if ( !valid || values[0] < 0.1f || values[0] > 1.0f ) { valid = qfalse; break; }
-			def.fovScale = values[0];
+			if ( !valid || values[0] < 1.0f || values[0] > 170.0f ) { valid = qfalse; break; }
+			def.zoomFov = values[0];
 		} else if ( !Q_stricmp( token, "lens" ) ) {
 			valid = CG_Sights_Numbers( &cursor, values, 4 );
 			if ( !valid || values[3] <= 0 ) { valid = qfalse; break; }
@@ -175,9 +176,10 @@ float CG_Sights_Fraction( void ) {
 	return fraction * fraction * (3.0f - 2.0f * fraction);
 }
 
-float CG_Sights_FovScale( int weapon ) {
+// The sight's zoom FOV (MW2's adsZoomFov), which CG_ViewFov aims toward.
+float CG_Sights_ZoomFov( int weapon ) {
 	const weaponSights_t *def = CG_Sights_Def( weapon );
-	return CG_Sights_Pose( def ) ? def->fovScale : 0.72f;
+	return CG_Sights_Pose( def ) ? def->zoomFov : CG_SIGHTS_DEFAULT_ZOOM_FOV;
 }
 
 void CG_Sights_Update( const playerState_t *ps ) {

@@ -1,5 +1,6 @@
 /* Exercise the actual sight parser, transform and optic projection headlessly. */
 #include "../../code/cgame/cg_sights.c"
+#include "../../code/game/bg_m40a3_data.h"	/* the M300's zoom, from weapon.json */
 
 cg_t cg;
 cgs_t cgs;
@@ -253,7 +254,8 @@ static void TestOptic(void) {
 
 static void TestInvalidConfigs(void) {
 	const char *bad[]={
-		"iron 0 0\n", "iron 0 0 0 0 0 0\nfov 0\n",
+		"iron 0 0\n", "iron 0 0 0 0 0 0\nzoomfov 0\n",
+		"iron 0 0 0 0 0 0\nzoomfov 171\n", "iron 0 0 0 0 0 0\nfov 0.72\n",
 		"iron 0 0 0 0 0 0\ntiming 0 100\n",
 		"iron nan 0 0 0 0 0\n", "iron 0 0 0 0 0 0\nunknown 1\n",
 		"iron 0 0 0 0 0 0\nreddot 0 0 0 0 0 0\n"
@@ -289,7 +291,8 @@ static void TestAimPermission(void) {
 	CG_Sights_Update(&cg.predictedPlayerState);
 	NEAR(cg.adsFrac,1);
 	CHECK(CG_Sights_HideViewModel() && CG_Sights_HideCrosshair());
-	NEAR(1+CG_Sights_Fraction()*(CG_Sights_FovScale(WP_M40A3)-1),.26f);
+	/* fully in: the view is at the scope's zoom FOV (CG_ViewFov) */
+	NEAR(CG_Sights_Fraction(),1); NEAR(CG_Sights_ZoomFov(WP_M40A3),M40_ADS_ZOOM_FOV);
 	draws=scopeDraws; CG_Sights_DrawScope(); CHECK(scopeDraws==draws+1);
 	CHECK(!memcmp(&before,&cg.predictedPlayerState,sizeof(before)));
 	// Advancing render time does not expire aim. Only simulation permission
@@ -300,7 +303,7 @@ static void TestAimPermission(void) {
 	NEAR(cg.adsFrac,0);
 	CHECK(!CG_Sights_HideViewModel() && !CG_Sights_HideCrosshair());
 	CG_Sights_DrawScope(); CHECK(scopeDraws==draws+1);
-	NEAR(1+CG_Sights_Fraction()*(CG_Sights_FovScale(WP_M40A3)-1),1);
+	NEAR(CG_Sights_Fraction(),0);	/* back at the hip FOV */
 
 	// Releasing the button while aiming remains physically possible preserves
 	// the usual exit curve, including its scope fade and matching FOV/model.
@@ -394,7 +397,7 @@ static void BeginAimedShot(pmove_t *move) {
 	ps->slotFlags[SLOT_PRIMARY]=ps->slotFlags[SLOT_SECONDARY]=0;
 	ps->slotAttachments[SLOT_PRIMARY]=BG_ATTACHMENT_REDDOT;
 	ps->weapon=WP_SHOTGUN;ps->weaponstate=WEAPON_READY;ps->weaponTime=0;
-	ps->weaponAnimTime=-1;ps->commandTime=cg.time;ps->speed=320;
+	ps->weaponAnimTime=-1;ps->commandTime=cg.time;ps->speed=BG_PLAYER_SPEED;
 	ps->ammo[WP_SHOTGUN]=BG_WeaponMagSize(WP_SHOTGUN);
 	ps->groundEntityNum=ENTITYNUM_NONE;
 	memset(move,0,sizeof(*move));move->ps=ps;
@@ -461,7 +464,7 @@ int main(void) {
 	Tick((int)cg_sights[WP_M40A3].inTime);
 	NEAR(cg.adsFrac,1);
 	CHECK(CG_Sights_HideCrosshair());
-	NEAR(CG_Sights_FovScale(WP_M40A3),.26f);
+	NEAR(CG_Sights_ZoomFov(WP_M40A3),M40_ADS_ZOOM_FOV);
 	cgs.screenXScale=3; cgs.screenYScale=2.25f;
 	CG_Sights_DrawScope(); CHECK(scopeDraws==1); NEAR(scopeWidth*3,1080);
 	CHECK(CG_Sights_HideViewModel());

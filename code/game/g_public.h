@@ -232,7 +232,7 @@ typedef enum {
 
 	// Presentation-only, server snapshot replay. Never rewinds game state.
 	G_REPLAY_RESET,	// ( qboolean enabled ); clear history / cancel playback
-	G_REPLAY_START,	// int ( int clientNum, int fromTime, int toTime ); playback deadline, or 0
+	G_REPLAY_START,	// int ( int clientNum, int fromTime, int toTime, int beginTime ); playback deadline, or 0
 
 	BOTLIB_SETUP = 200,				// ( void );
 	BOTLIB_SHUTDOWN,				// ( void );

@@ -252,7 +252,7 @@ static void TestMoniNAC(void) {
  }
 }
 
-/* ---- swap and sprint out of its raise, drop and pump ---- */
+/* ---- swap out of its raise, drop and pump, and sprint over them ---- */
 static void TestOutOf(void) {
  int i, msec, left;
  for(i=0;i<ARRAY_LEN(thinks);i++) {
@@ -291,14 +291,38 @@ static void TestOutOf(void) {
   } else {
    CHECK(ps.weapon==ALT && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_WeaponDropTime(ALT) && !Owes(ALT));
   }
-  /* sprint out of its pump: the carry from the pump, the shell already in */
+  /* sprint over its pump: MW2's sprint check refuses RECHAMBERING (578074-
+   * 578080), so a sprint begun with the pump under way runs while it
+   * finishes, and the gun lowers after it with the shell in */
   Ready(BG_ATTACHMENT_SHOTGUN); OnAlt(msec);
   move.cmd.buttons=BUTTON_ATTACK; Step(msec); move.cmd.buttons=0;
   while(ps.weaponstate==WEAPON_FIRING) Step(msec);
-  ps.pm_flags|=PMF_SPRINTING; Step(msec);
+  CHECK(ps.weaponstate==WEAPON_BOLTING);
+  ps.pm_flags|=PMF_SPRINTING;
+  while(ps.weaponstate==WEAPON_BOLTING) Step(msec);
+  CHECK(!Owes(ALT));
+  if(ps.weaponstate==WEAPON_READY) Step(msec);
   CHECK(ps.weaponstate==WEAPON_SPRINT_IN || ps.weaponstate==WEAPON_SPRINTING);
   ps.pm_flags&=~PMF_SPRINTING; Settle(msec);
-  CHECK(ps.weapon==ALT && !Owes(ALT));	/* the close was crossed under the carry, as for any gun */
+  CHECK(ps.weapon==ALT && !Owes(ALT));
+  /* a sprint on as its shot ends lowers it on that think with the pump owed
+   * (MW2's shot ends READY owing it, and the sprint check precedes the
+   * rechamber, 575A30), even when the 1 ms close is crossed on that same
+   * think; back up, the pump is worked whole */
+  Ready(BG_ATTACHMENT_SHOTGUN); OnAlt(msec);
+  move.cmd.buttons=BUTTON_ATTACK; Step(msec); move.cmd.buttons=0;
+  CHECK(ps.weaponstate==WEAPON_FIRING);
+  ps.pm_flags|=PMF_SPRINTING;
+  while(ps.weaponstate==WEAPON_FIRING) Step(msec);
+  CHECK(ps.weaponstate==WEAPON_SPRINT_IN && Owes(ALT));
+  ps.pm_flags&=~PMF_SPRINTING;
+  while(ps.weaponstate!=WEAPON_BOLTING) {
+   CHECK(Owes(ALT) && (ps.weaponstate==WEAPON_SPRINT_IN || ps.weaponstate==WEAPON_SPRINTING ||
+    ps.weaponstate==WEAPON_SPRINT_OUT || ps.weaponstate==WEAPON_READY));
+   Step(msec);
+  }
+  CHECK(Owes(ALT) && ps.weaponAnimTime<=msec);
+  Settle(msec); CHECK(ps.weapon==ALT && !Owes(ALT));
   /* a sprint meanwhile holds its raise and drop to their end, as MW2's sprint
    * check refuses states 1-5 (5780bc-5780d0), then lowers into the carry */
   Ready(BG_ATTACHMENT_SHOTGUN); Select(SLOT_PRIMARY,qtrue); Step(msec);

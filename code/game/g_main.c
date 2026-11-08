@@ -138,7 +138,7 @@ static cvarTable_t		gameCvarTable[] = {
 
 	{ &g_dedicated, "dedicated", "0", 0, 0, qfalse  },
 
-	{ &g_speed, "g_speed", "320", 0, 0, qtrue  },
+	{ &g_speed, "g_speed", XSTRING(BG_PLAYER_SPEED), 0, 0, qtrue  },	// MW2's 190
 	{ &g_gravity, "g_gravity", "800", 0, 0, qtrue  },
 	{ &g_knockback, "g_knockback", "1000", 0, 0, qtrue  },
 	{ &g_quadfactor, "g_quadfactor", "3", 0, 0, qtrue  },
@@ -1157,14 +1157,12 @@ void LogExit( const char *string ) {
 
 	level.intermissionQueued = level.time;
 
-	// S&D has already selected its round-winning kill. Reuse that playback
-	// on the match-winning round; never restart it or replace an objective win
-	// with an unrelated earlier kill.
-	if ( g_gametype.integer != GT_SND && level.lastKillTime &&
-	     level.time - level.lastKillTime <= KILLCAM_LINGER ) {
-		level.replayEndTime = trap_ReplayStart( level.lastKillerNum,
-			level.lastKillTime - KILLCAM_REWIND, level.time + KILLCAM_LINGER );
-	}
+	// No killcam is chosen here. S&D has already selected its round-winning
+	// kill and the match-winning round reuses that playback; elsewhere the
+	// kill whose score ended the match asks for MW2's final killcam itself
+	// (player_die), so a time or capture limit never replays an earlier kill.
+	// Every player keeps control until ROUNDEND_FREEZE_DELAY after this frame
+	// (ClientThink_real), with damage already off (G_Damage).
 
 	// this will keep the clients from playing any voice sounds
 	// that will get cut off when the queued intermission starts

@@ -32,7 +32,7 @@ Selecting or editing a class never refills the current life's ammo.
 
 Melee is always a button action. It is not selectable as a primary/secondary.
 Each of the three perk slots can select **None**, **Quick Reload**, **9 Lives**,
-**Inaudible**, **Second Nature**, or **Expeditious**. Perks must
+**Inaudible**, **Second Nature**, or **Lightweight**. Perks must
 be distinct; choose any three of the five, or leave slots empty. Existing presets
 are unchanged.
 
@@ -50,11 +50,24 @@ are unchanged.
   roster contains only Red dot, so a distinct two-attachment combination is
   not yet available. The M300's integral scope does not consume a slot and
   does not support a red dot. No fictional attachment is added to fill the slot.
-- Expeditious gives **10% faster movement**, including sprinting, ADS movement,
-  crouching, swimming and ladder climbing. It changes desired movement speed,
-  not jump height, gravity, knockback or weapon timings. The catalog's
-  `movementPercent` is the tuning value. Shared movement derives the multiplier
-  per command without modifying `ps.speed`, so prediction cannot compound it.
+- Lightweight is MW2's (`_perkfunctions.gsc` setLightWeight): **x1.07 on the
+  class speed**, so on the ground only (running, sprinting, crouching, aiming
+  and wading). The air, ladders, swimming, the jump, gravity, knockback, the
+  camera bob and weapon timings are unchanged. It took the place of Peace's
+  Expeditious (+10% everywhere) under the same saved ID, so existing classes
+  keep the perk. The catalog's `movementPercent` (107) is the value. Shared
+  movement derives the multiplier per command without modifying `ps.speed`,
+  so prediction cannot compound it.
+
+Each class also moves at its **primary's class speed**, MW2's
+`updateMoveSpeedScale`: the catalog's move-class column gives each gun its MW2
+twin's weapon class (Machinegun rifle 0.95, SPAS-12 spread 0.95, M300 sniper 1,
+Rocket launcher rocketlauncher 0.80; railgun, grenade launcher, lightning,
+plasma and BFG have no MW2 twin and take the script's default 1). It is set
+once at spawn (`ps.moveClass`) and multiplied last into the walk only; holding
+the secondary or a picked-up gun never changes it. At `g_speed` 190 the presets
+run at Assault 180.5, Sniper 190, Demolition 152 and Support 190. Aiming also
+takes the gun in hand's MW2 `adsMoveSpeedScale` (SPAS-12 2, the rest 1).
 
 Attachment choices are now per gun in Create Class. Capacity and compatibility
 are validated on the server as part of the saved class. They apply to spawn
@@ -67,8 +80,10 @@ still load and inherit the old `cg_sight` preference at spawn. New editor saves
 store explicit choices, so changing `cg_sight` will not overwrite them. The active
 perk mask is a predicted/replayed playerstate field. The current build (MW2's
 event rings: four playerstate events and every entity's own ring, with the
-view kick's cgame import and client-side bullets) uses protocol **86**, game
-**-15**; protocol 85 / game -14 was MW2's `grenadeTimeLeft` playerstate field,
+view kick's cgame import and client-side bullets, MW2's spawn class speed
+`moveClass`, and the underbarrel's and killstreak's fields) uses protocol
+**88**, game **-17**; protocol 87 / game -16 was `moveClass`, protocol 86 / game -15 was
+MW2's event rings, protocol 85 / game -14 MW2's `grenadeTimeLeft` playerstate field,
 and protocol 84 / game -13 the Tactical Insertion's 3-bit use hint type.
 Rebuild the executable, server and all modules together. A saved class stores
 raw weapon numbers, so a Tactical Insertion class saved in baseq3 (17) is not
@@ -137,6 +152,20 @@ whole drop. A one-shot finishes and holds its final pose; a looping clip keeps
 playing. Sprinting into a ladder uses the same ownership rule. Reload clips
 are excluded, and equipment actions/recovery block sprint.
 
+During a fire/bolt cycle the sprint flag runs (speed, meter) while pmove keeps
+what the gun is doing: as MW2's `PM_Weapon_CheckForSprint`, step 1b never
+lowers a shot in progress or `WEAPON_BOLTING`, just as it never lowers a raise
+or a drop. MW2's shot ends READY with the action owed and its sprint check
+comes before the rechamber, so a sprint already on when the shot ends (the
+think the fire clock reaches the open note, `PM_ShotOver`) lowers the gun
+there: the picture carries the fire clip it was showing, the action stays
+owed, and once the gun is back up it plays the whole cycle from its start. A
+sprint begun once the action is under way lets the fire clip play to its end;
+the cycle ends `WEAPON_READY` and chambered, and the next think starts the
+sprint entry from rest. A sprint therefore never cuts the pump or bolt, and
+the close note never meets a sprint lock. A reload is still lowered at once
+(MW2's sprint raise is taken out of its reload states).
+
 Sprint + Y and sprint + YY use the ordinary slot-toggle/drop-cancellation path.
 On cancellation a retained draw/drop or sprint transition returns along its
 visible clip. A swap does not end a sprint (a sprint latches, as in MW2), so
@@ -198,7 +227,9 @@ at the body with the fuse it has (a TI is planted). After the throw the item
 is held `BG_QUICK_ACTION_HOLD` (500ms) and goes away in `BG_RAPID_DROP_TIME`
 (50ms), then the same quick raise. Neither can be sprinted
 through: the latch holds until the gun is fully back. Empty equipment does nothing; a ladder
-grab clears queued actions, and takes a cooking frag with it. Every knife and grenade defers a Y until the gun it
+grab takes nothing from a knife or grenade under way (a frag cooks on): the ladder drop waits for
+the gun's quick raise, as MW2's ladder drop is a weapon change, and nothing new starts on the
+ladder. Every knife and grenade defers a Y until the gun it
 left is fully back on its quick raise (MW2's CheckForChangeWeapon); YY cannot
 cancel that raise. The Semtex's hold/release and pre-throw cancel (MW2's: in
 the drop or the pull Y always cancels; once held ready only while an offhand

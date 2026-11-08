@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-16"
+#define	GAME_VERSION		BASEGAME "-17"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -46,20 +46,44 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define	VOTE_TIME			30000	// 30 seconds before vote times out
 
+// MW2's body (PM_CheckDuck 0x570A90-0x5710E4, view heights 0x570B03-0x570FA8):
+// 70 tall standing with the eye at 60, 50 crouched with the eye at 40, 30 wide.
+// Peace keeps Quake 3's origin, MINS_Z (24) above the feet, so no map, spawn
+// or MINS_Z-translated MW2 offset moves: the box top and the eye are MW2's
+// heights above the feet less 24.
 #define PLAYER_WIDTH		15
 #define	MINS_Z				-24
-#define DEFAULT_HEIGHT		32
-#define	DEFAULT_VIEWHEIGHT	26
-#define CROUCH_HEIGHT		16
-#define CROUCH_VIEWHEIGHT	12
+#define DEFAULT_HEIGHT		46	// MW2's 70 above the feet
+#define	DEFAULT_VIEWHEIGHT	36	// MW2's 60
+#define CROUCH_HEIGHT		26	// MW2's 50
+#define CROUCH_VIEWHEIGHT	16	// MW2's 40
 #define DEAD_HEIGHT			-8
 #define	DEAD_VIEWHEIGHT		-16
 #define INVUL_RADIUS		42
 
 //
-// The server captures this window, then streams it to every client.
-#define	KILLCAM_REWIND			5000	// how far before the kill the replay starts
-#define KILLCAM_LINGER           750     // include the impact and immediate aftermath
+// The server captures this window, then streams it to every client. MW2's
+// final killcam (_killcam.gsc): camtime 4.0 before the death, postdelay 2.0
+// after it less the script's 0.05s settle frame, so 5.95s of playback.
+#define	KILLCAM_REWIND			4000	// how far before the kill the replay starts
+#define KILLCAM_LINGER			1950	// how far after it the replay ends
+
+// MW2's round end (_gamelogic.gsc endGame), from the deciding death or event:
+// endGame's waitframe (0.05s), then freezePlayerForRoundEnd( 1.0 ). Until
+// then everyone keeps full control, with damage already off (postgame).
+#define ROUNDEND_FREEZE_DELAY	1050
+// When the final killcam starts after the death: the waitframe plus
+// displayRoundEnd's roundEndWait( 4, matchBonus ) - its splash waits (0.5s
+// each, at least once) around the two 2s halves of the match bonus - or, on
+// the match-winning round, roundEndWait( 4, false ) = 0.5 + 4. Modes without
+// rounds reach it through displayGameEnd's roundEndWait( postRoundTime 5, true ).
+#define KILLCAM_ROUND_DELAY		5050
+#define KILLCAM_MATCH_DELAY		4550
+#define KILLCAM_GAME_DELAY		6050
+// sd.gsc: a detonation ends the round 3s later (bombPlanted's wait 3), a
+// defuse 1.5s later (bombDefused's wait 1.5); play goes on meanwhile.
+#define SND_DETONATION_DELAY	3000
+#define SND_DEFUSE_DELAY		1500
 
 // config strings are a general means of communicating variable length strings
 // from the server to all connected clients.
@@ -185,8 +209,9 @@ typedef enum {
 #define WA_RECOVERING      256  // thrown equipment returns original gun before queued selection
 #define WA_LEFT_EMPTY      512  // the quick action left no gun in hand (MW2's weapon 0): it returns to none
 
-// Ladder tuning is shared by prediction, authority and presentation. These are
-// initial feel values, not measured MW2 constants. A grab always pays a positive,
+// Ladder tuning is shared by prediction, authority and presentation. The drop
+// is an initial feel value, not MW2's (its ladder drop is the gun's
+// quickDropTime, 250ms, an open owner call). A grab always pays a positive,
 // weapon-independent holster; animation notes still own the busy lock.
 #define BG_LADDER_DROP_TIME       100
 // One rapid drop, same value as the minimum swap: thrown equipment going away
@@ -240,12 +265,18 @@ typedef enum {
 #define BG_INSERTION_DESTROY_DAMAGE 20	// ... destroyed once below 4980
 #define BG_INSERTION_HINT_BIAS    192.0f	// MW2's use list: a scriptmover's score less 192
 #define BG_INSERTION_GROUND_DROP  2048.0f	// TIGroundPosition: traced from +16 to -2048
+// Reach, climb speed, friction and acceleration are Peace's first-pass values:
+// MW2's ladder move has not been decoded. The push is MW2's speed, but Peace
+// adds it along the face's normal, where MW2's Jump_PushOffLadder (0x56DA80)
+// sets the flat velocity to it along the view, reflected off the ladder when
+// the view faces into it: the same push only when looking straight at it.
 #define BG_LADDER_REACH           4.0f
 #define BG_LADDER_SPEED           160.0f
 #define BG_LADDER_FRICTION        5.0f
 #define BG_LADDER_ACCELERATE      10.0f
-#define BG_LADDER_JUMP_PUSH       180.0f
+#define BG_LADDER_JUMP_PUSH       128.0f	// MW2's jump_ladderPushVel (0x7A9F38, read at 0x56DB62)
 #define BG_LADDER_JUMP_SCALE      0.75f	// MW2's Jump_PushOffLadder: of a jump's take-off speed
+#define BG_LADDER_YAW_CAP         100.0f	// MW2's bg_ladder_yawcap (0x7ADD0C, clamp 0x571B60): look either side of the ladder
 
 // One signed-short stat: three flags + 12-bit inward-facing yaw. No extra
 // pm_flags bit or animation sequence (both fields are already full).
@@ -686,6 +717,41 @@ void BG_BeginWeaponDraw(playerState_t *ps);
 #define BG_JUMP_LAND_STEP     18.0f
 #define BG_HARD_LAND_HEIGHT   12.0f	// a fall this high keeps 0.67 of the velocity
 #define BG_JUMP_HEIGHT        39.0f	// MW2's jump_height: how high a jump goes
+// MW2's walk (PM_CmdScale_Walk 0x572DB0, PM_WalkMove 0x573240), at IW4x's exe
+// defaults (owner's choice; the retail playlist set strafe and back to 1).
+// Each is a per-command factor, never written into ps.speed or the command.
+#define BG_PLAYER_SPEED       190	// g_speed (0x5E380A): its default and the tests' base speed
+#define BG_SPRINT_SPEED_SCALE  1.5f	// player_sprintSpeedScale (0x7ADCA0), the walk only
+#define BG_SPRINT_STRAFE_SCALE 0.667f	// player_sprintStrafeSpeedScale (0x7ADCEC): rightmove, truncated
+#define BG_ADS_SPEED_SCALE     0.4f	// PMF_WALKING's walk and air scale (0x572EE6, 0x56F470)
+#define BG_CROUCH_SPEED_SCALE  0.65f	// PM_CmdScaleForStance's crouch, a multiply (0x572C50)
+#define BG_STRAFE_SPEED_SCALE  0.8f	// player_strafeSpeedScale (0x7ADCFC)
+#define BG_BACK_SPEED_SCALE    0.7f	// player_backSpeedScale (0x7ADC44)
+// MW2's player_view_pitch_up and _down (0x7AB3B4, 0x7A9F90; PM clamp 0x5718D0),
+// exe defaults (owner's choice; the retail playlist set 70). Constants, not
+// cvars, so prediction and the server always agree.
+#define BG_VIEW_PITCH_UP      85
+#define BG_VIEW_PITCH_DOWN    85
+#define BG_PITCH_SHORT(deg)   ( (deg) * 65536 / 360 )	// whole short units, never past the limit
+// MW2's class speed (_weapons.gsc updateMoveSpeedScale): set at spawn from the
+// class's primary, by its weaponClass, and multiplied last into the walk only
+// (ps->moveSpeedScaleMultiplier, 0x572FD0). playerState_t.moveClass carries it.
+typedef enum {
+	MOVECLASS_NONE,			// the script's default case: 1.0
+	MOVECLASS_RIFLE,		// 0.95
+	MOVECLASS_SMG,			// 1.0
+	MOVECLASS_PISTOL,		// 1.0
+	MOVECLASS_MG,			// 0.875
+	MOVECLASS_SPREAD,		// 0.95 (shotguns)
+	MOVECLASS_ROCKETLAUNCHER,	// 0.80
+	MOVECLASS_SNIPER,		// 1.0
+	MOVECLASS_RIOTSHIELD,		// 0.8 (a riot shield primary, tested before the class)
+	MOVECLASS_COUNT
+} moveClass_t;
+float BG_MoveClassFactor( int moveClass );
+float BG_MoveClassScale( const playerState_t *ps );
+int BG_WeaponMoveClass( int weapon );
+float BG_WeaponAdsMoveScale( int weapon );
 float BG_JumpLandFactor( int jumpLand );
 float BG_JumpVelocity( const playerState_t *ps );
 // MW2's view bob: the eye's offset on z and along the view's right (BG_GetPlayerViewOrigin).
@@ -727,15 +793,14 @@ qboolean BG_UpdateWeaponPickup(playerState_t *ps, const usercmd_t *cmd,
 // Stable saved-class IDs. Nonzero IDs occupy bit (ID - 1) in ps->perks.
 typedef enum {
 	PERK_NONE, PERK_QUICK_RELOAD, PERK_NO_FALL_DAMAGE, PERK_SILENT_FOOTSTEPS,
-	PERK_SECOND_NATURE, PERK_EXPEDITIOUS, BG_PERK_COUNT
+	PERK_SECOND_NATURE, PERK_LIGHTWEIGHT, BG_PERK_COUNT
 } bg_perk_t;
 typedef struct {
 	const char *name, *description;
-	int reloadPercent, attachmentLimit, movementPercent;
+	int reloadPercent, attachmentLimit, movementPercent;	// movementPercent: of the class speed
 } bg_perkDef_t;
 const bg_perkDef_t *BG_Perk( int perk );
 qboolean BG_HasPerk( const playerState_t *ps, int perk );
-float BG_MovementScale( const playerState_t *ps );
 int BG_AttachmentLimit( const playerState_t *ps );
 int BG_AttachmentCount( int mask );
 

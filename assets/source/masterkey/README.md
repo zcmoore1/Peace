@@ -14,7 +14,7 @@ and the rifle-with-underbarrel skinned into one IQM.
 |---|---|
 | `assets/baseq3/models/weapons2/masterkey/view.iqm` | the viewmodel. cgame uses it as soon as it exists (`cg_viewModelBase`, `cg_weapons.c`) |
 | `assets/baseq3/models/weapons2/masterkey/view.cfg` | the clip table, **generated**: do not edit it by hand except to move frame starts |
-| `assets/baseq3/models/weapons2/masterkey/view.sights` | optional ADS sight config, same format as `spas12/view.sights` |
+| `assets/baseq3/models/weapons2/masterkey/view.sights` | the ADS sight config, same format as `spas12/view.sights`. Its `iron` pose is the eye in the model's own coordinates, so it can only be written once the model exists; until then the gun aims at the default zoom (50). Give it MW2's `m4_shotgun_attach_mp` numbers, which are in `weapon.json`: `timing 200 200` (adsTransInTime/OutTime) and `zoomfov 55` (adsZoomFov) |
 | `assets/baseq3/scripts/peace_masterkey.shader` | map the IQM's baked material names to textures, as `peace_spas.shader` does |
 
 Material names are baked into the IQM, so export with

@@ -36,7 +36,11 @@ This is separate from the animation frame table `view.cfg`.
 - `iron` / `reddot`: eye X/Y/Z in the model's idle coordinates, then correction
   pitch/yaw/roll in degrees. +X forward, +Y left, +Z up.
 - `timing`: aim-in and aim-out milliseconds.
-- `fov`: aimed FOV multiplier.
+- `zoomfov`: the aimed FOV in degrees, MW2's `adsZoomFov`, in `cg_fov`'s own
+  measure (horizontal at 4:3). The view eases from `cg_fov` toward
+  min(`cg_fov`, zoomfov) by the aim blend, as MW2's `CG_GetViewFov` does. A gun
+  with no sight file aims at 50 (MW2's rifle and LMG iron sights). The SPAS's is
+  `spas12_mp`'s 55, the M300's `cheytac_mp`'s 15.
 - `optic` / `reticle`: model and shader paths.
 - `mount`: parentless joint name/index, translation, pitch/yaw/roll relative to
   that joint. The index must identify the same root joint as the name.

@@ -33,7 +33,9 @@ static const bg_perkDef_t perks[BG_PERK_COUNT] = {
 	{ "9 Lives", "Landing cannot damage you. Other damage is unchanged.", 100, 1, 100 },
 	{ "Inaudible", "Silent running and wading footsteps for everyone.", 100, 1, 100 },
 	{ "Second Nature", "Two attachments per gun, such as a red dot with the shotgun.", 100, 2, 100 },
-	{ "Expeditious", "10% faster movement. Jump height and weapon speeds unchanged.", 100, 1, 110 }
+	// MW2's Lightweight (_perkfunctions.gsc setLightWeight): moveSpeedScaler
+	// 1.07, which multiplies the class speed, so it is the walk's alone.
+	{ "Lightweight", "7% faster on the ground. Air, ladder, swim and weapon speeds unchanged.", 100, 1, 107 }
 };
 typedef char perkMaskFitsWire[(BG_PERK_COUNT - 1 <= PS_PERK_BITS) ? 1 : -1];
 
@@ -45,11 +47,34 @@ qboolean BG_HasPerk( const playerState_t *ps, int perk ) {
 	return ps && perk > PERK_NONE && perk < BG_PERK_COUNT &&
 		(ps->perks & (1 << (perk - 1))) != 0;
 }
-// Derived for each command, never accumulated into ps->speed or velocity.
-// Use the same modifier for locomotion and its crouch/water/ladder limits.
-float BG_MovementScale( const playerState_t *ps ) {
+// MW2's class speeds, by the primary's weaponClass (_weapons.gsc
+// updateMoveSpeedScale). Word-only, indexed by moveClass_t.
+static const float moveClassFactors[MOVECLASS_COUNT] = {
+	1.0f,	// MOVECLASS_NONE: the switch's default
+	0.95f,	// rifle
+	1.0f,	// smg
+	1.0f,	// pistol
+	0.875f,	// mg
+	0.95f,	// spread
+	0.80f,	// rocketlauncher
+	1.0f,	// sniper
+	0.8f	// a riot shield primary
+};
+typedef char moveClassFitsWire[(MOVECLASS_COUNT <= (1 << PS_MOVECLASS_BITS)) ? 1 : -1];
+float BG_MoveClassFactor( int moveClass ) {
+	if ( moveClass < 0 || moveClass >= MOVECLASS_COUNT ) moveClass = MOVECLASS_NONE;
+	return moveClassFactors[moveClass];
+}
+// MW2's ps->moveSpeedScaleMultiplier (setMoveSpeedScale(classScale *
+// moveSpeedScaler)): the spawn class's factor times Lightweight's. The walk
+// multiplies it last (PM_CmdScale_Walk 0x572FD0); the air, a ladder, swimming
+// and the bob's rate never read it. Derived for each command, never
+// accumulated into ps->speed or velocity.
+float BG_MoveClassScale( const playerState_t *ps ) {
 	int perk;
-	float scale = 1.0f;
+	float scale;
+	if ( !ps ) return 1.0f;
+	scale = BG_MoveClassFactor( ps->moveClass );
 	for ( perk = 1; perk < BG_PERK_COUNT; perk++ )
 		if ( BG_HasPerk(ps, perk) ) scale *= perks[perk].movementPercent / 100.0f;
 	return scale;
@@ -188,12 +213,21 @@ qboolean BG_IsActionWeapon( int weapon ) {
 		weapon == WP_TACTICAL_INSERTION;
 }
 
-static const struct { int weapon; const char *name; int attachments; } classWeapons[] = {
-	{WP_MACHINEGUN, "Machinegun", BG_ATTACHMENT_REDDOT | BG_ATTACHMENT_SHOTGUN}, {WP_SHOTGUN, "SPAS-12", BG_ATTACHMENT_REDDOT},
-	{WP_RAILGUN, "Railgun", BG_ATTACHMENT_REDDOT}, {WP_ROCKET_LAUNCHER, "Rocket launcher", BG_ATTACHMENT_REDDOT},
-	{WP_GRENADE_LAUNCHER, "Grenade launcher", BG_ATTACHMENT_REDDOT}, {WP_LIGHTNING, "Lightning gun", BG_ATTACHMENT_REDDOT},
-	{WP_PLASMAGUN, "Plasma gun", BG_ATTACHMENT_REDDOT}, {WP_BFG, "BFG", BG_ATTACHMENT_REDDOT},
-	{WP_M40A3, "M300 Praetorian", 0}
+// The class weapon catalog. moveClass is the MW2 twin's weaponClass (m4_mp
+// rifle, spas12_mp spread, rpg_mp rocketlauncher, cheytac_mp sniper); a gun
+// with no MW2 twin takes the script's default class (owner's choice).
+// adsMoveScale is the twin's adsMoveSpeedScale (spas12_mp 2, the rest 1); its
+// moveSpeedScale is 1 on all four, so the hip needs no column.
+static const struct { int weapon; const char *name; int attachments; int moveClass; float adsMoveScale; } classWeapons[] = {
+	{WP_MACHINEGUN, "Machinegun", BG_ATTACHMENT_REDDOT | BG_ATTACHMENT_SHOTGUN, MOVECLASS_RIFLE, 1.0f},
+	{WP_SHOTGUN, "SPAS-12", BG_ATTACHMENT_REDDOT, MOVECLASS_SPREAD, 2.0f},
+	{WP_RAILGUN, "Railgun", BG_ATTACHMENT_REDDOT, MOVECLASS_NONE, 1.0f},
+	{WP_ROCKET_LAUNCHER, "Rocket launcher", BG_ATTACHMENT_REDDOT, MOVECLASS_ROCKETLAUNCHER, 1.0f},
+	{WP_GRENADE_LAUNCHER, "Grenade launcher", BG_ATTACHMENT_REDDOT, MOVECLASS_NONE, 1.0f},
+	{WP_LIGHTNING, "Lightning gun", BG_ATTACHMENT_REDDOT, MOVECLASS_NONE, 1.0f},
+	{WP_PLASMAGUN, "Plasma gun", BG_ATTACHMENT_REDDOT, MOVECLASS_NONE, 1.0f},
+	{WP_BFG, "BFG", BG_ATTACHMENT_REDDOT, MOVECLASS_NONE, 1.0f},
+	{WP_M40A3, "M300 Praetorian", 0, MOVECLASS_SNIPER, 1.0f}
 };
 
 int BG_WeaponAttachmentMask(int weapon) {
@@ -201,6 +235,24 @@ int BG_WeaponAttachmentMask(int weapon) {
 	for (i=0; i<ARRAY_LEN(classWeapons); i++)
 		if (classWeapons[i].weapon == weapon) return classWeapons[i].attachments;
 	return 0;
+}
+
+// The move class a class's primary gives its owner at spawn (BG_ApplyClass).
+int BG_WeaponMoveClass( int weapon ) {
+	int i;
+	for ( i = 0; i < ARRAY_LEN(classWeapons); i++ )
+		if ( classWeapons[i].weapon == weapon ) return classWeapons[i].moveClass;
+	return MOVECLASS_NONE;
+}
+
+// MW2's adsMoveSpeedScale of the gun in hand (PM_CmdScale_Walk 0x572F5C-
+// 0x572F99, ps->weapon), read only while aiming. Anything else in hand,
+// equipment included, aims at 1 (MW2's offhands have 0, which skips it).
+float BG_WeaponAdsMoveScale( int weapon ) {
+	int i;
+	for ( i = 0; i < ARRAY_LEN(classWeapons); i++ )
+		if ( classWeapons[i].weapon == weapon ) return classWeapons[i].adsMoveScale;
+	return 1.0f;
 }
 
 // MW2's alt weapons (WeaponCompleteDef altWeaponIndex): the gun in a slot

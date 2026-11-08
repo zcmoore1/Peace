@@ -520,8 +520,8 @@ static void CG_PeaceDump_f( void ) {
 	CG_Printf( "position %.1f %.1f %.1f   ground %i   health %i\n",
 		ps->origin[0], ps->origin[1], ps->origin[2], ps->groundEntityNum,
 		ps->stats[STAT_HEALTH] );
-	CG_Printf( "movement base %i   perkScale %.3f   velocity %.1f %.1f %.1f\n",
-		ps->speed, BG_MovementScale(ps), ps->velocity[0], ps->velocity[1], ps->velocity[2] );
+	CG_Printf( "movement base %i   moveClass %i   classScale %.4f   velocity %.1f %.1f %.1f\n",
+		ps->speed, ps->moveClass, BG_MoveClassScale(ps), ps->velocity[0], ps->velocity[1], ps->velocity[2] );
 	if ( cgs.gametype == GT_SND ) {
 		CG_Printf( "snd      %s\n", CG_ConfigString(CS_SND) );
 		CG_Printf( "sites    %s\n", CG_ConfigString(CS_SND_SITES) );

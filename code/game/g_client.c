@@ -24,10 +24,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 // g_client.c -- client functions that don't happen every frame
 
-static vec3_t	playerMins = {-15, -15, -24};
-static vec3_t	playerMaxs = {15, 15, 32};
+// The server's player box: MW2's 70-unit body over Peace's origin (bg_public.h).
+static vec3_t	playerMins = {-PLAYER_WIDTH, -PLAYER_WIDTH, MINS_Z};
+static vec3_t	playerMaxs = {PLAYER_WIDTH, PLAYER_WIDTH, DEFAULT_HEIGHT};
 
-/*QUAKED info_player_deathmatch (1 0 1) (-16 -16 -24) (16 16 32) initial
+/*QUAKED info_player_deathmatch (1 0 1) (-16 -16 -24) (16 16 46) initial
 potential spawning position for deathmatch games.
 The first time a player enters the game, they will be at an 'initial' spot.
 Targets will be fired when someone spawns in on them.
@@ -47,7 +48,7 @@ void SP_info_player_deathmatch( gentity_t *ent ) {
 	}
 }
 
-/*QUAKED info_player_start (1 0 0) (-16 -16 -24) (16 16 32)
+/*QUAKED info_player_start (1 0 0) (-16 -16 -24) (16 16 46)
 equivalent to info_player_deathmatch
 */
 void SP_info_player_start(gentity_t *ent) {

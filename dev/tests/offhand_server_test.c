@@ -221,7 +221,7 @@ static void Reset(int row) {
  memset(boomTime,0,sizeof(boomTime));
  level.time=10000; level.previousTime=level.time-CMD_MSEC; level.num_entities=MAX_CLIENTS; level.maxclients=2;
  level.clients=cl; level.gentities=g_entities;
- g_gametype.integer=GT_FFA; g_knockback.integer=1000; g_speed.value=320; g_gravity.value=DEFAULT_GRAVITY;
+ g_gametype.integer=GT_FFA; g_knockback.integer=1000; g_speed.value=BG_PLAYER_SPEED; g_gravity.value=DEFAULT_GRAVITY;
  pmove_msec.integer=8; pmove_fixed.integer=0; sndCanDamage=qtrue; viewPitch=0; forwardMove=0; cmdWeapon=WP_SHOTGUN;
  for(i=0;i<2;i++) {
   gentity_t *e=&g_entities[i]; bg_class_t c=*BG_Class(0);

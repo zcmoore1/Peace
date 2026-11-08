@@ -1,5 +1,6 @@
-/* Verify the real playerstate delta format preserves all ten action bits and MW2's grenadeTimeLeft,
- * including a tap released while holstering, through prediction corrections. */
+/* Verify the real playerstate delta format preserves all ten action bits, MW2's grenadeTimeLeft
+ * and the spawn's move class, including a tap released while holstering, through prediction
+ * corrections. */
 #include "../../code/qcommon/q_shared.h"
 #include "../../code/qcommon/qcommon.h"
 #include "../../code/game/bg_public.h"
@@ -18,7 +19,9 @@ int main(void) {
  byte data[MAX_MSGLEN]; msg_t msg; int i,j;
  for(i=0;i<1024;i++) for(j=0;j<1024;j++) {
   memset(&from,0,sizeof(from)); from.weaponAction=i; from.perks=i&((1<<PS_PERK_BITS)-1);
+  from.moveClass=i%MOVECLASS_COUNT;
   to=from; to.weaponAction=j; to.perks=j&((1<<PS_PERK_BITS)-1);
+  to.moveClass=j%MOVECLASS_COUNT;	/* every move class, from every other */
   to.ammo[3]=7; to.ammoReserve[3]=24;
   to.stats[PS_STAT_WEAPONS]=(1<<14)|(1<<17)|(1<<(MAX_WEAPONS-1));
   to.stats[PS_STAT_UNCHAMBERED]=(1<<15)|(1<<18)|(1<<(MAX_WEAPONS-1));
@@ -46,6 +49,7 @@ int main(void) {
   MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
   CHECK(decoded.weaponAction==j);
   CHECK(decoded.perks==to.perks);
+  CHECK(decoded.moveClass==to.moveClass);
   CHECK(decoded.ammo[3]==7 && decoded.ammoReserve[3]==24);
   CHECK(decoded.stats[PS_STAT_WEAPONS]==to.stats[PS_STAT_WEAPONS]);
   CHECK(decoded.stats[PS_STAT_UNCHAMBERED]==to.stats[PS_STAT_UNCHAMBERED]);
@@ -66,8 +70,18 @@ int main(void) {
  }
  /* the use hint's six types in PS_CURSOR_HINT_BITS (3, protocol 84): both
   * Tactical Insertion types, the top one included, each from every other.
-  * Protocol 85 adds grenadeTimeLeft. */
- CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==86);
+  * Protocol 85 adds grenadeTimeLeft; protocol 87 adds moveClass. */
+ CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==87);
+ /* moveClass is MW2's nine weapon classes in PS_MOVECLASS_BITS (4): every one,
+  * the last included, from every other, and alone in a delta. */
+ CHECK(MOVECLASS_COUNT==9 && MOVECLASS_COUNT<=(1<<PS_MOVECLASS_BITS));
+ for(i=0;i<MOVECLASS_COUNT;i++) for(j=0;j<MOVECLASS_COUNT;j++) {
+  memset(&from,0,sizeof(from)); to=from; from.moveClass=i; to.moveClass=j;
+  MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,&from,&to);
+  CHECK(!msg.overflowed); MSG_BeginReading(&msg);
+  MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
+  CHECK(decoded.moveClass==j && decoded.perks==0 && decoded.weaponAction==0);
+ }
  for(i=0;i<CURSOR_HINT_COUNT;i++) for(j=0;j<CURSOR_HINT_COUNT;j++) {
   memset(&from,0,sizeof(from)); to=from; from.cursorHint=i; to.cursorHint=j;
   to.cursorHintEntIndex=MAX_CLIENTS+j;

@@ -151,7 +151,7 @@ void BS_Reset( int gametype ) {
  memset(&level,0,sizeof(level)); memset(g_entities,0,sizeof(g_entities)); memset(cl,0,sizeof(cl));
  level.time=BS_START_TIME; level.previousTime=level.time-8; level.num_entities=MAX_CLIENTS; level.maxclients=BS_CLIENTS;
  level.clients=cl; level.gentities=g_entities;
- g_gametype.integer=gametype; g_knockback.integer=0; g_speed.value=320; g_gravity.value=DEFAULT_GRAVITY;
+ g_gametype.integer=gametype; g_knockback.integer=0; g_speed.value=BG_PLAYER_SPEED; g_gravity.value=DEFAULT_GRAVITY;
  g_smoothClients.integer=1; g_quadfactor.value=3;
  pmove_msec.integer=8; pmove_fixed.integer=0; sndCanDamage=qtrue;
  for(i=0;i<BS_CLIENTS;i++) {

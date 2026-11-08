@@ -439,73 +439,123 @@ void CG_ZoomUp_f( void ) {
 
 /*
 ====================
+CG_ClampFov
+
+MW2's cg_fov is a ranged dvar (0x9FBE24: 65 to 80), so the value itself
+stays in that range. CG_UpdateCvars calls this each frame.
+====================
+*/
+void CG_ClampFov( void ) {
+	if ( !( cg_fov.value >= CG_FOV_MIN ) ) {	// a non-number reads 0
+		trap_Cvar_Set( "cg_fov", XSTRING( CG_FOV_MIN ) );
+	} else if ( cg_fov.value > CG_FOV_MAX ) {
+		trap_Cvar_Set( "cg_fov", XSTRING( CG_FOV_MAX ) );
+	}
+}
+
+/*
+====================
+CG_ViewFov
+
+MW2's CG_GetViewFov (0x40D3C0): cg_fov, or the fixed intermission 90, then
+toward the sight while aiming, never wider than the hip:
+lerp( cg_fov, min( cg_fov, zoom ), f ). The zoom is the sight file's
+(MW2's adsZoomFov), and f is the one aim fraction that also moves the gun and
+the hipfire HUD. The result is in cg_fov's own measure: degrees across a 4:3
+screen. CG_ProjectFov widens it for the real one.
+====================
+*/
+static float CG_ViewFov( void ) {
+	float	fov, zoomFov, f;
+
+	if ( cg.predictedPlayerState.pm_type == PM_INTERMISSION ) {
+		return CG_FOV_INTERMISSION;
+	}
+
+	if ( cgs.dmflags & DF_FIXED_FOV ) {
+		// dmflag to hold every client to the default
+		fov = CG_FOV_DEFAULT;
+	} else {
+		fov = cg_fov.value;
+		if ( !( fov >= CG_FOV_MIN ) ) {
+			fov = CG_FOV_MIN;
+		} else if ( fov > CG_FOV_MAX ) {
+			fov = CG_FOV_MAX;
+		}
+	}
+
+	// Quake 3's +zoom, which MW2 does not have
+	zoomFov = cg_zoomFov.value;
+	if ( zoomFov < 1 ) {
+		zoomFov = 1;
+	} else if ( zoomFov > 160 ) {
+		zoomFov = 160;
+	}
+	if ( cg.zoomed ) {
+		f = ( cg.time - cg.zoomTime ) / (float)ZOOM_TIME;
+		if ( f > 1.0 ) {
+			fov = zoomFov;
+		} else {
+			fov = fov + f * ( zoomFov - fov );
+		}
+	} else {
+		f = ( cg.time - cg.zoomTime ) / (float)ZOOM_TIME;
+		if ( f <= 1.0 ) {
+			fov = zoomFov + f * ( fov - zoomFov );
+		}
+	}
+
+	// aiming: the target comes from predicted gameplay permission, never a
+	// visual clip (CG_Sights_Update has already run this frame)
+	zoomFov = CG_Sights_ZoomFov( cg.predictedPlayerState.weapon );
+	if ( zoomFov > fov ) {
+		zoomFov = fov;
+	}
+	return fov + CG_Sights_Fraction() * ( zoomFov - fov );
+}
+
+/*
+====================
+CG_ProjectFov
+
+MW2's projection (0x47AC60, from CG_CalcFov 0x596D50): the FOV is horizontal
+at 4:3, so the vertical half-angle is fixed by it,
+tan( fovY / 2 ) = 0.75 * tan( fov / 2 ), and the horizontal one follows the
+view's own aspect (Hor+). A wider screen sees more at the sides, never less
+at the top. At 65: 65 across a 4:3 view, 74.8 at 16:10, 80.7 at 16:9, and
+51.1 high on all of them.
+====================
+*/
+static void CG_ProjectFov( float fov, float width, float height, float *fovX, float *fovY ) {
+	float	tanHalfY;
+
+	// atan2, not atan: the QVM's bg_lib has only atan2 and tan
+	tanHalfY = 0.75f * tan( fov * M_PI / 360.0f );
+	*fovY = atan2( tanHalfY, 1.0f ) * 360.0f / M_PI;
+	*fovX = atan2( tanHalfY * width, height ) * 360.0f / M_PI;
+}
+
+/*
+====================
 CG_CalcFov
 
-Fixed fov at intermissions, otherwise account for fov variable and zooms.
+Sets the view's FOV and the mouse sensitivity that goes with it.
 ====================
 */
 #define	WAVE_AMPLITUDE	1
 #define	WAVE_FREQUENCY	0.4
 
 static int CG_CalcFov( void ) {
-	float	x;
 	float	phase;
 	float	v;
 	int		contents;
-	float	fov_x, fov_y;
-	float	zoomFov;
-	float	f;
+	float	fov, fov_x, fov_y;
 	int		inwater;
 
-	if ( cg.predictedPlayerState.pm_type == PM_INTERMISSION ) {
-		// if in intermission, use a fixed value
-		fov_x = 90;
-	} else {
-		// user selectable
-		if ( cgs.dmflags & DF_FIXED_FOV ) {
-			// dmflag to prevent wide fov for all clients
-			fov_x = 90;
-		} else {
-			fov_x = cg_fov.value;
-			if ( fov_x < 1 ) {
-				fov_x = 1;
-			} else if ( fov_x > 160 ) {
-				fov_x = 160;
-			}
-		}
-
-		// account for zooms
-		zoomFov = cg_zoomFov.value;
-		if ( zoomFov < 1 ) {
-			zoomFov = 1;
-		} else if ( zoomFov > 160 ) {
-			zoomFov = 160;
-		}
-
-		if ( cg.zoomed ) {
-			f = ( cg.time - cg.zoomTime ) / (float)ZOOM_TIME;
-			if ( f > 1.0 ) {
-				fov_x = zoomFov;
-			} else {
-				fov_x = fov_x + f * ( zoomFov - fov_x );
-			}
-		} else {
-			f = ( cg.time - cg.zoomTime ) / (float)ZOOM_TIME;
-			if ( f <= 1.0 ) {
-				fov_x = zoomFov + f * ( fov_x - zoomFov );
-			}
-		}
-	}
-
-	// One fraction drives the FOV, weapon alignment and hipfire HUD. The
-	// target comes from predicted gameplay permission, never a visual clip.
+	// One fraction drives the FOV, weapon alignment and hipfire HUD.
 	CG_Sights_Update( &cg.predictedPlayerState );
-	fov_x *= 1.0f + CG_Sights_Fraction() *
-	         (CG_Sights_FovScale( cg.predictedPlayerState.weapon ) - 1.0f);
-
-	x = cg.refdef.width / tan( fov_x / 360 * M_PI );
-	fov_y = atan2( cg.refdef.height, x );
-	fov_y = fov_y * 360 / M_PI;
+	fov = CG_ViewFov();
+	CG_ProjectFov( fov, cg.refdef.width, cg.refdef.height, &fov_x, &fov_y );
 
 	// warp if underwater
 	contents = CG_PointContents( cg.refdef.vieworg, -1 );
@@ -525,12 +575,11 @@ static int CG_CalcFov( void ) {
 	cg.refdef.fov_x = fov_x;
 	cg.refdef.fov_y = fov_y;
 
-	if ( !cg.zoomed ) {
-		cg.zoomSensitivity = 1.0f + CG_Sights_Fraction() *
-		    (CG_Sights_FovScale( cg.predictedPlayerState.weapon ) - 1.0f);
-	} else {
-		cg.zoomSensitivity = cg.refdef.fov_y / 75.0;
-	}
+	// MW2's sensitivity follows the same FOV (0x596D50, read at 0x4EB320):
+	// tan( fov / 2 ) over tan( 65 / 2 ), so 1 at the default hip, less while
+	// aiming, and more at a hip above 65.
+	cg.zoomSensitivity = tan( fov * M_PI / 360.0f ) /
+		tan( CG_FOV_DEFAULT * M_PI / 360.0f );
 
 	return inwater;
 }

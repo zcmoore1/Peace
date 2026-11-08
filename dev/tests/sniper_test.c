@@ -106,7 +106,7 @@ static void TestSelection(void) {
  move.cmd.weapon=BG_SLOT_COMMAND+1; Step(1); move.cmd.weapon=BG_SLOT_COMMAND;
  move.cmd.buttons=BUTTON_ATTACK; Step(1); CHECK(shots==1);
  Ready(); CHECK(BG_WeaponSpread(&ps)>0); ps.pm_flags|=PMF_ADS; CHECK(BG_WeaponSpread(&ps)==0);
- ps.velocity[0]=320; CHECK(BG_WeaponSpread(&ps)>0);
+ ps.velocity[0]=BG_PLAYER_SPEED; CHECK(BG_WeaponSpread(&ps)>0);
 }
 int main(void) {
  TestCatalog(); TestCycle(); TestReload(); TestSelection();

@@ -567,7 +567,7 @@ void CG_GrappleTrail( centity_t *ent, const weaponInfo_t *wi ) {
 	memset( &beam, 0, sizeof( beam ) );
 	//FIXME adjust for muzzle position
 	VectorCopy ( cg_entities[ ent->currentState.otherEntityNum ].lerpOrigin, beam.origin );
-	beam.origin[2] += 26;
+	beam.origin[2] += DEFAULT_VIEWHEIGHT;
 	AngleVectors( cg_entities[ ent->currentState.otherEntityNum ].lerpAngles, forward, NULL, up );
 	VectorMA( beam.origin, -6, up, beam.origin );
 	VectorCopy( origin, beam.oldorigin );
@@ -1379,6 +1379,8 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 
 	MatrixMultiply(lerped.axis, ((refEntity_t *)parent)->axis, gun.axis);
 	gun.backlerp = parent->backlerp;
+	// a scaled body (cg_players.c) scales the gun it holds
+	gun.nonNormalizedAxes = parent->nonNormalizedAxes;
 
 	CG_AddWeaponWithPowerups( &gun, cent->currentState.powerups );
 
@@ -1533,7 +1535,6 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	refEntity_t	hand;
 	centity_t	*cent;
 	clientInfo_t	*ci;
-	float		fovOffset;
 	vec3_t		angles;
 	weaponInfo_t	*weapon;
 
@@ -1580,13 +1581,6 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		return;
 	}
 
-	// drop gun lower at higher fov
-	if ( cg_fov.integer > 90 ) {
-		fovOffset = -0.2 * ( cg_fov.integer - 90 );
-	} else {
-		fovOffset = 0;
-	}
-
 	cent = &cg.predictedPlayerEntity;	// &cg_entities[cg.snap->ps.clientNum];
 	CG_RegisterWeapon( ps->weapon );
 	weapon = &cg_weapons[ ps->weapon ];
@@ -1602,7 +1596,7 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 
 	VectorMA( hand.origin, cg_gun_x.value, cg.refdef.viewaxis[0], hand.origin );
 	VectorMA( hand.origin, cg_gun_y.value, cg.refdef.viewaxis[1], hand.origin );
-	VectorMA( hand.origin, (cg_gun_z.value+fovOffset), cg.refdef.viewaxis[2], hand.origin );
+	VectorMA( hand.origin, cg_gun_z.value, cg.refdef.viewaxis[2], hand.origin );
 	// A short universal lowering works for the placeholder MD3s too, and does
 	// not take animation-layer ownership away from the existing still-swap rule.
 	if ( !weapon->viewModel && (ps->stats[STAT_LADDER] & LADDER_HOLSTER) ) {

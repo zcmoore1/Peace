@@ -379,6 +379,13 @@ static void TestSpawn(void) {
  spawnHinted=0; hinted=endFrames;
  ClientSpawn(&g_entities[0]);
  CHECK(endFrames==hinted+1 && !spawnHinted);	/* its first hint pass never saw it */
+ /* the real ClientSpawn's box is MW2's body over Peace's origin: 30 wide,
+  * 70 tall, MINS_Z below the origin; the eye 60 above the feet; and the move
+  * class is the class primary's (the preset's Machinegun: MW2's rifle) */
+ CHECK(g_entities[0].r.mins[0]==-PLAYER_WIDTH && g_entities[0].r.maxs[1]==PLAYER_WIDTH);
+ CHECK(g_entities[0].r.mins[2]==MINS_Z && g_entities[0].r.maxs[2]==DEFAULT_HEIGHT);
+ CHECK(g_entities[0].r.maxs[2]-g_entities[0].r.mins[2]==70 && DEFAULT_VIEWHEIGHT-MINS_Z==60);
+ CHECK(cl[0].ps.moveClass==BG_WeaponMoveClass(cl[0].ps.stats[STAT_SLOT_PRIMARY]) && cl[0].ps.moveClass==MOVECLASS_RIFLE);
  CHECK(VectorCompare(cl[0].ps.origin,spot) && fabs(AngleNormalize180(cl[0].ps.viewangles[YAW]-30))<0.01f);
  CHECK(cl[0].ps.viewangles[PITCH]==0 && cl[0].ps.viewangles[ROLL]==0);
  CHECK(!ti->inuse && !Insertions() && cl[1].ps.cursorHintEntIndex==ENTITYNUM_NONE);

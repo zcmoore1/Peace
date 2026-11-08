@@ -470,7 +470,7 @@ static void Run1(int rtt, const script_t *sc, int at) {
 	svPs.ammo[cl.lethal] = 2;	/* as before MW2's counts: a scenario may use one before its own */
 	svPs.stats[STAT_HEALTH] = 100; svPs.pm_type = PM_NORMAL; svPs.weapon = GUN; svPs.weaponstate = WEAPON_READY;
 	svPs.ammo[GUN] = svPs.slotAmmo[SLOT_PRIMARY] = startAmmo = BG_WeaponMagSize(GUN) - 2;
-	svPs.viewheight = 26; svPs.origin[2] = 24.125f; svPs.groundEntityNum = ENTITYNUM_WORLD;
+	svPs.viewheight = DEFAULT_VIEWHEIGHT; svPs.origin[2] = 24.125f; svPs.groundEntityNum = ENTITYNUM_WORLD;
 	levelTime = 1000;
 #ifdef FAKERELOAD_ENGINE
 	if (ownHost && viaEngine) {

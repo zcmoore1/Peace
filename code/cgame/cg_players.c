@@ -1495,6 +1495,18 @@ static void CG_PlayerAngles( centity_t *cent, vec3_t legs[3], vec3_t torso[3], v
 
 /*
 ===============
+CG_PlayerModelZ
+
+A height above the origin on the Quake 3 placeholder model, as drawn: the
+picture is scaled about the feet (MINS_Z), so the feet stay on the floor.
+===============
+*/
+static float CG_PlayerModelZ( float z ) {
+	return MINS_Z + ( z - MINS_Z ) * CG_PLAYER_MODEL_SCALE;
+}
+
+/*
+===============
 CG_HasteTrail
 ===============
 */
@@ -1543,7 +1555,9 @@ static void CG_BreathPuffs( centity_t *cent, refEntity_t *head) {
 	vec3_t up, origin;
 	int contents;
 
-	ci = &cgs.clientinfo[ cent->currentState.number ];
+	// the client's info, not the entity's: a corpse or podium player's number
+	// is past MAX_CLIENTS
+	ci = &cgs.clientinfo[ cent->currentState.clientNum ];
 
 	if (!cg_enableBreath.integer) {
 		return;
@@ -1635,10 +1649,15 @@ static void CG_TrailItem( centity_t *cent, qhandle_t hModel ) {
 	AnglesToAxis( angles, axis );
 
 	memset( &ent, 0, sizeof( ent ) );
-	VectorMA( cent->lerpOrigin, -16, axis[0], ent.origin );
-	ent.origin[2] += 16;
+	// on the scaled body's back (CG_PLAYER_MODEL_SCALE), at its scale
+	VectorMA( cent->lerpOrigin, -16 * CG_PLAYER_MODEL_SCALE, axis[0], ent.origin );
+	ent.origin[2] += CG_PlayerModelZ( 16 );
 	angles[YAW] += 90;
 	AnglesToAxis( angles, ent.axis );
+	VectorScale( ent.axis[0], CG_PLAYER_MODEL_SCALE, ent.axis[0] );
+	VectorScale( ent.axis[1], CG_PLAYER_MODEL_SCALE, ent.axis[1] );
+	VectorScale( ent.axis[2], CG_PLAYER_MODEL_SCALE, ent.axis[2] );
+	ent.nonNormalizedAxes = qtrue;
 
 	ent.hModel = hModel;
 	trap_R_AddRefEntityToScene( &ent );
@@ -1654,7 +1673,7 @@ static void CG_PlayerFlag( centity_t *cent, qhandle_t hSkin, refEntity_t *torso 
 	clientInfo_t	*ci;
 	refEntity_t	pole;
 	refEntity_t	flag;
-	vec3_t		angles, dir;
+	vec3_t		angles, dir, poleAxis[3];
 	int			legsAnim, flagAnim, updateangles;
 	float		angle, d;
 
@@ -1666,6 +1685,11 @@ static void CG_PlayerFlag( centity_t *cent, qhandle_t hSkin, refEntity_t *torso 
 	pole.renderfx = torso->renderfx;
 	CG_PositionEntityOnTag( &pole, torso, torso->hModel, "tag_flag" );
 	trap_R_AddRefEntityToScene( &pole );
+	// the pole carries the body's scale (CG_ScalePlayerModel); the swing below
+	// measures directions, so it reads the pole's axes at unit length
+	VectorNormalize2( pole.axis[0], poleAxis[0] );
+	VectorNormalize2( pole.axis[1], poleAxis[1] );
+	VectorNormalize2( pole.axis[2], poleAxis[2] );
 
 	// show the flag model
 	memset( &flag, 0, sizeof(flag) );
@@ -1695,11 +1719,11 @@ static void CG_PlayerFlag( centity_t *cent, qhandle_t hSkin, refEntity_t *torso 
 		// add gravity
 		dir[2] += 100;
 		VectorNormalize( dir );
-		d = DotProduct(pole.axis[2], dir);
+		d = DotProduct(poleAxis[2], dir);
 		// if there is enough movement orthogonal to the flag pole
 		if (fabs(d) < 0.9) {
 			//
-			d = DotProduct(pole.axis[0], dir);
+			d = DotProduct(poleAxis[0], dir);
 			if (d > 1.0f) {
 				d = 1.0f;
 			}
@@ -1708,7 +1732,7 @@ static void CG_PlayerFlag( centity_t *cent, qhandle_t hSkin, refEntity_t *torso 
 			}
 			angle = acos(d);
 
-			d = DotProduct(pole.axis[1], dir);
+			d = DotProduct(poleAxis[1], dir);
 			if (d < 0) {
 				angles[YAW] = 360 - angle * 180 / M_PI;
 			}
@@ -1917,7 +1941,7 @@ static void CG_PlayerFloatSprite( centity_t *cent, qhandle_t shader ) {
 
 	memset( &ent, 0, sizeof( ent ) );
 	VectorCopy( cent->lerpOrigin, ent.origin );
-	ent.origin[2] += 48;
+	ent.origin[2] += CG_PlayerModelZ( 48 );	// over the scaled head
 	ent.reType = RT_SPRITE;
 	ent.customShader = shader;
 	ent.radius = 10;
@@ -2044,7 +2068,7 @@ static qboolean CG_PlayerShadow( centity_t *cent, float *shadowPlane ) {
 	// add the mark as a temporary, so it goes directly to the renderer
 	// without taking a spot in the cg_marks array
 	CG_ImpactMark( cgs.media.shadowMarkShader, trace.endpos, trace.plane.normal, 
-		cent->pe.legs.yawAngle, alpha,alpha,alpha,1, qfalse, 24, qtrue );
+		cent->pe.legs.yawAngle, alpha,alpha,alpha,1, qfalse, 24 * CG_PLAYER_MODEL_SCALE, qtrue );
 
 	return qtrue;
 }
@@ -2068,7 +2092,7 @@ static void CG_PlayerSplash( centity_t *cent ) {
 	}
 
 	VectorCopy( cent->lerpOrigin, end );
-	end[2] -= 24;
+	end[2] += MINS_Z;
 
 	// if the feet aren't in liquid, don't make a mark
 	// this won't handle moving water brushes, but they wouldn't draw right anyway...
@@ -2078,7 +2102,7 @@ static void CG_PlayerSplash( centity_t *cent ) {
 	}
 
 	VectorCopy( cent->lerpOrigin, start );
-	start[2] += 32;
+	start[2] += DEFAULT_HEIGHT;	// the top of the body, which the picture fills
 
 	// if the head isn't out of liquid, don't make a mark
 	contents = CG_PointContents( start, 0 );
@@ -2235,6 +2259,32 @@ int CG_LightVerts( vec3_t normal, int numVerts, polyVert_t *verts )
 
 /*
 ===============
+CG_ScalePlayerModel
+
+Scales the legs, the root of the tag chain, by CG_PLAYER_MODEL_SCALE about
+the feet, so the Quake 3 placeholder fills the standing box: x1.25 for MW2's
+70-unit player. Every rendered player goes through here: live players, the
+viewer's own body in a mirror, corpses and podium players. The torso,
+head, gun, barrel, flash and flag hang on tags, and CG_PositionEntityOnTag and
+CG_PositionRotatedEntityOnTag carry the scale down the chain: every tag's
+offset and every piece grows by the same factor, so nothing comes apart.
+The feet are the model's (0, 0, MINS_Z) along its own up axis. Picture only:
+the origin, box, lighting origin and every trace are untouched.
+===============
+*/
+static void CG_ScalePlayerModel( refEntity_t *legs ) {
+	vec3_t	feet;
+
+	VectorMA( legs->origin, MINS_Z, legs->axis[2], feet );
+	VectorScale( legs->axis[0], CG_PLAYER_MODEL_SCALE, legs->axis[0] );
+	VectorScale( legs->axis[1], CG_PLAYER_MODEL_SCALE, legs->axis[1] );
+	VectorScale( legs->axis[2], CG_PLAYER_MODEL_SCALE, legs->axis[2] );
+	VectorMA( feet, -MINS_Z, legs->axis[2], legs->origin );
+	legs->nonNormalizedAxes = qtrue;
+}
+
+/*
+===============
 CG_Player
 ===============
 */
@@ -2320,6 +2370,7 @@ void CG_Player( centity_t *cent ) {
 	legs.customSkin = ci->legsSkin;
 
 	VectorCopy( cent->lerpOrigin, legs.origin );
+	CG_ScalePlayerModel( &legs );
 
 	VectorCopy( cent->lerpOrigin, legs.lightingOrigin );
 	legs.shadowPlane = shadowPlane;

@@ -214,7 +214,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_autoswitch, "cg_autoswitch", "1", CVAR_ARCHIVE },
 	{ &cg_drawGun, "cg_drawGun", "1", CVAR_ARCHIVE },
 	{ &cg_zoomFov, "cg_zoomfov", "22.5", CVAR_ARCHIVE },
-	{ &cg_fov, "cg_fov", "90", CVAR_ARCHIVE },
+	{ &cg_fov, "cg_fov", XSTRING( CG_FOV_DEFAULT ), CVAR_ARCHIVE },	// MW2's 65, kept to 65-80
 	{ &cg_viewsize, "cg_viewsize", "100", CVAR_ARCHIVE },
 	{ &cg_shadows, "cg_shadows", "1", CVAR_ARCHIVE  },
 	{ &cg_gibs, "cg_gibs", "1", CVAR_ARCHIVE  },
@@ -390,6 +390,8 @@ void CG_UpdateCvars( void ) {
 	}
 
 	// check for modications here
+
+	CG_ClampFov();
 
 	// If team overlay is on, ask for updates from the server.  If it's off,
 	// let the server know so we don't receive it

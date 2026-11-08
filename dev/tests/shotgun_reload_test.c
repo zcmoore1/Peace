@@ -593,7 +593,7 @@ static void TestAimSwapOrdering( int offset, int ads ) {
 	testMove.trace = ClearWorldTrace;
 	testMove.pointcontents = NoWorldContents;
 	testMove.tracemask = MASK_PLAYERSOLID;
-	testPs.speed = 320;
+	testPs.speed = BG_PLAYER_SPEED;
 	testPs.groundEntityNum = ENTITYNUM_NONE;
 	for ( elapsed = 0; elapsed < FireNote( WNOTE_BOLT_CLOSED ) - 1 + offset; elapsed++ ) MoveTick( 1 );
 	CHECK( !!(testPs.pm_flags & PMF_ADS) == ads );

@@ -162,7 +162,7 @@ void SS_Reset( int gun, int lethal, int levelTime ) {
  memset(&level,0,sizeof(level)); memset(g_entities,0,sizeof(g_entities)); memset(clients,0,sizeof(clients));
  level.time=levelTime; level.previousTime=levelTime-50; level.num_entities=MAX_CLIENTS; level.maxclients=SS_CLIENTS;
  level.clients=clients; level.gentities=g_entities;
- g_gametype.integer=GT_SND; g_knockback.integer=0; g_speed.value=320; g_gravity.value=DEFAULT_GRAVITY;
+ g_gametype.integer=GT_SND; g_knockback.integer=0; g_speed.value=BG_PLAYER_SPEED; g_gravity.value=DEFAULT_GRAVITY;
  g_smoothClients.integer=1; g_quadfactor.value=3;
  pmove_msec.integer=8; pmove_fixed.integer=0;
  for(i=0;i<SS_CLIENTS;i++) {

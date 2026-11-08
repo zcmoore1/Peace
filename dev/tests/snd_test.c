@@ -60,7 +60,7 @@ void ClientSpawn(gentity_t *e) {
  memset(ps,0,sizeof(*ps)); ps->clientNum=e-g_entities;
  ps->persistant[PERS_TEAM]=e->client->sess.sessionTeam;
  ps->stats[STAT_HEALTH]=ps->stats[STAT_MAX_HEALTH]=e->health=100;
- ps->groundEntityNum=ENTITYNUM_WORLD; ps->viewheight=26;
+ ps->groundEntityNum=ENTITYNUM_WORLD; ps->viewheight=DEFAULT_VIEWHEIGHT;
  ps->weapon=WP_SHOTGUN; ps->weaponstate=WEAPON_READY; ps->ammo[WP_SHOTGUN]=8;
  VectorSet(ps->origin, e->client->sess.sessionTeam==TEAM_RED ? -280 : 280, (e-g_entities)*80, 24);
  e->takedamage=qtrue; e->r.linked=qtrue;

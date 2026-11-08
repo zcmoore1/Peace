@@ -22,7 +22,8 @@ static void TestCatalog(void) {
  bg_class_t cl,copy,before; char text[BG_CLASS_STRING_SIZE]; int a,b,c,valid,i;
  CHECK(!strcmp(BG_Perk(PERK_NO_FALL_DAMAGE)->name,"9 Lives"));
  CHECK(!strcmp(BG_Perk(PERK_SILENT_FOOTSTEPS)->name,"Inaudible"));
- CHECK(!strcmp(BG_Perk(PERK_EXPEDITIOUS)->name,"Expeditious"));
+ CHECK(!strcmp(BG_Perk(PERK_LIGHTWEIGHT)->name,"Lightweight"));
+ CHECK(BG_Perk(PERK_LIGHTWEIGHT)->movementPercent==107);	/* MW2's moveSpeedScaler 1.07 */
  for(a=0;a<BG_PERK_COUNT;a++) for(b=0;b<BG_PERK_COUNT;b++) for(c=0;c<BG_PERK_COUNT;c++) {
   cl=*BG_Class(0); cl.perk[0]=a; cl.perk[1]=b; cl.perk[2]=c;
   valid=!(a && (a==b || a==c)) && !(b && b==c);
@@ -31,7 +32,10 @@ static void TestCatalog(void) {
   CHECK(!memcmp(&cl,&copy,sizeof(cl)));
   BG_ApplyClass(&ps,&copy);
   for(i=1;i<BG_PERK_COUNT;i++) CHECK(BG_HasPerk(&ps,i)==(i==a || i==b || i==c));
-  CHECK(fabs(BG_MovementScale(&ps)-((a==PERK_EXPEDITIOUS || b==PERK_EXPEDITIOUS || c==PERK_EXPEDITIOUS) ? 1.1f : 1.0f))<.0001f);
+  /* Lightweight multiplies the spawn class's speed (the Assault preset's
+   * Machinegun: rifle, 0.95), as MW2's setMoveSpeedScale(0.95 * 1.07) */
+  CHECK(ps.moveClass==MOVECLASS_RIFLE);
+  CHECK(fabs(BG_MoveClassScale(&ps)-0.95f*((a==PERK_LIGHTWEIGHT || b==PERK_LIGHTWEIGHT || c==PERK_LIGHTWEIGHT) ? 1.07f : 1.0f))<.0001f);
   CHECK(BG_AttachmentLimit(&ps)==((a==PERK_SECOND_NATURE || b==PERK_SECOND_NATURE || c==PERK_SECOND_NATURE) ? 2 : 1));
   BG_ApplyLoadout(&ps,0); CHECK(ps.perks==0);
  }
@@ -112,7 +116,7 @@ static void TestFootsteps(void) {
  for(water=0;water<3;water++) for(metal=0;metal<2;metal++) for(silent=0;silent<2;silent++) {
   Ready(WP_MACHINEGUN,silent ? PERK_SILENT_FOOTSTEPS : PERK_NONE);
   ps.groundEntityNum=ENTITYNUM_WORLD; ps.velocity[0]=200; move.cmd.forwardmove=127;
-  ps.speed=320;	/* g_speed: MW2's cycle rate is speed over the posture's most */
+  ps.speed=BG_PLAYER_SPEED;	/* g_speed: MW2's cycle rate is speed over the posture's most */
   move.waterlevel=water; pml.groundTrace.surfaceFlags=metal ? SURF_METALSTEPS : 0;
   ps.bobCycle=63; pml.msec=10; seq=ps.eventSequence; PM_Footsteps();
   CHECK(ps.eventSequence-seq==(silent ? 0 : 1));
@@ -140,54 +144,63 @@ static void ClearTrace(trace_t *tr,const vec3_t start,const vec3_t mins,
 }
 static int NoContents(const vec3_t point,int pass) { (void)point;(void)pass;return 0; }
 static void MovementReady(int perk) {
- Ready(WP_MACHINEGUN,perk);ps.speed=320;ps.gravity=800;
+ Ready(WP_MACHINEGUN,perk);ps.speed=BG_PLAYER_SPEED;ps.gravity=800;
  move.trace=ClearTrace;move.pointcontents=NoContents;move.cmd.forwardmove=127;
  pml.frametime=.01f;pml.msec=10;
  VectorSet(pml.forward,1,0,0);VectorSet(pml.right,0,-1,0);
  VectorSet(pml.groundTrace.plane.normal,0,0,1);
  pml.walking=pml.groundPlane=qtrue;ps.groundEntityNum=ENTITYNUM_WORLD;
 }
+/* Lightweight is MW2's: 1.07 on the class speed, which only the walk reads
+ * (and Peace's wading clamp, a fraction of that walk). The air, a ladder,
+ * swimming, the jump and gravity never see it. */
 static void TestMovement(void) {
- const int flags[]={0,PMF_SPRINTING,PMF_ADS};
+ const int flags[]={0,PMF_SPRINTING,PMF_ADS,PMF_DUCKED,PMF_ADS|PMF_DUCKED};
  int i,j,boost,mode;
- float base,fast,normalSpeed=0,jump=0,scale;
+ float base,fast,normalSpeed=0,jump=0,scale,air;
  vec3_t falling={0,0,0};
- CHECK(BG_MovementScale(NULL)==1.0f);
+ CHECK(BG_MoveClassScale(NULL)==1.0f);
  MovementReady(PERK_NONE);
  for(i=0;i<ARRAY_LEN(flags);i++) {
-  ps.pm_flags=flags[i];ps.perks=0;base=PM_CmdScale(&move.cmd);
-  ps.perks=1<<(PERK_EXPEDITIOUS-1);fast=PM_CmdScale(&move.cmd);
-  CHECK(fabs(fast-base*1.1f)<.0001f);
-  for(j=0;j<1000;j++) { CHECK(PM_CmdScale(&move.cmd)==fast);CHECK(ps.speed==320); }
+  ps.pm_flags=flags[i];ps.perks=0;base=PM_WalkScale(127,0);air=PM_AirScale(127,0);
+  ps.perks=1<<(PERK_LIGHTWEIGHT-1);fast=PM_WalkScale(127,0);
+  CHECK(fabs(fast-base*1.07f)<.0001f);
+  CHECK(PM_AirScale(127,0)==air);			/* not in the air */
+  for(j=0;j<1000;j++) { CHECK(PM_WalkScale(127,0)==fast);CHECK(ps.speed==BG_PLAYER_SPEED); }
   /* Diagonal input retains normalization; the perk is not per-axis. */
-  move.cmd.rightmove=127;scale=PM_CmdScale(&move.cmd);
-  CHECK(fabs(scale*sqrt(2.0f)-fast)<.0001f);move.cmd.rightmove=0;
+  scale=PM_WalkScale(127,127);
+  CHECK(fabs(scale*sqrt(2.0f)-fast)<.0001f);
  }
- move.cmd.forwardmove=0;CHECK(PM_CmdScale(&move.cmd)==0);
- /* Exercise real accelerators and caps, not just the scaling helper. */
- for(mode=0;mode<8;mode++) for(boost=0;boost<2;boost++) {
-  MovementReady(boost ? PERK_EXPEDITIOUS : PERK_NONE);
-  if(mode==1)ps.pm_flags=PMF_SPRINTING;
-  if(mode==2)ps.pm_flags=PMF_ADS;
-  if(mode==3)ps.pm_flags=PMF_DUCKED;
-  if(mode>=4 && mode<=6)move.waterlevel=mode-3;
-  if(mode>=6)pml.walking=pml.groundPlane=qfalse;
-  if(mode==7)VectorSet(pml.ladderNormal,-1,0,0);
+ CHECK(PM_WalkScale(0,0)==0);
+ /* Exercise real accelerators and caps, not just the scaling helper:
+  * 0-4 the walk (run, sprint, aim, crouch, crouched aim), 5-6 wading,
+  * 7 swimming, 8 a ladder. */
+ for(mode=0;mode<9;mode++) for(boost=0;boost<2;boost++) {
+  MovementReady(boost ? PERK_LIGHTWEIGHT : PERK_NONE);
+  if(mode<5)ps.pm_flags=flags[mode];
+  if(mode>=5 && mode<=7)move.waterlevel=mode-4;
+  if(mode>=7)pml.walking=pml.groundPlane=qfalse;
+  if(mode==8)VectorSet(pml.ladderNormal,-1,0,0);
   for(j=0;j<300;j++) {
-   if(mode==7)PM_LadderMove();else if(mode==6)PM_WaterMove();else PM_WalkMove();
-   CHECK(ps.speed==320 && ps.gravity==800);
+   pml.rightmove=move.cmd.rightmove;
+   if(mode==8)PM_LadderMove();else if(mode==7)PM_WaterMove();else PM_WalkMove();
+   CHECK(ps.speed==BG_PLAYER_SPEED && ps.gravity==800);
    CHECK(ps.weaponstate==WEAPON_READY && ps.weaponTime==0);
   }
   scale=VectorLength(ps.velocity);
-  if(!boost)normalSpeed=scale;else CHECK(fabs(scale-normalSpeed*1.1f)<.01f);
+  if(!boost)normalSpeed=scale;
+  else if(mode<=6)CHECK(fabs(scale-normalSpeed*1.07f)<.01f);
+  else CHECK(fabs(scale-normalSpeed)<.01f);
  }
- /* The jump impulse and gravity are not speed multipliers. With no movement
-  * input, an existing falling/knockback velocity is also unchanged. */
+ /* The jump impulse and gravity are not speed multipliers, and neither is
+  * an air push. With no movement input, an existing falling/knockback
+  * velocity is also unchanged. */
  for(boost=0;boost<2;boost++) {
-  MovementReady(boost ? PERK_EXPEDITIOUS : PERK_NONE);move.cmd.upmove=127;
+  MovementReady(boost ? PERK_LIGHTWEIGHT : PERK_NONE);move.cmd.upmove=127;
   CHECK(PM_CheckJump());CHECK(ps.velocity[2]==BG_JumpVelocity(&ps) && ps.velocity[2]>0);
   PM_AirMove();if(!boost)jump=ps.velocity[2];else CHECK(ps.velocity[2]==jump);
-  MovementReady(boost ? PERK_EXPEDITIOUS : PERK_NONE);
+  if(!boost)air=ps.velocity[0];else CHECK(ps.velocity[0]==air && air>0);
+  MovementReady(boost ? PERK_LIGHTWEIGHT : PERK_NONE);
   move.cmd.forwardmove=0;pml.walking=pml.groundPlane=qfalse;
   VectorSet(ps.velocity,100,200,-300);PM_AirMove();
   if(!boost)VectorCopy(ps.velocity,falling);else CHECK(VectorCompare(ps.velocity,falling));

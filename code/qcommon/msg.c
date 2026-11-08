@@ -1124,6 +1124,7 @@ netField_t	playerStateFields[] =
 { PSF(weaponDraw), 1 },
 { PSF(weapFlags), 2 },
 { PSF(perks), PS_PERK_BITS },
+{ PSF(moveClass), PS_MOVECLASS_BITS },
 { PSF(jumpLand), -12 },
 { PSF(jumpWait), 10 },
 { PSF(jumpOriginZ), 0 },

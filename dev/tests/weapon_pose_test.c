@@ -1040,7 +1040,7 @@ static void FlowWorldBegin(void) {
  CHECK(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_READY);
  flow.trace=FlowFloorTrace;flow.pointcontents=FlowFloorContents;flow.tracemask=MASK_PLAYERSOLID;
  flow.cmd.forwardmove=127;flowPs.commandTime=flow.cmd.serverTime;
- flowPs.speed=320;flowPs.gravity=800;flowPs.origin[2]=24;
+ flowPs.speed=BG_PLAYER_SPEED;flowPs.gravity=800;flowPs.origin[2]=24;
  flowPs.groundEntityNum=ENTITYNUM_WORLD;FlowWorldStep(qtrue);
  CHECK(flowPs.groundEntityNum==ENTITYNUM_WORLD);
 }

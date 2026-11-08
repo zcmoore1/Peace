@@ -32,17 +32,21 @@ pmove_t		*pm;
 pml_t		pml;
 
 // movement parameters
-float	pm_stopspeed = 100.0f;
-float	pm_duckScale = 0.25f;
+float	pm_stopspeed = 100.0f;	// MW2's stopspeed (0x7A9F9C)
 float	pm_swimScale = 0.50f;
-float	pm_adsScale = 0.50f;	// aiming, on the ground and in the air alike (Peace's value; MW2's walk scale is 0.4)
 
-float	pm_accelerate = 10.0f;
+// MW2's walk acceleration by stance (PM_WalkMove 0x5733A5: 0x739B9C, 0x6F6CBC);
+// prone's 19 waits for prone. Slick ground and knockback take 1.0 there,
+// as the air does (0x5730C8).
+float	pm_accelerate = 9.0f;
+float	pm_duckaccelerate = 12.0f;
 float	pm_airaccelerate = 1.0f;
 float	pm_wateraccelerate = 4.0f;
 float	pm_flyaccelerate = 8.0f;
+float	pm_noclipaccelerate = 10.0f;	// noclip keeps Quake 3's
 
-float	pm_friction = 6.0f;
+float	pm_friction = 5.5f;		// MW2's friction (0x7ADC2C, used 0x56F15D)
+float	pm_noclipfriction = 9.0f;	// noclip keeps Quake 3's (6 x 1.5)
 float	pm_waterfriction = 1.0f;
 float	pm_flightfriction = 3.0f;
 float	pm_spectatorfriction = 5.0f;
@@ -385,23 +389,22 @@ PM_CmdScale
 Returns the scale factor to apply to cmd movements
 This allows the clients to use axial -127 to 127 values for all directions
 without getting a sqrt(2) distortion in speed.
+
+Quake 3's, for the moves MW2 has no counterpart of: swimming, flying and
+noclip. They read the jump axis. Aiming slows them as it does the air
+(BG_ADS_SPEED_SCALE); the sprint and the class speed are the walk's alone
+(PM_WalkScale). The scale is this command's, never written into ps.speed:
+Pmove's substeps and prediction replay evaluate it more than once.
 ============
 */
 static float PM_CmdScale( usercmd_t *cmd ) {
 	int		max;
-	int		speed = pm->ps->speed;
+	float	speed = pm->ps->speed;
 	float	total;
 	float	scale;
 
-	// Sprint: forward speed boost, on the ground only - MW2 scales its walk
-	// and not its air move (PM_AirScale), so a sprint in the air pays off on
-	// landing. ADS: movement penalty. Modify this command's scale, never the authoritative
-	// base speed. Pmove subdivisions and prediction replay can evaluate this
-	// more than once.
-	if ( ( pm->ps->pm_flags & PMF_SPRINTING ) && pml.walking ) {
-		speed = (int)( speed * 1.4f );
-	} else if ( pm->ps->pm_flags & PMF_ADS ) {
-		speed = (int)( speed * pm_adsScale );
+	if ( pm->ps->pm_flags & PMF_ADS ) {
+		speed *= BG_ADS_SPEED_SCALE;
 	}
 
 	max = abs( cmd->forwardmove );
@@ -417,40 +420,83 @@ static float PM_CmdScale( usercmd_t *cmd ) {
 
 	total = sqrt( cmd->forwardmove * cmd->forwardmove
 		+ cmd->rightmove * cmd->rightmove + cmd->upmove * cmd->upmove );
-	scale = (float)speed * max / ( 127.0 * total );
+	scale = speed * max / ( 127.0 * total );
 
-	return scale * BG_MovementScale( pm->ps );
+	return scale;
+}
+
+/*
+============
+PM_WalkScale
+
+MW2's PM_CmdScale_Walk (0x572DB0), the walk's only scale. The stick alone
+counts (MW2's jump is a button): a backward forwardmove is worth
+BG_BACK_SPEED_SCALE of itself and a rightmove BG_STRAFE_SPEED_SCALE, and the
+larger sets the magnitude, so the scales never turn the direction. Then
+aiming, the sprint, the crouch and the aimed gun's adsMoveSpeedScale, each a
+float multiply, and the class speed last (0x572FD0). The result is this
+command's; nothing is written into ps.speed or the command.
+============
+*/
+static float PM_WalkScale( int forwardmove, int rightmove ) {
+	float	f, r, m, scale;
+
+	f = forwardmove < 0 ? (float)fabs( BG_BACK_SPEED_SCALE * forwardmove ) : (float)abs( forwardmove );
+	r = (float)fabs( BG_STRAFE_SPEED_SCALE * rightmove );
+	m = f > r ? f : r;
+	if ( m == 0 ) {
+		return 0;
+	}
+
+	scale = pm->ps->speed * m /
+		( (float)sqrt( forwardmove * forwardmove + rightmove * rightmove ) * 127.0f );
+	if ( pm->ps->pm_flags & PMF_ADS ) {
+		scale *= BG_ADS_SPEED_SCALE;
+	}
+	if ( pm->ps->pm_flags & PMF_SPRINTING ) {
+		scale *= BG_SPRINT_SPEED_SCALE;
+	}
+	if ( pm->ps->pm_flags & PMF_DUCKED ) {
+		scale *= BG_CROUCH_SPEED_SCALE;
+	}
+	// MW2 takes the gun's moveSpeedScale at the hip (1 on every gun Peace
+	// models) and its adsMoveSpeedScale while aiming.
+	if ( pm->ps->pm_flags & PMF_ADS ) {
+		scale *= BG_WeaponAdsMoveScale( pm->ps->weapon );
+	}
+	return scale * BG_MoveClassScale( pm->ps );
 }
 
 /*
 ============
 PM_AirScale
 
-MW2's air move speed: the base speed, spread over the stick alone, and slowed
-while aiming (MW2's air scale keeps its walking scale, which aiming sets).
-MW2's jump is a button, not a move axis, and sprint is its walk's, so neither
-touches the air. A held jump would otherwise cut air control to 71%.
+MW2's air move speed (PM_CmdScale 0x56F470): the base speed, spread over the
+stick alone, and slowed while aiming (MW2's air scale keeps its walking
+scale, which aiming sets). MW2's jump is a button, not a move axis, and
+sprint, the crouch, the gun and the class speed are its walk's, so none of
+them touches the air. A held jump would otherwise cut air control to 71%.
 ============
 */
-static float PM_AirScale( const usercmd_t *cmd ) {
+static float PM_AirScale( int forwardmove, int rightmove ) {
 	int		max;
-	int		speed = pm->ps->speed;
+	float	speed = pm->ps->speed;
 	float	total;
 
 	if ( pm->ps->pm_flags & PMF_ADS ) {
-		speed = (int)( speed * pm_adsScale );
+		speed *= BG_ADS_SPEED_SCALE;
 	}
 
-	max = abs( cmd->forwardmove );
-	if ( abs( cmd->rightmove ) > max ) {
-		max = abs( cmd->rightmove );
+	max = abs( forwardmove );
+	if ( abs( rightmove ) > max ) {
+		max = abs( rightmove );
 	}
 	if ( !max ) {
 		return 0;
 	}
 
-	total = sqrt( cmd->forwardmove * cmd->forwardmove + cmd->rightmove * cmd->rightmove );
-	return (float)speed * max / ( 127.0 * total ) * BG_MovementScale( pm->ps );
+	total = sqrt( forwardmove * forwardmove + rightmove * rightmove );
+	return speed * max / ( 127.0 * total );
 }
 
 
@@ -688,8 +734,8 @@ static void PM_WaterMove( void ) {
 	VectorCopy (wishvel, wishdir);
 	wishspeed = VectorNormalize(wishdir);
 
-	if ( wishspeed > pm->ps->speed * BG_MovementScale( pm->ps ) * pm_swimScale ) {
-		wishspeed = pm->ps->speed * BG_MovementScale( pm->ps ) * pm_swimScale;
+	if ( wishspeed > pm->ps->speed * pm_swimScale ) {
+		wishspeed = pm->ps->speed * pm_swimScale;
 	}
 
 	PM_Accelerate (wishdir, wishspeed, pm_wateraccelerate);
@@ -779,7 +825,6 @@ static void PM_AirMove( void ) {
 	vec3_t		wishdir;
 	float		wishspeed;
 	float		scale;
-	usercmd_t	cmd;
 
 	PM_Friction();
 
@@ -797,11 +842,12 @@ static void PM_AirMove( void ) {
 		pm->ps->jumpOriginZ = 0;
 	}
 
+	// pml.rightmove: a take-off from a sprint keeps the walk's sprint strafe
+	// for this think, as MW2's air move reads the command its walk scaled.
 	fmove = pm->cmd.forwardmove;
-	smove = pm->cmd.rightmove;
+	smove = pml.rightmove;
 
-	cmd = pm->cmd;
-	scale = PM_AirScale( &cmd );
+	scale = PM_AirScale( fmove, smove );
 
 	// set the movementDir so clients can rotate the legs for strafing
 	PM_SetMovementDir();
@@ -990,7 +1036,7 @@ static void PM_LadderMove( void ) {
 	maxInput = abs( pm->cmd.forwardmove );
 	if ( abs( pm->cmd.rightmove ) > maxInput ) maxInput = abs( pm->cmd.rightmove );
 	wishspeed = VectorNormalize( wishdir ) > 0 ?
-		BG_LADDER_SPEED * BG_MovementScale( pm->ps ) * maxInput / 127.0f : 0;
+		BG_LADDER_SPEED * maxInput / 127.0f : 0;
 	PM_Accelerate( wishdir, wishspeed, BG_LADDER_ACCELERATE );
 	PM_SlideMove( qfalse );
 }
@@ -1028,7 +1074,6 @@ static void PM_WalkMove( void ) {
 	vec3_t		wishdir;
 	float		wishspeed;
 	float		scale;
-	usercmd_t	cmd;
 	float		accelerate;
 	float		vel;
 
@@ -1051,6 +1096,14 @@ static void PM_WalkMove( void ) {
 		VectorScale( pm->ps->velocity, cut, pm->ps->velocity );
 	}
 
+	// MW2's sprint strafe (0x573262-0x573286): while sprinting, rightmove is
+	// scaled and truncated (127 becomes 84) before the jump check, so the
+	// walk and a take-off's air move both read it. It bends the direction;
+	// the speed is the walk scale's.
+	if ( pm->ps->pm_flags & PMF_SPRINTING ) {
+		pml.rightmove = (int)( pml.rightmove * BG_SPRINT_STRAFE_SCALE );
+	}
+
 	if ( PM_CheckJump () ) {
 		// jumped away
 		if ( pm->waterlevel > 1 ) {
@@ -1064,10 +1117,9 @@ static void PM_WalkMove( void ) {
 	PM_Friction ();
 
 	fmove = pm->cmd.forwardmove;
-	smove = pm->cmd.rightmove;
+	smove = pml.rightmove;
 
-	cmd = pm->cmd;
-	scale = PM_CmdScale( &cmd );
+	scale = PM_WalkScale( fmove, smove );
 
 	// set the movementDir so clients can rotate the legs for strafing
 	PM_SetMovementDir();
@@ -1093,28 +1145,26 @@ static void PM_WalkMove( void ) {
 	wishspeed = VectorNormalize(wishdir);
 	wishspeed *= scale;
 
-	// clamp the speed lower if ducking
-	if ( pm->ps->pm_flags & PMF_DUCKED ) {
-		if ( wishspeed > pm->ps->speed * BG_MovementScale( pm->ps ) * pm_duckScale ) {
-			wishspeed = pm->ps->speed * BG_MovementScale( pm->ps ) * pm_duckScale;
-		}
-	}
-
-	// clamp the speed lower if wading or walking on the bottom
+	// clamp the speed lower if wading or walking on the bottom: a fraction
+	// of this player's own run, class speed and Lightweight included (MW2
+	// has no water; Quake 3's rule)
 	if ( pm->waterlevel ) {
 		float	waterScale;
 
 		waterScale = pm->waterlevel / 3.0;
 		waterScale = 1.0 - ( 1.0 - pm_swimScale ) * waterScale;
-		if ( wishspeed > pm->ps->speed * BG_MovementScale( pm->ps ) * waterScale ) {
-			wishspeed = pm->ps->speed * BG_MovementScale( pm->ps ) * waterScale;
+		if ( wishspeed > pm->ps->speed * BG_MoveClassScale( pm->ps ) * waterScale ) {
+			wishspeed = pm->ps->speed * BG_MoveClassScale( pm->ps ) * waterScale;
 		}
 	}
 
 	// when a player gets hit, they temporarily lose
-	// full control, which allows them to be moved a bit
+	// full control, which allows them to be moved a bit; otherwise MW2's
+	// acceleration by stance (0x5733A5)
 	if ( ( pml.groundTrace.surfaceFlags & SURF_SLICK ) || pm->ps->pm_flags & PMF_TIME_KNOCKBACK ) {
 		accelerate = pm_airaccelerate;
+	} else if ( pm->ps->pm_flags & PMF_DUCKED ) {
+		accelerate = pm_duckaccelerate;
 	} else {
 		accelerate = pm_accelerate;
 	}
@@ -1205,7 +1255,7 @@ static void PM_NoclipMove( void ) {
 	{
 		drop = 0;
 
-		friction = pm_friction*1.5;	// extra friction
+		friction = pm_noclipfriction;
 		control = speed < pm_stopspeed ? pm_stopspeed : speed;
 		drop += control*friction*pml.frametime;
 
@@ -1232,7 +1282,7 @@ static void PM_NoclipMove( void ) {
 	wishspeed = VectorNormalize(wishdir);
 	wishspeed *= scale;
 
-	PM_Accelerate( wishdir, wishspeed, pm_accelerate );
+	PM_Accelerate( wishdir, wishspeed, pm_noclipaccelerate );
 
 	// move
 	VectorMA (pm->ps->origin, pml.frametime, pm->ps->velocity, pm->ps->origin);
@@ -1257,6 +1307,45 @@ static int PM_FootstepForSurface( void ) {
 	return EV_FOOTSTEP;
 }
 
+
+/*
+=================
+PM_BobMaxSpeed
+
+MW2's PM_GetMaxSpeed (0x573850), the most this posture can go, which only the
+bob's rate reads: the base speed mixed by the stick's direction (MW2's own
+mix of the strafe and back scales, not the walk's), aiming or the sprint,
+the aimed gun's adsMoveSpeedScale and the crouch. Unlike the walk it leaves
+out the class speed and Lightweight, so a rifle class's bob runs at 95% of
+the rate (re/bob_verify.txt B22, B33).
+=================
+*/
+static float PM_BobMaxSpeed( void ) {
+	float	speed = pm->ps->speed;
+	int		fm = pm->cmd.forwardmove, rm = pml.rightmove;
+
+	if ( fm ) {
+		if ( rm ) {
+			speed *= ( ( BG_STRAFE_SPEED_SCALE - 1.0f ) * 0.75f + 2.0f ) * 0.5f;
+			if ( fm < 0 ) {
+				speed *= ( BG_BACK_SPEED_SCALE + 1.0f ) * 0.5f;
+			}
+		} else if ( fm < 0 ) {
+			speed *= BG_BACK_SPEED_SCALE;
+		}
+	} else if ( rm ) {
+		speed *= ( BG_STRAFE_SPEED_SCALE - 1.0f ) * 0.75f + 1.0f;
+	}
+	if ( pm->ps->pm_flags & PMF_ADS ) {
+		speed *= BG_ADS_SPEED_SCALE * BG_WeaponAdsMoveScale( pm->ps->weapon );
+	} else if ( pm->ps->pm_flags & PMF_SPRINTING ) {
+		speed *= BG_SPRINT_SPEED_SCALE;
+	}
+	if ( pm->ps->pm_flags & PMF_DUCKED ) {
+		speed *= BG_CROUCH_SPEED_SCALE;
+	}
+	return speed;
+}
 
 /*
 =================
@@ -1616,7 +1705,7 @@ static void PM_CheckDuck (void)
 		}
 		else {
 			VectorSet( pm->mins, -PLAYER_WIDTH, -PLAYER_WIDTH, MINS_Z );
-			VectorSet( pm->maxs, PLAYER_WIDTH, PLAYER_WIDTH, 16 );
+			VectorSet( pm->maxs, PLAYER_WIDTH, PLAYER_WIDTH, CROUCH_HEIGHT );
 		}
 		pm->ps->pm_flags |= PMF_DUCKED;
 		pm->ps->viewheight = CROUCH_VIEWHEIGHT;
@@ -1763,14 +1852,8 @@ static void PM_Footsteps( void ) {
 	{
 		qboolean back = ( pm->ps->pm_flags & PMF_BACKWARDS_RUN ) != 0;
 		qboolean aimed = ( pm->ps->pm_flags & PMF_ADS ) != 0;
-		float maxSpeed = pm->ps->speed * BG_MovementScale( pm->ps );
-		if ( pm->ps->pm_flags & PMF_SPRINTING ) {
-			maxSpeed *= 1.4f;
-		} else if ( aimed ) {
-			maxSpeed *= pm_adsScale;
-		}
+		float maxSpeed = PM_BobMaxSpeed();
 		if ( pm->ps->pm_flags & PMF_DUCKED ) {
-			maxSpeed *= pm_duckScale;
 			bobmove = aimed ? 0.315f : 0.34f;
 		} else if ( ( pm->ps->pm_flags & PMF_SPRINTING ) && !back ) {
 			bobmove = 0.5f;		// MW2's player_sprintCameraBob
@@ -2754,8 +2837,11 @@ float BG_SpreadScale( const playerState_t *ps ) {
 		scale = 1.0f;              // hipfire baseline
 	}
 
-	// movement penalty, proportional to horizontal speed (320 ~ run speed)
-	scale += ( speed / 320.0f ) * 0.6f;
+	// movement penalty, proportional to horizontal speed over the base speed
+	// (a full run adds 0.6). A state built from an entity carries no speed;
+	// it takes g_speed's default, which the server's player has unless an
+	// admin changes it.
+	scale += ( speed / ( ps->speed > 0 ? ps->speed : BG_PLAYER_SPEED ) ) * 0.6f;
 
 	if ( ps->groundEntityNum == ENTITYNUM_NONE ) {
 		scale += 1.5f;             // airborne: big bloom
@@ -2881,6 +2967,10 @@ void BG_ApplyClass( playerState_t *ps, const bg_class_t *cl ) {
 		ps->slotAttachments[i] = cl->attachments[i] < 0 ? 0 : cl->attachments[i];
 	}
 	ps->stats[STAT_ACTIVE_SLOT] = SLOT_PRIMARY;
+	// MW2's class speed is the primary's at spawn (_class.gsc sets
+	// self.primaryWeapon once; updateMoveSpeedScale always reads it): a swap
+	// to the secondary or a pickup never changes it.
+	ps->moveClass = BG_WeaponMoveClass( ps->stats[STAT_SLOT_PRIMARY] );
 
 	// Melee is never a slot - you always have it.
 	ps->ammo[WP_KNIFE] = -1;
@@ -3379,17 +3469,26 @@ static void PM_UpdateWeaponAction( void ) {
 		pm->ps->weaponstate == WEAPON_RAISING;
 	qboolean prepare = qfalse;
 	int leftEmpty = pm->ps->weaponAction & WA_LEFT_EMPTY;
+	// MW2's ladder drop is a weapon change (CheckForChangeWeapon's ladder
+	// branch, 578c72), and that check refuses every melee and offhand state,
+	// the quick raise after one included (578bc0-578c04). So a ladder grabbed
+	// with a quick action latched takes nothing from it: the knife lands, a
+	// frag cooks on and is thrown or cooks out, a Y cancel is still a cancel,
+	// and the gun comes back on its quick raise. PM_LadderWeapon puts the gun
+	// away for the ladder once the latch has cleared. Nothing new starts on a
+	// ladder (whether MW2 sends the buttons there is unsettled), and a ladder
+	// that has the hands drops the return and recovery latches.
+	qboolean ladder = (pm->ps->stats[STAT_LADDER] & (LADDER_ATTACHED | LADDER_HOLSTER)) ||
+		pm->ps->weaponstate == WEAPON_LADDER;
 	if (BG_RequestedSlot(pm->ps, pm->cmd.weapon) == pm->ps->stats[STAT_ACTIVE_SLOT]) returning = 0;
 	// A requested slot change waits for the ORIGINAL gun to finish recovery.
 	// Clear on the ready boundary so its normal holster can start this think.
 	if (recovering && pm->ps->weapon == BG_ActiveSlotWeapon(pm->ps) &&
 		pm->ps->weaponstate == WEAPON_RAISING && pm->ps->weaponTime <= 0) recovering = 0;
-	if ( (pm->ps->stats[STAT_LADDER] & (LADDER_ATTACHED | LADDER_HOLSTER)) ||
-		pm->ps->weaponstate == WEAPON_LADDER ) {
+	if ( ladder && !( action & WA_TYPE_MASK ) ) {
 		action = 0;
 		returning = 0;
 		recovering = 0;
-		pm->ps->grenadeTimeLeft = 0;	// an offhand the ladder took is gone, fuse and all
 	} else {
 		// A quick action is not over when it fires. It is over when the gun is
 		// back in hand and fully drawn: that whole recovery keeps the latch, and
@@ -3414,8 +3513,8 @@ static void PM_UpdateWeaponAction( void ) {
 		// knife is only ever started from no quick action at all (MW2's knife
 		// check refuses the melee and offhand states and every raise and drop).
 		// While a grenade is still out, presses are lost.
-		if ( !(action & WA_TYPE_MASK) || (action & WA_TYPE_MASK) == WA_MELEE ||
-			( (action & WA_FIRED) && !BG_IsActionWeapon( pm->ps->weapon ) ) ) {
+		if ( !ladder && ( !(action & WA_TYPE_MASK) || (action & WA_TYPE_MASK) == WA_MELEE ||
+			( (action & WA_FIRED) && !BG_IsActionWeapon( pm->ps->weapon ) ) ) ) {
 			int nextAction = 0;
 			// MW2 also starts no knife while a scoped gun is aimed at all. The gun
 			// in hand is aimed only if PM_CheckADS let it be. Nor while the action
@@ -3712,9 +3811,13 @@ static void PM_FinishWeaponChange( void ) {
 
 // An alternate holster DESTINATION, not an alternate reload or swap. Leave the
 // animation clock live until the ordinary note pass has run this think.
+// Like any weapon change it waits for a latched quick action, the gun's quick
+// raise after it included (PM_UpdateWeaponAction): the drop starts on the
+// ready boundary, the think the latch clears, if the ladder is still held.
 static qboolean PM_LadderWeapon( void ) {
 	int state = pm->ps->stats[STAT_LADDER];
 	if ( ((state & LADDER_ATTACHED) || pml.ladderGrabbed) &&
+		!( pm->ps->weaponAction & WA_TYPE_MASK ) &&
 		!(state & LADDER_HOLSTER) && pm->ps->weaponstate != WEAPON_LADDER ) {
 		pm->ps->stats[STAT_LADDER] |= LADDER_HOLSTER;
 		pm->ps->weaponstate = WEAPON_DROPPING;
@@ -4545,23 +4648,28 @@ void PM_UpdateViewAngles( playerState_t *ps, const usercmd_t *cmd ) {
 	for (i=0 ; i<3 ; i++) {
 		temp = cmd->angles[i] + ps->delta_angles[i];
 		if ( i == PITCH ) {
-			// don't let the player look up or down more than 90 degrees
-			if ( temp > 16000 ) {
-				ps->delta_angles[i] = 16000 - cmd->angles[i];
-				temp = 16000;
-			} else if ( temp < -16000 ) {
-				ps->delta_angles[i] = -16000 - cmd->angles[i];
-				temp = -16000;
+			// MW2's pitch clamp (0x5718D0): down to player_view_pitch_down
+			// and up to player_view_pitch_up, the excess taken out of
+			// delta_angles so the mouse never winds up past it
+			if ( temp > BG_PITCH_SHORT( BG_VIEW_PITCH_DOWN ) ) {
+				ps->delta_angles[i] = BG_PITCH_SHORT( BG_VIEW_PITCH_DOWN ) - cmd->angles[i];
+				temp = BG_PITCH_SHORT( BG_VIEW_PITCH_DOWN );
+			} else if ( temp < -BG_PITCH_SHORT( BG_VIEW_PITCH_UP ) ) {
+				ps->delta_angles[i] = -BG_PITCH_SHORT( BG_VIEW_PITCH_UP ) - cmd->angles[i];
+				temp = -BG_PITCH_SHORT( BG_VIEW_PITCH_UP );
 			}
 		}
 		ps->viewangles[i] = SHORT2ANGLE(temp);
 	}
 
+	// MW2's ladder yaw clamp (0x571B60): the view stays within
+	// bg_ladder_yawcap of facing into the ladder, the excess taken out of
+	// delta_angles as for the pitch.
 	if ( ps->pm_type == PM_NORMAL && (ps->stats[STAT_LADDER] & LADDER_ATTACHED) ) {
 		float facing = LADDER_FACING( ps->stats[STAT_LADDER] );
 		float delta = AngleSubtract( ps->viewangles[YAW], facing );
-		if ( delta > 90.0f || delta < -90.0f ) {
-			ps->viewangles[YAW] = facing + (delta > 0 ? 90.0f : -90.0f);
+		if ( delta > BG_LADDER_YAW_CAP || delta < -BG_LADDER_YAW_CAP ) {
+			ps->viewangles[YAW] = facing + (delta > 0 ? BG_LADDER_YAW_CAP : -BG_LADDER_YAW_CAP);
 			ps->delta_angles[YAW] = ANGLE2SHORT( ps->viewangles[YAW] ) - cmd->angles[YAW];
 		}
 	}
@@ -4692,6 +4800,9 @@ void PmoveSingle (pmove_t *pmove) {
 		pm->cmd.upmove = 0;
 	}
 
+	// this think's rightmove, which the walk's sprint strafe may scale
+	pml.rightmove = pm->cmd.rightmove;
+
 	if ( pm->ps->pm_type == PM_SPECTATOR ) {
 		PM_CheckDuck ();
 		PM_FlyMove ();
@@ -4774,7 +4885,7 @@ void PmoveSingle (pmove_t *pmove) {
 	PM_Weapon();
 	// PM_CheckSprint's airborne start under a quick action ends this same think
 	// (PM_UpdateWeaponAction), also when PM_Weapon returned before it ran (the
-	// use-item press) or a ladder holster zeroed the latch with the knife out.
+	// use-item press, or a think a cooking frag ends, PM_UpdateGrenadeThrow).
 	if ( ( pm->ps->pm_flags & PMF_SPRINTING ) &&
 	     ( ( pm->ps->weaponAction & WA_TYPE_MASK ) || BG_IsActionWeapon( pm->ps->weapon ) ) ) {
 		if ( pm->cmd.buttons & BUTTON_SPRINT ) pm->ps->weapFlags |= PWF_SPRINT_RELEASE;

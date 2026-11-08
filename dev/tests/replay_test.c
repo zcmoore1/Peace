@@ -42,7 +42,7 @@ static void Reset(void) {
  }
  for(i=0;i<4;i++) {
   clients[i].state=CS_ACTIVE; clients[i].gentity=&entities[i];
-  players[i].clientNum=i; players[i].viewheight=26;
+  players[i].clientNum=i; players[i].viewheight=DEFAULT_VIEWHEIGHT;
   players[i].weapon=WP_SHOTGUN; players[i].weaponstate=WEAPON_READY;
   players[i].stats[STAT_HEALTH]=100;
  }
@@ -78,6 +78,7 @@ static void Play(int t) {
  players[0].viewangles[1]=t*.03f;
  players[0].weaponAnimTime=t%1000; players[0].weaponTime=1000-t%1000;
  players[0].pm_flags=PMF_ADS;
+ players[0].moveClass=MOVECLASS_ROCKETLAUNCHER;	/* spawn-owned, not a clock */
  players[0].powerups[PW_QUAD]=15000;
  players[0].powerups[PW_REDFLAG]=INT_MAX;
  entities[1].s.pos.trBase[1]=t*.02f;
@@ -122,6 +123,7 @@ static void TestLobby(int step) {
   if(t==replay.beginTime) CHECK(expected.serverTime==replay.beginTime); /* the window's first frame is kept */
   last=expected.serverTime-offset;
   CHECK(expected.ps.pm_flags&PMF_ADS);
+  CHECK(expected.ps.moveClass==MOVECLASS_ROCKETLAUNCHER);	/* never rebased */
   CHECK(expected.ps.powerups[PW_QUAD]==15000+offset);
   CHECK(expected.ps.powerups[PW_REDFLAG]==INT_MAX);
   CHECK(expected.ps.weaponAnimTime+expected.ps.weaponTime==1000);

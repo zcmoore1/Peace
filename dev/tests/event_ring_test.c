@@ -175,8 +175,8 @@ static void Shooter( int lethal ) {
 	BG_ApplyClass( &shooter, &cl );
 	shooter.clientNum = SHOOTER; shooter.stats[STAT_HEALTH] = 100; shooter.pm_type = PM_NORMAL;
 	shooter.weapon = WP_SHOTGUN; shooter.weaponstate = WEAPON_READY;
-	shooter.viewheight = 26; shooter.origin[2] = 24.125f; shooter.groundEntityNum = ENTITYNUM_WORLD;
-	shooter.speed = 320; shooter.gravity = 800; shooter.commandTime = serverTime;
+	shooter.viewheight = DEFAULT_VIEWHEIGHT; shooter.origin[2] = 24.125f; shooter.groundEntityNum = ENTITYNUM_WORLD;
+	shooter.speed = BG_PLAYER_SPEED; shooter.gravity = 800; shooter.commandTime = serverTime;
 	shooterCmd.serverTime = serverTime; shooterCmd.weapon = WP_SHOTGUN;
 	BG_PlayerStateToEntityStateExtraPolate( &shooter, &shooterEntity, shooter.commandTime, qtrue );
 }

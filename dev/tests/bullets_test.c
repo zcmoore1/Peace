@@ -223,6 +223,7 @@ static void TestOwnShots( void ) {
 		CHECK( FleshOn( VICTIM ) > 0 );		/* it hits the victim, and the wall beside them */
 		if ( guns[g] != WP_M40A3 || !a ) CHECK( bs_markCount > FleshOn( VICTIM ) );	/* the M300 aimed: every round hits */
 		CHECK( MarksMatch( guns[g] ) );
+		CHECK( BC_SoundPing( SHOOTER, NULL ) == 0 );	/* never on your own minimap */
 		if ( guns[g] == WP_SHOTGUN ) CHECK( bc_shotgunSmokes > 0 && bs_markCount % DEFAULT_SHOTGUN_COUNT == 0 );
 		if ( guns[g] == WP_MASTERKEY ) CHECK( bc_shotgunSmokes > 0 && bs_markCount % BG_WeaponPellets( WP_MASTERKEY ) == 0 );
 		if ( guns[g] == WP_RAILGUN ) CHECK( bc_rails == bc_markCount );
@@ -291,7 +292,50 @@ static void TestOthers( void ) {
 		r.commands = 240; r.lastOnly = qtrue; r.predicted = qtrue;
 		Run( &r );
 		CHECK( bs_markCount > 0 && FleshOn( VICTIM ) > 0 && MarksMatch( guns[g] ) );
+		{	/* and the shooter on this enemy's minimap, where they fired (MW2's sound ping) */
+			vec3_t at; int stamp = BC_SoundPing( SHOOTER, at );
+			CHECK( stamp > BS_START_TIME + BG_SOUND_PING_HOLD && stamp <= BC_Time() + BG_SOUND_PING_HOLD );
+			CHECK( at[0] == 0 && at[1] == 0 );
+		}
 	}
+}
+
+/* MW2's compass sound ping (CG_FireWeapon 0x59d8d9-0x59d915, 0x57fe60): an
+ * enemy's shot from a gun that is neither silenced nor a grenade (MW2's
+ * offhands, Peace's quick actions) marks them where they fired, held from that
+ * moment; a teammate's, a spectator's and the viewer's own never do. */
+static void TestSoundPing( void ) {
+	static const int quick[] = { WP_KNIFE, WP_FRAG, WP_FLASH, WP_SEMTEX, WP_THROWING_KNIFE, WP_TACTICAL_INSERTION };
+	static const int pinging[] = { WP_MACHINEGUN, WP_SHOTGUN, WP_ROCKET_LAUNCHER, WP_M40A3, WP_MASTERKEY };
+	enum { OTHER = 5 };	/* a player the snapshot never carries: the cgame alone */
+	run_t r;
+	vec3_t at;
+	int i;
+	memset( &r, 0, sizeof( r ) );
+	r.weapon = WP_MACHINEGUN; r.gametype = GT_FFA; r.viewer = WATCHER; r.renderEvery = 1; r.snapEvery = 6;
+	r.commands = 12; r.predicted = qtrue;
+	Run( &r );	/* a live cgame, the watcher's */
+	for ( i = 0; i < ARRAY_LEN( quick ); i++ ) {
+		BC_FireEvent( OTHER, quick[i], 300, 0, 24 );
+		CHECK( BC_SoundPing( OTHER, NULL ) == 0 );
+	}
+	for ( i = 0; i < ARRAY_LEN( pinging ); i++ ) {
+		BC_FireEvent( OTHER, pinging[i], 300 + i, -40, 24 );
+		CHECK( BC_SoundPing( OTHER, at ) == BC_Time() + BG_SOUND_PING_HOLD && at[0] == 300 + i && at[1] == -40 );
+	}
+	BC_FireEvent( WATCHER, WP_MACHINEGUN, 0, 200, 24 );
+	CHECK( BC_SoundPing( WATCHER, NULL ) == 0 );	/* the viewer's own */
+	BC_SetTeam( GT_FFA, OTHER + 1, TEAM_SPECTATOR );
+	BC_FireEvent( OTHER + 1, WP_MACHINEGUN, 0, 0, 24 );
+	CHECK( BC_SoundPing( OTHER + 1, NULL ) == 0 );	/* a spectator */
+	/* a team game: the watcher is on TEAM_FREE's side here, as its playerstate says */
+	CHECK( BS_PlayerState( WATCHER )->persistant[PERS_TEAM] == TEAM_FREE );
+	BC_SetTeam( GT_TEAM, OTHER + 2, TEAM_FREE );
+	BC_FireEvent( OTHER + 2, WP_MACHINEGUN, 0, 0, 24 );
+	CHECK( BC_SoundPing( OTHER + 2, NULL ) == 0 );	/* a teammate */
+	BC_SetTeam( GT_TEAM, OTHER + 3, TEAM_RED );
+	BC_FireEvent( OTHER + 3, WP_MACHINEGUN, 0, 0, 24 );
+	CHECK( BC_SoundPing( OTHER + 3, NULL ) == BC_Time() + BG_SOUND_PING_HOLD );	/* an enemy */
 }
 
 /* The fake bullet (dev/FAKE_RELOAD.md), as it emerges: a use/reload tap a
@@ -344,6 +388,7 @@ int main( void ) {
 	TestSky();
 	TestUnpredicted();
 	TestOthers();
+	TestSoundPing();
 	TestFakeBullet();
 	TestProjectile();
 	printf( "bullets_test: %d checks passed\n", checks );

@@ -208,6 +208,26 @@ void BC_Reset( int clientNum ) {
 	}
 }
 
+/* MW2's compass sound ping as this cgame recorded it (CG_FireWeapon). */
+int BC_SoundPing( int client, vec3_t origin ) {
+	if ( origin ) VectorCopy( cg.radarSoundOrigin[client], origin );
+	return cg.radarSoundTime[client];
+}
+int BC_Time( void ) { return cg.time; }
+/* This cgame's view of the game: its gametype and one player's team (cgs). */
+void BC_SetTeam( int gametype, int client, int team ) {
+	cgs.gametype = gametype; cgs.clientinfo[client].team = team;
+}
+/* A fire event from player entity n with the given gun, at (x, y, z), through
+ * the real CG_FireWeapon, as CG_EntityEvent hands it on. */
+void BC_FireEvent( int n, int weapon, float x, float y, float z ) {
+	centity_t *cent = &cg_entities[n];
+	cent->currentState.number = n; cent->currentState.eType = ET_PLAYER;
+	cent->currentState.weapon = weapon;
+	VectorSet( cent->currentState.pos.trBase, x, y, z ); VectorCopy( cent->currentState.pos.trBase, cent->lerpOrigin );
+	CG_FireWeapon( cent, weapon );
+}
+
 /* A new snapshot: CG_TransitionSnapshot's part this test needs. Each entity
  * takes the snapshot's state and its events are checked (CG_TransitionEntity);
  * a temp entity is new every time (the server frees it once sent). */

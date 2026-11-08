@@ -22,6 +22,10 @@ cl %test_flags% /Feout\build\masterkey-tests\killstreak_server_test.exe dev\test
 if errorlevel 1 goto fail
 out\build\masterkey-tests\killstreak_server_test.exe
 if errorlevel 1 goto fail
+cl %test_flags% /Feout\build\masterkey-tests\radar_test.exe dev\tests\radar_test.c code\qcommon\q_math.c code\qcommon\q_shared.c /link /OPT:REF
+if errorlevel 1 goto fail
+out\build\masterkey-tests\radar_test.exe
+if errorlevel 1 goto fail
 popd
 exit /b 0
 :fail

@@ -553,6 +553,9 @@ typedef struct {
 	int             radarInterval;    // ms until the next sweep
 	int             radarPingCount;
 	vec3_t          radarPings[48];   // x, y and yaw of each enemy at that sweep
+	// MW2's compass sound ping: an enemy who fired, per client
+	int             radarSoundTime[MAX_CLIENTS];   // cg.time the ping starts fading, 0 for none
+	vec3_t          radarSoundOrigin[MAX_CLIENTS]; // where they fired from
 	int			equippedOffhand;	// MW2's cg equippedOffHand: the offhand EV_SWITCH_OFFHAND last named
 
 	// auto rotating items

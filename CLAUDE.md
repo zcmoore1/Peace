@@ -350,6 +350,12 @@ source for MW2 behaviour; the owner rejects it.
   compassFastRadarUpdateTime), each ping shown 4 s (compassRadarPingFadeTime),
   2500 units to the minimap's edge (compassMaxRange), farther held at the edge
   (compassClampIcons). S&D's round start and map restarts take every UAV down.
+  With no UAV too, an enemy's shot from a gun that is neither silenced nor a
+  grenade (MW2's offhands, Peace's quick actions) shows them where they fired:
+  MW2's compass sound ping (`CG_SoundPing` in `CG_FireWeapon`, 0x59d8d9;
+  recorder 0x57fe60), held `BG_SOUND_PING_HOLD` (1500, MW2's hold when the fire
+  sound's length is unknown; cgame cannot read one) and faded over
+  compassSoundPingFadeTime (2 s), for the players the snapshot carries.
   Picture and server only: pmove knows the trigger, never the radar. See
   `dev/UAV.md`.
 - **Inventory instances own attachments and ammunition.** `BG_GetSlot` /
@@ -1142,7 +1148,9 @@ moni NAC with the SPAS as its contrast, swap out of the raise, drop and pump and
 the trigger (its drop, Y taking it back, the knife lost
 meanwhile, use on the command it is in hand, its drop and the gun's return),
 the instance's shells through swaps, drops and scavenges, and the segmented
-reload. It runs `build_masterkey.py --check` first. Every rule was
+reload, then the minimap through the real `cg_radar.c` (`radar_test.c`: the
+UAV's pings and MW2's sound pings, their hold, fade and place). It runs
+`build_masterkey.py --check` first. Every rule was
 mutation-checked. The shoot-reload checks in `shotgun_reload_test.c` cover it
 too, from its tables: guards there skip only windows its 1 ms action has no
 think for.
@@ -1166,7 +1174,9 @@ hit, and that the shooter's client draws every bullet, pellet and beam where
 the server's damage traces ended (hip and aimed, still and moving, aim moving,
 one or several commands a frame, lag), the unpredicted path, other players'
 view from the entity event (the victim's own box included), the sky, a
-projectile and the fake bullet.
+projectile and the fake bullet, and MW2's compass sound ping through the real
+`CG_FireWeapon` (every opponent's shot pings them where they fired; never your
+own, a teammate's, a spectator's, the knife's or an offhand's).
 
 `dev/tests/run-kick.sh` (`KICK_TEST_FLAGS=-DMISSIONPACK` for the other
 numbering) runs MW2's view kick through the real `cg_kick.c`, `cg_event.c`,

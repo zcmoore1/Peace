@@ -32,6 +32,10 @@ void BC_Snapshot( int serverTime, const playerState_t *ps, const entityState_t *
 void BC_PredictFrame( int time );		/* the real CG_PredictPlayerState, then the entities' events */
 void BC_UnpredictedFrame( int time );	/* a demo, a followed player or the killcam: the snapshot's own events */
 void BC_ClearMarks( void );
+int BC_SoundPing( int client, vec3_t origin );	/* MW2's compass sound ping: its stamp and where */
+int BC_Time( void );
+void BC_SetTeam( int gametype, int client, int team );
+void BC_FireEvent( int n, int weapon, float x, float y, float z );
 extern bwMark_t bc_marks[BW_MAX_MARKS];
 extern int bc_markCount, bc_rails, bc_shotgunSmokes, bc_tracers;
 extern vec3_t bc_railEnd;

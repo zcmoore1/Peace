@@ -2078,6 +2078,34 @@ WEAPON EVENTS
 
 /*
 ================
+CG_SoundPing
+
+MW2's compass sound ping (CG_FireWeapon 0x59d8d9-0x59d915; recorder 0x57fe60):
+another player's shot puts them on the minimap where they fired, if they are
+an enemy - any other player in free-for-all - and the gun is neither silenced
+nor a grenade. Peace has no silenced gun yet, and MW2's grenade-type weapons
+are its offhands, which are Peace's quick actions (MW2's knife raises no gun
+event at all). It is held BG_SOUND_PING_HOLD, then fades (CG_DrawRadar).
+Picture only, and only for the players the snapshot carries.
+================
+*/
+static void CG_SoundPing( centity_t *cent, int weapon ) {
+	int num = cent->currentState.number;
+
+	if ( !cg.snap || cent->currentState.eType != ET_PLAYER || num < 0 || num >= MAX_CLIENTS ||
+	     num == cg.snap->ps.clientNum || BG_IsActionWeapon( weapon ) ||
+	     cgs.clientinfo[num].team == TEAM_SPECTATOR ) {
+		return;
+	}
+	if ( cgs.gametype >= GT_TEAM && cgs.clientinfo[num].team == cg.snap->ps.persistant[PERS_TEAM] ) {
+		return;
+	}
+	cg.radarSoundTime[num] = cg.time + BG_SOUND_PING_HOLD;
+	VectorCopy( cent->currentState.pos.trBase, cg.radarSoundOrigin[num] );
+}
+
+/*
+================
 CG_FireWeapon
 
 Caused by an EV_FIRE_WEAPON event. The event names the gun that fired: by the
@@ -2120,6 +2148,9 @@ void CG_FireWeapon( centity_t *cent, int weapon ) {
 	// sv_clientSideBullets, CG_FireWeapon 4fb2df). Every fire event, the
 	// lightning gun's after its first too.
 	CG_FireBullets( cent, weapon );
+
+	// and the shooter on an enemy's minimap (MW2 pings every shot)
+	CG_SoundPing( cent, weapon );
 
 	// lightning gun only does this this on initial press
 	if ( weapon == WP_LIGHTNING ) {

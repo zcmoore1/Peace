@@ -27,6 +27,20 @@ never drawn, only its radar.
     - `compassRadarPingFadeTime` 4.
     - `compassMaxRange` 2500.
     - `compassClampIcons` 1.
+    - `compassSoundPingFadeTime` 2 (0x4e9bc2): "The time in seconds for the
+      sound overlay on the compass to fade".
+  - The sound ping, which needs no UAV:
+    - `CG_FireWeapon` (0x59d8d9-0x59d915) records it for a player entity
+      whose gun is neither `silenced` (WeaponDef +0x670) nor of
+      `weapType` grenade (+0x2c). The offhands are grenade type in the dump;
+      the RPG is a projectile and the guns are bullets.
+    - The hold is the fire sound's playing length, looked up at 0x410330,
+      or 1500 ms when it is not found (0x59d901).
+    - The recorder (0x57fe60) skips the local player and spectators, stamps
+      `cg.time` plus the hold, copies where they fired, and marks them an
+      enemy unless both are on one team (free-for-all: always).
+    - The compass draws it at full alpha until the stamp, then fades it over
+      `compassSoundPingFadeTime` (0x4fe381-0x4fe3d4).
 
 ## How it plays
 
@@ -61,6 +75,11 @@ never drawn, only its radar.
 - **The minimap** sits top left and turns with your view (you face up). Its
   edge is 2500 units from you, and anything farther is held at the edge.
   - Teammates the snapshot carries are drawn on it always.
+  - An enemy who fires shows where they fired: full for 1.5 s, then fading
+    over 2 s (MW2's sound ping). Every Peace gun pings, since none is
+    silenced; the knife and the equipment never do. Peace holds it 1.5 s
+    always (MW2's fallback; cgame cannot read a sound's length), and only
+    the players its snapshot carries can ping.
   - "UAV" (or "UAV x2") shows while a radar is up.
   - An earned UAV shows its key below it ("UAV x1 [DPAD RIGHT]").
 
@@ -72,5 +91,13 @@ never drawn, only its radar.
   - Use on the command it is in hand, spent once.
   - The trigger's drop and the gun's return.
   - Nothing asked for with none left.
+- `dev/tests/run-masterkey.sh` also builds `radar_test.c`, the real
+  `cg_radar.c`: the UAV's pings and their fade, and the sound pings (full
+  through the hold, the fade, gone after, held at the edge, turned with the
+  view, a stale stamp dropped).
+- `dev/tests/run-bullets.sh`: the sound ping through the real
+  `CG_FireWeapon`. Every opponent's real shots ping them where they fired;
+  the shooter never pings on their own minimap; the knife and every offhand
+  never ping; a teammate and a spectator never do; an enemy always does.
 - `dev/tests/run-snd.sh`: every round start clears the UAVs.
 - `dev/tests/action_wire_test.c`: `weapFlags`' new bit round-trips.

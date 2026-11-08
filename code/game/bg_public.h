@@ -684,6 +684,14 @@ int BG_PelletDamage(int weapon, float distance);
 #define BG_FAST_RADAR_UPDATE_TIME 2000	// compassFastRadarUpdateTime: two or more
 #define BG_RADAR_PING_FADE_TIME 4000	// compassRadarPingFadeTime: a ping is shown this long
 #define BG_COMPASS_MAX_RANGE 2500	// compassMaxRange, in world units; compassClampIcons 1 holds the rest at the edge
+// MW2's compass sound ping (cgame CG_FireWeapon 0x59d8d9-0x59d915, recorded by
+// 0x57fe60, drawn at 0x4fe381): an enemy's shot from a gun that is neither
+// silenced nor a grenade shows them where they fired, held at full strength
+// and then faded over compassSoundPingFadeTime (2.0 s, registered at 0x4e9bc2).
+// MW2 holds it for the fire sound's playing length, 1500 when it is not found
+// (0x59d901); cgame cannot read a sound's length, so that fallback is the hold.
+#define BG_SOUND_PING_HOLD 1500
+#define BG_SOUND_PING_FADE_TIME 2000
 qboolean BG_OffhandOut(const playerState_t *ps);
 qboolean BG_OffhandPreparesAtOnce( int weapon );
 qboolean BG_QuickActionInPlace( int weapon );

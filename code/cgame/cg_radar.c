@@ -8,7 +8,10 @@ to its edge, anything farther held at the edge (compassClampIcons). Teammates
 the snapshot carries are drawn on it always. While a UAV covers this player the
 server sends a sweep of enemy positions every compassRadarUpdateTime
 (compassFastRadarUpdateTime with two or more up); each ping shows where that
-enemy was at the sweep and fades over compassRadarPingFadeTime. Picture only:
+enemy was at the sweep and fades over compassRadarPingFadeTime. An enemy who
+fires a gun that is not silenced (none of Peace's is) or a grenade shows where
+they fired (MW2's sound ping, recorded in CG_FireWeapon): at full strength for
+BG_SOUND_PING_HOLD, then fading over compassSoundPingFadeTime. Picture only:
 nothing here is gameplay.
 ===========================================================================
 */
@@ -117,6 +120,21 @@ void CG_DrawRadar( void ) {
 				CG_RadarDot( x, y, RADAR_DOT + 1, enemy );
 			}
 		}
+	}
+
+	// the sound pings: each enemy who fired, where they fired, full until its
+	// stamp and then fading (MW2's 0x4fe381-0x4fe3d4); a stamp further ahead
+	// than its hold is from before cg.time went back, and is dropped
+	for ( i = 0; i < MAX_CLIENTS; i++ ) {
+		int stamp = cg.radarSoundTime[i];
+		if ( !stamp ) continue;
+		if ( stamp - cg.time > BG_SOUND_PING_HOLD || cg.time >= stamp + BG_SOUND_PING_FADE_TIME ) {
+			cg.radarSoundTime[i] = 0;
+			continue;
+		}
+		enemy[3] = cg.time <= stamp ? 1.0f : 1.0f - (float)( cg.time - stamp ) / BG_SOUND_PING_FADE_TIME;
+		CG_RadarPoint( cg.radarSoundOrigin[i], viewYaw, &x, &y );
+		CG_RadarDot( x, y, RADAR_DOT + 1, enemy );
 	}
 
 	// the player, facing up

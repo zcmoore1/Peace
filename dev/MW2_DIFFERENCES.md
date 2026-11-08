@@ -6,17 +6,17 @@ This is a snapshot: work after `3a99c10` may close items. In that case update th
 
 ## Summary
 
-181 differences are listed. 53 now match MW2. 128 are open.
+183 differences are listed. 54 now match MW2. 129 are open.
 
 | Kind | Open | Unsettled (in open) | Now matches MW2 |
 |---|---:|---:|---:|
-| Not modelled: MW2 does it, Peace does not | 55 | 0 | 36 |
+| Not modelled: MW2 does it, Peace does not | 55 | 0 | 37 |
 | Placeholder: Peace's values or art, not MW2's | 36 | 0 | 11 |
 | Peace-only: Peace has it, MW2 does not | 14 | 0 | 0 |
 | Owner choice: a deliberate departure | 14 | 2 | 2 |
-| Unverified: MW2's side not fully read | 9 | 8 | 2 |
+| Unverified: MW2's side not fully read | 10 | 9 | 2 |
 | Bug | 0 | 0 | 2 |
-| **Total** | **128** | **10** | **53** |
+| **Total** | **129** | **11** | **54** |
 
 "Unsettled" means MW2's behaviour, or whether Peace matches it, has not been traced to the end. Those items are marked *(unsettled)*.
 
@@ -27,7 +27,7 @@ This is a snapshot: work after `3a99c10` may close items. In that case update th
 | Equipment | 18 | 13 |
 | Use and pickups | 8 | 2 |
 | Netcode and killcam | 8 | 8 |
-| Presentation, art and input | 19 | 4 |
+| Presentation, art and input | 20 | 5 |
 | Game modes | 8 | 2 |
 | Systems MW2 has that Peace lacks | 7 | 1 |
 | Peace-only extras | 8 | 0 |
@@ -276,16 +276,18 @@ The two bugs found are fixed: the knife did 100 instead of 135, and an empty let
 - **Weapon sounds.** MW2 has per-weapon fire, reload and notetrack sounds. Peace's reload plays the Quake 3 select sound, and the mag-in and bolt-close notes play the no-ammo click as an audible cancel-window cue. *Placeholder.* Peace: `code/cgame/cg_event.c:829-842`.
 - **Pullback sounds.** MW2 plays pullbackSound/pullbackSoundPlayer for the frag, flash and Semtex pins and the TI flare lift. Peace wires them under MW2's alias names in `sound/weapons/offhand/`, but none ship, so they are silent. Neither game has a cook timer on the HUD. *Placeholder.* MW2: WeaponDef +0x64/+0x68; cgame 0x501C40. Peace: `code/cgame/cg_weapons.c:626-640`; `CLAUDE.md:457-458, 739-740`.
 - **Player models and deaths.** MW2 has soldier models and ragdoll deaths, with no gibs. Peace uses Quake 3 player models and animations, and gibbing remains. cgame draws every player, corpse and podium model scaled about the feet to fill the standing box (x1.25 for MW2's 70-unit body), with every tag attachment, the flag, the shadow and the sprites at the same scale; picture only. Both renderers renormalise a scaled model's local light direction, so the scale does not brighten its directed light. *Placeholder.* Peace: `code/cgame/cg_players.c` (`CG_ScalePlayerModel`); `code/cgame/cg_local.h` (`CG_PLAYER_MODEL_SCALE`); `code/game/g_combat.c:703`; `code/renderergl1/tr_light.c:374-383`; `code/renderergl2/tr_light.c:434-443`.
-- **HUD.** MW2 has its ammo counter, minimap/compass, killfeed, score bar and damage direction. Peace has a text loadout HUD (slot, ammo/reserve, lethal/tactical counts), Quake 3 obituaries, rewards and crosshair names, and a plain minimap: a square turned with the view, showing the player, teammates and the UAV's pings, with no map image, compass or objective icons. *Placeholder.* Peace: `code/cgame/cg_draw.c:2447-2510`; `code/cgame/cg_event.c:79-110`; `code/cgame/cg_radar.c`.
+- **HUD.** MW2 has its ammo counter, minimap/compass, killfeed, score bar and damage direction. Peace has a text loadout HUD (slot, ammo/reserve, lethal/tactical counts), Quake 3 obituaries, rewards and crosshair names, and a plain minimap: a square turned with the view, showing the player, teammates, the UAV's pings and enemies who fire, with no map image, compass or objective icons. *Placeholder.* Peace: `code/cgame/cg_draw.c:2447-2510`; `code/cgame/cg_event.c:79-110`; `code/cgame/cg_radar.c`.
 - **Hit markers.** MW2 shows a crosshair hit marker on damage dealt (`damage_feedback`). Peace has none. *Not modelled.* MW2: maps/mp/gametypes/_damagefeedback.gsc:3-18.
 - **Dynamic crosshair.** MW2 sizes the crosshair by its spread. Peace draws its own four bars from `BG_WeaponSpread` (dev1). *Placeholder.* Peace: `code/cgame/cg_draw.c:1921-1930`.
 - **The aim graph and FOV turn scale** *(unsettled)*. MW2 shapes the pad's look with its aim input graph (graph 3's knots in aaInputGraph) and scales turn rates by `fovTurnRateScale`, which its per-frame aim assist sets. Neither has been read out of MW2 yet: Peace's `aim_input_graph` is empty, so the look is linear in the stick, and the FOV scale is 1. `dev/tools/mw2_aimdump.ps1`, run beside a live IW4x match, reads both. *Unverified.* MW2: iw4x.exe aaInputGraph 0x7A2FC0, aaGlob+288. Peace: `code/client/cl_gamepadaim.c:233`; `dev/tools/mw2_aimdump.ps1`; `CLAUDE.md` (the game pad invariant).
+- **Sound ping hold and reach** *(unsettled)*. MW2 holds a compass sound ping for its fire sound's playing length, looked up in its sound channels (0x410330), and only falls back to 1500ms when that sound is not found; and it pings every player whose fire event reaches the client, but whether MW2's snapshots carry players its PVS would leave out was not read. Peace always holds 1500ms (cgame cannot read a sound's length), and only the players Quake 3's PVS snapshot carries can ping. *Unverified.* MW2: iw4x.exe 0x59D8D9-0x59D915, 0x410330. Peace: `code/cgame/cg_weapons.c` (`CG_SoundPing`); `dev/UAV.md`.
 - **Not standalone.** Peace needs retail Quake 3 assets (player models, HUD textures, legacy weapons). *Placeholder.* Peace: `dev/LADDERS.md:31-32`; `dev/M40A3.md:136-138`.
 
 ### Recently made to match MW2
 
 - **Game pad aim** (`a665aab`). MW2's console look as IW4x ported it: the radial stick deadzone (`gpad_stick_deadzone_min` 0.2, `_max` 0.01), the dominant-axis scale, `aim_turnrate_yaw/pitch` 260/90 at the hip and 90/55 aimed, lerped by the aim fraction, times `input_viewSensitivity`, reached at `aim_accel_turnrate_lerp` and left at once. Before, Quake's linear `j_*` scaling with a per-axis threshold. MW2: IW4x Gamepad.cpp (e49e17d6: GPad_ConvertStickToFloat, AimAssist_CalcAdjustedAxis, AimAssist_ApplyTurnRates). Peace: `code/client/cl_gamepadaim.c`; `code/client/cl_input.c:475`.
 - **Game pad move** (`29e3f5e`). MW2's CL_GamepadMove with the move stick MAP_SQUARED (thumbstick_default.cfg): each axis times the stick's length, stretched onto the move square and floored, so a sprint needs about 91% of the stick past the deadzone. Before, Quake's linear `j_forward`/`j_side`. MW2: IW4x Gamepad.cpp; iw4x-rawfiles thumbstick_default.cfg. Peace: `code/client/cl_gamepadaim.c:88`; `code/client/cl_input.c:501`.
+- **Compass sound ping.** An enemy's shot from a gun that is neither silenced nor a grenade shows them on the minimap where they fired, at full strength and then faded over compassSoundPingFadeTime (2s); never the viewer's own, a teammate's or a spectator's, and MW2's grenade-type weapons are its offhands (Peace's quick actions), so the knife and equipment never ping. Every Peace gun pings, since none is silenced. Before, only the UAV put enemies on the minimap. MW2: iw4x.exe 0x59D8D9-0x59D915 (CG_FireWeapon), 0x57FE60 (recorder), 0x4FE381-0x4FE3D4 (draw), 0x4E9BC2 (compassSoundPingFadeTime 2.0); WeaponDef `silenced` +0x670, `weapType` +0x2C. Peace: `code/cgame/cg_weapons.c` (`CG_SoundPing`); `code/cgame/cg_radar.c`; `dev/UAV.md`.
 - **Trigger threshold.** A trigger presses at 13% of its travel, IW4x's `gpad_button_deadzone`: the engine's `joy_threshold` default and the shipped pad config. It was 0.15. MW2: IW4x Controller/Engine/Key.cpp. Peace: `code/sdl/sdl_input.c:1327`; `dev/peace-gamepad.cfg:27`; `dev/FAKE_RELOAD.md:178-182`.
 - **Empty lethal label.** With the last knife, Semtex or TI spent, the HUD keeps showing that lethal at 0, as MW2 shows the equipped offhand; a frag reads "FRAG". It was "LETHAL 0", because `BG_LethalWeapon` falls back to the frag. Peace: `code/cgame/cg_draw.c` `CG_DrawLoadoutHud`.
 

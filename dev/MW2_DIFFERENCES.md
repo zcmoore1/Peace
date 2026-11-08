@@ -2,34 +2,34 @@
 
 Peace `dev` at `3a99c10`. MW2 means stock IW4 multiplayer: `iw4x.exe`, the IW4 `weapons/mp` dump and the MP GSC. Each item gives what MW2 does, what Peace does, the kind, the MW2 source, and where Peace documents or codes it. Paths are relative to the repo root.
 
-This is a snapshot: work after `3a99c10` may close items. In that case update the item and move it to its area's "Recently made to match MW2" list.
+This is a snapshot: work after `3a99c10` may close items. In that case update the item and move it to its area's "Recently made to match MW2" list. The underbarrel shotgun, the UAV killstreak and the game pad's aim and move came in from `claude/menus-ui-5ua8b8` (merge `92bcb31`) and are counted.
 
 ## Summary
 
-162 differences are listed. 31 now match MW2. 131 are open.
+170 differences are listed. 36 now match MW2. 134 are open.
 
 | Kind | Open | Unsettled (in open) | Now matches MW2 |
 |---|---:|---:|---:|
-| Not modelled: MW2 does it, Peace does not | 53 | 0 | 23 |
-| Placeholder: Peace's values or art, not MW2's | 44 | 0 | 2 |
+| Not modelled: MW2 does it, Peace does not | 54 | 0 | 27 |
+| Placeholder: Peace's values or art, not MW2's | 44 | 0 | 3 |
 | Peace-only: Peace has it, MW2 does not | 14 | 0 | 0 |
-| Owner choice: a deliberate departure | 13 | 2 | 2 |
-| Unverified: MW2's side not fully read | 7 | 6 | 2 |
+| Owner choice: a deliberate departure | 14 | 2 | 2 |
+| Unverified: MW2's side not fully read | 8 | 7 | 2 |
 | Bug | 0 | 0 | 2 |
-| **Total** | **131** | **8** | **31** |
+| **Total** | **134** | **9** | **36** |
 
 "Unsettled" means MW2's behaviour, or whether Peace matches it, has not been traced to the end. Those items are marked *(unsettled)*.
 
 | Area | Open | Now matches MW2 |
 |---|---:|---:|
 | Movement and camera | 20 | 3 |
-| Weapons and gunplay | 39 | 6 |
+| Weapons and gunplay | 41 | 7 |
 | Equipment | 18 | 13 |
 | Use and pickups | 8 | 2 |
 | Netcode and killcam | 8 | 5 |
-| Presentation, art and input | 19 | 1 |
+| Presentation, art and input | 19 | 4 |
 | Game modes | 5 | 1 |
-| Systems MW2 has that Peace lacks | 6 | 0 |
+| Systems MW2 has that Peace lacks | 7 | 1 |
 | Peace-only extras | 8 | 0 |
 
 The two bugs found are fixed: the knife did 100 instead of 135, and an empty lethal read "LETHAL 0". See Weapons and Presentation. The stale notes found while checking are corrected: the knife's art, the throwing knife's 135 called a placeholder, `pm_adsScale`'s comment, and an old FAKE_RELOAD.md difference.
@@ -100,6 +100,7 @@ The two bugs found are fixed: the knife did 100 instead of 135, and an empty let
 - **SPAS-12 pellets and damage.** MW2's `spas12_mp` fires 8 pellets of 40 damage falling to 20 between 400 and 700 units, hip spread 5, adsSpread 5.5. Peace fires the Quake 3 shotgun: 11 pellets of 10 damage in a fixed square (700*16 at 131072 units), no falloff, and ADS does not change it. *Placeholder.* MW2: weapons/mp/spas12_mp. Peace: `code/game/bg_public.h:38-39`; `code/game/g_weapon.c:272-316`; `code/game/bg_misc.c:1880-1890`; `docs/spas-audit.md`.
 - **M300 vs the Intervention.** MW2's `cheytac_mp`: magazine reload 2267ms (empty 3867, ammo added at 1799), drop 1200, raise 1000, ADS 400/600, adsZoomFov 15, sprint 300/300, clip 5, maxAmmo 40, 70 damage to 5000 units, hip spread 10..15. Peace's M300 uses its own "initial game-feel values": a per-round segmented reload 500/450/500, drop 500, raise 650, ADS 300/200, fov scale 0.26 of hip, sprint 220/640/260, reserve 30, 100 damage, hip spread 700 and 0 when aimed. Only the 250/250 quick drop/raise and the view kick are the Intervention's. *Placeholder.* MW2: weapons/mp/cheytac_mp. Peace: `code/game/bg_m40a3_data.h`; `assets/source/m40a3/weapon.json`; `dev/M40A3.md:13-33`; `code/game/g_weapon.c:902`.
 - **Sprint in/out times.** MW2 uses each weapon's `sprintInTime`/`sprintOutTime`: 300/300 for `m4_mp`, `spas12_mp`, `cheytac_mp` and `rpg_mp`. Peace uses hand-set rows: MG 200/250, legacy guns 150-350, SPAS 200/250 (carry 600), M300 220/260 (carry 640), with original sprint art. *Placeholder.* MW2: weapons/mp/*_mp. Peace: `code/game/bg_pmove.c:2174-2186`; `CLAUDE.md:776-784`; `dev/M40A3.md:37-50`; `dev/SPAS12.md:88-107`.
+- **Masterkey placeholders.** MW2 keeps `m4_shotgun_attach_mp`'s reload-end chamber in the xanim's notetracks (weap_shotattach_chamber_plr), not the weapon file, and has the gun's viewmodel and sounds. Peace closes it 659ms into the 1350ms end, loops a 1000ms idle, and until a model is plugged in draws the item's Quake 3 shotgun with the shotgun's sounds. *Placeholder.* MW2: weapons/mp/m4_shotgun_attach_mp. Peace: `assets/source/masterkey/weapon.json`; `assets/source/masterkey/README.md`; `dev/MASTERKEY.md`.
 - **First raise.** MW2 uses each gun's `firstRaiseTime`: `m4_mp` 850, `spas12_mp` 1075 (equal to its raise), `cheytac_mp` 1000, `rpg_mp` 730. Peace's `BG_WeaponFirstRaiseTime` is raise plus fire cycle: SPAS 1708 (1075 + 633, from the draw and pump frames), M300 1600 (650 + 950); every other gun uses its ordinary raise. *Placeholder.* MW2: weapons/mp/*_mp firstRaiseTime. Peace: `code/game/bg_pmove.c:2301-2305`; `dev/SPAS12.md:11-12`; `dev/WEAPON_PICKUPS.md:54-59`.
 
 **Fire cycle and reload**
@@ -116,10 +117,11 @@ The two bugs found are fixed: the knife did 100 instead of 135, and an empty let
 **Swaps**
 
 - **YY cancels an ordinary raise.** MW2's YY during a drop readies the gun at once (states 3-5 only); by the binary reading, a raise with time left is not interrupted, so YY does not skip a draw (inferred). Peace lets YY cancel an ordinary raise ("not a bug"), but not a quick action's recovery raise. *Owner choice.* MW2: iw4x.exe 0x578BC0, 0x578C13-0x578C31, 0x578D0E-0x578D36 (re/melee_report.txt C17; sl/review3.txt). Peace: `CLAUDE.md:433-436`; `code/game/bg_pmove.c:2084`; `dev/SPAS12.md:7`.
+- **Y while the killstreak trigger is coming out.** MW2's weapnext from an item, the killstreak trigger included, selects `weaponLatestPrimary`, which maps an alt weapon to its base, so the underbarrel's drop would end on the rifle. Peace's Y before the trigger is out returns the drop to the gun in hand, the underbarrel if it came from there. *Owner choice.* MW2: iw4x.exe 0x59ED40, 0x59EDE8, 0x59E270. Peace: `CLAUDE.md` (the UAV invariant); `dev/UAV.md`; `dev/MASTERKEY.md`.
 
 **Damage and health**
 
-- **Damage and range falloff.** MW2 gives each weapon damage/minDamage over maxDamageRange/minDamageRange (`m4_mp` 30 to 20, `spas12_mp` 40 to 20 per pellet, `cheytac_mp` 70). Peace deals flat damage at any range: MG 7, M300 100, shotgun pellet 10. *Placeholder.* MW2: weapons/mp/m4_mp, spas12_mp, cheytac_mp. Peace: `code/game/g_weapon.c:160-161, 272, 902`.
+- **Damage and range falloff.** MW2 gives each weapon damage/minDamage over maxDamageRange/minDamageRange (`m4_mp` 30 to 20, `spas12_mp` 40 to 20 per pellet, `cheytac_mp` 70). Peace deals flat damage at any range: MG 7, M300 100, shotgun pellet 10. Only the Masterkey falls off as MW2's does: `m4_shotgun_attach_mp`'s 25 per pellet out to 500 units, falling to 0 at 1750 (`BG_PelletDamage`). *Placeholder.* MW2: weapons/mp/m4_mp, spas12_mp, cheytac_mp, m4_shotgun_attach_mp. Peace: `code/game/g_weapon.c:160-161, 272, 902`; `code/game/bg_pmove.c:2381`.
 - **Hit locations.** MW2 applies per-weapon `locationDamage` multipliers (head, torso, limbs). Peace's `G_Damage` applies flat damage; the Quake 3 "used for headshots" comment is vestigial. *Not modelled.* MW2: iw4x.exe 0x43ABD0 via table 0x1856518. Peace: `code/game/g_combat.c:855-875`.
 - **Hitboxes.** MW2 traces hits against per-bone hitboxes on the animated skeleton. Peace traces against the player's Quake 3 axis-aligned box (`MASK_SHOT`), so the silhouette is not the target. *Not modelled.* MW2: none cited. Peace: `code/game/g_weapon.c:167-235`; `code/game/bg_misc.c:1846-1856`.
 - **Bullet penetration.** MW2 bullets penetrate by `penetrateType` (`m4_mp` medium, `spas12_mp` small), raised by FMJ and `perk_bulletPenetrationMultiplier` 2. Peace's trace stops at the first surface. *Not modelled.* MW2: weapons/mp/*_mp penetrateType; dvars `perk_bulletPenetrationMultiplier`, `bullet_penetrationMinFxDist`. Peace: `code/game/g_weapon.c:180-235`.
@@ -128,9 +130,9 @@ The two bugs found are fixed: the knife did 100 instead of 135, and an empty let
 
 **Spread and aim**
 
-- **Hip spread model.** MW2 keeps a per-player `aimSpreadScale` (0-255) between each weapon's hipSpreadMin/Max (`m4_mp` 3..7, `spas12_mp` 5, `cheytac_mp` 10..15). It grows with movement past `bg_aimSpreadMoveSpeedThreshold` 11, by `jump_spreadAdd` 64 per jump and by hipSpreadFireAdd per shot, is forced to 255 in melee, and decays. Peace's stateless `BG_SpreadScale` (dev1) is base spread (MG 200, M300 700) times (ADS scale or 1) + 0.6*speed/320, +1.5 airborne, x0.6 crouched and still; it does not grow while firing. *Placeholder.* MW2: iw4x.exe Jump_Start 0x56D940, PM_Weapon 0x44C380; weapons/mp hipSpread*. Peace: `code/game/bg_pmove.c:2552-2575, 2743-2779`.
-- **ADS spread.** MW2 uses per-weapon `adsSpread` (`m4_mp` 0, `spas12_mp` 5.5, `cheytac_mp` 0), blended by the ADS fraction. Peace uses a flat 0.15 of hip spread for every gun (M300 0, still with the movement term), switched on at once by the binary `PMF_ADS`. *Placeholder.* MW2: weapons/mp/*_mp adsSpread. Peace: `code/game/bg_pmove.c:2576-2582, 2752-2755`; `code/game/bg_m40a3_data.h:7`.
-- **Bullet dispersion shape.** MW2's `Bullet_Fire` uses its own spread geometry around the aim, seeded from the shot's gameTime. Peace ports MW2's seed and RNG (`BG_srand`/`BG_random` on the shot command's time) but keeps Quake 3's shape (`BG_BulletEnd`, `BG_ShotgunAxes`/`BG_ShotgunPelletEnd`) so "a shot hurts what it always did". *Placeholder.* MW2: Bullet_Fire 0x4402C0; BG_srand 0x410720; BG_random 0x44C590. Peace: `CLAUDE.md:191-196`; `code/game/bg_misc.c:1763-1772, 1846-1860`.
+- **Hip spread model.** MW2 keeps a per-player `aimSpreadScale` (0-255) between each weapon's hipSpreadMin/Max (`m4_mp` 3..7, `spas12_mp` 5, `cheytac_mp` 10..15, `m4_shotgun_attach_mp` 5..7 with hipSpreadMoveAdd 0.1). It grows with movement past `bg_aimSpreadMoveSpeedThreshold` 11, by `jump_spreadAdd` 64 per jump and by hipSpreadFireAdd per shot, is forced to 255 in melee, and decays. Peace's stateless `BG_SpreadScale` (dev1) is base spread (MG 200, M300 700, the Masterkey 717: its 5° minimum, tan(5°) x 8192) times (ADS scale or 1) + 0.6*speed/320, +1.5 airborne, x0.6 crouched and still; it does not grow while firing. *Placeholder.* MW2: iw4x.exe Jump_Start 0x56D940, PM_Weapon 0x44C380; weapons/mp hipSpread*. Peace: `code/game/bg_pmove.c:2552-2575, 2743-2779`.
+- **ADS spread.** MW2 uses per-weapon `adsSpread` (`m4_mp` 0, `spas12_mp` 5.5, `cheytac_mp` 0), blended by the ADS fraction. Peace uses a flat 0.15 of hip spread for every gun (M300 0, still with the movement term), switched on at once by the binary `PMF_ADS`, except the Masterkey, which takes MW2's ratio, adsSpread 5.5 over its 5° hip minimum (1.1). *Placeholder.* MW2: weapons/mp/*_mp adsSpread. Peace: `code/game/bg_pmove.c:2576-2582, 2752-2755`; `code/game/bg_m40a3_data.h:7`.
+- **Bullet dispersion shape.** MW2's `Bullet_Fire` uses its own spread geometry around the aim, seeded from the shot's gameTime. Peace ports MW2's seed and RNG (`BG_srand`/`BG_random` on the shot command's time) but keeps Quake 3's shape (`BG_BulletEnd`, `BG_ShotgunAxes`/`BG_ShotgunPelletEnd`) so "a shot hurts what it always did". The Masterkey's six pellets are six `BG_BulletEnd` shots in its cone from one seed. *Placeholder.* MW2: Bullet_Fire 0x4402C0; BG_srand 0x410720; BG_random 0x44C590. Peace: `CLAUDE.md:191-196`; `code/game/bg_misc.c:1763-1772, 1846-1860`.
 - **Muzzle point and bob on shots.** MW2 starts bullets and thrown offhands at the view origin (`G_CalcMuzzlePoints` → `BG_GetPlayerViewOrigin`), which includes bob, lean and an origin+8 floor, and the aim adds damage kick, idle sway and ADS bob, so bob moves the shot on the server. Peace uses the Quake 3 muzzle (`BG_ShotMuzzle`: snapped origin + viewheight + 14 along the aim) for bullets, both knives and grenades; its bob is camera-only. *Not modelled.* MW2: iw4x.exe 0x5FD2A0, 0x47EC30, 0x4B6D00, 0x4C3755, 0x4936B8-0x493801. Peace: `code/game/bg_misc.c:1818-1823`; `code/game/g_weapon.c:758-761`; `CLAUDE.md:464-473`; `dev/SEMTEX.md:76-77`; `dev/THROWING_KNIFE.md:72-73`.
 
 **ADS**
@@ -155,6 +157,7 @@ The two bugs found are fixed: the knife did 100 instead of 135, and an empty let
 
 ### Recently made to match MW2
 
+- **Underbarrel shotgun, the Masterkey** (`bb2ef44`, `92bcb31`). MW2's alt weapon `m4_shotgun_attach_mp`, on the Machinegun with the Shotgun attachment and riding in its slot. An alt switch puts nothing down (altDropTime is 0 for all 181 pairings) and raises in altRaiseTime, 730ms each way; while sprinting it is an ordinary drop and raise. weapnext from the alt goes to its rifle, and from a rifle to the next slot's gun, never its alt. Its shot is 330ms and its pump 430ms with the close 1ms in (rechamberBoltTime 0), so the switch's no-drop makes the moni NAC. Clip 4, start 12, max 24 per gun instance; reload start 1000 with a shell at 600, loop 750 with a shell at 550, end 1350; drop and raise 829, quick 750/250, sprint 300/300; six pellets; its view kick (55..65 pitch, -35..35 yaw, centre 1400). Pellets are client-side bullets like every hitscan shot. Before, Peace had no alt weapons. MW2: weapons/mp/m4_shotgun_attach_mp, m4_shotgun_mp; iw4x.exe 0x479B80, 0x575F70, 0x576370, 0x578BC0, 0x579450, 0x59ED40, 0x575BD8-0x575C03. Peace: `code/game/bg_masterkey_data.h`; `assets/source/masterkey/weapon.json`; `dev/MASTERKEY.md`; `dev/VIEW_KICK.md`.
 - **Knife damage.** A connected knife does 135, MW2's `meleeDamage` for every MP gun, so it kills through the spawn countdown and armor. It was 100. MW2: weapons/mp/*_mp meleeDamage. Peace: `code/game/g_weapon.c` `KNIFE_DAMAGE`.
 - **SPAS-12 drop and raise.** 829ms holster and 1075ms draw (`spas12_mp` dropTime 0.829, raiseTime 1.075) in code, `view.cfg` and `import_spas.py`. It was 1500/1500. Peace: `code/game/bg_pmove.c:2060, 2084`; `assets/baseq3/models/weapons2/spas12/view.cfg:10-11`; `dev/tools/import_spas.py:28`.
 - **View kick** (`e7ea655`, `3a99c10`). Each shot sets an angular velocity from the hip or ADS view-kick data, `CG_KickAngles` runs it out in 5ms steps with a 10° clamp, and `CL_FinishMove` adds it into `cmd.angles`. It is the approved cgame exception, and is not applied in the killcam, follow mode or demos. MW2: iw4x.exe 0x4A5FE0, 0x596790, 0x5A6740-0x5A677B. Peace: `code/game/bg_pmove.c:2629-2640, 2690-2728`; `code/cgame/cg_kick.c`; `code/client/cl_input.c:598-606`; `dev/VIEW_KICK.md`.
@@ -266,14 +269,17 @@ The two bugs found are fixed: the knife did 100 instead of 135, and an empty let
 - **Weapon sounds.** MW2 has per-weapon fire, reload and notetrack sounds. Peace's reload plays the Quake 3 select sound, and the mag-in and bolt-close notes play the no-ammo click as an audible cancel-window cue. *Placeholder.* Peace: `code/cgame/cg_event.c:829-842`.
 - **Pullback sounds.** MW2 plays pullbackSound/pullbackSoundPlayer for the frag, flash and Semtex pins and the TI flare lift. Peace wires them under MW2's alias names in `sound/weapons/offhand/`, but none ship, so they are silent. Neither game has a cook timer on the HUD. *Placeholder.* MW2: WeaponDef +0x64/+0x68; cgame 0x501C40. Peace: `code/cgame/cg_weapons.c:626-640`; `CLAUDE.md:404-405, 643-644`.
 - **Player models and deaths.** MW2 has soldier models and ragdoll deaths, with no gibs. Peace uses Quake 3 player models and animations, and gibbing remains. *Placeholder.* Peace: `code/cgame/cg_players.c`; `code/game/g_combat.c:688`.
-- **HUD.** MW2 has its ammo counter, minimap/compass, killfeed, score bar and damage direction. Peace has a text loadout HUD (slot, ammo/reserve, lethal/tactical counts), Quake 3 obituaries, rewards and crosshair names, and no minimap or radar. *Placeholder.* Peace: `code/cgame/cg_draw.c:2447-2510`; `code/cgame/cg_event.c:79-110`.
+- **HUD.** MW2 has its ammo counter, minimap/compass, killfeed, score bar and damage direction. Peace has a text loadout HUD (slot, ammo/reserve, lethal/tactical counts), Quake 3 obituaries, rewards and crosshair names, and a plain minimap: a square turned with the view, showing the player, teammates and the UAV's pings, with no map image, compass or objective icons. *Placeholder.* Peace: `code/cgame/cg_draw.c:2447-2510`; `code/cgame/cg_event.c:79-110`; `code/cgame/cg_radar.c`.
 - **Hit markers.** MW2 shows a crosshair hit marker on damage dealt (`damage_feedback`). Peace has none. *Not modelled.* MW2: maps/mp/gametypes/_damagefeedback.gsc:3-18.
 - **Dynamic crosshair.** MW2 sizes the crosshair by its spread. Peace draws its own four bars from `BG_WeaponSpread` (dev1). *Placeholder.* Peace: `code/cgame/cg_draw.c:1921-1930`.
-- **Trigger threshold.** IW4x's trigger engages at 13% of travel. Peace's `joy_threshold` is 0.15. *Placeholder.* MW2: IW4x Controller/Engine/Key.cpp. Peace: `code/sdl/sdl_input.c:1308`; `dev/FAKE_RELOAD.md:178-182`.
+- **The aim graph and FOV turn scale** *(unsettled)*. MW2 shapes the pad's look with its aim input graph (graph 3's knots in aaInputGraph) and scales turn rates by `fovTurnRateScale`, which its per-frame aim assist sets. Neither has been read out of MW2 yet: Peace's `aim_input_graph` is empty, so the look is linear in the stick, and the FOV scale is 1. `dev/tools/mw2_aimdump.ps1`, run beside a live IW4x match, reads both. *Unverified.* MW2: iw4x.exe aaInputGraph 0x7A2FC0, aaGlob+288. Peace: `code/client/cl_gamepadaim.c:233`; `dev/tools/mw2_aimdump.ps1`; `CLAUDE.md` (the game pad invariant).
 - **Not standalone.** Peace needs retail Quake 3 assets (player models, HUD textures, legacy weapons). *Placeholder.* Peace: `dev/LADDERS.md:30-31`; `dev/M40A3.md:135-137`.
 
 ### Recently made to match MW2
 
+- **Game pad aim** (`a665aab`). MW2's console look as IW4x ported it: the radial stick deadzone (`gpad_stick_deadzone_min` 0.2, `_max` 0.01), the dominant-axis scale, `aim_turnrate_yaw/pitch` 260/90 at the hip and 90/55 aimed, lerped by the aim fraction, times `input_viewSensitivity`, reached at `aim_accel_turnrate_lerp` and left at once. Before, Quake's linear `j_*` scaling with a per-axis threshold. MW2: IW4x Gamepad.cpp (e49e17d6: GPad_ConvertStickToFloat, AimAssist_CalcAdjustedAxis, AimAssist_ApplyTurnRates). Peace: `code/client/cl_gamepadaim.c`; `code/client/cl_input.c:475`.
+- **Game pad move** (`29e3f5e`). MW2's CL_GamepadMove with the move stick MAP_SQUARED (thumbstick_default.cfg): each axis times the stick's length, stretched onto the move square and floored, so a sprint needs about 91% of the stick past the deadzone. Before, Quake's linear `j_forward`/`j_side`. MW2: IW4x Gamepad.cpp; iw4x-rawfiles thumbstick_default.cfg. Peace: `code/client/cl_gamepadaim.c:88`; `code/client/cl_input.c:501`.
+- **Trigger threshold.** A trigger presses at 13% of its travel, IW4x's `gpad_button_deadzone`: the engine's `joy_threshold` default and the shipped pad config. It was 0.15. MW2: IW4x Controller/Engine/Key.cpp. Peace: `code/sdl/sdl_input.c:1327`; `dev/peace-gamepad.cfg:27`; `dev/FAKE_RELOAD.md:178-182`.
 - **Empty lethal label.** With the last knife, Semtex or TI spent, the HUD keeps showing that lethal at 0, as MW2 shows the equipped offhand; a frag reads "FRAG". It was "LETHAL 0", because `BG_LethalWeapon` falls back to the frag. Peace: `code/cgame/cg_draw.c` `CG_DrawLoadoutHud`.
 
 ---
@@ -298,7 +304,8 @@ The two bugs found are fixed: the knife did 100 instead of 135, and an empty let
 
 ### Open
 
-- **Killstreaks and other systems.** MW2 has killstreaks (UAV, care package, predator, sentry, harrier, AC-130 and the rest), turrets, vehicles, night vision, akimbo, the riot shield, XP/ranks/challenges and scoring splashes. Peace has none of these. *Not modelled.* MW2: PM_IsAdsAllowed 0x5755A0 (akimbo, turret), 0x577E30 (night vision); maps/mp/killstreaks. Peace: `dev/TACTICAL_INSERTION.md:215-217`.
+- **Killstreaks and other systems.** MW2 has killstreaks (UAV, care package, predator, sentry, harrier, AC-130 and the rest), turrets, vehicles, night vision, akimbo, the riot shield, XP/ranks/challenges and scoring splashes. Peace has only the UAV (see below). *Not modelled.* MW2: PM_IsAdsAllowed 0x5755A0 (akimbo, turret), 0x577E30 (night vision); maps/mp/killstreaks. Peace: `dev/TACTICAL_INSERTION.md:215-217`; `dev/UAV.md`.
+- **The UAV in the world.** MW2's UAV is an aircraft (`vehicle_uav_static_mp`) circling the map on a rig, with 700 health: it can be shot down, which calls out its destroyer, and the Counter-UAV is its own killstreak. Peace's UAV is radar only: nothing flies, nothing can destroy it, and there is no Counter-UAV, splash or announcer. *Not modelled.* MW2: maps/mp/killstreaks/_uav.gsc:29, 38, 98-100, 200-239, 261-275. Peace: `code/game/g_killstreak.c`; `dev/UAV.md`.
 - **MW2 perks.** MW2 has Marathon, Lightweight, Extreme Conditioning (`perk_sprintMultiplier` 2), fast sprint recovery (sprintOutTime x0.6), Sleight of Hand, Scavenger, Bling, One Man Army, Stopping Power, Hardline, Cold-Blooded, Danger Close, Commando (melee 176), Steady Aim, Scrambler, Ninja, SitRep and Last Stand. Peace has none; a few have rough Peace analogues, and the sprint is always 4s. *Not modelled.* MW2: iw4x.exe perk bits 10/25, 0x577FB0, 0x7BDDA8 (re/res_verify_sprint-machine.txt); dvars `perk_*`. Peace: `code/game/bg_loadout.c:30-37`; `CLAUDE.md:455-459`; `code/game/bg_public.h:632-633`.
 - **Death streaks.** MW2 has Copycat, Painkiller, Martyrdom and Final Stand. Peace has none. *Not modelled.* MW2: _class.gsc.
 - **Attachments.** MW2 has per-gun lists: ACOG, silencer, grip, FMJ, extended mags, thermal, heartbeat, holo, GL, shotgun, akimbo, tactical knife, rapid fire and more. Peace has the red dot only (plus the M300's integral scope), so Second Nature's second slot has nothing distinct to hold. *Not modelled.* MW2: weapons/mp/*_mp variants. Peace: `code/game/bg_loadout.c:19-27, 192-198`; `CLAUDE.md:736-737`; `dev/LOADOUTS.md:48-52`.
@@ -307,7 +314,7 @@ The two bugs found are fixed: the knife did 100 instead of 135, and an empty let
 
 ### Recently made to match MW2
 
-None in this area.
+- **UAV killstreak** (`bb2ef44`). Three enemy kills in one life earn a UAV, once a life, kept through death; D-pad right calls it, and the trigger's weapon change spends it. The radar covers the owner's team (the owner alone in FFA) for radarViewTime 30s, sweeping enemy positions every compassRadarUpdateTime 4s, or compassFastRadarUpdateTime 2s with two up; each ping shows compassRadarPingFadeTime 4s, 2500 units reach the minimap's edge (compassMaxRange) and farther ones are held there (compassClampIcons). S&D's round start and map restarts take every UAV down. Before, Peace had no killstreaks. MW2: killstreakTable; the compass dvars; iw4x.exe 0x5E49B0 (weapon_change); maps/mp/killstreaks/_uav.gsc. Peace: `code/game/g_killstreak.c`; `code/cgame/cg_radar.c`; `dev/UAV.md`.
 
 ---
 

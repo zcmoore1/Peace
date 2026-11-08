@@ -1323,7 +1323,8 @@ void IN_Init( void *windowData )
 	in_nograb = Cvar_Get( "in_nograb", "0", CVAR_ARCHIVE );
 
 	in_joystick = Cvar_Get( "in_joystick", "0", CVAR_ARCHIVE|CVAR_LATCH );
-	in_joystickThreshold = Cvar_Get( "joy_threshold", "0.15", CVAR_ARCHIVE );
+	// Where a trigger presses: 0.13 of its travel, IW4x's gpad_button_deadzone.
+	in_joystickThreshold = Cvar_Get( "joy_threshold", "0.13", CVAR_ARCHIVE );
 
 	// A game pad's sticks use MW2's radial deadzone (IW4x's defaults); its
 	// triggers and older joysticks keep joy_threshold.

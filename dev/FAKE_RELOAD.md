@@ -178,7 +178,7 @@ the only writer of the flag) looks at X. The flag is read on the next command
 (0x5786E3). So X and RT in one command give a real shot in both games. The
 input side matches too. IW4x polls the pad once a frame and sends X and RT in
 the same pass, in that order (`Controller/Engine/Key.cpp`). Its trigger engages
-at 13% of travel, Peace's at 15% (`joy_threshold`). The IW4x fake shot script
+at 13% of travel, and so does Peace's (`joy_threshold` 0.13). The IW4x fake shot script
 below leaves two frames between X and the shot.
 
 `cl_debugButtons 1` prints, for each X and RT press, the command it went out

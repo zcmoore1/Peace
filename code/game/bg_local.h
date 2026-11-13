@@ -25,6 +25,15 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	MIN_WALK_NORMAL	0.7f		// can't walk on very steep slopes
 
 #define	STEPSIZE		18
+#define	STEPSIZE_PRONE	10		// MW2's prone step (PM_StepSlideMove 0x4B18B3: 0x6FD688)
+// MW2's prone bend (BG_CheckProneValid): the torso's pitch less the legs' may
+// lie in PRONE_BEND_MIN..PRONE_BEND_MAX (0x421A6C, 0x421A79), and the legs'
+// pitch is first held to the torso's + PRONE_WAIST_HOLD (0x4219F9), so the
+// bend is never below -PRONE_WAIST_HOLD and the minimum never fails
+#define	PRONE_BEND_MIN		-50.0f	// 0x6E5388
+#define	PRONE_BEND_MAX		70.0f	// 0x6FC914
+#define	PRONE_WAIST_HOLD	10.0f	// 0x721550
+#define	STEPSIZE_DOWN	9		// MW2's push down past a ground move, every stance (0x4B1ACC, 0x4B1C8D)
 #define	STEP_SPEED_KEEP	0.2f	// MW2: a walked step as high as STEPSIZE keeps this much speed
 
 #define	TIMER_LAND		130
@@ -60,6 +69,10 @@ typedef struct {
 	// reuse the command, so here it is a per-think copy that cannot compound).
 	// The walk, the take-off's air move and the bob read it.
 	int			rightmove;
+	// This think's copy of the command's forwardmove. MW2's prone crawl stops
+	// (PmoveSingle 0x574570, 0x574769) zero the command; Peace zeroes these
+	// copies, so a chopped command's next step still reads the real one.
+	int			forwardmove;
 } pml_t;
 
 extern	pmove_t		*pm;
@@ -71,6 +84,7 @@ extern	float	pm_swimScale;
 
 extern	float	pm_accelerate;
 extern	float	pm_duckaccelerate;
+extern	float	pm_proneaccelerate;
 extern	float	pm_noclipaccelerate;
 extern	float	pm_airaccelerate;
 extern	float	pm_wateraccelerate;
@@ -89,4 +103,5 @@ void PM_AddEvent( int newEvent );
 
 qboolean	PM_SlideMove( qboolean gravity );
 void		PM_StepSlideMove( qboolean gravity );
+qboolean	PM_VerifyPronePosition( const vec3_t startOrigin, const vec3_t startVelocity );
 

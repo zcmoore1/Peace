@@ -1151,6 +1151,7 @@ typedef struct {
 #define PS_PERK_BITS 5
 #define PS_MOVECLASS_BITS 4	// moveClass_t (bg_public.h): MW2's nine weapon classes
 #define PS_CURSOR_HINT_BITS 3	// cursorHint_t (bg_public.h): six types
+#define PS_EYE_LEG_BITS 10	// viewHeightLerpTime: ms into a running eye leg, always below BG_PRONE_LERP_MS (400)
 
 typedef struct playerState_s {
 	int			commandTime;	// cmd->serverTime of last executed command
@@ -1215,7 +1216,18 @@ typedef struct playerState_s {
 	int             grenadeTimeLeft;	// MW2's: ms of fuse left on the offhand in hand (from HOLD entry), -1 cooked out; a duration, never rebased
 
 	vec3_t		viewangles;		// for fixed views
-	int			viewheight;
+	float		viewheight;		// the eye above the origin (Peace units); a float for MW2's eye curve
+	// MW2's stance and eye (playerState_t +0x118..+0x128, +0x160..+0x168). Eye
+	// heights here are MW2 units, above the feet (BG_EYE_*); viewheight is the
+	// same eye in Peace units. None is a clock: the replay rebases none of them.
+	int			viewHeightTarget;		// BG_EYE_* the stance asks for; 0 = never set (MW2's sentinel)
+	int			viewHeightLerpTime;		// ms into the running eye leg (MW2 keeps an absolute time)
+	int			viewHeightLerpTarget;	// BG_EYE_* the running leg ends at; 0 = no leg running
+	int			viewHeightLerpDown;		// 1 = the running leg goes down
+	float		proneDirection;			// MW2 ps+0x160: the prone body's yaw
+	float		proneDirectionPitch;	// MW2 ps+0x164: the ground's pitch along that yaw
+	float		proneTorsoPitch;		// MW2 ps+0x168: the centre of the prone pitch clamp
+	int			prevCmd;				// MW2's pmove oldcmd: the previous command's moves and aim (BG_PrevCmdPack)
 
 	// damage feedback
 	int			damageEvent;	// when it changes, latch the other parms
@@ -1277,7 +1289,14 @@ typedef struct playerState_s {
 #define BUTTON_ALTFIRE		524288			// underbarrel / alt weapon toggle (bit 19)
 #define BUTTON_WEAPON_SWAP   1048576         // selection intent, even when cancelling equipment
 #define BUTTON_USE_RELOAD    2097152         // MW2's +usereload (bit 21): use, else reload; the server asks for the reload
-// usercmd_t.buttons is delta-encoded with 32 bits (msg.c) - bits 22..31 spare.
+// MW2's stance, a level carried in every command (CL_KeyMove 0x5A5F4B,
+// CL_AddCurrentStanceToCmd 0x5A5EF0): prone, crouch, or neither for stand.
+// TEMP marks a stance from a held key (+prone, +movedown): no refusal event.
+#define BUTTON_PRONE         (1<<22)         // MW2's 0x100
+#define BUTTON_CROUCH        (1<<23)         // MW2's 0x200
+#define BUTTON_TEMP_STANCE   (1<<24)         // MW2's 0x1000 (IW4x's CMD_BUTTON_DOWN)
+#define BUTTON_STANCE_MASK   (BUTTON_PRONE|BUTTON_CROUCH|BUTTON_TEMP_STANCE)
+// usercmd_t.buttons is delta-encoded with 32 bits (msg.c) - bits 25..31 spare.
 
 #define	MOVE_RUN			120			// if forwardmove or rightmove are >= MOVE_RUN,
 										// then BUTTON_WALKING should be set

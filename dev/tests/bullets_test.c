@@ -23,6 +23,17 @@
  *  - nothing is drawn for a projectile, and a shot into the sky draws nothing;
  *  - the fake bullet emerges: a shot the server never fires is still drawn
  *    on the shooter's screen, with no damage.
+ *
+ * MW2's stance (dev/STANCE.md): every bullet and pellet ends where the
+ * owner's hit volumes put it (D7, BG_PlayerHitVolumes: the box, the volume
+ * over it while the eye is above it, a prone player's body), and the real
+ * server's damage lands on what the mark says. A prone shooter's own shots
+ * come from the float eye; others draw a drop shot (stand to prone while
+ * firing) from the eye the entity carries (origin2[2]) on every think of both
+ * legs, and a settled prone shooter from the prone eye; a prone target's body
+ * behind it stops the shooter's, a watcher's and its own drawn bullets as it
+ * stops the server's; a target crouching or going prone is hit over its box
+ * while its eye is still above it, on the server and every screen alike.
  */
 #include "../../code/qcommon/q_shared.h"
 #include "../../code/game/bg_public.h"
@@ -84,6 +95,8 @@ static qboolean MarksMatch( int weapon ) {
 				a && b && SameMark( a, b ) ? "" : "   <<" );
 		}
 	}
+	if ( getenv( "BULLETS_DEBUG" ) ) printf( "marks: server %d (%d shot traces, %d stopped by a hit volume), client %d\n",
+		n, bs_shotTraces, bs_volumeHits, bc_markCount );
 	if ( n != bc_markCount ) return qfalse;
 	for ( i = 0; i < n; i++ ) if ( !SameMark( &server[i], &bc_marks[i] ) ) return qfalse;
 	return qtrue;
@@ -91,6 +104,13 @@ static qboolean MarksMatch( int weapon ) {
 
 typedef struct {
 	int		weapon;
+	float	yaw;			/* the shooter's aim */
+	float	shooterY;		/* where the shooter stands across the line (0: in front of the victim) */
+	int		shooterStance;	/* stance bits the shooter's commands hold */
+	int		victimStance;	/* stance bits the victim holds (0: it sends no commands) */
+	int		victimCycle;	/* ms on, then off, of victimStance (0: always on) */
+	float	victimYaw;
+	qboolean	settleFirst;	/* no trigger until the victim's stance has settled */
 	int		gametype;
 	int		viewer;			/* whose cgame draws */
 	int		renderEvery;	/* commands made before each client frame */
@@ -103,12 +123,23 @@ typedef struct {
 	float	pitch;
 } run_t;
 
+/* the victim's stance has settled: no eye leg running (or no stance in pmove) */
+static int settledAt;	/* the command the victim's stance settled on, -1 not yet */
+#define SETTLE_MARGIN	24	/* commands after that before the trigger: every client's snapshots have it */
+static qboolean Settled( void ) {
+	const playerState_t *ps = BS_PlayerState( VICTIM );
+	return !ps->viewHeightLerpTarget && ps->viewheight == ( ( ps->pm_flags & PMF_PRONE ) ? PRONE_VIEWHEIGHT :
+		( ps->pm_flags & PMF_DUCKED ) ? CROUCH_VIEWHEIGHT : DEFAULT_VIEWHEIGHT );
+}
 static usercmd_t Cmd( const run_t *r, int k, int t ) {
 	usercmd_t c;
-	float yaw = 0, pitch = r->pitch;
+	float yaw = r->yaw, pitch = r->pitch;
 	memset( &c, 0, sizeof( c ) );
 	c.serverTime = t; c.weapon = r->weapon;
-	if ( r->useReloadAt ) {	/* a few rounds, a pause, the tap, then the trigger */
+	c.buttons = r->shooterStance;
+	if ( r->settleFirst && ( settledAt < 0 || k < settledAt + SETTLE_MARGIN ) ) {
+		;	/* hold fire while the target lies down, and until every view has it down */
+	} else if ( r->useReloadAt ) {	/* a few rounds, a pause, the tap, then the trigger */
 		if ( k < 24 || k > r->useReloadAt ) c.buttons |= BUTTON_ATTACK;
 		if ( k == r->useReloadAt ) c.buttons |= BUTTON_USE_RELOAD;
 	} else if ( !r->lastOnly || ( k + 1 ) % r->snapEvery == 0 ) c.buttons |= BUTTON_ATTACK;
@@ -136,12 +167,14 @@ static void Run( const run_t *r ) {
 	entityState_t *ents;
 
 	if ( getenv( "BULLETS_DEBUG" ) ) {
-		printf( "run: weapon %d gametype %d viewer %d render %d snap %d lag %d move %d turn %d ads %d predicted %d lastOnly %d pitch %g\n",
+		printf( "run: weapon %d gametype %d viewer %d render %d snap %d lag %d move %d turn %d ads %d predicted %d lastOnly %d pitch %g"
+			" yaw %g shooterStance %x victimStance %x cycle %d\n",
 			r->weapon, r->gametype, r->viewer, r->renderEvery, r->snapEvery, r->lag, r->move, r->turn, r->ads,
-			r->predicted, r->lastOnly, r->pitch );
+			r->predicted, r->lastOnly, r->pitch, r->yaw, r->shooterStance, r->victimStance, r->victimCycle );
 	}
 
 	BS_Reset( r->gametype );
+	BS_Place( SHOOTER, 0, r->shooterY, 24 );
 	BS_Place( VICTIM, 300, 0, 24 );
 	BS_Place( WATCHER, 0, 200, 24 );
 	BS_Arm( SHOOTER, r->weapon );
@@ -155,10 +188,23 @@ static void Run( const run_t *r ) {
 		BC_Snapshot( BS_START_TIME, BS_PlayerState( r->viewer ), first, n );
 	}
 	BC_ClearMarks(); BS_ClearMarks();
+	settledAt = -1;
 
 	for ( k = 0, t = BS_START_TIME; k < r->commands; k++ ) {
 		usercmd_t c;
 		t += CMD_MSEC;
+		if ( r->victimStance ) {	/* the target's own command first, in this think */
+			usercmd_t v;
+			memset( &v, 0, sizeof( v ) );
+			v.serverTime = t; v.weapon = BS_PlayerState( VICTIM )->weapon;
+			v.angles[YAW] = ANGLE2SHORT( r->victimYaw );
+			if ( !r->victimCycle || ( k * CMD_MSEC / r->victimCycle ) % 2 == 0 ) v.buttons = r->victimStance;
+			BS_Command( VICTIM, &v );
+			if ( r->viewer == VICTIM ) BC_StoreCommand( &v );
+			if ( settledAt < 0 && k > 0 && Settled() ) settledAt = k;
+		} else if ( settledAt < 0 ) {
+			settledAt = 0;
+		}
 		c = Cmd( r, k, t );
 		if ( r->viewer == SHOOTER ) BC_StoreCommand( &c );
 		BS_Command( SHOOTER, &c );
@@ -196,7 +242,26 @@ static void Run( const run_t *r ) {
 	}
 
 	/* the damage is the server's and unchanged: each hit's own amount */
-	CHECK( health - BS_Health( VICTIM ) == FleshOn( VICTIM ) * Damage( r->weapon, r->gametype ) );
+	CHECK( bs_markCount < BW_MAX_MARKS && bc_markCount < BW_MAX_MARKS );	/* every mark recorded */
+	if ( !r->victimStance ) {	/* a target that thinks counts its health down above the maximum (ClientTimerActions) */
+		CHECK( health - BS_Health( VICTIM ) == FleshOn( VICTIM ) * Damage( r->weapon, r->gametype ) );
+	}
+	if ( r->weapon != WP_RAILGUN && r->weapon != WP_LIGHTNING && r->weapon != WP_ROCKET_LAUNCHER ) {
+		CHECK( bs_bulletHealth[VICTIM] == FleshOn( VICTIM ) * Damage( r->weapon, r->gametype ) );
+	}
+	/* every bullet's and pellet's damage is on what its mark says, where it
+	 * says (the real bullet code's point, snapped by a bullet as tr.endpos is) */
+	if ( r->weapon != WP_RAILGUN && r->weapon != WP_LIGHTNING && r->weapon != WP_ROCKET_LAUNCHER ) {
+		int i, d = 0;
+		for ( i = 0; i < bs_markCount; i++ ) {
+			if ( !bs_marks[i].flesh ) continue;
+			CHECK( d < bs_damageCount && bs_damage[d].entityNum == bs_marks[i].entityNum );
+			CHECK( fabs( bs_damage[d].point[0] - bs_marks[i].point[0] ) < 1 && fabs( bs_damage[d].point[1] - bs_marks[i].point[1] ) < 1 &&
+				fabs( bs_damage[d].point[2] - bs_marks[i].point[2] ) < 1 );
+			d++;
+		}
+		CHECK( d == bs_damageCount );
+	}
 }
 
 static const int guns[] = { WP_MACHINEGUN, WP_SHOTGUN, WP_RAILGUN, WP_LIGHTNING, WP_M40A3
@@ -335,6 +400,87 @@ static void TestGenerator( void ) {
 	CHECK( BG_BulletSeed( 10008 ) != BG_BulletSeed( 10016 ) );
 }
 
+#define VICTIM_X	300	/* where Run puts the victim */
+
+/* A prone target's body, which lies behind its origin (MW2's room check's
+ * body, D7): the victim lies down facing +y, so its body runs back along -y,
+ * and a prone shooter level with it fires along +x across the body, clear of
+ * the victim's prone box. Every aim here is a whole multiple of 45 degrees,
+ * the angles an entity carries exactly. The server, the shooter's own screen,
+ * a watcher's and the victim's own (its box from BG_PlayerBox, its volumes
+ * from its own playerstate) agree on every bullet and pellet. */
+static void TestProneTarget( void ) {
+	static const int bodyGuns[] = { WP_MACHINEGUN, WP_SHOTGUN, WP_M40A3 }, viewers[] = { SHOOTER, WATCHER, VICTIM };
+	int g, v, volumeHits = 0;
+	qboolean prone = qtrue;
+	for ( g = 0; g < ARRAY_LEN( bodyGuns ); g++ ) for ( v = 0; v < ARRAY_LEN( viewers ); v++ ) {
+		run_t r;
+		memset( &r, 0, sizeof( r ) );
+		r.weapon = bodyGuns[g]; r.gametype = GT_FFA; r.viewer = viewers[v]; r.renderEvery = 1; r.snapEvery = 6;
+		r.commands = 200; r.predicted = qtrue; r.lastOnly = viewers[v] != SHOOTER;
+		r.ads = viewers[v] == SHOOTER;	/* others draw the hip's spread: aiming is not on the entity */
+		r.victimStance = BUTTON_PRONE; r.victimYaw = 90; r.settleFirst = qtrue;
+		r.shooterStance = BUTTON_PRONE; r.shooterY = -0.6f * BG_PRONE_FEET_DIST;
+		Run( &r );
+		CHECK( bs_markCount > 0 && MarksMatch( r.weapon ) );
+		prone = prone && ( BS_PlayerState( VICTIM )->pm_flags & PMF_PRONE );
+		volumeHits += bs_volumeHits;
+	}
+	CHECK( prone && volumeHits > 0 );
+	printf( "a prone target's body behind its box: %d bullets and pellets stopped there, on every screen\n", volumeHits );
+}
+
+/* A target crouching, then going prone, over and over: while its eye is
+ * still above its new box (MW2's eye curve against the box that changes at
+ * once), a bullet over the box hits it, on the server and on a watcher's
+ * screen, which sees the target's entity as the shot did. Shot level from a
+ * standing eye, over the crouched box (the stand-to-crouch leg), and from a
+ * crouched eye, over the prone box (crouch to prone). */
+static void TestOverTheBox( void ) {
+	static const int shooterStances[] = { 0, BUTTON_CROUCH | BUTTON_TEMP_STANCE };
+	int h, volumeHits = 0;
+	qboolean down = qfalse;
+	for ( h = 0; h < ARRAY_LEN( shooterStances ); h++ ) {
+		run_t r;
+		memset( &r, 0, sizeof( r ) );
+		r.weapon = WP_MACHINEGUN; r.gametype = GT_FFA; r.viewer = WATCHER; r.renderEvery = 1; r.snapEvery = 6;
+		r.shooterStance = shooterStances[h];
+		r.victimStance = BUTTON_PRONE; r.victimCycle = 3 * BG_PRONE_LERP_MS; r.victimYaw = 180;
+		/* four times down and up, and down again at the end */
+		r.commands = 7 * r.victimCycle / CMD_MSEC - 10; r.predicted = qtrue; r.lastOnly = qtrue;
+		Run( &r );
+		CHECK( bs_markCount > 0 && MarksMatch( r.weapon ) );
+		volumeHits += bs_volumeHits;
+		down = down || ( BS_PlayerState( VICTIM )->pm_flags & ( PMF_PRONE | PMF_DUCKED ) );
+	}
+	CHECK( down && volumeHits > 0 );
+	printf( "a target's eye above its new box: %d bullets hit it over the box, on the server and a watcher's screen\n", volumeHits );
+}
+
+/* The drop shot: firing while going prone. Others draw it from the eye the
+ * shooter's entity carries (origin2[2], the server's muzzle eye) on every
+ * think of both legs, and then from the prone eye; the shooter's own screen
+ * from its recorded float eye, standing still and moving. */
+static void TestDropShot( void ) {
+	static const int viewers[] = { WATCHER, VICTIM, SHOOTER };
+	int g, v, m, midLeg = 0;
+	qboolean prone = qtrue;
+	for ( g = 0; g < ARRAY_LEN( guns ); g++ ) for ( v = 0; v < ARRAY_LEN( viewers ); v++ ) for ( m = 0; m < 2; m++ ) {
+		run_t r;
+		if ( viewers[v] != SHOOTER && m ) continue;	/* others are exact standing still (above) */
+		memset( &r, 0, sizeof( r ) );
+		r.weapon = guns[g]; r.gametype = GT_FFA; r.viewer = viewers[v]; r.renderEvery = 1; r.snapEvery = 6;
+		r.commands = 240; r.predicted = qtrue; r.lastOnly = viewers[v] != SHOOTER; r.move = m;
+		r.shooterStance = BUTTON_PRONE;
+		Run( &r );
+		CHECK( bs_markCount > 0 && MarksMatch( r.weapon ) );
+		midLeg += bs_midLegShots;
+		prone = prone && BS_PlayerState( SHOOTER )->viewheight == PRONE_VIEWHEIGHT;
+	}
+	CHECK( prone && midLeg > 0 );
+	printf( "drop shots: %d bullets fired from an eye between two stances, drawn where the server's went\n", midLeg );
+}
+
 int main( void ) {
 	TestGenerator();
 	TestOwnShots();
@@ -343,6 +489,9 @@ int main( void ) {
 	TestOthers();
 	TestFakeBullet();
 	TestProjectile();
+	TestProneTarget();
+	TestOverTheBox();
+	TestDropShot();
 	printf( "bullets_test: %d checks passed\n", checks );
 	return 0;
 }

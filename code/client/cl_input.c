@@ -50,7 +50,10 @@ at the same time.
 kbutton_t	in_left, in_right, in_forward, in_back;
 kbutton_t	in_lookup, in_lookdown, in_moveleft, in_moveright;
 kbutton_t	in_strafe, in_speed;
-kbutton_t	in_up, in_down;
+// MW2's three vertical kbuttons (playersKb 10, 11, 12): in_up is its UP, which
+// only flies (noclip, spectators); in_jump its MOVEUP, the jump; in_down its
+// DOWN, +movedown's held crouch (and Quake's fly and swim down).
+kbutton_t	in_up, in_down, in_jump;
 
 #ifdef USE_VOIP
 kbutton_t	in_voiprecord;
@@ -194,8 +197,169 @@ float CL_KeyState( kbutton_t *key ) {
 
 
 
-void IN_UpDown(void) {IN_KeyDown(&in_up);}
-void IN_UpUp(void) {IN_KeyUp(&in_up);}
+/*
+===============================================================================
+
+MW2'S STANCE
+
+MW2's stance is the client's (clientActive_t's stanceHeld, stance,
+stancePosition, stanceTime): every command carries it as a level, prone,
+crouch or neither (CL_KeyMove below), and pmove decides what the body does.
+Each command here is MW2's handler, named beside it. "Temp" is a held stance
+key, +prone or +movedown (MW2's kb[PRONE] || kb[DOWN]): while one is down the
+command carries that key's stance with BUTTON_TEMP_STANCE, and every stance
+command, toggle and reset is ignored. "Connected" is MW2's connectionState
+test (CA_CONNECTED, 5 in both).
+
+===============================================================================
+*/
+
+static cvar_t	*cl_stanceHoldTime;
+
+#define CL_TEMP_STANCE()	( in_buttons[22].active || in_down.active )
+#define CL_STANCE_CONNECTED()	( clc.state >= CA_CONNECTED )
+
+// +stance (0x5A5A30): crouch at once and arm the hold. No kbutton and no
+// argument is read, so every press re-arms.
+static void IN_StanceDown( void ) {
+	if ( CL_TEMP_STANCE() || !CL_STANCE_CONNECTED() ) {
+		return;
+	}
+	cl.stanceHeld = qtrue;
+	cl.stancePosition = cl.stance;
+	cl.stanceTime = com_frameTime;
+	if ( cl.stancePosition != BG_STANCE_CROUCH ) {
+		cl.stance = BG_STANCE_CROUCH;
+	}
+}
+
+// -stance (0x5A5A80): a hold that has not fired is a tap; a tap from a crouch
+// stands.
+static void IN_StanceUp( void ) {
+	if ( CL_TEMP_STANCE() || !CL_STANCE_CONNECTED() ) {
+		return;
+	}
+	if ( cl.stanceHeld && cl.stancePosition == BG_STANCE_CROUCH ) {
+		cl.stance = BG_STANCE_STAND;
+	}
+	cl.stanceHeld = qfalse;
+}
+
+// togglecrouch, toggleprone, goprone, gocrouch (0x5A5C30, 0x5A5C60, 0x5A5C90,
+// 0x5A5CB0): no connection test
+static void IN_ToggleCrouch( void ) {
+	if ( !CL_TEMP_STANCE() ) {
+		cl.stance = cl.stance != BG_STANCE_CROUCH ? BG_STANCE_CROUCH : BG_STANCE_STAND;
+	}
+}
+static void IN_ToggleProne( void ) {
+	if ( !CL_TEMP_STANCE() ) {
+		cl.stance = cl.stance != BG_STANCE_PRONE ? BG_STANCE_PRONE : BG_STANCE_STAND;
+	}
+}
+static void IN_GoProne( void ) {
+	if ( !CL_TEMP_STANCE() ) {
+		cl.stance = BG_STANCE_PRONE;
+	}
+}
+static void IN_GoCrouch( void ) {
+	if ( !CL_TEMP_STANCE() ) {
+		cl.stance = BG_STANCE_CROUCH;
+	}
+}
+
+// lowerstance, raisestance (0x5A5BB0, 0x5A5BF0): one step, none past the ends
+static void IN_LowerStance( void ) {
+	if ( !CL_STANCE_CONNECTED() || CL_TEMP_STANCE() ) {
+		return;
+	}
+	if ( cl.stance == BG_STANCE_STAND ) {
+		cl.stance = BG_STANCE_CROUCH;
+	} else if ( cl.stance == BG_STANCE_CROUCH ) {
+		cl.stance = BG_STANCE_PRONE;
+	}
+}
+static void IN_RaiseStance( void ) {
+	if ( !CL_STANCE_CONNECTED() || CL_TEMP_STANCE() ) {
+		return;
+	}
+	if ( cl.stance == BG_STANCE_CROUCH ) {
+		cl.stance = BG_STANCE_STAND;
+	} else if ( cl.stance == BG_STANCE_PRONE ) {
+		cl.stance = BG_STANCE_CROUCH;
+	}
+}
+
+// +gostand (0x5A5CD0): stand straight up; only from standing is it a jump.
+// UP is pressed in every stance (it flies a spectator).
+static void IN_GoStandDown( void ) {
+	if ( !CL_STANCE_CONNECTED() ) {
+		return;
+	}
+	IN_KeyDown( &in_up );
+	if ( cl.stance != BG_STANCE_STAND ) {
+		if ( !CL_TEMP_STANCE() ) {
+			cl.stance = BG_STANCE_STAND;
+		}
+	} else {
+		IN_KeyDown( &in_jump );
+	}
+}
+// -gostand (0x5A5D20)
+static void IN_GoStandUp( void ) {
+	if ( !CL_STANCE_CONNECTED() ) {
+		return;
+	}
+	IN_KeyUp( &in_up );
+	IN_KeyUp( &in_jump );
+}
+
+// +moveup (0x5A5690): one stance up (prone to crouch, crouch to stand); only
+// from standing is it a jump.
+void IN_UpDown( void ) {
+	IN_KeyDown( &in_up );
+	if ( CL_TEMP_STANCE() || !CL_STANCE_CONNECTED() ) {
+		return;
+	}
+	if ( cl.stance == BG_STANCE_CROUCH ) {
+		cl.stance = BG_STANCE_STAND;
+	} else if ( cl.stance == BG_STANCE_PRONE ) {
+		cl.stance = BG_STANCE_CROUCH;
+	} else {
+		IN_KeyDown( &in_jump );
+	}
+}
+// -moveup (0x5A56F0): no connection test
+void IN_UpUp( void ) {
+	IN_KeyUp( &in_up );
+	IN_KeyUp( &in_jump );
+}
+
+/*
+=================
+IN_SetStance
+
+_peaceSetStance <0-2>: MW2's CL_SetStance (0x4630A0), which its cgame calls on
+the player's own EV_STANCE_FORCE_* events and while the predicted playerstate
+has PMF_RESPAWNED. Peace's cgame reaches it as it reaches leaveads, through
+the console (owner's decision). A held stance key ignores it, and the hold is
+never touched: a pending hold still fires on time.
+=================
+*/
+static void IN_SetStance( void ) {
+	int stance;
+	if ( Cmd_Argc() < 2 ) {
+		return;
+	}
+	stance = atoi( Cmd_Argv( 1 ) );
+	if ( stance < BG_STANCE_STAND || stance > BG_STANCE_PRONE ) {
+		return;
+	}
+	if ( !CL_TEMP_STANCE() ) {
+		cl.stance = stance;
+	}
+}
+
 void IN_DownDown(void) {IN_KeyDown(&in_down);}
 void IN_DownUp(void) {IN_KeyUp(&in_down);}
 void IN_LeftDown(void) {IN_KeyDown(&in_left);}
@@ -279,6 +443,10 @@ void IN_Button19Down(void) {IN_KeyDown(&in_buttons[19]);}
 void IN_Button19Up(void) {IN_KeyUp(&in_buttons[19]);}
 void IN_Button21Down(void) {IN_KeyDown(&in_buttons[21]);}
 void IN_Button21Up(void) {IN_KeyUp(&in_buttons[21]);}
+// +prone / -prone (0x5A5A10, 0x5A5A20): MW2's PRONE kbutton, bit 22 =
+// BUTTON_PRONE as in its CL_CmdButtons (0x5A65FB). A held prone, not a toggle.
+static void IN_Button22Down(void) {IN_KeyDown(&in_buttons[22]);}
+static void IN_Button22Up(void) {IN_KeyUp(&in_buttons[22]);}
 // cgame reports the swap press as well as the desired slot. Equipment can
 // consume that intent without having to manufacture a different selection.
 static void IN_WeaponSwap(void) { in_buttons[20].wasPressed = qtrue; }
@@ -325,6 +493,60 @@ void CL_AdjustAngles( void ) {
 
 /*
 ================
+CL_AddCurrentStanceToCmd
+
+MW2's (0x5A5EF0): the client's stance as the command's level. Crouch and
+prone exclude each other; stand is neither. TEMP is never set from here.
+================
+*/
+static void CL_AddCurrentStanceToCmd( usercmd_t *cmd ) {
+	switch ( cl.stance ) {
+	case BG_STANCE_CROUCH:
+		cmd->buttons = ( cmd->buttons & ~( BUTTON_PRONE | BUTTON_TEMP_STANCE ) ) | BUTTON_CROUCH;
+		break;
+	case BG_STANCE_PRONE:
+		cmd->buttons = ( cmd->buttons & ~( BUTTON_CROUCH | BUTTON_TEMP_STANCE ) ) | BUTTON_PRONE;
+		break;
+	default:
+		cmd->buttons &= ~BUTTON_STANCE_MASK;
+		break;
+	}
+}
+
+/*
+================
+CL_StanceMove
+
+MW2's CL_KeyMove stance part (0x5A5F4B-0x5A5FD3), run after CL_CmdButtons on
+every command. A held +prone or +movedown sends its own stance with TEMP. Else
+a +stance hold fires on the first command whose frame time is at least
+cl_stanceHoldTime after the press (300 exactly fires): prone, or stand if it
+was armed from prone. Then the client's stance goes out. So a +prone tap
+shorter than one command is lost (CL_CmdButtons' bit 22 is overwritten here).
+================
+*/
+static qboolean cl_stanceHoldFired;	// for cl_debugButtons
+
+static void CL_StanceMove( usercmd_t *cmd ) {
+	if ( CL_TEMP_STANCE() ) {
+		if ( in_buttons[22].active ) {
+			cmd->buttons = ( cmd->buttons & ~BUTTON_CROUCH ) | BUTTON_PRONE;
+		} else {
+			cmd->buttons = ( cmd->buttons & ~BUTTON_PRONE ) | BUTTON_CROUCH;
+		}
+		cmd->buttons |= BUTTON_TEMP_STANCE;
+		return;
+	}
+	if ( cl.stanceHeld && com_frameTime - cl.stanceTime >= cl_stanceHoldTime->integer ) {
+		cl.stance = cl.stancePosition != BG_STANCE_PRONE ? BG_STANCE_PRONE : BG_STANCE_STAND;
+		cl.stanceHeld = qfalse;
+		cl_stanceHoldFired = qtrue;
+	}
+	CL_AddCurrentStanceToCmd( cmd );
+}
+
+/*
+================
 CL_KeyMove
 
 Sets the usercmd_t based on key states
@@ -332,7 +554,9 @@ Sets the usercmd_t based on key states
 */
 void CL_KeyMove( usercmd_t *cmd ) {
 	int		movespeed;
-	int		forward, side, up;
+	int		forward, side, up, fly, down;
+
+	CL_StanceMove( cmd );
 
 	//
 	// adjust for speed key / running
@@ -359,8 +583,24 @@ void CL_KeyMove( usercmd_t *cmd ) {
 	side -= movespeed * CL_KeyState (&in_moveleft);
 
 
-	up += movespeed * CL_KeyState (&in_up);
-	up -= movespeed * CL_KeyState (&in_down);
+	// MW2's jump is its own bit (0x400), never a sum: MOVEUP (+gostand and
+	// +moveup press it only from a standing stance), and UP for noclip and
+	// spectators (MW2's CL_CmdButtons 0x5A6635-0x5A66C4). DOWN never touches
+	// it: a held +movedown is a stance key (CL_StanceMove's CROUCH|TEMP) and
+	// only Quake's fly and swim down, so it goes into upmove only while
+	// nothing goes up. So a walker's upmove > 0 is the jump, held crouch or
+	// not: the crouch never cancels it (a release under a held jump is no
+	// fresh press, and a held crouch jumps off a ladder, as MW2's Jump_Check
+	// reads the bit). Every key is read every frame so its time never piles up.
+	up += movespeed * CL_KeyState (&in_jump);
+	fly = movespeed * CL_KeyState (&in_up);
+	down = movespeed * CL_KeyState (&in_down);
+	if ( cl.snap.ps.pm_type == PM_NOCLIP || cl.snap.ps.pm_type == PM_SPECTATOR ) {
+		up += fly;
+	}
+	if ( up <= 0 ) {
+		up -= down;
+	}
 
 	forward += movespeed * CL_KeyState (&in_forward);
 	forward -= movespeed * CL_KeyState (&in_back);
@@ -609,8 +849,9 @@ void CL_FinishMove( usercmd_t *cmd ) {
 CL_DebugButtons
 
 cl_debugButtons 1 prints, for each X (+usereload) and RT (+attack) press, the
-command it went out in and how far apart the two were. It only reports; it
-changes nothing.
+command it went out in and how far apart the two were, and the command a
++stance hold fired in and every change of a command's stance bits. It only
+reports; it changes nothing.
 
 Why it matters: the server asks for X's reload after it has run the command
 X went out in, and the gun takes it on the next command (MW2's
@@ -626,10 +867,25 @@ static void CL_DebugButtons( const usercmd_t *cmd ) {
 	static int xCmd = -1, rtCmd = -1;
 	static unsigned xTime, rtTime;
 	int risen = cmd->buttons & ~lastButtons;
+	int stanceChanged = ( cmd->buttons ^ lastButtons ) & BUTTON_STANCE_MASK;
+	qboolean holdFired = cl_stanceHoldFired;
 
 	lastButtons = cmd->buttons;
+	cl_stanceHoldFired = qfalse;
 	if ( !cl_debugButtons || !cl_debugButtons->integer ) {
 		return;
+	}
+	// MW2's stance: where a +stance hold fired, and every change of the
+	// command's stance level (prone, crouch, temp from a held key)
+	if ( holdFired ) {
+		Com_Printf( "^3buttons:^7 cmd %i (frame %ims): +stance hold fired at %ims (pressed at %i, now %i)\n",
+			cl.cmdNumber, (int)frame_msec, com_frameTime - cl.stanceTime, cl.stanceTime, com_frameTime );
+	}
+	if ( stanceChanged ) {
+		Com_Printf( "^3buttons:^7 cmd %i (frame %ims, time %i): stance bits%s%s%s%s\n", cl.cmdNumber,
+			(int)frame_msec, com_frameTime, ( cmd->buttons & BUTTON_STANCE_MASK ) ? "" : " none (stand)",
+			( cmd->buttons & BUTTON_PRONE ) ? " PRONE" : "", ( cmd->buttons & BUTTON_CROUCH ) ? " CROUCH" : "",
+			( cmd->buttons & BUTTON_TEMP_STANCE ) ? " TEMP" : "" );
 	}
 	// cl.cmdNumber starts again at each connection
 	if ( xCmd > cl.cmdNumber ) xCmd = -1;
@@ -1034,6 +1290,20 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-moveup",IN_UpUp);
 	Cmd_AddCommand ("+movedown",IN_DownDown);
 	Cmd_AddCommand ("-movedown",IN_DownUp);
+	// MW2's stance commands (CL_InitInput 0x45E7B7-0x45E7D0 and beside)
+	Cmd_AddCommand ("+stance",IN_StanceDown);
+	Cmd_AddCommand ("-stance",IN_StanceUp);
+	Cmd_AddCommand ("togglecrouch",IN_ToggleCrouch);
+	Cmd_AddCommand ("toggleprone",IN_ToggleProne);
+	Cmd_AddCommand ("goprone",IN_GoProne);
+	Cmd_AddCommand ("gocrouch",IN_GoCrouch);
+	Cmd_AddCommand ("lowerstance",IN_LowerStance);
+	Cmd_AddCommand ("raisestance",IN_RaiseStance);
+	Cmd_AddCommand ("+gostand",IN_GoStandDown);
+	Cmd_AddCommand ("-gostand",IN_GoStandUp);
+	Cmd_AddCommand ("+prone",IN_Button22Down);	// BUTTON_PRONE = bit 22
+	Cmd_AddCommand ("-prone",IN_Button22Up);
+	Cmd_AddCommand ("_peaceSetStance",IN_SetStance);	// cgame's CL_SetStance
 	Cmd_AddCommand ("+left",IN_LeftDown);
 	Cmd_AddCommand ("-left",IN_LeftUp);
 	Cmd_AddCommand ("+right",IN_RightDown);
@@ -1118,6 +1388,9 @@ void CL_InitInput( void ) {
 	cl_nodelta = Cvar_Get ("cl_nodelta", "0", 0);
 	cl_debugMove = Cvar_Get ("cl_debugMove", "0", 0);
 	cl_debugButtons = Cvar_Get ("cl_debugButtons", "0", 0);
+	// MW2's cl_stanceHoldTime (0x45E9FD-0x45EA2D): int 300, 0..1000, not archived
+	cl_stanceHoldTime = Cvar_Get ("cl_stanceHoldTime", "300", 0);
+	Cvar_CheckRange (cl_stanceHoldTime, 0, 1000, qtrue);
 }
 
 /*
@@ -1133,6 +1406,19 @@ void CL_ShutdownInput(void)
 	Cmd_RemoveCommand("-moveup");
 	Cmd_RemoveCommand("+movedown");
 	Cmd_RemoveCommand("-movedown");
+	Cmd_RemoveCommand("+stance");
+	Cmd_RemoveCommand("-stance");
+	Cmd_RemoveCommand("togglecrouch");
+	Cmd_RemoveCommand("toggleprone");
+	Cmd_RemoveCommand("goprone");
+	Cmd_RemoveCommand("gocrouch");
+	Cmd_RemoveCommand("lowerstance");
+	Cmd_RemoveCommand("raisestance");
+	Cmd_RemoveCommand("+gostand");
+	Cmd_RemoveCommand("-gostand");
+	Cmd_RemoveCommand("+prone");
+	Cmd_RemoveCommand("-prone");
+	Cmd_RemoveCommand("_peaceSetStance");
 	Cmd_RemoveCommand("+left");
 	Cmd_RemoveCommand("-left");
 	Cmd_RemoveCommand("+right");

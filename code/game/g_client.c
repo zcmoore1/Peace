@@ -515,17 +515,39 @@ SetClientViewAngle
 ==================
 */
 void SetClientViewAngle( gentity_t *ent, vec3_t angle ) {
-	int			i;
+	playerState_t	*ps = &ent->client->ps;
+	vec3_t			view;
+	float			d;
+	int				i;
+
+	// MW2's (0x428010-0x42823F): a prone player's new view keeps the prone
+	// view's limits, the yaw within BG_PRONE_YAW_CAP of the body and the
+	// pitch within BG_PRONE_PITCH_CAP of proneTorsoPitch (PM_ProneViewAngles)
+	VectorCopy( angle, view );
+	if ( ps->pm_flags & PMF_PRONE ) {
+		d = BG_AngleDelta( ps->proneDirection, view[YAW] );
+		if ( d > BG_PRONE_YAW_CAP ) {
+			view[YAW] = BG_AngleNormalize360( ps->proneDirection - BG_PRONE_YAW_CAP );
+		} else if ( d < -BG_PRONE_YAW_CAP ) {
+			view[YAW] = BG_AngleNormalize360( ps->proneDirection + BG_PRONE_YAW_CAP );
+		}
+		d = BG_AngleDelta( ps->proneTorsoPitch, view[PITCH] );
+		if ( d > BG_PRONE_PITCH_CAP ) {
+			view[PITCH] = BG_AngleNormalize180( ps->proneTorsoPitch - BG_PRONE_PITCH_CAP );
+		} else if ( d < -BG_PRONE_PITCH_CAP ) {
+			view[PITCH] = BG_AngleNormalize180( ps->proneTorsoPitch + BG_PRONE_PITCH_CAP );
+		}
+	}
 
 	// set the delta angle
 	for (i=0 ; i<3 ; i++) {
 		int		cmdAngle;
 
-		cmdAngle = ANGLE2SHORT(angle[i]);
-		ent->client->ps.delta_angles[i] = cmdAngle - ent->client->pers.cmd.angles[i];
+		cmdAngle = ANGLE2SHORT(view[i]);
+		ps->delta_angles[i] = cmdAngle - ent->client->pers.cmd.angles[i];
 	}
-	VectorCopy( angle, ent->s.angles );
-	VectorCopy (ent->s.angles, ent->client->ps.viewangles);
+	VectorCopy( view, ent->s.angles );
+	VectorCopy (ent->s.angles, ps->viewangles);
 }
 
 /*
@@ -1231,8 +1253,12 @@ void ClientSpawn(gentity_t *ent) {
 	G_SetOrigin( ent, spawn_origin );
 	VectorCopy( spawn_origin, client->ps.origin );
 
-	// the respawned flag will be cleared after the attack and jump keys come up
+	// the respawned flag will be cleared after the attack and prone come up
 	client->ps.pm_flags |= PMF_RESPAWNED;
+	// MW2's spawn eye (0x47DB25): standing, no leg running, before the spawn
+	// angles are set so they are never prone-clamped. A spawn that runs no
+	// Pmove (S&D's frozen start) has its eye from here.
+	BG_SpawnStance( &client->ps );
 
 	trap_GetUsercmd( client - level.clients, &ent->client->pers.cmd );
 	SetClientViewAngle( ent, spawn_angles );

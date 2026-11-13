@@ -153,6 +153,64 @@ void SnapVectorTowards( vec3_t v, vec3_t to ) {
 	}
 }
 
+/*
+======================
+G_ShotTrace
+
+A bullet's or a pellet's trace for its damage (Bullet_Fire, ShotgunPellet):
+the world and every entity's box (trap_Trace), then the bullet-only hit
+volumes MW2's skeleton is approximated by (BG_PlayerHitVolumes, owner's
+decision: bullets and pellets only): a player whose eye is still above their
+box on a downward stance leg, and a prone body lying behind its origin. The
+nearest entry wins, so a shot that reaches one of those volumes before
+anything else hits that player there. Each target's volumes come from its
+entity, as every client's drawn bullet reads them (CG_ShotTrace), around the
+box the engine traced: r.currentOrigin, r.mins and r.maxs. The railgun, the
+lightning gun, knives, melee, missiles and explosions never come here and
+keep the box.
+======================
+*/
+void G_ShotTrace( trace_t *tr, const vec3_t start, const vec3_t end, int passent ) {
+	bgHitVolume_t	vols[BG_MAX_HIT_VOLUMES];
+	gentity_t		*target;
+	vec3_t			normal, hitNormal;
+	float			fraction, best;
+	int				i, n, v, hit = -1;
+
+	trap_Trace( tr, start, NULL, NULL, end, passent, MASK_SHOT );
+	best = tr->fraction;
+	for ( i = 0; i < level.maxclients; i++ ) {
+		target = &g_entities[i];
+		if ( i == passent || !target->inuse || !target->r.linked || target->s.eType != ET_PLAYER ||
+		     !( target->r.contents & MASK_SHOT ) ) {
+			continue;
+		}
+		n = BG_PlayerHitVolumes( &target->s, target->r.currentOrigin, target->r.mins, target->r.maxs, vols );
+		for ( v = 1; v < n; v++ ) {	// vols[0], the box, is the engine trace's
+			if ( BG_HitVolumeTrace( &vols[v], start, end, &fraction, normal ) && fraction < best ) {
+				best = fraction;
+				hit = i;
+				VectorCopy( normal, hitNormal );
+			}
+		}
+	}
+	if ( hit < 0 ) {
+		return;
+	}
+	tr->fraction = best;
+	tr->allsolid = tr->startsolid = qfalse;
+	tr->endpos[0] = start[0] + best * ( end[0] - start[0] );
+	tr->endpos[1] = start[1] + best * ( end[1] - start[1] );
+	tr->endpos[2] = start[2] + best * ( end[2] - start[2] );
+	VectorCopy( hitNormal, tr->plane.normal );
+	tr->plane.dist = DotProduct( tr->endpos, hitNormal );
+	tr->plane.type = PlaneTypeForNormal( hitNormal );
+	SetPlaneSignbits( &tr->plane );
+	tr->surfaceFlags = 0;
+	tr->contents = CONTENTS_BODY;
+	tr->entityNum = hit;
+}
+
 #ifdef MISSIONPACK
 #define CHAINGUN_DAMAGE		7
 #endif
@@ -195,7 +253,7 @@ void Bullet_Fire (gentity_t *ent, int damage, int mod ) {
 	passent = ent->s.number;
 	for (i = 0; i < 10; i++) {
 
-		trap_Trace (&tr, muzzle, NULL, NULL, end, passent, MASK_SHOT);
+		G_ShotTrace( &tr, muzzle, end, passent );
 		if ( tr.surfaceFlags & SURF_NOIMPACT ) {
 			return;
 		}
@@ -285,7 +343,7 @@ qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent ) {
 	VectorCopy( start, tr_start );
 	VectorCopy( end, tr_end );
 	for (i = 0; i < 10; i++) {
-		trap_Trace (&tr, tr_start, NULL, NULL, tr_end, passent, MASK_SHOT);
+		G_ShotTrace( &tr, tr_start, tr_end, passent );
 		traceEnt = &g_entities[ tr.entityNum ];
 
 		// send bullet impact

@@ -319,7 +319,6 @@ static void CG_OffsetFirstPersonView( void ) {
 	float			ratio;
 	float			delta;
 	float			f;
-	int				timeDelta;
 	
 	if ( cg.snap->ps.pm_type == PM_INTERMISSION ) {
 		return;
@@ -366,15 +365,9 @@ static void CG_OffsetFirstPersonView( void ) {
 
 //===================================
 
-	// add view height
+	// add view height: the playerstate's eye, which pmove moves along MW2's
+	// curve (no cgame ease)
 	origin[2] += cg.predictedPlayerState.viewheight;
-
-	// smooth out duck height changes
-	timeDelta = cg.time - cg.duckTime;
-	if ( timeDelta < DUCK_TIME) {
-		cg.refdef.vieworg[2] -= cg.duckChange 
-			* (DUCK_TIME - timeDelta) / DUCK_TIME;
-	}
 
 	// MW2's camera bob (CG_OffsetFirstPersonView): up on z and across the view's
 	// right, sized by stance, sprint and aim. The cycle holds still in the air,

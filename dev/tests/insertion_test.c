@@ -392,9 +392,16 @@ static void TestSpawn(void) {
  CHECK(cl[0].ps.cursorHintEntIndex!=number && g_entities[0].health>0 && cl[0].ps.ammo[WP_TACTICAL_INSERTION]==1);
  CHECK(cl[0].insertionSpotValid && VectorCompare(cl[0].insertionSpot,spot));	/* the new life's first spot */
  CHECK(g_entities[1].health>0);
- /* the next life spawns normally: it was used up */
+ /* the next life spawns normally: it was used up. It died lying down, its
+  * body turned away: MW2's spawn eye stands it up with no leg running, before
+  * the spawn's angles, which no prone clamp touches (BG_SpawnStance) */
+ cl[0].ps.pm_flags|=PMF_PRONE|PMF_PRONEMOVE_OVERRIDDEN; cl[0].ps.viewHeightTarget=BG_EYE_PRONE;
+ cl[0].ps.viewheight=PRONE_VIEWHEIGHT; cl[0].ps.proneDirection=270; cl[0].ps.viewHeightLerpTarget=BG_EYE_PRONE;
  Die(0); ClientSpawn(&g_entities[0]);
  CHECK(cl[0].ps.origin[0]==-800 && cl[0].ps.origin[1]==0 && NEAR(cl[0].ps.viewangles[YAW],90));
+ CHECK(!(cl[0].ps.pm_flags&(PMF_PRONE|PMF_DUCKED|PMF_PRONEMOVE_OVERRIDDEN)) && cl[0].ps.viewheight==DEFAULT_VIEWHEIGHT);
+ CHECK(cl[0].ps.viewHeightTarget==BG_EYE_STAND && !cl[0].ps.viewHeightLerpTarget && g_entities[0].r.maxs[2]==DEFAULT_HEIGHT);
+ CHECK(!(g_entities[0].s.eFlags&(EF_PRONE|EF_CROUCHING)) && g_entities[0].s.origin2[2]==DEFAULT_VIEWHEIGHT);
  /* someone standing on it: a normal spawn, the TI gone, nobody telefragged */
  ti=Planted(0,100,50); VectorCopy(ti->pos1,spot);
  Stand(1,spot[0]+10,spot[1],spot[2]); Stand(0,-300,300,24); Die(0);

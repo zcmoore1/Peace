@@ -767,8 +767,40 @@ static void TestEventRing(void) {
    CHECK(w->s.eventSequence==0 && w->s.events[3]==EV_GENERAL_SOUND && w->s.eventParms[3]==5); }
 }
 
+/* Lying down (dev/STANCE.md): MW2's death drop reads no stance, so a prone
+ * holder's grenade leaves BG_OFFHAND_DEATH_HEIGHT above the origin as a
+ * standing one's does (5df990-5df9b0); a prone throw leaves from the prone
+ * eye's muzzle, as every reach reads ps.viewheight. */
+static void ProneOut(void) {
+ int t;
+ for(t=0;t<1000 && !(ps->viewHeightTarget==BG_EYE_PRONE && !ps->viewHeightLerpTarget);t+=CMD_MSEC) Frame(BUTTON_PRONE);
+ CHECK((ps->pm_flags&PMF_PRONE) && ps->viewheight==PRONE_VIEWHEIGHT && g_entities[THROWER].r.maxs[2]==PRONE_HEIGHT);
+ Frame(Button(WP_FRAG)|BUTTON_PRONE);
+ for(t=0;t<10000 && !(ps->weapon==WP_FRAG && ps->weaponstate==WEAPON_READY);t+=CMD_MSEC) Frame(Button(WP_FRAG)|BUTTON_PRONE);
+ CHECK(ps->weapon==WP_FRAG && ps->grenadeTimeLeft>0 && (ps->pm_flags&PMF_PRONE));
+}
+static void TestProne(void) {
+ int from; gentity_t *m=NULL; vec3_t at;
+ Reset(FRAG); from=level.num_entities;
+ ProneOut();
+ VectorCopy(g_entities[THROWER].r.currentOrigin,at);
+ Kill();
+ CHECK(Spawned(from,&m)==1 && NEAR(m->s.pos.trBase[0],at[0]) && NEAR(m->s.pos.trBase[1],at[1]) &&
+  NEAR(m->s.pos.trBase[2],at[2]+BG_OFFHAND_DEATH_HEIGHT));
+ /* thrown lying down: from the prone muzzle */
+ Reset(FRAG); from=level.num_entities;
+ ProneOut();
+ Command(BUTTON_PRONE);
+ CHECK(Spawned(from,&m)==1 && (ps->weaponAction&WA_FIRED));
+ { vec3_t forward, muzzle; AngleVectors(ps->viewangles,forward,NULL,NULL);
+   VectorCopy(g_entities[THROWER].s.pos.trBase,muzzle); muzzle[2]+=PRONE_VIEWHEIGHT; VectorMA(muzzle,14,forward,muzzle);
+   SnapVector(muzzle); CHECK(VectorCompare(m->s.pos.trBase,muzzle)); }
+ World();
+}
+
 int main(void) {
  TestData(); TestThrow(); TestCook(); TestChoppedCookOut(); TestDeathDrop(); TestReleaseOnFatalFall();
+ TestProne();
  TestEventRing();
  printf("PASS: %d offhand server checks\n",checks); return 0;
 }

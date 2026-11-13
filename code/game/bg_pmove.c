@@ -35,11 +35,12 @@ pml_t		pml;
 float	pm_stopspeed = 100.0f;	// MW2's stopspeed (0x7A9F9C)
 float	pm_swimScale = 0.50f;
 
-// MW2's walk acceleration by stance (PM_WalkMove 0x5733A5: 0x739B9C, 0x6F6CBC);
-// prone's 19 waits for prone. Slick ground and knockback take 1.0 there,
-// as the air does (0x5730C8).
+// MW2's walk acceleration by stance (PM_WalkMove 0x5733A5: 0x739B9C, 0x6F6CBC,
+// prone 0x739B94). Slick ground and knockback take 1.0 there, as the air does
+// (0x5730C8).
 float	pm_accelerate = 9.0f;
 float	pm_duckaccelerate = 12.0f;
+float	pm_proneaccelerate = 19.0f;
 float	pm_airaccelerate = 1.0f;
 float	pm_wateraccelerate = 4.0f;
 float	pm_flyaccelerate = 8.0f;
@@ -52,6 +53,10 @@ float	pm_flightfriction = 3.0f;
 float	pm_spectatorfriction = 5.0f;
 
 int		c_pmove = 0;
+
+// MW2's stance (PM_CheckDuck and its helpers, below)
+static qboolean	PM_StanceFits( float top );
+static qboolean	PM_ProneEntryCheck( void );
 
 
 /*
@@ -185,8 +190,8 @@ MW2's view bob
 
 BG_GetPlayerViewOrigin and CG_OffsetFirstPersonView in MW2's executable: the
 eye moves by a vertical bob on z and a horizontal bob along the view's right,
-each an amplitude (by stance and sprint, blended with aiming, per unit of
-speed, never above BG_VIEWBOB_MAX) times a curve of the bob cycle. The cycle
+each an amplitude (by stance and sprint, blended with aiming but not prone,
+per unit of speed, never above BG_VIEWBOB_MAX) times a curve of the bob cycle. The cycle
 freezes in the air, so a sprint switching on or off there moves the camera.
 No angle bob at the hip. Amplitudes are { horizontal, vertical }.
 ==================
@@ -196,6 +201,7 @@ static const float bg_viewBobStanding[2]    = { 0.007f,  0.007f  };
 static const float bg_viewBobStandingAds[2] = { 0.007f,  0.007f  };
 static const float bg_viewBobDucked[2]      = { 0.0075f, 0.0075f };
 static const float bg_viewBobDuckedAds[2]   = { 0.0075f, 0.0075f };
+static const float bg_viewBobProne[2]       = { 0.02f,   0.005f  };	// bg_viewBobAmplitudeProne (0x44825F)
 #define BG_VIEWBOB_MAX 8.0f
 
 float BG_ViewBobCycle( const playerState_t *ps ) {
@@ -204,7 +210,10 @@ float BG_ViewBobCycle( const playerState_t *ps ) {
 
 static float BG_ViewBobAmplitude( const playerState_t *ps, int axis, float speed, float adsFrac ) {
 	float amp;
-	if ( ps->pm_flags & PMF_DUCKED ) {
+	// MW2 picks prone first, on its eye target, with no aim blend
+	if ( ps->pm_flags & PMF_PRONE ) {
+		amp = bg_viewBobProne[axis];
+	} else if ( ps->pm_flags & PMF_DUCKED ) {
 		amp = ( 1.0f - adsFrac ) * bg_viewBobDucked[axis] + adsFrac * bg_viewBobDuckedAds[axis];
 	} else if ( ps->pm_flags & PMF_SPRINTING ) {
 		amp = bg_viewBobSprinting[axis];
@@ -427,15 +436,59 @@ static float PM_CmdScale( usercmd_t *cmd ) {
 
 /*
 ============
+BG_StanceScale
+
+MW2's PM_CmdScaleForStance (0x572C50): the stance's share of the walk, keyed
+to the eye. Into prone the crouch's scale ramps down to prone's over the
+crouch-to-prone leg, and out of it up again over the prone-to-crouch leg,
+linear in the leg's time; otherwise the eye target's own scale. A leg's first
+think (no time in it yet) takes the target's flat scale, as MW2's does. It is
+read from the playerstate every think, never stored, so substeps and the
+prediction replay cannot compound it.
+============
+*/
+static float BG_StanceScale( const playerState_t *ps ) {
+	float	f;
+
+	if ( ps->viewHeightLerpTarget == BG_EYE_PRONE ) {
+		f = (float)ps->viewHeightLerpTime / BG_PRONE_LERP_MS;
+		if ( f > 1.0f ) {
+			return BG_PRONE_SPEED_SCALE;
+		}
+		if ( f > 0.0f ) {
+			return ( 1.0f - f ) * BG_CROUCH_SPEED_SCALE + f * BG_PRONE_SPEED_SCALE;
+		}
+	} else if ( ps->viewHeightLerpTarget == BG_EYE_CROUCH && !ps->viewHeightLerpDown ) {
+		f = (float)ps->viewHeightLerpTime / BG_PRONE_LERP_MS;
+		if ( f > 1.0f ) {
+			return BG_CROUCH_SPEED_SCALE;
+		}
+		if ( f > 0.0f ) {
+			return ( 1.0f - f ) * BG_PRONE_SPEED_SCALE + f * BG_CROUCH_SPEED_SCALE;
+		}
+	}
+	switch ( ps->viewHeightTarget ) {
+	case BG_EYE_PRONE:
+		return BG_PRONE_SPEED_SCALE;
+	case BG_EYE_CROUCH:
+		return BG_CROUCH_SPEED_SCALE;
+	default:
+		return 1.0f;
+	}
+}
+
+/*
+============
 PM_WalkScale
 
 MW2's PM_CmdScale_Walk (0x572DB0), the walk's only scale. The stick alone
 counts (MW2's jump is a button): a backward forwardmove is worth
 BG_BACK_SPEED_SCALE of itself and a rightmove BG_STRAFE_SPEED_SCALE, and the
 larger sets the magnitude, so the scales never turn the direction. Then
-aiming, the sprint, the crouch and the aimed gun's adsMoveSpeedScale, each a
-float multiply, and the class speed last (0x572FD0). The result is this
-command's; nothing is written into ps.speed or the command.
+aiming, the sprint, the stance (BG_StanceScale: crouch, prone and the ramps
+between) and the aimed gun's adsMoveSpeedScale, each a float multiply, and the
+class speed last (0x572FD0). The result is this command's; nothing is written
+into ps.speed or the command.
 ============
 */
 static float PM_WalkScale( int forwardmove, int rightmove ) {
@@ -456,9 +509,7 @@ static float PM_WalkScale( int forwardmove, int rightmove ) {
 	if ( pm->ps->pm_flags & PMF_SPRINTING ) {
 		scale *= BG_SPRINT_SPEED_SCALE;
 	}
-	if ( pm->ps->pm_flags & PMF_DUCKED ) {
-		scale *= BG_CROUCH_SPEED_SCALE;
-	}
+	scale *= BG_StanceScale( pm->ps );
 	// MW2 takes the gun's moveSpeedScale at the hip (1 on every gun Peace
 	// models) and its adsMoveSpeedScale while aiming.
 	if ( pm->ps->pm_flags & PMF_ADS ) {
@@ -505,26 +556,26 @@ static float PM_AirScale( int forwardmove, int rightmove ) {
 PM_SetMovementDir
 
 Determine the rotation of the legs relative
-to the facing dir
+to the facing dir, from this think's moves (a prone crawl stop zeroes them)
 ================
 */
 static void PM_SetMovementDir( void ) {
-	if ( pm->cmd.forwardmove || pm->cmd.rightmove ) {
-		if ( pm->cmd.rightmove == 0 && pm->cmd.forwardmove > 0 ) {
+	if ( pml.forwardmove || pml.rightmove ) {
+		if ( pml.rightmove == 0 && pml.forwardmove > 0 ) {
 			pm->ps->movementDir = 0;
-		} else if ( pm->cmd.rightmove < 0 && pm->cmd.forwardmove > 0 ) {
+		} else if ( pml.rightmove < 0 && pml.forwardmove > 0 ) {
 			pm->ps->movementDir = 1;
-		} else if ( pm->cmd.rightmove < 0 && pm->cmd.forwardmove == 0 ) {
+		} else if ( pml.rightmove < 0 && pml.forwardmove == 0 ) {
 			pm->ps->movementDir = 2;
-		} else if ( pm->cmd.rightmove < 0 && pm->cmd.forwardmove < 0 ) {
+		} else if ( pml.rightmove < 0 && pml.forwardmove < 0 ) {
 			pm->ps->movementDir = 3;
-		} else if ( pm->cmd.rightmove == 0 && pm->cmd.forwardmove < 0 ) {
+		} else if ( pml.rightmove == 0 && pml.forwardmove < 0 ) {
 			pm->ps->movementDir = 4;
-		} else if ( pm->cmd.rightmove > 0 && pm->cmd.forwardmove < 0 ) {
+		} else if ( pml.rightmove > 0 && pml.forwardmove < 0 ) {
 			pm->ps->movementDir = 5;
-		} else if ( pm->cmd.rightmove > 0 && pm->cmd.forwardmove == 0 ) {
+		} else if ( pml.rightmove > 0 && pml.forwardmove == 0 ) {
 			pm->ps->movementDir = 6;
-		} else if ( pm->cmd.rightmove > 0 && pm->cmd.forwardmove > 0 ) {
+		} else if ( pml.rightmove > 0 && pml.forwardmove > 0 ) {
 			pm->ps->movementDir = 7;
 		}
 	} else {
@@ -562,11 +613,11 @@ static qboolean PM_CheckJump( void ) {
 		return qfalse;
 	}
 
-	// MW2's Jump_Check: no jump within BG_JUMP_WAIT of the last one, and none
-	// from a stance PM_CheckDuck could not raise to standing (a ceiling too low
-	// to stand under). The press is spent, so holding on never jumps; it takes
-	// a fresh press.
-	if ( pm->ps->jumpWait > 0 || ( pm->ps->pm_flags & PMF_DUCKED ) ) {
+	// MW2's Jump_Check (0x4E9840): no jump within BG_JUMP_WAIT of the last
+	// one, and none unless the effective stance (the eye target, which the
+	// flags follow) is standing: crouched, prone, or on a leg down. The press
+	// is spent, so holding on never jumps; it takes a fresh press.
+	if ( pm->ps->jumpWait > 0 || ( pm->ps->pm_flags & ( PMF_DUCKED | PMF_PRONE ) ) ) {
 		pm->ps->pm_flags |= PMF_JUMP_HELD;
 		pm->cmd.upmove = 0;
 		return qfalse;
@@ -844,7 +895,7 @@ static void PM_AirMove( void ) {
 
 	// pml.rightmove: a take-off from a sprint keeps the walk's sprint strafe
 	// for this think, as MW2's air move reads the command its walk scaled.
-	fmove = pm->cmd.forwardmove;
+	fmove = pml.forwardmove;
 	smove = pml.rightmove;
 
 	scale = PM_AirScale( fmove, smove );
@@ -889,6 +940,20 @@ static void PM_AirMove( void ) {
 #endif
 
 	PM_StepSlideMove ( qtrue );
+
+	// MW2's PM_AirMove (0x573151-0x57321E): prone in the air with no room for
+	// the body (the entry's check, 0x570700), it crouches at once if the
+	// crouch box fits - even mid-leg, where the eye's next think reverses -
+	// and resets the client's stance. MW2 leaves its bounds to the next
+	// PM_CheckDuck; Peace's box follows the flags now (BG_PlayerBox, the one
+	// box rule), so the entity and everyone's traces agree with the flags.
+	if ( ( pm->ps->pm_flags & PMF_PRONE ) && pm->ps->pm_type < PM_DEAD &&
+	     !PM_ProneEntryCheck() && PM_StanceFits( CROUCH_HEIGHT ) ) {
+		pm->ps->pm_flags = ( pm->ps->pm_flags & ~PMF_PRONE ) | PMF_DUCKED;
+		pm->ps->viewHeightTarget = BG_EYE_CROUCH;
+		BG_PlayerBox( pm->ps, pm->mins, pm->maxs );
+		BG_AddPredictableEventToPlayerstate( EV_STANCE_FORCE_CROUCH, BG_STANCE_PARM_FORCED, pm->ps );
+	}
 }
 
 /*
@@ -929,9 +994,11 @@ static void PM_CheckLadder( void ) {
 	vec3_t inward, lower, angles;
 	int state = pm->ps->stats[STAT_LADDER];
 	qboolean found;
+	// MW2 attaches no ladder while the effective stance is prone (0x573DE6);
+	// a crouched player attaches, and PM_CheckDuck stands them up there.
 	if ( pm->ps->pm_type != PM_NORMAL || pm->ps->stats[STAT_HEALTH] <= 0 ||
 		pm->waterlevel > 1 || pm->ps->powerups[PW_FLIGHT] ||
-		(pm->ps->pm_flags & (PMF_TIME_WATERJUMP | PMF_GRAPPLE_PULL))
+		(pm->ps->pm_flags & (PMF_TIME_WATERJUMP | PMF_GRAPPLE_PULL | PMF_PRONE))
 #ifdef MISSIONPACK
 		|| pm->ps->powerups[PW_INVULNERABILITY]
 #endif
@@ -1116,7 +1183,7 @@ static void PM_WalkMove( void ) {
 
 	PM_Friction ();
 
-	fmove = pm->cmd.forwardmove;
+	fmove = pml.forwardmove;
 	smove = pml.rightmove;
 
 	scale = PM_WalkScale( fmove, smove );
@@ -1163,6 +1230,8 @@ static void PM_WalkMove( void ) {
 	// acceleration by stance (0x5733A5)
 	if ( ( pml.groundTrace.surfaceFlags & SURF_SLICK ) || pm->ps->pm_flags & PMF_TIME_KNOCKBACK ) {
 		accelerate = pm_airaccelerate;
+	} else if ( pm->ps->pm_flags & PMF_PRONE ) {
+		accelerate = pm_proneaccelerate;
 	} else if ( pm->ps->pm_flags & PMF_DUCKED ) {
 		accelerate = pm_duckaccelerate;
 	} else {
@@ -1242,7 +1311,14 @@ static void PM_NoclipMove( void ) {
 	float		wishspeed;
 	float		scale;
 
+	// MW2's noclip sets the eye target standing (0x5747B9); Peace also drops
+	// the stance and any leg at once (a cheat, never a play state).
 	pm->ps->viewheight = DEFAULT_VIEWHEIGHT;
+	pm->ps->viewHeightTarget = BG_EYE_STAND;
+	pm->ps->viewHeightLerpTarget = 0;
+	pm->ps->viewHeightLerpTime = 0;
+	pm->ps->viewHeightLerpDown = 0;
+	pm->ps->pm_flags &= ~( PMF_DUCKED | PMF_PRONE );
 
 	// friction
 
@@ -1315,14 +1391,14 @@ PM_BobMaxSpeed
 MW2's PM_GetMaxSpeed (0x573850), the most this posture can go, which only the
 bob's rate reads: the base speed mixed by the stick's direction (MW2's own
 mix of the strafe and back scales, not the walk's), aiming or the sprint,
-the aimed gun's adsMoveSpeedScale and the crouch. Unlike the walk it leaves
+the aimed gun's adsMoveSpeedScale and the stance (BG_StanceScale). Unlike the walk it leaves
 out the class speed and Lightweight, so a rifle class's bob runs at 95% of
 the rate (re/bob_verify.txt B22, B33).
 =================
 */
 static float PM_BobMaxSpeed( void ) {
 	float	speed = pm->ps->speed;
-	int		fm = pm->cmd.forwardmove, rm = pml.rightmove;
+	int		fm = pml.forwardmove, rm = pml.rightmove;
 
 	if ( fm ) {
 		if ( rm ) {
@@ -1341,10 +1417,9 @@ static float PM_BobMaxSpeed( void ) {
 	} else if ( pm->ps->pm_flags & PMF_SPRINTING ) {
 		speed *= BG_SPRINT_SPEED_SCALE;
 	}
-	if ( pm->ps->pm_flags & PMF_DUCKED ) {
-		speed *= BG_CROUCH_SPEED_SCALE;
-	}
-	return speed;
+	// MW2 ends with PM_CmdScaleForStance (0x57395F): the crouch, prone and
+	// the ramps between
+	return speed * BG_StanceScale( pm->ps );
 }
 
 /*
@@ -1504,6 +1579,21 @@ static int PM_CorrectAllSolid( trace_t *trace ) {
 
 /*
 =============
+BG_TraceWalkable
+
+MW2's trace walkable byte (trace+0x2A, set by every trace as !startsolid &&
+normal[2] >= 0.7: 0x424999-0x4249BF, 0x4783CC-0x4783F9). Peace's trace_t has
+no such field, so it is computed where MW2 reads it: the prone room check's
+waist and feet traces and the prone pitch's ground trace. It is not
+BG_CheckProne's groundIsWalkable parameter, which MW2 tests only with onGround.
+=============
+*/
+qboolean BG_TraceWalkable( const trace_t *tr ) {
+	return !tr->startsolid && tr->plane.normal[2] >= MIN_WALK_NORMAL;
+}
+
+/*
+=============
 PM_GroundTraceMissed
 
 The ground trace didn't hit a surface, so we are in freefall
@@ -1656,7 +1746,10 @@ static void PM_SetWaterLevel( void ) {
 	int			sample2;
 
 	//
-	// get waterlevel, accounting for ducking
+	// get waterlevel, from the standing eye in every stance: MW2's stance
+	// code reads no water and MW2 has no water mover, so neither a crouch nor
+	// prone (whose eye is 11 above the feet) may swim or drown in water a
+	// standing player wades in, and an eye leg never moves the level
 	//
 	pm->waterlevel = 0;
 	pm->watertype = 0;
@@ -1667,7 +1760,7 @@ static void PM_SetWaterLevel( void ) {
 	cont = pm->pointcontents( point, pm->ps->clientNum );
 
 	if ( cont & MASK_WATER ) {
-		sample2 = pm->ps->viewheight - MINS_Z;
+		sample2 = BG_WATER_SAMPLE_EYE;
 		sample1 = sample2 / 2;
 
 		pm->watertype = cont;
@@ -1687,18 +1780,672 @@ static void PM_SetWaterLevel( void ) {
 }
 
 /*
+=============================================================================
+
+MW2'S STANCE
+
+PM_CheckDuck (0x570A90), the eye's curve (PM_ViewHeightAdjust 0x570270), the
+prone room check (BG_CheckProneValid 0x420EB0, through the wrapper 0x43D920)
+and prone's entry (0x570830), pitch (0x5723C0), view (0x571ED0) and crawl
+rules (PmoveSingle 0x57448B-0x574782). dev/STANCE.md has the whole design.
+
+Eye heights here are MW2 units above the feet (BG_EYE_*); ps->viewheight is
+the same eye above Peace's origin, MINS_Z's 24 lower, exact in float both
+ways. MW2 keeps a running leg's start time; Peace keeps the time since it
+started (viewHeightLerpTime), advanced once a think at the top of
+PM_CheckDuck by pml.msec, which is MW2's serverTime - lerpTime: Pmove's
+chopped steps sum to the command. A leg is running while
+viewHeightLerpTarget is set (MW2: lerpTime != 0). Nothing here is a clock the
+replay rebases.
+
+=============================================================================
+*/
+
+#define BG_EYE_LEG_MS			200		// MW2's stand-crouch legs (0x4BFAE0: 0xc8)
+#define BG_EYE_DEAD_RATE		180.0f	// the dead eye's fall, units a second (0x6FE380)
+#define BG_PRONE_TURN_RATE		55.0f	// the prone body's turn, degrees a second (0x714900)
+#define BG_PRONE_TURN_SPAN		240.0f	// BG_CheckProneTurned's spread (0x726560)
+#define BG_PRONE_PITCH_RATE		70.0f	// prone pitches follow the ground (0x737EC8)
+#define BG_PRONE_YAW_UNDO		0.98f	// a blocked small turn's undo (0x70DC60)
+#define BG_PRONE_BOB_RATE		0.25f	// the bob cycle's prone rate (bobFactorTable 0x739D48)
+
+typedef struct {
+	int		frac;		// percent of the leg; -1 ends the table
+	float	height;		// MW2 units above the feet
+} bgEyeWaypoint_t;
+
+// MW2's viewLerpWaypoint tables, waypoint for waypoint (0x795BB0, 0x795C40,
+// 0x795CB0, 0x795D38). Their ends are the eyes they join.
+static const bgEyeWaypoint_t bg_eyeStandCrouch[] = {
+	{ 0, BG_EYE_STAND }, { 1, 59.5f }, { 4, 58.5f }, { 30, 56.0f }, { 80, 44.0f },
+	{ 90, 41.5f }, { 95, 40.5f }, { 100, BG_EYE_CROUCH }, { -1, 0 }
+};
+static const bgEyeWaypoint_t bg_eyeCrouchStand[] = {
+	{ 0, BG_EYE_CROUCH }, { 5, 40.5f }, { 10, 41.5f }, { 20, 44.0f }, { 70, 56.0f },
+	{ 96, 58.5f }, { 99, 59.5f }, { 100, BG_EYE_STAND }, { -1, 0 }
+};
+static const bgEyeWaypoint_t bg_eyeCrouchProne[] = {
+	{ 0, BG_EYE_CROUCH }, { 11, 38.0f }, { 22, 33.0f }, { 34, 25.0f }, { 45, 16.0f },
+	{ 50, 15.0f }, { 55, 16.0f }, { 70, 18.0f }, { 90, 17.0f }, { 100, BG_EYE_PRONE }, { -1, 0 }
+};
+static const bgEyeWaypoint_t bg_eyeProneCrouch[] = {
+	{ 0, BG_EYE_PRONE }, { 5, 10.0f }, { 30, 21.0f }, { 50, 25.0f }, { 67, 31.0f },
+	{ 83, 34.0f }, { 100, BG_EYE_CROUCH }, { -1, 0 }
+};
+// The tables' ends are MW2's eyes (60, 40, 11), which BG_EYE_* must stay.
+typedef char bgEyeTablesJoinMW2Eyes[( BG_EYE_STAND == 60 && BG_EYE_CROUCH == 40 &&
+	BG_EYE_PRONE == 11 && BG_EYE_DEAD == 8 ) ? 1 : -1];
+
+/*
+==============
+BG_EyeLegTime
+
+MW2's leg lengths (0x4BFAE0): into prone and out of it BG_PRONE_LERP_MS,
+the stand-crouch legs BG_EYE_LEG_MS.
+==============
+*/
+static int BG_EyeLegTime( int lerpTarget, int lerpDown ) {
+	if ( lerpTarget == BG_EYE_PRONE ) {
+		return BG_PRONE_LERP_MS;
+	}
+	if ( lerpTarget == BG_EYE_CROUCH ) {
+		return lerpDown ? BG_EYE_LEG_MS : BG_PRONE_LERP_MS;
+	}
+	return BG_EYE_LEG_MS;
+}
+
+static const bgEyeWaypoint_t *BG_EyeLegTable( int lerpTarget, int lerpDown ) {
+	if ( lerpTarget == BG_EYE_PRONE ) {
+		return bg_eyeCrouchProne;
+	}
+	if ( lerpTarget == BG_EYE_CROUCH ) {
+		return lerpDown ? bg_eyeStandCrouch : bg_eyeProneCrouch;
+	}
+	return bg_eyeCrouchStand;
+}
+
+/*
+==============
+BG_EyeTableLerp
+
+MW2's (0x5701B0): the first waypoint at 0, a waypoint at its own percent,
+otherwise linear between the two around it (the fraction kept as a float).
+Past the table, the first waypoint.
+==============
+*/
+static float BG_EyeTableLerp( const bgEyeWaypoint_t *table, int frac ) {
+	int		i;
+	float	f;
+
+	if ( frac == 0 ) {
+		return table[0].height;
+	}
+	for ( i = 1; table[i].frac != -1; i++ ) {
+		if ( table[i].frac == frac ) {
+			return table[i].height;
+		}
+		if ( table[i].frac > frac ) {
+			f = (float)( frac - table[i - 1].frac ) / (float)( table[i].frac - table[i - 1].frac );
+			return (float)( (double)( table[i].height - table[i - 1].height ) * f + table[i - 1].height );
+		}
+	}
+	return table[0].height;
+}
+
+/*
+==============
+PM_ViewHeightAdjust
+
+MW2's eye (0x570270-0x5706F1), on ps->viewheight. The stance eyes run their
+legs on MW2's tables: a running leg's height is its table at the percent of
+its length gone (whole percent, truncated); when it is done the eye sits at
+its end. A target the other way reverses the running leg from the mirrored
+percent, and that think the eye keeps the old leg's height (MW2 computes the
+new leg's and discards it). With no leg running and the eye off its target, a
+leg starts, which moves the eye from the next think. The dead eye falls at
+BG_EYE_DEAD_RATE. MW2's eye 0 (viewheight MINS_Z) and target 0 mean "never
+set": the eye jumps to the target.
+==============
+*/
+static void PM_ViewHeightAdjust( void ) {
+	playerState_t	*ps = pm->ps;
+	int				target = ps->viewHeightTarget;
+	float			cur = ps->viewheight - MINS_Z;
+	int				frac = 0;
+
+	if ( target == 0 || cur == 0 ) {
+		ps->viewheight = ( ps->pm_type == PM_SPECTATOR ? 0 : target ) + MINS_Z;
+		return;
+	}
+	if ( cur == (float)target && !ps->viewHeightLerpTarget ) {
+		return;
+	}
+
+	if ( target == BG_EYE_PRONE || target == BG_EYE_CROUCH || target == BG_EYE_STAND ) {
+		if ( ps->viewHeightLerpTarget ) {
+			frac = 100 * ps->viewHeightLerpTime /
+				BG_EyeLegTime( ps->viewHeightLerpTarget, ps->viewHeightLerpDown );
+			if ( frac < 0 ) {
+				frac = 0;
+			}
+			if ( frac >= 100 ) {
+				frac = 100;
+				cur = ps->viewHeightLerpTarget;
+				ps->viewHeightLerpTarget = 0;
+				ps->viewHeightLerpTime = 0;
+				ps->viewHeightLerpDown = 0;
+			} else {
+				cur = BG_EyeTableLerp( BG_EyeLegTable( ps->viewHeightLerpTarget, ps->viewHeightLerpDown ), frac );
+			}
+		}
+
+		if ( ps->viewHeightLerpTarget && target != ps->viewHeightLerpTarget &&
+		     ( ( target < ps->viewHeightLerpTarget && !ps->viewHeightLerpDown ) ||
+		       ( target > ps->viewHeightLerpTarget && ps->viewHeightLerpDown ) ) ) {
+			// reverse the running leg from the mirrored percent
+			frac = 100 - frac;
+			ps->viewHeightLerpDown ^= 1;
+			if ( ps->viewHeightLerpDown ) {
+				if ( ps->viewHeightLerpTarget == BG_EYE_STAND ) {
+					ps->viewHeightLerpTarget = BG_EYE_CROUCH;
+				} else if ( ps->viewHeightLerpTarget == BG_EYE_CROUCH ) {
+					ps->viewHeightLerpTarget = BG_EYE_PRONE;
+				}
+			} else {
+				if ( ps->viewHeightLerpTarget == BG_EYE_PRONE ) {
+					ps->viewHeightLerpTarget = BG_EYE_CROUCH;
+				} else if ( ps->viewHeightLerpTarget == BG_EYE_CROUCH ) {
+					ps->viewHeightLerpTarget = BG_EYE_STAND;
+				}
+			}
+			if ( frac == 100 ) {
+				cur = ps->viewHeightLerpTarget;
+				ps->viewHeightLerpTarget = 0;
+				ps->viewHeightLerpTime = 0;
+				ps->viewHeightLerpDown = 0;
+			} else {
+				// MW2's serverTime - (int)(frac * 0.01 * ms) (0x570529-0x57054D):
+				// the double 0.01 is above a hundredth, so its truncation is
+				// the integer division's
+				ps->viewHeightLerpTime = frac * BG_EyeLegTime( ps->viewHeightLerpTarget,
+					ps->viewHeightLerpDown ) / 100;
+			}
+		} else if ( !ps->viewHeightLerpTarget && cur != (float)target ) {
+			// start a leg: the eye moves from the next think
+			ps->viewHeightLerpTime = 0;
+			if ( target == BG_EYE_PRONE ) {
+				ps->viewHeightLerpDown = 1;
+				ps->viewHeightLerpTarget = cur > BG_EYE_CROUCH ? BG_EYE_CROUCH : BG_EYE_PRONE;
+			} else if ( target == BG_EYE_CROUCH ) {
+				ps->viewHeightLerpDown = cur > BG_EYE_CROUCH;
+				ps->viewHeightLerpTarget = BG_EYE_CROUCH;
+			} else {
+				ps->viewHeightLerpDown = 0;
+				ps->viewHeightLerpTarget = cur >= BG_EYE_CROUCH ? BG_EYE_STAND : BG_EYE_CROUCH;
+			}
+		}
+	} else {
+		// the dead eye (MW2's dive and last stand are not ported)
+		ps->viewHeightLerpTarget = 0;
+		ps->viewHeightLerpTime = 0;
+		ps->viewHeightLerpDown = 0;
+		if ( cur < (float)target ) {
+			cur += pml.frametime * BG_EYE_DEAD_RATE;
+			if ( cur >= (float)target ) {
+				cur = target;
+			}
+		} else {
+			cur -= pml.frametime * BG_EYE_DEAD_RATE;
+			if ( cur <= (float)target ) {
+				cur = target;
+			}
+		}
+	}
+	ps->viewheight = cur + MINS_Z;
+}
+
+/*
+==============
+PM_StanceFits
+
+MW2's room check for standing and crouching: the box up to top at the
+origin, where it is. Other players never block it (MW2 masks out bodies).
+==============
+*/
+static qboolean PM_StanceFits( float top ) {
+	trace_t	tr;
+	vec3_t	mins, maxs;
+
+	VectorSet( mins, -PLAYER_WIDTH, -PLAYER_WIDTH, MINS_Z );
+	VectorSet( maxs, PLAYER_WIDTH, PLAYER_WIDTH, top );
+	pm->trace( &tr, pm->ps->origin, mins, maxs, pm->ps->origin, pm->ps->clientNum,
+		pm->tracemask & ~CONTENTS_BODY );
+	return !tr.allsolid;
+}
+
+// MW2's prone checks take the feet; Peace's origin is MINS_Z above them.
+static void PM_ProneFeet( vec3_t feet ) {
+	VectorCopy( pm->ps->origin, feet );
+	feet[2] += MINS_Z;
+}
+
+static void PM_VectorLerp( const vec3_t from, const vec3_t to, float frac, vec3_t out ) {
+	out[0] = from[0] + ( to[0] - from[0] ) * frac;
+	out[1] = from[1] + ( to[1] - from[1] ) * frac;
+	out[2] = from[2] + ( to[2] - from[2] ) * frac;
+}
+
+// MW2's vectopitch (0x4DC690): down is positive, 0..360.
+static float BG_VecToPitch( const vec3_t v ) {
+	float	pitch;
+
+	if ( v[0] == 0 && v[1] == 0 ) {
+		return v[2] > 0 ? 270.0f : 90.0f;
+	}
+	pitch = (float)( atan2( v[2], sqrt( v[0] * v[0] + v[1] * v[1] ) ) * -180.0 / M_PI );
+	if ( pitch < 0 ) {
+		pitch += 360.0f;
+	}
+	return pitch;
+}
+
+/*
+==============
+BG_PitchForYawOnNormal
+
+MW2's PitchForYawOnNormal (0x4FF810): the pitch of a plane along a yaw,
+down positive.
+==============
+*/
+static float BG_PitchForYawOnNormal( float yaw, const vec3_t normal ) {
+	float	r = DEG2RAD( yaw );
+
+	if ( normal[2] == 0 ) {
+		return 270.0f;
+	}
+	return (float)( atan2( ( normal[0] * cos( r ) + normal[1] * sin( r ) ) / normal[2], 1.0 ) * 180.0 / M_PI );
+}
+
+static void PM_ProneTrace( trace_t *tr, const vec3_t start, const vec3_t mins, const vec3_t maxs,
+	const vec3_t end ) {
+	// MW2's client mask (0x810011): solid and player clip, no bodies, no water
+	pm->trace( tr, start, mins, maxs, end, pm->ps->clientNum, CONTENTS_SOLID | CONTENTS_PLAYERCLIP );
+}
+
+/*
+==============
+BG_CheckProne
+
+MW2's BG_CheckProneValid (0x420EB0), step for step in MW2's feet frame: is
+there room for a body lying behind the feet point along yaw? The box of
+size and height goes up 10 from the feet unless already prone; a 6-unit box
+(BG_PRONE_TRACE_HALF) then traces to where the legs reach (feetDist, retried
+22 higher when close), down at the waist (18 back), and down at the feet; the
+bend between torso and legs may not pass 70 with the legs hanging down; two
+lines 5 up must be clear. groundIsWalkable is the caller's word for the ground and
+counts only on the ground; the waist and feet traces are tested with
+BG_TraceWalkable, the trace's own byte. On the ground any failure is a no; in
+the air most are a yes with zero pitches, but a leg trace that hits is a no.
+==============
+*/
+static qboolean BG_CheckProne( const vec3_t feet, float size, float height, float yaw,
+	float *torsoPitch, float *waistPitch, qboolean alreadyProne, qboolean onGround,
+	qboolean groundIsWalkable, float feetDist ) {
+	trace_t		tr;
+	vec3_t		mins, maxs, b6mins, b6maxs, start, end, fwd, angles, feetPos, waistPos, d;
+	float		th, first, len, depth, waist, torso, waistP, diff;
+	qboolean	ok = qtrue, firstHit = qfalse;
+	const float	half = BG_PRONE_TRACE_HALF;
+
+	if ( !alreadyProne ) {
+		VectorSet( mins, -size, -size, 0 );
+		VectorSet( maxs, size, size, height );
+		VectorCopy( feet, end );
+		end[2] += 10;
+		PM_ProneTrace( &tr, feet, mins, maxs, end );
+		if ( tr.allsolid ) {
+			return qfalse;
+		}
+	}
+	if ( onGround && !groundIsWalkable ) {
+		return qfalse;
+	}
+
+	VectorSet( b6mins, -half, -half, -half );
+	VectorSet( b6maxs, half, half, half );
+	VectorSet( angles, 0, yaw - 180.0f, 0 );	// behind: toward the feet
+	AngleVectors( angles, fwd, NULL, NULL );
+	th = height - half;
+
+	// the legs' reach
+	VectorCopy( feet, start );
+	start[2] += th;
+	VectorMA( start, feetDist - half, fwd, end );
+	PM_ProneTrace( &tr, start, b6mins, b6maxs, end );
+	if ( tr.fraction >= 1.0f ) {
+		first = feetDist;
+	} else {
+		if ( !onGround ) {
+			return qfalse;
+		}
+		firstHit = qtrue;
+		first = ( feetDist - half ) * tr.fraction + half;
+		if ( first < size + 2 ) {
+			return qfalse;
+		}
+		if ( first < th * 0.7 + 18 ) {
+			// close: aim 22 higher, which becomes the direction the rest uses
+			firstHit = qfalse;
+			end[2] += 22;
+			VectorSubtract( end, start, fwd );
+			len = VectorNormalize( fwd );
+			PM_ProneTrace( &tr, start, b6mins, b6maxs, end );
+			if ( tr.fraction >= 1.0f ) {
+				first = feetDist;
+			} else {
+				firstHit = qtrue;
+				first = tr.fraction * len + half;
+				if ( first < th * 0.7 + 18 ) {
+					return qfalse;
+				}
+			}
+		}
+	}
+	PM_VectorLerp( start, end, tr.fraction, feetPos );
+
+	// the waist: straight down from 18 back, deeper on the ground
+	VectorMA( feet, 18, fwd, start );
+	start[2] += th;
+	depth = ( onGround ? 2.5f : 1.0f ) * size + th - half;
+	VectorCopy( start, end );
+	end[2] -= depth;
+	PM_ProneTrace( &tr, start, b6mins, b6maxs, end );
+	if ( tr.fraction == 1.0f ) {
+		goto fail;
+	}
+	if ( !BG_TraceWalkable( &tr ) ) {
+		return qfalse;
+	}
+	waist = depth * tr.fraction + half;
+	PM_VectorLerp( start, end, tr.fraction, waistPos );
+	waistPos[2] -= half;
+
+	if ( firstHit ) {
+		// the legs met something: they may not drop too far below the waist,
+		// and a line from the waist toward the feet, raised 18 if blocked,
+		// must clear
+		if ( waist * -0.75 > first - waist ) {
+			goto fail;
+		}
+		VectorSubtract( feetPos, waistPos, d );
+		VectorMA( d, half, fwd, d );
+		d[2] += half;
+		VectorNormalize( d );
+		VectorMA( start, feetDist - half - 18, d, end );
+		end[0] = ( ( feetDist - half ) * fwd[0] + feet[0] + end[0] ) * 0.5f;
+		end[1] = ( ( feetDist - half ) * fwd[1] + feet[1] + end[1] ) * 0.5f;
+		PM_ProneTrace( &tr, start, b6mins, b6maxs, end );
+		if ( tr.fraction < 1.0f ) {
+			PM_VectorLerp( start, end, tr.fraction, start );
+			start[2] += 18;
+			end[2] += 18;
+			PM_ProneTrace( &tr, start, b6mins, b6maxs, end );
+			if ( tr.fraction < 1.0f ) {
+				goto fail;
+			}
+		}
+		PM_VectorLerp( start, end, tr.fraction, feetPos );
+	}
+
+	// the ground under the feet
+	VectorCopy( feetPos, start );
+	VectorCopy( feetPos, end );
+	end[2] -= 2 * ( feetPos[2] - waistPos[2] ) + size;
+	PM_ProneTrace( &tr, start, b6mins, b6maxs, end );
+	if ( tr.fraction == 1.0f ) {
+		goto fail;
+	}
+	if ( !BG_TraceWalkable( &tr ) ) {
+		return qfalse;
+	}
+	PM_VectorLerp( start, end, tr.fraction, feetPos );
+	feetPos[2] -= half;
+
+	// the bend: both lines run forward, from the waist to the feet point and
+	// from the legs' end to the waist (0x4218DE, 0x42198D: the path for a body
+	// lying behind, MW2's last argument PM_GetEffectiveStance != last stand,
+	// 0x478C20; the last stand's body lies in front and subtracts the other
+	// way, 0x421909, 0x4219AF). The waist's pitch (down positive) is held to
+	// the torso's + PRONE_WAIST_HOLD, so legs raised always pass and only legs
+	// hanging down past PRONE_BEND_MAX against the torso fail.
+	VectorSubtract( feet, waistPos, d );
+	torso = BG_AngleNormalize180( BG_VecToPitch( d ) );
+	VectorSubtract( waistPos, feetPos, d );
+	waistP = BG_AngleNormalize180( BG_VecToPitch( d ) );
+	if ( waistP > torso + PRONE_WAIST_HOLD ) {
+		waistP = torso + PRONE_WAIST_HOLD;
+	}
+	diff = BG_AngleDelta( torso, waistP );
+	if ( diff < PRONE_BEND_MIN || diff > PRONE_BEND_MAX ) {
+		ok = qfalse;
+	}
+	// two lines 5 up: feet point to waist, waist to the feet
+	VectorCopy( feet, start );
+	start[2] += 5;
+	VectorCopy( waistPos, end );
+	end[2] += 5;
+	PM_ProneTrace( &tr, start, vec3_origin, vec3_origin, end );
+	if ( tr.fraction < 1.0f ) {
+		ok = qfalse;
+	}
+	VectorCopy( waistPos, start );
+	start[2] += 5;
+	VectorCopy( feetPos, end );
+	end[2] += 5;
+	PM_ProneTrace( &tr, start, vec3_origin, vec3_origin, end );
+	if ( tr.fraction < 1.0f ) {
+		ok = qfalse;
+	}
+	if ( torsoPitch ) {
+		*torsoPitch = torso;
+	}
+	if ( waistPitch ) {
+		*waistPitch = waistP;
+	}
+	if ( ok ) {
+		return qtrue;
+	}
+
+fail:
+	if ( onGround ) {
+		return qfalse;
+	}
+	if ( torsoPitch ) {
+		*torsoPitch = 0;
+	}
+	if ( waistPitch ) {
+		*waistPitch = 0;
+	}
+	return qtrue;
+}
+
+// BG_CheckProne for this player's prone body (size PLAYER_WIDTH, the prone
+// box's height above the feet); Peace draws no torso or waist pitch.
+static qboolean PM_CheckProneBody( float yaw, qboolean alreadyProne, qboolean onGround,
+	qboolean groundIsWalkable, float feetDist ) {
+	vec3_t	feet;
+
+	PM_ProneFeet( feet );
+	return BG_CheckProne( feet, PLAYER_WIDTH, PRONE_HEIGHT - MINS_Z, yaw, NULL, NULL,
+		alreadyProne, onGround, groundIsWalkable, feetDist );
+}
+
+// MW2's 0x570700: room to lie down along the view, as the entry and the air
+// check ask it.
+static qboolean PM_ProneEntryCheck( void ) {
+	return PM_CheckProneBody( pm->ps->viewangles[YAW], qfalse,
+		pm->ps->groundEntityNum != ENTITYNUM_NONE, qtrue, BG_PRONE_FEET_DIST );
+}
+
+/*
+==============
+PM_ProneAllowed
+
+MW2's PlayerProneAllowed (0x570780): never with a gun that blocks prone,
+always while prone already, never off the ground, else room to lie down.
+==============
+*/
+static qboolean PM_ProneAllowed( void ) {
+	// MW2 also asks the command's weapon; Peace's names a slot
+	if ( BG_WeaponBlocksProne( pm->ps->weapon ) ||
+	     BG_WeaponBlocksProne( pm->ps->stats[STAT_SLOT_PRIMARY + BG_RequestedSlot( pm->ps, pm->cmd.weapon )] ) ) {
+		return qfalse;
+	}
+	if ( pm->ps->pm_flags & PMF_PRONE ) {
+		return qtrue;
+	}
+	if ( pm->ps->groundEntityNum == ENTITYNUM_NONE ) {
+		return qfalse;
+	}
+	return PM_ProneEntryCheck();
+}
+
+/*
+==============
+BG_CheckProneTurned
+
+MW2's (0x5717D0): the body at yaw, checked part way back toward the view
+and with the legs drawn in by how far apart they are.
+==============
+*/
+static qboolean BG_CheckProneTurned( float yaw, float viewYaw ) {
+	float	d = BG_AngleDelta( yaw, viewYaw );
+	float	f = (float)fabs( d ) / BG_PRONE_TURN_SPAN;
+
+	return PM_CheckProneBody( BG_AngleNormalize360( yaw - ( 1.0f - f ) * d ), qtrue,
+		pm->ps->groundEntityNum != ENTITYNUM_NONE, qtrue,
+		f * BG_PRONE_TURN_FEET_DIST + ( 1.0f - f ) * BG_PRONE_FEET_DIST );
+}
+
+static qboolean PM_CheckProneTurn( float yaw ) {
+	return PM_CheckProneBody( yaw, qtrue, pm->ps->groundEntityNum != ENTITYNUM_NONE, qtrue,
+		BG_PRONE_TURN_FEET_DIST );
+}
+
+// MW2's PM_ExitAimDownSight (0x503B30): the aim is dropped and the client
+// told (its toggled aim, cgame's leaveads).
+static void PM_ExitAimDownSight( void ) {
+	PM_AddEvent( EV_RESET_ADS );
+	pm->ps->pm_flags &= ~PMF_ADS;
+}
+
+/*
+==============
+PM_ProneSlowdown
+
+MW2's Jump_ActivateSlowdown (0x46D610), as lying down starts it: a landing's
+slowdown (friction and the next jump, BG_JumpLandFactor) unless a timer is
+already running. Peace keeps it in jumpLand, never pm_time, so the slide
+move's velocity hold is untouched; no velocity is cut.
+==============
+*/
+static void PM_ProneSlowdown( void ) {
+	if ( !pm->ps->jumpLand && !( pm->ps->pm_time && ( pm->ps->pm_flags & PMF_TIME_KNOCKBACK ) ) ) {
+		pm->ps->jumpLand = BG_JUMP_LAND_TIME;
+	}
+}
+
+/*
+==============
+PM_ProneEntry
+
+MW2's (0x570830), on the think the prone flag first appears: a moving
+player drops a held aim, the prone box settles up 10 and back down (out of a
+slope), the body takes the view's yaw and the ground's pitch, and the pitch
+clamp centres there, within 45 of the view.
+==============
+*/
+static void PM_ProneEntry( void ) {
+	trace_t	tr;
+	vec3_t	start, end;
+	int		mask = pm->tracemask & ~CONTENTS_BODY;
+	float	d;
+
+	if ( pml.forwardmove || pml.rightmove ) {
+		pm->ps->pm_flags &= ~PMF_PRONEMOVE_OVERRIDDEN;
+		PM_ExitAimDownSight();
+	}
+
+	VectorCopy( pm->ps->origin, end );
+	end[2] += 10;
+	pm->trace( &tr, pm->ps->origin, pm->mins, pm->maxs, end, pm->ps->clientNum, mask );
+	VectorCopy( tr.endpos, start );
+	pm->trace( &tr, start, pm->mins, pm->maxs, pm->ps->origin, pm->ps->clientNum, mask );
+	VectorCopy( tr.endpos, pm->ps->origin );
+
+	pm->ps->proneDirection = pm->ps->viewangles[YAW];
+	VectorCopy( pm->ps->origin, end );
+	end[2] -= 0.25f;
+	pm->trace( &tr, pm->ps->origin, pm->mins, pm->maxs, end, pm->ps->clientNum, mask );
+	if ( !tr.startsolid && tr.fraction < 1.0f ) {
+		pm->ps->proneDirectionPitch = BG_PitchForYawOnNormal( pm->ps->proneDirection, tr.plane.normal );
+	} else {
+		pm->ps->proneDirectionPitch = 0;
+	}
+	d = BG_AngleDelta( pm->ps->proneDirectionPitch, pm->ps->viewangles[PITCH] );
+	if ( d < -BG_PRONE_PITCH_CAP ) {
+		pm->ps->proneTorsoPitch = pm->ps->viewangles[PITCH] - BG_PRONE_PITCH_CAP;
+	} else if ( d > BG_PRONE_PITCH_CAP ) {
+		pm->ps->proneTorsoPitch = pm->ps->viewangles[PITCH] + BG_PRONE_PITCH_CAP;
+	} else {
+		pm->ps->proneTorsoPitch = pm->ps->proneDirectionPitch;
+	}
+}
+
+/*
+==============
+PM_StanceForceStand
+
+MW2's sprint out of a crouch or prone (PM_CheckDuck 0x570B7B): standing at
+once, the eye's leg turned or started (its clock already advanced this
+think), and the client's stance reset to stand.
+==============
+*/
+static void PM_StanceForceStand( void ) {
+	pm->ps->pm_flags &= ~( PMF_DUCKED | PMF_PRONE );
+	pm->ps->viewHeightTarget = BG_EYE_STAND;
+	BG_AddPredictableEventToPlayerstate( EV_STANCE_FORCE_STAND, BG_STANCE_PARM_FORCED, pm->ps );
+	PM_ViewHeightAdjust();
+	BG_PlayerBox( pm->ps, pm->mins, pm->maxs );
+}
+
+/*
 ==============
 PM_CheckDuck
 
-Sets mins, maxs, and pm->ps->viewheight
+MW2's (0x570A90-0x571120). The command's stance bits only ask: prone (with
+room to lie down, else nothing in the air, else a refusal unless the stance
+is from a held key), crouch (never refused, but out of prone only with room),
+or neither (stand, else crouch, from prone or a crouch, with room). The eye's
+target follows only between legs, and the flags and box follow the target -
+so a request mid-leg waits, and the first leg of stand to prone asks for room
+again every think. Spectators stand and the dead keep their flags. While
+PMF_RESPAWNED nothing is asked, and on a ladder the bits are stripped.
+Sets mins, maxs and the eye.
 ==============
 */
-static void PM_CheckDuck (void)
-{
-	trace_t	trace;
+static void PM_CheckDuck( void ) {
+	playerState_t	*ps = pm->ps;
+	int				stance = pm->cmd.buttons & BUTTON_STANCE_MASK;	// a copy: MW2 strips the command's
+	qboolean		wasProne = ( ps->pm_flags & PMF_PRONE ) != 0;
+	qboolean		temp;
 
-	if ( pm->ps->powerups[PW_INVULNERABILITY] ) {
-		if ( pm->ps->pm_flags & PMF_INVULEXPAND ) {
+	if ( ps->viewHeightLerpTarget ) {
+		ps->viewHeightLerpTime += pml.msec;
+	}
+
+	if ( ps->powerups[PW_INVULNERABILITY] ) {
+		if ( ps->pm_flags & PMF_INVULEXPAND ) {
 			// invulnerability sphere has a 42 units radius
 			VectorSet( pm->mins, -INVUL_RADIUS, -INVUL_RADIUS, -INVUL_RADIUS );
 			VectorSet( pm->maxs, INVUL_RADIUS, INVUL_RADIUS, INVUL_RADIUS );
@@ -1707,56 +2454,381 @@ static void PM_CheckDuck (void)
 			VectorSet( pm->mins, -PLAYER_WIDTH, -PLAYER_WIDTH, MINS_Z );
 			VectorSet( pm->maxs, PLAYER_WIDTH, PLAYER_WIDTH, CROUCH_HEIGHT );
 		}
-		pm->ps->pm_flags |= PMF_DUCKED;
-		pm->ps->viewheight = CROUCH_VIEWHEIGHT;
+		ps->pm_flags = ( ps->pm_flags & ~PMF_PRONE ) | PMF_DUCKED;
+		ps->viewHeightTarget = BG_EYE_CROUCH;
+		ps->viewHeightLerpTarget = 0;
+		ps->viewHeightLerpTime = 0;
+		ps->viewHeightLerpDown = 0;
+		ps->viewheight = CROUCH_VIEWHEIGHT;
 		return;
 	}
-	pm->ps->pm_flags &= ~PMF_INVULEXPAND;
+	ps->pm_flags &= ~PMF_INVULEXPAND;
 
-	pm->mins[0] = -PLAYER_WIDTH;
-	pm->mins[1] = -PLAYER_WIDTH;
-
-	pm->maxs[0] = PLAYER_WIDTH;
-	pm->maxs[1] = PLAYER_WIDTH;
-
-	pm->mins[2] = MINS_Z;
-
-	if (pm->ps->pm_type == PM_DEAD)
-	{
-		pm->maxs[2] = DEAD_HEIGHT;
-		pm->ps->viewheight = DEAD_VIEWHEIGHT;
+	if ( ps->pm_type == PM_SPECTATOR ) {
+		// MW2 0x570A9F; Peace keeps its spectator's standing box and eye
+		ps->pm_flags &= ~( PMF_DUCKED | PMF_PRONE );
+		if ( stance & BUTTON_PRONE ) {
+			BG_AddPredictableEventToPlayerstate( EV_STANCE_FORCE_STAND, BG_STANCE_PARM_FORCED, ps );
+		}
+		ps->viewHeightTarget = BG_EYE_STAND;
+		ps->viewHeightLerpTarget = 0;
+		ps->viewHeightLerpTime = 0;
+		ps->viewHeightLerpDown = 0;
+		ps->viewheight = DEFAULT_VIEWHEIGHT;
+		BG_PlayerBox( ps, pm->mins, pm->maxs );
 		return;
 	}
 
-	if (pm->cmd.upmove < 0)
-	{	// duck
-		pm->ps->pm_flags |= PMF_DUCKED;
+	if ( ps->pm_type == PM_DEAD ) {
+		// MW2 0x570B5D: the eye falls, the flags stay, no event
+		ps->viewHeightTarget = BG_EYE_DEAD;
+		PM_ViewHeightAdjust();
+		BG_PlayerBox( ps, pm->mins, pm->maxs );
+		return;
 	}
-	else
-	{	// stand up if possible
-		if (pm->ps->pm_flags & PMF_DUCKED)
-		{
-			// try to stand up
-			pm->maxs[2] = DEFAULT_HEIGHT;
-			pm->trace (&trace, pm->ps->origin, pm->mins, pm->maxs, pm->ps->origin, pm->ps->clientNum, pm->tracemask );
-			if (!trace.allsolid)
-				pm->ps->pm_flags &= ~PMF_DUCKED;
+
+	if ( ( ps->pm_flags & PMF_SPRINTING ) && ( ps->pm_flags & ( PMF_PRONE | PMF_DUCKED ) ) ) {
+		// MW2 0x570B7B; normally the sprint's start think has done it
+		PM_StanceForceStand();
+		return;
+	}
+
+	if ( !( ps->pm_flags & PMF_RESPAWNED ) ) {
+		// MW2's ladder strip (0x570C54-0x570C71) tests no held key
+		if ( ( ps->stats[STAT_LADDER] & LADDER_ATTACHED ) && ( stance & ( BUTTON_PRONE | BUTTON_CROUCH ) ) ) {
+			stance &= ~( BUTTON_PRONE | BUTTON_CROUCH );
+			BG_AddPredictableEventToPlayerstate( EV_STANCE_FORCE_STAND, BG_STANCE_PARM_FORCED, ps );
+		}
+		temp = ( stance & BUTTON_TEMP_STANCE ) != 0;
+		if ( stance & BUTTON_PRONE ) {
+			if ( PM_ProneAllowed() ) {
+				ps->pm_flags = ( ps->pm_flags & ~PMF_DUCKED ) | PMF_PRONE;
+			} else if ( ps->groundEntityNum == ENTITYNUM_NONE ) {
+				// in the air: nothing yet; prone comes on the ground
+			} else if ( !temp ) {
+				BG_AddPredictableEventToPlayerstate( ( ps->pm_flags & ( PMF_PRONE | PMF_DUCKED ) ) ?
+					EV_STANCE_FORCE_CROUCH : EV_STANCE_FORCE_STAND, BG_STANCE_PARM_PRONE_BLOCKED, ps );
+			}
+		} else if ( stance & BUTTON_CROUCH ) {
+			if ( ps->pm_flags & PMF_PRONE ) {
+				if ( PM_StanceFits( CROUCH_HEIGHT ) ) {
+					ps->pm_flags = ( ps->pm_flags & ~PMF_PRONE ) | PMF_DUCKED;
+				} else if ( !temp ) {
+					BG_AddPredictableEventToPlayerstate( EV_STANCE_FORCE_PRONE, BG_STANCE_PARM_CROUCH_BLOCKED, ps );
+				}
+			} else {
+				ps->pm_flags |= PMF_DUCKED;		// a crouch is never refused
+			}
+		} else if ( ps->pm_flags & PMF_PRONE ) {
+			if ( PM_StanceFits( DEFAULT_HEIGHT ) ) {
+				ps->pm_flags &= ~( PMF_PRONE | PMF_DUCKED );
+			} else if ( PM_StanceFits( CROUCH_HEIGHT ) ) {
+				ps->pm_flags = ( ps->pm_flags & ~PMF_PRONE ) | PMF_DUCKED;
+			} else if ( !temp ) {
+				BG_AddPredictableEventToPlayerstate( EV_STANCE_FORCE_PRONE, BG_STANCE_PARM_STAND_BLOCKED, ps );
+			}
+		} else if ( ps->pm_flags & PMF_DUCKED ) {
+			if ( PM_StanceFits( DEFAULT_HEIGHT ) ) {
+				ps->pm_flags &= ~PMF_DUCKED;
+			} else if ( !temp ) {
+				BG_AddPredictableEventToPlayerstate( EV_STANCE_FORCE_CROUCH, BG_STANCE_PARM_STAND_BLOCKED, ps );
+			}
 		}
 	}
 
-	if (pm->ps->pm_flags & PMF_DUCKED)
-	{
-		pm->maxs[2] = CROUCH_HEIGHT;
-		pm->ps->viewheight = CROUCH_VIEWHEIGHT;
+	// the eye's target moves only between legs (0x570F0A)
+	if ( !ps->viewHeightLerpTarget ) {
+		if ( ps->pm_flags & PMF_PRONE ) {
+			if ( ps->viewHeightTarget == BG_EYE_STAND ) {
+				ps->viewHeightTarget = BG_EYE_CROUCH;	// through a crouch, no slowdown yet
+			} else if ( ps->viewHeightTarget != BG_EYE_PRONE ) {
+				ps->viewHeightTarget = BG_EYE_PRONE;
+				PM_ProneSlowdown();
+			}
+		} else if ( ps->viewHeightTarget == BG_EYE_PRONE ) {
+			ps->viewHeightTarget = BG_EYE_CROUCH;		// up through a crouch
+		} else {
+			ps->viewHeightTarget = ( ps->pm_flags & PMF_DUCKED ) ? BG_EYE_CROUCH : BG_EYE_STAND;
+		}
 	}
-	else
-	{
-		pm->maxs[2] = DEFAULT_HEIGHT;
-		pm->ps->viewheight = DEFAULT_VIEWHEIGHT;
+	PM_ViewHeightAdjust();
+
+	// the flags and the box follow the target (0x570FD9)
+	ps->pm_flags &= ~( PMF_PRONE | PMF_DUCKED );
+	if ( ps->viewHeightTarget == BG_EYE_PRONE ) {
+		ps->pm_flags |= PMF_PRONE;
+	} else if ( ps->viewHeightTarget == BG_EYE_CROUCH ) {
+		ps->pm_flags |= PMF_DUCKED;
+	}
+	BG_PlayerBox( ps, pm->mins, pm->maxs );
+	if ( ( ps->pm_flags & PMF_PRONE ) && !wasProne ) {
+		PM_ProneEntry();
 	}
 }
 
+/*
+==============
+PM_UpdatePronePitch
 
+MW2's (0x5723C0), every think while prone, after the ground trace. In the
+air the body is checked again (BG_CheckProne already prone, off the ground,
+the ground's own walkability if there is a plane) and a body with no room
+resets the client to crouch; MW2 does the same on unwalkable ground, which
+its ground trace (and Peace's) has already dropped, so that branch cannot
+run. Then the body's and the clamp's pitches follow the ground under the
+body's yaw and the view's at BG_PRONE_PITCH_RATE.
+==============
+*/
+static float PM_PronePitchToward( float pitch, float target ) {
+	float	d = BG_AngleDelta( target, pitch );
+	float	step = pml.frametime * BG_PRONE_PITCH_RATE;
+
+	if ( d == 0 ) {
+		return pitch;
+	}
+	if ( step < fabs( d ) ) {
+		d = d < 0 ? -step : step;
+	}
+	return BG_AngleNormalize180( pitch + d );
+}
+
+static void PM_UpdatePronePitch( void ) {
+	playerState_t	*ps = pm->ps;
+	float			t;
+
+	if ( !( ps->pm_flags & PMF_PRONE ) ) {
+		return;
+	}
+	if ( ps->groundEntityNum == ENTITYNUM_NONE ) {
+		if ( !PM_CheckProneBody( ps->proneDirection, qtrue, qfalse,
+		       pml.groundPlane ? BG_TraceWalkable( &pml.groundTrace ) : qtrue, BG_PRONE_FEET_DIST ) ) {
+			BG_AddPredictableEventToPlayerstate( EV_STANCE_FORCE_CROUCH, BG_STANCE_PARM_PRONE_BLOCKED, ps );
+		}
+	} else if ( pml.groundPlane && !BG_TraceWalkable( &pml.groundTrace ) ) {
+		BG_AddPredictableEventToPlayerstate( EV_STANCE_FORCE_CROUCH, BG_STANCE_PARM_FORCED, ps );
+	}
+	t = pml.groundPlane ? BG_PitchForYawOnNormal( ps->proneDirection, pml.groundTrace.plane.normal ) : 0;
+	ps->proneDirectionPitch = PM_PronePitchToward( ps->proneDirectionPitch, t );
+	t = pml.groundPlane ? BG_PitchForYawOnNormal( ps->viewangles[YAW], pml.groundTrace.plane.normal ) : 0;
+	ps->proneTorsoPitch = PM_PronePitchToward( ps->proneTorsoPitch, t );
+}
+
+/*
+==============
+PM_VerifyPronePosition
+
+MW2's (0x574C80), from PM_StepSlideMove once the step is settled, for a move
+begun on the ground: a prone body with no room where it ended (a crawl back
+into a wall, over a ledge, onto a bend) undoes the move, origin and
+velocity, and keeps it from losing speed to a step.
+==============
+*/
+qboolean PM_VerifyPronePosition( const vec3_t startOrigin, const vec3_t startVelocity ) {
+	if ( !( pm->ps->pm_flags & PMF_PRONE ) ) {
+		return qtrue;
+	}
+	if ( PM_CheckProneBody( pm->ps->proneDirection, qtrue, qtrue, qtrue, BG_PRONE_FEET_DIST ) ) {
+		return qtrue;
+	}
+	VectorCopy( startOrigin, pm->ps->origin );
+	VectorCopy( startVelocity, pm->ps->velocity );
+	return qfalse;
+}
+
+/*
+==============
+The prone crawl and the weapon (PmoveSingle 0x57448B-0x574782)
+
+MW2 stops a prone crawl for a weapon action (PM_SetProneMovementOverride at
+its drop, raise, every shot, the knife's and each offhand's pull) and for an
+unscoped aim; the stop holds until the stick is pushed further than on the
+command before, or, with no aim, until the weapon is quiet again. A push
+that the weapon allows also drops the aim. Peace's quiet states and the
+interrupt are its own weapon states mapped onto MW2's; nothing names a gun.
+==============
+*/
+static qboolean PM_UsingSniperScope( void ) {
+	// MW2's BG_UsingSniperScope (0x4C9020); PMF_ADS stands in for its aim fraction
+	return BG_WeaponScopeOverlay( pm->ps->weapon ) && ( pm->ps->pm_flags & PMF_ADS );
+}
+
+// MW2's 0x572AA0: ready, raising, dropping or a magazine's reload (RELOADING;
+// a segmented reload's start and end are MW2's RELOAD_START and RELOAD_END).
+static qboolean PM_WeaponQuiet( void ) {
+	if ( pm->ps->weaponAction & WA_TYPE_MASK ) {
+		return qfalse;
+	}
+	switch ( pm->ps->weaponstate ) {
+	case WEAPON_READY:
+	case WEAPON_RAISING:
+	case WEAPON_DROPPING:
+		return qtrue;
+	case WEAPON_RELOADING:
+		return pm->ps->weaponAnimSeq == RSEQ_LOOP ||
+			BG_WeaponReloadSegLength( pm->ps->weapon, pm->ps->weaponAnimSeq ) <= 0;
+	default:
+		return qfalse;
+	}
+}
+
+// MW2's PM_InteruptWeaponWithProneMove (0x486860): a push crawls on unless a
+// shot is being fired or a knife or offhand is out (through the gun's quick
+// raise after it).
+static qboolean PM_InterruptWeaponWithProneMove( void ) {
+	return pm->ps->weaponstate != WEAPON_FIRING && !( pm->ps->weaponAction & WA_TYPE_MASK );
+}
+
+// MW2's PM_SetProneMovementOverride (0x461FE0)
+static void PM_SetProneMoveOverride( void ) {
+	if ( pm->ps->pm_flags & PMF_PRONE ) {
+		pm->ps->pm_flags |= PMF_PRONEMOVE_OVERRIDDEN;
+	}
+}
+
+static void PM_ProneMoveOverride( void ) {
+	playerState_t	*ps = pm->ps;
+
+	if ( ( ps->pm_flags & PMF_PRONE ) && !PM_UsingSniperScope() ) {
+		if ( abs( pm->cmd.forwardmove ) > abs( BG_PREVCMD_FORWARD( ps ) ) ||
+		     abs( pm->cmd.rightmove ) > abs( BG_PREVCMD_RIGHT( ps ) ) ) {
+			if ( PM_InterruptWeaponWithProneMove() ) {
+				ps->pm_flags &= ~PMF_PRONEMOVE_OVERRIDDEN;
+				PM_ExitAimDownSight();
+			}
+		} else if ( !( ps->pm_flags & PMF_ADS ) && PM_WeaponQuiet() ) {
+			ps->pm_flags &= ~PMF_PRONEMOVE_OVERRIDDEN;
+		}
+	} else {
+		ps->pm_flags &= ~PMF_PRONEMOVE_OVERRIDDEN;
+	}
+	// an unscoped aim lying down does not crawl
+	if ( ( ps->pm_flags & PMF_PRONE ) && ( ps->pm_flags & PMF_ADS ) && !PM_UsingSniperScope() ) {
+		pml.forwardmove = 0;
+		pml.rightmove = 0;
+	}
+}
+
+/*
+==============
+PM_ProneViewAngles
+
+MW2's prone view (0x571ED0, inside its view update, after the pitch clamp),
+once a think and only here: Peace runs PM_UpdateViewAngles more than once.
+While prone the body turns toward the view at BG_PRONE_TURN_RATE, when the
+view is near the cap, the player moves, or the command asks for prone (every
+prone command does, so it always follows); each step is checked
+(BG_CheckProneTurned), backing off a degree at a time toward the body, then
+at the 45 reach at the view and at the new yaw. A body still off the view is
+then synced within this think: while a check fails the view is pushed toward
+the body a degree a loop, and a body check that fails moves the yaw tried by
+the new difference. The view stays within BG_PRONE_YAW_CAP of the body; when
+anything was blocked, EV_STANCE_INVALID tells the client (the hint), and a
+small turn the same way since the last think is mostly undone. The pitch
+stays within BG_PRONE_PITCH_CAP of proneTorsoPitch. MW2 adds its pushes to
+delta_angles; Peace writes the final angles as the ladder clamp does.
+==============
+*/
+static void PM_SetViewAngle( int i, float angle ) {
+	pm->ps->delta_angles[i] = ANGLE2SHORT( angle ) - pm->cmd.angles[i];
+	pm->ps->viewangles[i] = SHORT2ANGLE( (short)( pm->cmd.angles[i] + pm->ps->delta_angles[i] ) );
+}
+
+static void PM_ProneViewAngles( float oldViewYaw ) {
+	playerState_t	*ps = pm->ps;
+	const float		cap = BG_PRONE_YAW_CAP;
+	float			viewYaw, start, d, step, yaw, e, s, test, adj, viewPitch;
+	qboolean		blocked = qfalse, more, retry, ok;
+
+	if ( !( ps->pm_flags & PMF_PRONE ) || ps->pm_type != PM_NORMAL || ps->stats[STAT_HEALTH] <= 0 ) {
+		return;
+	}
+	viewYaw = start = ps->viewangles[YAW];
+
+	// the turn
+	d = BG_AngleDelta( ps->proneDirection, viewYaw );
+	if ( fabs( d ) > cap - 5 || ( ( pml.forwardmove || pml.rightmove ) && d != 0 ) ||
+	     ( pm->cmd.buttons & BUTTON_PRONE ) ) {
+		step = (float)( pml.msec * BG_PRONE_TURN_RATE * 0.001 );
+		if ( step > fabs( d ) ) {
+			yaw = viewYaw;
+		} else {
+			yaw = d > 0 ? ps->proneDirection - step : ps->proneDirection + step;
+		}
+		more = qtrue;
+		while ( !BG_CheckProneTurned( yaw, viewYaw ) ) {
+			if ( !more ) {
+				goto sync;
+			}
+			e = BG_AngleDelta( ps->proneDirection, yaw );
+			if ( fabs( e ) <= 1 ) {
+				more = qfalse;
+				blocked = qtrue;
+			} else {
+				e = e > 0 ? 1.0f : -1.0f;
+			}
+			yaw = BG_AngleNormalize360( yaw + e );
+		}
+		if ( !PM_CheckProneTurn( viewYaw ) || !PM_CheckProneTurn( yaw ) ) {
+			blocked = qtrue;
+			goto sync;
+		}
+		ps->proneDirection = yaw;
+	}
+
+sync:
+	s = BG_AngleDelta( ps->proneDirection, viewYaw );
+	if ( s != 0 ) {
+		retry = qtrue;
+		test = ps->proneDirection;
+		for ( ;; ) {
+			ok = PM_CheckProneTurn( test );
+			if ( ok && BG_CheckProneTurned( test, viewYaw ) ) {
+				ps->proneDirection = test;
+				break;
+			}
+			if ( !retry ) {
+				break;
+			}
+			if ( fabs( s ) <= 1 ) {
+				retry = qfalse;
+				step = s;
+			} else {
+				step = s > 0 ? 1.0f : -1.0f;
+			}
+			blocked = qtrue;
+			viewYaw = BG_AngleNormalize360( viewYaw + step );
+			s = BG_AngleDelta( ps->proneDirection, viewYaw );
+			if ( !ok ) {
+				test = BG_AngleNormalize360( test + s );
+			}
+		}
+	}
+
+	// the yaw clamp (0x571C30)
+	if ( s > cap || s < -cap ) {
+		adj = s > cap ? s - cap : s + cap;
+		viewYaw = BG_AngleNormalize360( adj > 0 ? ps->proneDirection - cap : ps->proneDirection + cap );
+	}
+	if ( blocked ) {
+		BG_AddPredictableEventToPlayerstate( EV_STANCE_INVALID, BG_STANCE_PARM_PRONE_BLOCKED, ps );
+		d = BG_AngleDelta( oldViewYaw, viewYaw );
+		if ( fabs( d ) <= 1 && d * BG_AngleDelta( start, viewYaw ) > 0 ) {
+			viewYaw = BG_AngleNormalize360( viewYaw + BG_PRONE_YAW_UNDO * d );
+		}
+	}
+	if ( viewYaw != start ) {
+		PM_SetViewAngle( YAW, viewYaw );
+	}
+
+	// the pitch clamp (0x571D80)
+	viewPitch = ps->viewangles[PITCH];
+	d = BG_AngleDelta( ps->proneTorsoPitch, viewPitch );
+	if ( d > BG_PRONE_PITCH_CAP ) {
+		PM_SetViewAngle( PITCH, BG_AngleNormalize180( ps->proneTorsoPitch - BG_PRONE_PITCH_CAP ) );
+	} else if ( d < -BG_PRONE_PITCH_CAP ) {
+		PM_SetViewAngle( PITCH, BG_AngleNormalize180( ps->proneTorsoPitch + BG_PRONE_PITCH_CAP ) );
+	}
+}
 
 //===================================================================
 
@@ -1790,13 +2862,15 @@ static void PM_Footsteps( void ) {
 		return;
 	}
 
-	// if not trying to move
-	if ( !pm->cmd.forwardmove && !pm->cmd.rightmove ) {
+	// if not trying to move (this think's moves: a prone crawl stop zeroes them)
+	if ( !pml.forwardmove && !pml.rightmove ) {
 		if (  pm->xyspeed < 5 ) {
 			if ( pm->xyspeed < 1 ) {
 				pm->ps->bobCycle = 0;	// MW2 starts the cycle over once stopped
 			}
-			if ( pm->ps->pm_flags & PMF_DUCKED ) {
+			if ( pm->ps->pm_flags & PMF_PRONE ) {
+				PM_ContinueLegsAnim( LEGS_IDLEPR );
+			} else if ( pm->ps->pm_flags & PMF_DUCKED ) {
 				PM_ContinueLegsAnim( LEGS_IDLECR );
 			} else {
 				PM_ContinueLegsAnim( LEGS_IDLE );
@@ -1808,7 +2882,15 @@ static void PM_Footsteps( void ) {
 
 	footstep = qfalse;
 
-	if ( pm->ps->pm_flags & PMF_DUCKED ) {
+	if ( pm->ps->pm_flags & PMF_PRONE ) {
+		// MW2's walkprone and walkpronebk; prone makes no footsteps
+		// (PM_ShouldMakeFootsteps 0x452BA0)
+		if ( pm->ps->pm_flags & PMF_BACKWARDS_RUN ) {
+			PM_ContinueLegsAnim( LEGS_CRAWLB );
+		} else {
+			PM_ContinueLegsAnim( LEGS_CRAWL );
+		}
+	} else if ( pm->ps->pm_flags & PMF_DUCKED ) {
 		if ( pm->ps->pm_flags & PMF_BACKWARDS_RUN ) {
 			PM_ContinueLegsAnim( LEGS_BACKCR );
 		}
@@ -1847,13 +2929,18 @@ static void PM_Footsteps( void ) {
 
 	// MW2's cycle rate: speed over the most this posture can go, times MW2's
 	// rate for it - 0.335 standing, 0.34 ducked, 0.36 backpedalling, a little
-	// less aimed, 0.5 sprinting - so the camera bob keeps MW2's cadence. Too
-	// slow to bob holds the cycle. Footstep events still fall on its crossings.
+	// less aimed, 0.5 sprinting, and 0.25 prone whatever the aim or direction
+	// (bobFactorTable 0x739D48: the prone rows' other column needs MW2's
+	// walking flag, never set prone, or a lean) - so the camera bob keeps
+	// MW2's cadence. Too slow to bob holds the cycle. Footstep events still
+	// fall on its crossings.
 	{
 		qboolean back = ( pm->ps->pm_flags & PMF_BACKWARDS_RUN ) != 0;
 		qboolean aimed = ( pm->ps->pm_flags & PMF_ADS ) != 0;
 		float maxSpeed = PM_BobMaxSpeed();
-		if ( pm->ps->pm_flags & PMF_DUCKED ) {
+		if ( pm->ps->pm_flags & PMF_PRONE ) {
+			bobmove = BG_PRONE_BOB_RATE;
+		} else if ( pm->ps->pm_flags & PMF_DUCKED ) {
 			bobmove = aimed ? 0.315f : 0.34f;
 		} else if ( ( pm->ps->pm_flags & PMF_SPRINTING ) && !back ) {
 			bobmove = 0.5f;		// MW2's player_sprintCameraBob
@@ -2820,7 +3907,8 @@ playerState so the game module and cgame agree exactly:
   - hipfire still -> baseline (1.0)
   - moving        -> widens with horizontal speed
   - airborne      -> large penalty (can't control the gun in the air)
-  - crouched still -> tighter
+  - crouched or prone still -> tighter (prone counts as crouched: a
+    placeholder until MW2's hip spread, lerped on the eye, is ported)
 ===============
 */
 float BG_SpreadScale( const playerState_t *ps ) {
@@ -2845,8 +3933,8 @@ float BG_SpreadScale( const playerState_t *ps ) {
 
 	if ( ps->groundEntityNum == ENTITYNUM_NONE ) {
 		scale += 1.5f;             // airborne: big bloom
-	} else if ( ( ps->pm_flags & PMF_DUCKED ) && speed < 20.0f ) {
-		scale *= 0.6f;             // crouched and still: steadier
+	} else if ( ( ps->pm_flags & ( PMF_DUCKED | PMF_PRONE ) ) && speed < 20.0f ) {
+		scale *= 0.6f;             // crouched or prone and still: steadier
 	}
 
 	return scale;
@@ -3768,6 +4856,7 @@ static void PM_BeginWeaponChange( int weapon ) {
 	pm->ps->weaponTime  = BG_HolsterTime( pm->ps );
 	pm->ps->weaponstate = WEAPON_DROPPING;
 	PM_StartTorsoAnim( TORSO_DROP );
+	PM_SetProneMoveOverride();	// MW2's drop (0x576096); a drop is quiet, so the next think lets it go
 }
 
 
@@ -3802,6 +4891,10 @@ static void PM_FinishWeaponChange( void ) {
 		return;
 	}
 	BG_BeginWeaponDraw(pm->ps);
+	// MW2's raise and OffHandPrepare stop a prone crawl (0x57627D, 0x577865):
+	// a gun's raise only until the next think (it is quiet), a knife or an
+	// offhand through its quick raise
+	PM_SetProneMoveOverride();
 	// An offhand's draw is its prepare, MW2's OffHandPrepare (5778e6): its
 	// pullback, with the offhand as the parm.
 	if ( BG_OffhandHeldToThrow( weapon ) ) {
@@ -3864,7 +4957,9 @@ Sets or clears PMF_SPRINTING each tick, as MW2's PM_UpdateSprint:
   - MW2's sprint-ending conditions end one and keep one from starting:
     ladder, a quick action, the trigger, aiming, a reload or use/reload
     button, the knife or equipment buttons, holding jump, too little
-    forward, ducking, deep water, running out of sprint time
+    forward, deep water, running out of sprint time; a crouch or prone bit
+    ends one but does not keep one from starting, which stands the player up
+    (with room) on its first think
   - MW2's sprint time: BG_SPRINT_TIME of it, used while sprinting and
     refilled 1:1 while not; a start needs more than BG_SPRINT_MIN_TIME left
   - on the ground or in the air alike (MW2)
@@ -3877,7 +4972,7 @@ static void PM_CheckSprint( void ) {
 	qboolean held = ( pm->cmd.buttons & BUTTON_SPRINT ) != 0;
 	qboolean sprinting = ( pm->ps->pm_flags & PMF_SPRINTING ) != 0;
 	qboolean quick = ( pm->ps->weaponAction & WA_TYPE_MASK ) || BG_IsActionWeapon( pm->ps->weapon );
-	qboolean ended, wantSprint;
+	qboolean blocked, ended, wantSprint;
 
 	// The sprint time: the think just moved was sprinted or rested. Spent, the
 	// sprint ends like any other and its held button waits to come up.
@@ -3897,14 +4992,19 @@ static void PM_CheckSprint( void ) {
 	// pushing forward less than MW2's player_sprintForwardMinimum.
 	// MW2 has no ground test: a sprint goes on and can start in the air (its
 	// speed waits for the ground, PM_CmdScale). MW2 has no swimming; deep water
-	// ends a sprint like the rest.
-	ended = ( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) ||
+	// ends a sprint like the rest. A prone crawl stop counts as no forward
+	// (pml.forwardmove).
+	blocked = ( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) ||
 	        ( pm->cmd.buttons & ( BUTTON_ATTACK | BUTTON_ADS | BUTTON_RELOAD | BUTTON_USE_RELOAD |
 	                              BUTTON_MELEE | BUTTON_LETHAL | BUTTON_TACTICAL ) ) ||
 	        pm->cmd.upmove > 0 || ( pm->ps->pm_flags & PMF_JUMP_HELD ) ||
-	        pm->cmd.forwardmove <= BG_SPRINT_FORWARD_MINIMUM ||
-	        ( pm->ps->pm_flags & PMF_DUCKED ) || pm->waterlevel > 1 ||
+	        pml.forwardmove <= BG_SPRINT_FORWARD_MINIMUM || pm->waterlevel > 1 ||
 	        pm->ps->sprintUsed >= BG_SPRINT_TIME;
+	// MW2's start gate (0x56ED10, mask 0xCC35) takes no stance bit, so a
+	// toggled crouch or prone can start a sprint; its end gate (0x56ED80,
+	// 0xCF35) adds the crouch and prone bits, so a stance still asked for on
+	// the next command ends it.
+	ended = blocked || ( pm->cmd.buttons & ( BUTTON_CROUCH | BUTTON_PRONE ) );
 
 	// PWF_SPRINT_RELEASE: the button has stayed down since it started this
 	// sprint or a sprint ended under it, and only letting it go clears it -
@@ -3930,14 +5030,22 @@ static void PM_CheckSprint( void ) {
 	// starting - except that MW2's start gate skips that test in the air after
 	// a jump. Such a sprint lasts one think (PM_UpdateWeaponAction ends it, as
 	// MW2's end gate does the next), and its held button then waits to come up.
+	// Out of a crouch or prone it needs room to stand (MW2's PM_CanStand,
+	// 0x56EDE0) and stands up on the spot (PM_StanceForceStand): the client's
+	// stance is reset before its next command, which would otherwise ask for
+	// the stance again and end the sprint.
 	if ( sprinting ) {
 		wantSprint = !ended && !quick;
 	} else {
-		wantSprint = held && !ended && ( !quick || pm->ps->jumpLand < 0 ) &&
+		wantSprint = held && !blocked && ( !quick || pm->ps->jumpLand < 0 ) &&
 		             !( pm->ps->weapFlags & PWF_SPRINT_RELEASE ) &&
-		             BG_SPRINT_TIME - pm->ps->sprintUsed > BG_SPRINT_MIN_TIME;
+		             BG_SPRINT_TIME - pm->ps->sprintUsed > BG_SPRINT_MIN_TIME &&
+		             ( !( pm->ps->pm_flags & ( PMF_DUCKED | PMF_PRONE ) ) || PM_StanceFits( DEFAULT_HEIGHT ) );
 		if ( wantSprint ) {
 			pm->ps->weapFlags |= PWF_SPRINT_RELEASE;
+			if ( pm->ps->pm_flags & ( PMF_DUCKED | PMF_PRONE ) ) {
+				PM_StanceForceStand();
+			}
 		}
 	}
 
@@ -4008,6 +5116,19 @@ static void PM_CheckADS( void ) {
 	canADS = ( pm->cmd.buttons & BUTTON_ADS ) &&
 	         !( ( pm->cmd.buttons & BUTTON_SPRINT ) && !BG_WeaponScopeOverlay( pm->ps->weapon ) ) &&
 	         BG_CanAimDownSights( pm->ps );
+
+	// MW2's prone aim (PM_UpdateAimDownSightFlag 0x4BDDC0): lying down with an
+	// unscoped gun, an aim held since the command before does not start while
+	// crawling, and an aim stops the crawl (PMF_PRONEMOVE_OVERRIDDEN, read by
+	// the next think). A scoped gun aims and crawls. MW2 decides this before
+	// the move; Peace, as for every aim, after it.
+	if ( canADS && ( pm->ps->pm_flags & PMF_PRONE ) && !PM_UsingSniperScope() ) {
+		if ( BG_PREVCMD_ADS( pm->ps ) && ( pml.forwardmove || pml.rightmove ) ) {
+			canADS = qfalse;
+		} else {
+			pm->ps->pm_flags |= PMF_PRONEMOVE_OVERRIDDEN;
+		}
+	}
 
 	if ( canADS ) {
 		pm->ps->pm_flags |= PMF_ADS;
@@ -4454,6 +5575,8 @@ static void PM_Weapon( void ) {
 	if ( BG_IsActionWeapon( pm->ps->weapon ) ) {
 		pm->ps->weaponAction |= WA_FIRED;
 	}
+	// MW2's fire and melee hit stop a prone crawl (0x576F8B, 0x5774CF)
+	PM_SetProneMoveOverride();
 
 	// One hold: every piece of equipment recovers alike (the knife has its own
 	// meleeTime instead, BG_QuickActionInPlace).
@@ -4686,6 +5809,8 @@ PmoveSingle
 void trap_SnapVector( float *v );
 
 void PmoveSingle (pmove_t *pmove) {
+	float	oldViewYaw;
+
 	pm = pmove;
 
 	// this counter lets us debug movement problems with a journal
@@ -4729,9 +5854,11 @@ void PmoveSingle (pmove_t *pmove) {
 		}
 	}
 
-	// clear the respawned flag if attack and use are cleared
+	// clear the respawned flag once attack and prone are up (MW2 0x574617:
+	// a held trigger, or a client still asking for prone, waits; the client
+	// resets its stance to stand every frame meanwhile)
 	if ( pm->ps->stats[STAT_HEALTH] > 0 && 
-		!( pm->cmd.buttons & (BUTTON_ATTACK | BUTTON_USE_HOLDABLE) ) ) {
+		!( pm->cmd.buttons & (BUTTON_ATTACK | BUTTON_PRONE) ) ) {
 		if ( pm->ps->pm_flags & PMF_RESPAWNED ) {
 			// A spawn clears the action latch, not the player's physical buttons.
 			// Seed their held state so carrying a button through death/countdown
@@ -4747,8 +5874,9 @@ void PmoveSingle (pmove_t *pmove) {
 	// adding fake talk balloons
 	if ( pmove->cmd.buttons & BUTTON_TALK ) {
 		// keep the talk button set tho for when the cmd.serverTime > 66 msec
-		// and the same cmd is used multiple times in Pmove
-		pmove->cmd.buttons = BUTTON_TALK;
+		// and the same cmd is used multiple times in Pmove. The stance stays:
+		// it is the client's state (MW2's), not a press.
+		pmove->cmd.buttons = BUTTON_TALK | ( pmove->cmd.buttons & BUTTON_STANCE_MASK );
 		pmove->cmd.forwardmove = 0;
 		pmove->cmd.rightmove = 0;
 		pmove->cmd.upmove = 0;
@@ -4777,10 +5905,10 @@ void PmoveSingle (pmove_t *pmove) {
 		pm->ps->stats[STAT_LADDER] = 0;
 	}
 
-	// update the viewangles
+	// update the viewangles (the prone view, which MW2 runs inside its view
+	// update, runs once below, after the crawl rules it reads)
+	oldViewYaw = pm->ps->viewangles[YAW];
 	PM_UpdateViewAngles( pm->ps, &pm->cmd );
-
-	AngleVectors (pm->ps->viewangles, pml.forward, pml.right, pml.up);
 
 	if ( pm->cmd.upmove < 10 ) {
 		// not holding jump
@@ -4800,8 +5928,25 @@ void PmoveSingle (pmove_t *pmove) {
 		pm->cmd.upmove = 0;
 	}
 
-	// this think's rightmove, which the walk's sprint strafe may scale
+	// this think's moves, which the walk's sprint strafe may scale and a
+	// prone crawl stop zeroes
 	pml.rightmove = pm->cmd.rightmove;
+	pml.forwardmove = pm->cmd.forwardmove;
+
+	// MW2's order (PmoveSingle 0x57448B-0x574782): the crawl rules, the view
+	// (with the prone turn and clamps), then a stopped crawl's zeroing, all
+	// on the stance the last think left. Peace's freeze and intermission move
+	// nothing at all (MW2's PMF_FROZEN still runs them).
+	if ( pm->ps->pm_type != PM_FREEZE && pm->ps->pm_type != PM_INTERMISSION &&
+	     pm->ps->pm_type != PM_SPINTERMISSION ) {
+		PM_ProneMoveOverride();
+		PM_ProneViewAngles( oldViewYaw );
+	}
+	AngleVectors (pm->ps->viewangles, pml.forward, pml.right, pml.up);
+	if ( ( pm->ps->pm_flags & PMF_PRONE ) && ( pm->ps->pm_flags & PMF_PRONEMOVE_OVERRIDDEN ) ) {
+		pml.forwardmove = 0;
+		pml.rightmove = 0;
+	}
 
 	if ( pm->ps->pm_type == PM_SPECTATOR ) {
 		PM_CheckDuck ();
@@ -4834,6 +5979,11 @@ void PmoveSingle (pmove_t *pmove) {
 	// set groundentity
 	PM_CheckLadder();
 	if ( !(pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED) ) PM_GroundTrace();
+
+	// MW2 0x574ACC: the prone body against the ground just traced
+	if ( pm->ps->pm_flags & PMF_PRONE ) {
+		PM_UpdatePronePitch();
+	}
 
 	if ( pm->ps->pm_type == PM_DEAD ) {
 		PM_DeadMove ();
@@ -4919,6 +6069,11 @@ Can be called by either the server or the client
 */
 void Pmove (pmove_t *pmove) {
 	int			finalTime;
+	// MW2's pm->oldcmd for the next command: this one as it came, written
+	// once a command (never per chopped step, so each step compares with the
+	// command before) and only if a step ran
+	int			prevCmd = BG_PrevCmdPack( &pmove->cmd );
+	qboolean	stepped = qfalse;
 
 	finalTime = pmove->cmd.serverTime;
 
@@ -4951,10 +6106,14 @@ void Pmove (pmove_t *pmove) {
 		}
 		pmove->cmd.serverTime = pmove->ps->commandTime + msec;
 		PmoveSingle( pmove );
+		stepped = qtrue;
 
 		if ( pmove->ps->pm_flags & PMF_JUMP_HELD ) {
 			pmove->cmd.upmove = 20;
 		}
+	}
+	if ( stepped ) {
+		pmove->ps->prevCmd = prevCmd;
 	}
 
 	//PM_CheckStuck();

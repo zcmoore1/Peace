@@ -14,7 +14,14 @@
  *   body in a mirror are scaled the same way;
  * - the flag swings exactly as the unscaled one would;
  * - the sprites over the head, the shadow and the water splash follow it;
- * - picture only: the entity, its lighting origin and its state are untouched.
+ * - picture only: the entity, its lighting origin and its state are untouched;
+ * - MW2's prone body, a placeholder (owner's decision): a live player with
+ *   EF_PRONE lies face down along the body's yaw and pitch (origin2[0..1]),
+ *   the legs pitched 90 degrees about the yaw's right axis, the model's eye on
+ *   the prone eye over the origin and the body running back behind it, scaled
+ *   about the rotated feet; the torso held to the legs, the head looking
+ *   ahead; the tags below PRONE_HEIGHT; a prone corpse stands for its death;
+ *   the prone legs anims are built from the Quake 3 frames.
  * Only the engine traps, the world and modules outside these files are
  * stubbed; the tags are made-up but not trivial (offset and rotated). */
 #include "../../code/cgame/cg_players.c"
@@ -146,8 +153,13 @@ localEntity_t *CG_SmokePuff(const vec3_t p, const vec3_t vel, float radius, floa
 qhandle_t trap_R_RegisterModel(const char *name) { (void)name; CHECK(0); return 0; }
 qhandle_t trap_R_RegisterShader(const char *name) { (void)name; CHECK(0); return 0; }
 void trap_R_ModelBounds(clipHandle_t model, vec3_t mins, vec3_t maxs) { (void)model; (void)mins; (void)maxs; CHECK(0); }
-int trap_FS_FOpenFile(const char *path, fileHandle_t *f, fsMode_t mode) { (void)path; (void)f; (void)mode; CHECK(0); return -1; }
-void trap_FS_FCloseFile(fileHandle_t f) { (void)f; CHECK(0); }
+/* an animation.cfg, served only to the prone frames' check */
+static const char *animConfig;
+int trap_FS_FOpenFile(const char *path, fileHandle_t *f, fsMode_t mode) {
+	(void)path; (void)mode; CHECK(animConfig != NULL); *f = 1; return (int)strlen(animConfig);
+}
+void trap_FS_Read(void *buffer, int len, fileHandle_t f) { (void)f; memcpy(buffer, animConfig, len); }
+void trap_FS_FCloseFile(fileHandle_t f) { (void)f; CHECK(animConfig != NULL); }
 void CG_WeapAnim_RegisterClips(int weapon, qhandle_t model, const char *path) { (void)weapon; (void)model; (void)path; CHECK(0); }
 void CG_Sights_Register(int weapon, const char *path) { (void)weapon; (void)path; CHECK(0); }
 localEntity_t *CG_AllocLocalEntity(void) { CHECK(0); return NULL; }
@@ -447,6 +459,120 @@ static void TestSpritesAndSplash(void) {
 	CHECK(splashPolys == 0);
 }
 
+/* MW2's prone body, the placeholder: the stated pose, not every vertex. */
+static void TestProne(void) {
+	static const float yaws[] = { 0, 37, -150, 270 }, pitches[] = { 0, 12, -9 }, views[] = { 0, -30, 25 };
+	int y, p, v, i;
+	for (y = 0; y < ARRAY_LEN(yaws); y++) for (p = 0; p < ARRAY_LEN(pitches); p++) for (v = 0; v < ARRAY_LEN(views); v++) {
+		const refEntity_t *legs, *torso, *head;
+		vec3_t legsU[3], torsoU[3], headU[3], f, r, u, eye, feet, point, local, top, tagAxis[3], rel[3], tmp[3], expect[3];
+		vec3_t angles;
+		const fakeTag_t *t;
+		centity_t *cent;
+		Reset();
+		/* the view turned away from the body, as a prone player may look */
+		cent = Player(0, 0, yaws[y] + 40, views[v]);
+		cent->currentState.eFlags = EF_PRONE;
+		cent->currentState.legsAnim = LEGS_IDLEPR;
+		cent->currentState.origin2[0] = yaws[y];
+		cent->currentState.origin2[1] = pitches[p];
+		cent->currentState.origin2[2] = PRONE_VIEWHEIGHT;
+		Draw(cent);
+		legs = Drawn(M_LEGS); torso = Drawn(M_TORSO); head = Drawn(M_HEAD);
+		CHECK(legs && torso && head && Drawn(M_GUN));
+		Unit(legs, legsU); Unit(torso, torsoU); Unit(head, headU);
+		/* picture only: every piece lit from the entity's own origin */
+		CHECK(VectorCompare(legs->lightingOrigin, cent->lerpOrigin) && VectorCompare(torso->lightingOrigin, cent->lerpOrigin) &&
+			VectorCompare(head->lightingOrigin, cent->lerpOrigin));
+		/* face down, 90 degrees about the yaw's right axis: the model's up runs
+		 * along the body's forward, its face down, its left the yaw's left */
+		VectorSet(angles, pitches[p], yaws[y], 0);
+		AngleVectors(angles, f, r, u);
+		for (i = 0; i < 3; i++) {
+			NEAR(legsU[2][i], f[i], 1e-4);
+			NEAR(legsU[0][i], -u[i], 1e-4);
+			NEAR(legsU[1][i], -r[i], 1e-4);
+		}
+		/* the model's eye (the standing eye up from its feet) is the prone eye,
+		 * over the origin; the pivot is the rotated feet, behind it */
+		VectorMA(cent->lerpOrigin, PRONE_VIEWHEIGHT, u, eye);
+		VectorMA(eye, -(DEFAULT_VIEWHEIGHT - MINS_Z), f, feet);
+		VectorSet(local, 0, 0, MINS_Z);
+		ModelPoint(legs, local, point);
+		NEAR(Distance(point, feet), 0, 1e-3);
+		VectorSet(local, 0, 0, MINS_Z + (DEFAULT_VIEWHEIGHT - MINS_Z) / S);
+		ModelPoint(legs, local, point);
+		NEAR(Distance(point, eye), 0, 1e-3);
+		/* the body runs back from the origin: the feet 60 behind, the head's
+		 * top (the box's reach above its eye) just ahead */
+		VectorSubtract(feet, cent->lerpOrigin, point);
+		NEAR(DotProduct(point, f), -(DEFAULT_VIEWHEIGHT - MINS_Z), 1e-3);
+		VectorSet(local, 0, 0, MINS_Z + CG_PLAYER_MODEL_HEIGHT);
+		ModelPoint(legs, local, top);
+		VectorSubtract(top, cent->lerpOrigin, point);
+		NEAR(DotProduct(point, f), DEFAULT_HEIGHT - DEFAULT_VIEWHEIGHT, 1e-3);
+		/* the torso held to the legs (tag_torso's own turn only), the head
+		 * pitched back by 90 less the view's pitch to look ahead */
+		t = FindTag(M_LEGS, "tag_torso");
+		AnglesToAxis(t->angles, tagAxis);
+		MatrixMultiply(tagAxis, legsU, expect);
+		for (i = 0; i < 3; i++) NEAR(Distance(expect[i], torsoU[i]), 0, 1e-4);
+		t = FindTag(M_TORSO, "tag_head");
+		VectorSet(angles, views[v] - 90, 0, 0);
+		AnglesToAxis(angles, rel);
+		AnglesToAxis(t->angles, tagAxis);
+		MatrixMultiply(rel, tagAxis, tmp);
+		MatrixMultiply(tmp, torsoU, expect);
+		for (i = 0; i < 3; i++) NEAR(Distance(expect[i], headU[i]), 0, 1e-4);
+		/* lying down: the legs' root, torso and head tags are below the prone box's top */
+		CHECK(legs->origin[2] < cent->lerpOrigin[2] + PRONE_HEIGHT);
+		CHECK(torso->origin[2] < cent->lerpOrigin[2] + PRONE_HEIGHT);
+		CHECK(head->origin[2] < cent->lerpOrigin[2] + PRONE_HEIGHT);
+	}
+	printf("prone: the head at the origin, the feet %d behind, lying along the body's yaw and pitch\n",
+		DEFAULT_VIEWHEIGHT - MINS_Z);
+	/* a prone corpse plays its death standing; a crouched player stands in the picture's sense */
+	{
+		centity_t *cent;
+		vec3_t feet;
+		Reset();
+		cent = Player(MAX_CLIENTS + 3, 0, 200, 0);
+		cent->currentState.eFlags = EF_DEAD | EF_PRONE;
+		cent->currentState.origin2[0] = 90;
+		cent->currentState.legsAnim = BOTH_DEAD1; cent->currentState.torsoAnim = BOTH_DEAD1;
+		cent->currentState.weapon = WP_NONE;
+		Draw(cent);
+		CheckAssembly(cent, qfalse, qfalse, feet);
+		NEAR(feet[2], start[2] + MINS_Z, 1e-3);
+		Reset();
+		cent = Player(0, 0, 10, 0);
+		cent->currentState.eFlags = EF_CROUCHING; cent->currentState.legsAnim = LEGS_IDLECR;
+		Draw(cent);
+		CheckAssembly(cent, qtrue, qfalse, feet);
+		NEAR(feet[2], start[2] + MINS_Z, 1e-3);
+	}
+}
+
+/* The prone legs anims, built after an animation.cfg's parse as LEGS_BACKCR
+ * is: the straight idle, and the crouch walk forward and reversed. */
+static void TestProneFrames(void) {
+	static char config[4096];
+	clientInfo_t ci;
+	int i, n = 0;
+	for (i = 0; i < MAX_ANIMATIONS; i++) n += Com_sprintf(config + n, sizeof(config) - n, "%d %d %d %d\n", i * 10, 5 + i, i, 15 + i);
+	animConfig = config;
+	memset(&ci, 0, sizeof(ci));
+	CHECK(CG_ParseAnimationFile("models/players/test/animation.cfg", &ci));
+	animConfig = NULL;
+	CHECK(!memcmp(&ci.animations[LEGS_IDLEPR], &ci.animations[LEGS_IDLE], sizeof(animation_t)));
+	CHECK(ci.animations[LEGS_CRAWL].firstFrame == ci.animations[LEGS_WALKCR].firstFrame &&
+		ci.animations[LEGS_CRAWL].numFrames == ci.animations[LEGS_WALKCR].numFrames && !ci.animations[LEGS_CRAWL].reversed);
+	CHECK(ci.animations[LEGS_CRAWLB].firstFrame == ci.animations[LEGS_WALKCR].firstFrame &&
+		ci.animations[LEGS_CRAWLB].numFrames == ci.animations[LEGS_WALKCR].numFrames && ci.animations[LEGS_CRAWLB].reversed);
+	CHECK(ci.animations[LEGS_IDLEPR].numFrames > 0 && ci.animations[LEGS_CRAWL].numFrames > 0);
+	CHECK(BG_LegsAnimStance(LEGS_CRAWLB | ANIM_TOGGLEBIT) == BG_STANCE_PRONE);
+}
+
 int main(void) {
 	/* the scale fills the box the game uses */
 	NEAR(S, (double)(DEFAULT_HEIGHT - MINS_Z) / CG_PLAYER_MODEL_HEIGHT, 1e-6);
@@ -457,6 +583,8 @@ int main(void) {
 	TestCorpsePodiumMirror();
 	TestFlag();
 	TestSpritesAndSplash();
+	TestProne();
+	TestProneFrames();
 	printf("PASS: every player, corpse and podium model fills the %d-unit box, x%.4f about the feet (%d checks).\n",
 		DEFAULT_HEIGHT - MINS_Z, S, checks);
 	return 0;

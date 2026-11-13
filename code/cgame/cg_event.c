@@ -424,19 +424,11 @@ Returns waterlevel for entity origin
 */
 int CG_WaterLevel(centity_t *cent) {
 	vec3_t point;
-	int contents, sample1, sample2, anim, waterlevel;
-	int viewheight;
-
-	anim = cent->currentState.legsAnim & ~ANIM_TOGGLEBIT;
-
-	if (anim == LEGS_WALKCR || anim == LEGS_IDLECR) {
-		viewheight = CROUCH_VIEWHEIGHT;
-	} else {
-		viewheight = DEFAULT_VIEWHEIGHT;
-	}
+	int contents, sample1, sample2, waterlevel;
 
 	//
-	// get waterlevel, accounting for ducking
+	// get waterlevel from the standing eye in every stance, as pmove's
+	// PM_SetWaterLevel does (BG_WATER_SAMPLE_EYE: MW2's stance reads no water)
 	//
 	waterlevel = 0;
 
@@ -446,7 +438,7 @@ int CG_WaterLevel(centity_t *cent) {
 	contents = CG_PointContents(point, -1);
 
 	if (contents & MASK_WATER) {
-		sample2 = viewheight - MINS_Z;
+		sample2 = BG_WATER_SAMPLE_EYE;
 		sample1 = sample2 / 2;
 		waterlevel = 1;
 		point[2] = cent->lerpOrigin[2] + MINS_Z + sample1;
@@ -518,6 +510,44 @@ That player's entity is never in a snapshot (SV_BuildClientSnapshot).
 */
 qboolean CG_EventPlayerView( const centity_t *cent ) {
 	return cent == &cg.predictedPlayerEntity || cent->currentState.number == cg.snap->ps.clientNum;
+}
+
+/*
+==============
+CG_EventOwnInput
+
+Whether a player-view event may reach this client's own input: the viewed
+player is this client, live (no demo, no killcam). MW2's EV_RESET_ADS and
+stance handlers write the local client's input (cl.usingAds, CL_SetStance).
+==============
+*/
+static qboolean CG_EventOwnInput( void ) {
+	return cg.snap->ps.clientNum == cg.clientNum && !CG_Killcam_Active() && !cg.demoPlayback;
+}
+
+/*
+==============
+CG_SetInvalidCmdHint
+
+MW2's (0x587230): the weapon is stored every time; a parm of 1..3 arms type
+parm + 2, stamped now, unless that type is already set. A same-type event
+never restamps it: the type is cleared only by the draw (CG_DrawInvalidCmdHint)
+once it has shown CG_INVALID_HINT_MS, so a block that raises an event every
+think blinks on for as long as it lasts.
+==============
+*/
+void CG_SetInvalidCmdHint( int weapon, int parm ) {
+	int type;
+	cg.invalidCmdHintWeapon = weapon;
+	if ( parm < BG_STANCE_PARM_STAND_BLOCKED || parm > BG_STANCE_PARM_PRONE_BLOCKED ) {
+		return;
+	}
+	type = parm - BG_STANCE_PARM_STAND_BLOCKED + CG_INVALID_HINT_STAND_BLOCKED;
+	if ( cg.invalidCmdHintType == type ) {
+		return;
+	}
+	cg.invalidCmdHintType = type;
+	cg.invalidCmdHintTime = cg.time;
 }
 
 /*
@@ -870,13 +900,42 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		// sets cl.usingAds false (4f1b80). Never a followed or replayed player's.
 		if ( !CG_EventPlayerView( cent ) ) {
 			CG_Printf( "Event %s just for client %i was sent to other clients\n", "EV_RESET_ADS", es->number );
-		} else if ( cg.snap->ps.clientNum == cg.clientNum && !CG_Killcam_Active() && !cg.demoPlayback ) {
+		} else if ( CG_EventOwnInput() ) {
 			trap_SendConsoleCommand( "leaveads\n" );
 		}
 		break;
 	case EV_PREP_OFFHAND:
 		DEBUGNAME("EV_PREP_OFFHAND");
 		CG_PrepOffhand( cent, es->eventParm );
+		break;
+
+	// MW2's stance corrections (CG_EntityEvent 0x4DD48F-0x4DD557), the
+	// player's own only (singleClient). The FORCE three put the client's stance
+	// where pmove put the body, MW2's CL_SetStance: the second approved
+	// exception to cgame being picture only, client input only and never in a
+	// demo, killcam or follow (owner's decision). MW2's FORCE_PRONE also arms
+	// the hint, but only for a weapon that blocks prone while prone
+	// (0x408410, 0x4CA460: BG_WeaponBlocksProne), which Peace does not have.
+	case EV_STANCE_FORCE_STAND:
+	case EV_STANCE_FORCE_CROUCH:
+	case EV_STANCE_FORCE_PRONE:
+		DEBUGNAME("EV_STANCE_FORCE_*");
+		if ( !CG_EventPlayerView( cent ) ) {
+			CG_Printf( "Event %s just for client %i was sent to other clients\n", event == EV_STANCE_FORCE_STAND ?
+				"EV_STANCE_FORCE_STAND" : event == EV_STANCE_FORCE_CROUCH ? "EV_STANCE_FORCE_CROUCH" : "EV_STANCE_FORCE_PRONE", es->number );
+		} else if ( CG_EventOwnInput() ) {
+			trap_SendConsoleCommand( va( "_peaceSetStance %i\n", event == EV_STANCE_FORCE_STAND ? BG_STANCE_STAND :
+				event == EV_STANCE_FORCE_CROUCH ? BG_STANCE_CROUCH : BG_STANCE_PRONE ) );
+		}
+		break;
+	case EV_STANCE_INVALID:
+		DEBUGNAME("EV_STANCE_INVALID");
+		// a prone turn blocked: MW2's "Prone Blocked" hint (0x4DD506)
+		if ( !CG_EventPlayerView( cent ) ) {
+			CG_Printf( "Event %s just for client %i was sent to other clients\n", "EV_STANCE_INVALID", es->number );
+		} else if ( CG_EventOwnInput() ) {
+			CG_SetInvalidCmdHint( es->weapon, es->eventParm );
+		}
 		break;
 
 	case EV_GRENADE_SUICIDE:

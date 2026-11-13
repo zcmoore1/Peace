@@ -24,7 +24,13 @@
  * new, and a player's entity, reset, plays nothing its ring already held. And the killcam's ring arithmetic, which emerges: a shot and the
  * throwing knife's press in one recorded frame leave the archived playerstate
  * no shot to play (MW2's four events overwrite it), while a frame between them
- * keeps it. */
+ * keeps it.
+ *
+ * MW2's stance events (EV_STANCE_FORCE_STAND/CROUCH/PRONE, EV_STANCE_INVALID,
+ * singleClient): the player's own resets the client's stance through
+ * _peaceSetStance (MW2's CL_SetStance, owner's decision), never in a killcam,
+ * a demo or a followed view; no entity carries them; EV_STANCE_INVALID arms
+ * MW2's invalid-command hint, which a same-type event never restamps. */
 #include "../../code/cgame/cg_snapshot.c"
 
 void FakeReloadPmove( pmove_t *move );
@@ -125,6 +131,10 @@ void CG_Trace( trace_t *result, const vec3_t start, const vec3_t mins, const vec
 	(void)mins; (void)maxs; (void)skipNumber; (void)mask;
 	memset( result, 0, sizeof( *result ) ); result->fraction = 1; result->entityNum = ENTITYNUM_NONE;
 	VectorCopy( end, result->endpos ); (void)start;
+}
+/* cg_predict.c's other players' hit volumes: no one is in this empty world */
+void CG_ShotHitVolumes( trace_t *tr, const vec3_t start, const vec3_t end, int skipNumber ) {
+	(void)tr; (void)start; (void)end; (void)skipNumber;
 }
 void trap_CM_BoxTrace( trace_t *results, const vec3_t start, const vec3_t end, const vec3_t mins, const vec3_t maxs,
 	clipHandle_t model, int brushmask ) {
@@ -442,6 +452,85 @@ static void TestEquippedOffhandReset( void ) {
 	CHECK( !warnings );
 }
 
+/* The stance events, raised on the player's playerstate as pmove raises them
+ * (BG_AddPredictableEventToPlayerstate): what the player's own cgame does,
+ * what a demo, the killcam or a followed view does (nothing), and that the
+ * entity never carries one. */
+static void StanceEvent( int event, int parm ) {
+	playerState_t before = shooter;
+	BG_AddPredictableEventToPlayerstate( event, parm, &shooter );
+	BG_PlayerStateToEntityStateExtraPolate( &shooter, &shooterEntity, shooter.commandTime, qtrue );
+	snaps[0].ps = shooter; cg.snap = &snaps[0];
+	lastCommand[0] = 0;
+	PlayerEvents( &shooter, &before );
+}
+static void TestStanceEvents( void ) {
+	static const struct { int event, stance; } force[] = {
+		{ EV_STANCE_FORCE_STAND, BG_STANCE_STAND }, { EV_STANCE_FORCE_CROUCH, BG_STANCE_CROUCH },
+		{ EV_STANCE_FORCE_PRONE, BG_STANCE_PRONE } };
+	char expect[64];
+	int i, parm, view, stamp;
+	for ( i = 0; i < ARRAY_LEN( force ); i++ ) for ( parm = BG_STANCE_PARM_FORCED; parm <= BG_STANCE_PARM_PRONE_BLOCKED; parm++ ) {
+		/* the player's own: the stance reset, and no hint (MW2's FORCE_PRONE
+		 * hint needs a weapon that blocks prone, which Peace has none of) */
+		Fresh(); Shooter( WP_FRAG ); Commands( 0, 100 ); cg.clientNum = SHOOTER;
+		CHECK( !BG_WeaponBlocksProne( shooter.weapon ) );
+		StanceEvent( force[i].event, parm );
+		Com_sprintf( expect, sizeof( expect ), "_peaceSetStance %i\n", force[i].stance );
+		CHECK( !strcmp( lastCommand, expect ) && !cg.invalidCmdHintType && !warnings && !numPlayed );
+		/* never anyone else's input: a followed player, the killcam, a demo */
+		for ( view = 0; view < 3; view++ ) {
+			Fresh(); Shooter( WP_FRAG ); Commands( 0, 100 );
+			cg.clientNum = view == 0 ? VIEWER : SHOOTER;
+			if ( view == 1 ) snaps[0].snapFlags = SNAPFLAG_REPLAY;
+			if ( view == 2 ) cg.demoPlayback = qtrue;
+			StanceEvent( force[i].event, parm );
+			CHECK( !lastCommand[0] && !cg.invalidCmdHintType && !warnings );
+			cg.demoPlayback = qfalse;
+		}
+	}
+	/* singleClient: the entity's ring never carries one, so no one else plays it */
+	Fresh(); Shooter( WP_FRAG ); ShooterSnapshot(); Commands( 0, 100 ); ShooterSnapshot();
+	for ( i = 0; i < ARRAY_LEN( force ); i++ ) {
+		BG_AddPredictableEventToPlayerstate( force[i].event, BG_STANCE_PARM_STAND_BLOCKED, &shooter );
+		Command( 0 );
+	}
+	BG_AddPredictableEventToPlayerstate( EV_STANCE_INVALID, BG_STANCE_PARM_PRONE_BLOCKED, &shooter );
+	Command( 0 );
+	ShooterSnapshot();
+	for ( i = 0; i < MAX_ENTITY_EVENTS; i++ ) {
+		int ev = cg_entities[SHOOTER].currentState.events[i];
+		CHECK( ev < EV_STANCE_FORCE_STAND || ev > EV_STANCE_INVALID );
+	}
+	CHECK( !lastCommand[0] && !warnings && !cg.invalidCmdHintType );
+	/* EV_STANCE_INVALID arms MW2's "Prone Blocked" (CG_SetInvalidCmdHint
+	 * 0x587230): stamped once; the same type again leaves the stamp; the weapon
+	 * is stored every time; another type restamps */
+	Fresh(); Shooter( WP_FRAG ); Commands( 0, 100 ); cg.clientNum = SHOOTER;
+	StanceEvent( EV_STANCE_INVALID, BG_STANCE_PARM_PRONE_BLOCKED );
+	CHECK( cg.invalidCmdHintType == CG_INVALID_HINT_PRONE_BLOCKED && cg.invalidCmdHintTime == cg.time );
+	CHECK( cg.invalidCmdHintWeapon == shooter.weapon && !lastCommand[0] && !warnings );
+	stamp = cg.time;
+	cg.time += CG_INVALID_HINT_MS / 2;
+	shooter.weapon = WP_SHOTGUN;
+	StanceEvent( EV_STANCE_INVALID, BG_STANCE_PARM_PRONE_BLOCKED );
+	CHECK( cg.invalidCmdHintTime == stamp && cg.invalidCmdHintWeapon == WP_SHOTGUN );
+	cg.time += 8;
+	CG_SetInvalidCmdHint( WP_MACHINEGUN, BG_STANCE_PARM_STAND_BLOCKED );
+	CHECK( cg.invalidCmdHintType == CG_INVALID_HINT_STAND_BLOCKED && cg.invalidCmdHintTime == cg.time );
+	CG_SetInvalidCmdHint( WP_SHOTGUN, BG_STANCE_PARM_CROUCH_BLOCKED );
+	CHECK( cg.invalidCmdHintType == CG_INVALID_HINT_CROUCH_BLOCKED && cg.invalidCmdHintWeapon == WP_SHOTGUN );
+	/* a parm with no hint stores the weapon and arms nothing */
+	stamp = cg.invalidCmdHintTime; cg.time += 8;
+	CG_SetInvalidCmdHint( WP_M40A3, BG_STANCE_PARM_FORCED );
+	CHECK( cg.invalidCmdHintType == CG_INVALID_HINT_CROUCH_BLOCKED && cg.invalidCmdHintTime == stamp &&
+		cg.invalidCmdHintWeapon == WP_M40A3 );
+	/* followed, or in the killcam: no hint */
+	Fresh(); Shooter( WP_FRAG ); Commands( 0, 100 ); cg.clientNum = VIEWER;
+	StanceEvent( EV_STANCE_INVALID, BG_STANCE_PARM_PRONE_BLOCKED );
+	CHECK( !cg.invalidCmdHintType && !warnings );
+}
+
 int main( void ) {
 	TestShotThenKnife();
 	TestFragPullback();
@@ -450,6 +539,7 @@ int main( void ) {
 	TestOwnView();
 	TestKillcam();
 	TestEquippedOffhandReset();
+	TestStanceEvents();
 	printf( "PASS: %d event ring checks\n", checks );
 	return 0;
 }

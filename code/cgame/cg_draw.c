@@ -2962,6 +2962,53 @@ static void CG_DrawSND( void ) {
 	if ( prompt ) CG_SNDText(314,prompt,gold);
 }
 
+/*
+=================
+CG_DrawInvalidCmdHint
+
+MW2's invalid-command hint (CG_DrawInvalidCmdHint 0x58DB10, ownerdraw 113 of
+hud_720.menu): "Prone Blocked" while a prone turn is blocked, and MW2's two
+blocked-stance texts, which no Peace event arms. Shown CG_INVALID_HINT_MS
+from when it was armed, then cleared here, by the draw, and nowhere else; its
+alpha ramps from 0 to 1 every CG_INVALID_HINT_BLINK_MS of that. So an event
+every think shows three ramps, and the first event after the clear arms it
+again: it blinks for as long as the block lasts. MW2 shows it unless a menu
+is up or a client is spectated (the item's visible when: !ui_active() &&
+!spectatingclient()); the scoreboard does not hide it. While it is hidden this
+does not run, so the type is not cleared and a same-type event does not
+restamp it.
+=================
+*/
+void CG_DrawInvalidCmdHint( void ) {
+	const char	*text;
+	vec4_t		color;
+
+	if ( ( trap_Key_GetCatcher() & KEYCATCH_UI ) || ( cg.snap->ps.pm_flags & PMF_FOLLOW ) ||
+	     cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR ) {
+		return;
+	}
+	if ( cg.invalidCmdHintTime + CG_INVALID_HINT_MS < cg.time ) {
+		cg.invalidCmdHintType = CG_INVALID_HINT_NONE;
+	}
+	switch ( cg.invalidCmdHintType ) {
+	case CG_INVALID_HINT_STAND_BLOCKED:
+		text = "Can't Stand Here";
+		break;
+	case CG_INVALID_HINT_CROUCH_BLOCKED:
+		text = "Can't Crouch Here";
+		break;
+	case CG_INVALID_HINT_PRONE_BLOCKED:
+		text = "Prone Blocked";
+		break;
+	default:
+		return;
+	}
+	color[0] = color[1] = color[2] = 1.0f;
+	color[3] = (float)( ( cg.time - cg.invalidCmdHintTime ) % CG_INVALID_HINT_BLINK_MS ) / (float)CG_INVALID_HINT_BLINK_MS;
+	CG_DrawStringExt( SCREEN_WIDTH / 2 - CG_DrawStrlen( text ) * SMALLCHAR_WIDTH / 2, CG_INVALID_HINT_Y, text, color,
+		qfalse, qtrue, SMALLCHAR_WIDTH, SMALLCHAR_HEIGHT, 0 );
+}
+
 static void CG_Draw2D(stereoFrame_t stereoFrame)
 {
 #ifdef MISSIONPACK
@@ -3072,6 +3119,7 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 	if ( !cg.scoreBoardShowing) {
 		CG_DrawCenterString();
 	}
+	CG_DrawInvalidCmdHint();
 }
 
 

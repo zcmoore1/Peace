@@ -64,6 +64,10 @@ jobs:
         run: |
           sh dev/tests/run-ladders.sh
           LADDER_TEST_DEFINES=-DMISSIONPACK sh dev/tests/run-ladders.sh
+      - name: Test MW2's stance and prone through the real Pmove and server
+        run: |
+          sh dev/tests/run-stance.sh
+          STANCE_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-stance.sh
       - name: Test weapon state and sight presentation
         run: |
           mkdir -p out/tests
@@ -88,6 +92,14 @@ jobs:
           BULLETS_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-bullets.sh
           sh dev/tests/run-silentshot.sh
           SILENTSHOT_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-silentshot.sh
+      - name: Test MW2's stance button, its cgame half and the stance end to end
+        run: |
+          sh dev/tests/run-stanceinput.sh
+          STANCEINPUT_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-stanceinput.sh
+          sh dev/tests/run-stancecgame.sh
+          STANCECGAME_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-stancecgame.sh
+          sh dev/tests/run-stanceflow.sh
+          STANCEFLOW_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-stanceflow.sh
       - name: Build native and QVM game modules
         run: |
           cmake -S . -B out/ci -DBUILD_CLIENT=OFF -DBUILD_SERVER=OFF -DBUILD_RENDERER_GL1=OFF -DBUILD_RENDERER_GL2=OFF -DBUILD_GAME_LIBRARIES=ON -DBUILD_GAME_QVMS=ON

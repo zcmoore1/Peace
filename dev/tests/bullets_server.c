@@ -3,7 +3,16 @@
  * command, the real FireWeapon (g_weapon.c) and G_Damage (g_combat.c). Every
  * shot's ray trace is recorded where it ends; the world is bullets_world.c's.
  * Only engine traps and modules outside these files are stubbed, as in
- * offhand_server_test.c. */
+ * offhand_server_test.c.
+ *
+ * A bullet or a pellet ends where the owner's hit volumes (D7) put it: the
+ * mark is the engine trace's end, or the nearest volume past a player's box
+ * entered before it, from the one shared BG_PlayerHitVolumes fed as the
+ * server's bullet code feeds it (the target's entity, r.currentOrigin,
+ * r.mins, r.maxs). The trace the game gets is the engine's, untouched: its
+ * own bullet code applies the volumes, and every bullet's G_Damage (wrapped
+ * by the linker) is recorded so the test can check the real server hit what
+ * the mark says. */
 #include "../../code/game/g_local.h"
 #include "bullets_world.h"
 #include "bullets.h"
@@ -36,7 +45,30 @@ void QDECL G_LogPrintf(const char *fmt,...) { (void)fmt; }
 
 /* ---- the world (bullets_world.c) and the linked entities ---- */
 bwMark_t bs_marks[BW_MAX_MARKS];
-int bs_markCount, bs_shotTraces;
+int bs_markCount, bs_shotTraces, bs_volumeHits, bs_midLegShots;
+bwMark_t bs_damage[BW_MAX_MARKS];
+int bs_damageCount, bs_bulletHealth[BS_CLIENTS];
+static qboolean BS_BulletWeapon( int weapon ) {
+ return weapon==WP_MACHINEGUN || weapon==WP_SHOTGUN || weapon==WP_M40A3
+#ifdef MISSIONPACK
+  || weapon==WP_CHAINGUN
+#endif
+  ;
+}
+/* the players' volumes past their boxes, nearest first, as BG_PlayerHitVolumes defines them */
+static void BS_HitVolumes(trace_t *t,const vec3_t start,const vec3_t end,int pass) {
+ int i, j, n; bgHitVolume_t vols[BG_MAX_HIT_VOLUMES]; float f; vec3_t normal;
+ for(i=0;i<level.num_entities;i++) {
+  gentity_t *e=&g_entities[i];
+  if(!e->inuse || !e->r.linked || !(e->r.contents&MASK_SHOT) || i==pass || e->s.eType!=ET_PLAYER) continue;
+  n=BG_PlayerHitVolumes(&e->s,e->r.currentOrigin,e->r.mins,e->r.maxs,vols);
+  for(j=0;j<n;j++) {
+   if(vols[j].type==HITVOL_BOX || !BG_HitVolumeTrace(&vols[j],start,end,&f,normal) || f>=t->fraction) continue;
+   t->fraction=f; t->entityNum=i; t->surfaceFlags=0; VectorCopy(normal,t->plane.normal);
+   BW_Finish(t,start,end);
+  }
+ }
+}
 void trap_Trace(trace_t *t,const vec3_t start,const vec3_t mins,const vec3_t maxs,const vec3_t end,int pass,int mask) {
  int i, passOwner=-1;
  BW_TraceWorld(t,start,mins,maxs,end,mask);
@@ -52,12 +84,36 @@ void trap_Trace(trace_t *t,const vec3_t start,const vec3_t mins,const vec3_t max
  /* A shot's trace (FireWeapon's are rays against MASK_SHOT): where it ends,
   * if anything is to be seen there - the server's own impact rule. */
  if(!mins && !maxs && mask==MASK_SHOT) {
+  trace_t hit=*t;
   bs_shotTraces++;
-  if(bs_markCount<BW_MAX_MARKS && t->entityNum!=ENTITYNUM_NONE && !(t->surfaceFlags&SURF_NOIMPACT)) {
+  if(pass>=0 && pass<MAX_CLIENTS && BS_BulletWeapon(g_entities[pass].s.weapon)) {
+   float eye=g_entities[pass].client->ps.viewheight;
+   BS_HitVolumes(&hit,start,end,pass);
+   if(hit.fraction<t->fraction) bs_volumeHits++;
+   if(eye!=DEFAULT_VIEWHEIGHT && eye!=CROUCH_VIEWHEIGHT && eye!=PRONE_VIEWHEIGHT) bs_midLegShots++;	/* a shot on an eye leg */
+  }
+  if(bs_markCount<BW_MAX_MARKS && hit.entityNum!=ENTITYNUM_NONE && !(hit.surfaceFlags&SURF_NOIMPACT)) {
    bwMark_t *m=&bs_marks[bs_markCount++];
-   VectorCopy(t->endpos,m->point); m->entityNum=t->entityNum; m->flesh=t->entityNum<MAX_CLIENTS;
+   VectorCopy(hit.endpos,m->point); m->entityNum=hit.entityNum; m->flesh=hit.entityNum<MAX_CLIENTS;
   }
  }
+}
+/* every bullet's and pellet's damage, as the real bullet code dealt it */
+void __real_G_Damage(gentity_t *targ,gentity_t *inflictor,gentity_t *attacker,vec3_t dir,vec3_t point,int damage,int dflags,int mod);
+void __wrap_G_Damage(gentity_t *targ,gentity_t *inflictor,gentity_t *attacker,vec3_t dir,vec3_t point,int damage,int dflags,int mod) {
+ if(point && (mod==MOD_MACHINEGUN || mod==MOD_SHOTGUN || mod==MOD_M40A3
+#ifdef MISSIONPACK
+  || mod==MOD_CHAINGUN
+#endif
+  ) && bs_damageCount<BW_MAX_MARKS) {
+  int before=targ->health;
+  bwMark_t *m=&bs_damage[bs_damageCount++];
+  VectorCopy(point,m->point); m->entityNum=targ->s.number; m->flesh=1;
+  __real_G_Damage(targ,inflictor,attacker,dir,point,damage,dflags,mod);
+  if(targ->s.number<BS_CLIENTS) bs_bulletHealth[targ->s.number]+=before-targ->health;
+  return;
+ }
+ __real_G_Damage(targ,inflictor,attacker,dir,point,damage,dflags,mod);
 }
 void trap_LinkEntity(gentity_t *e) {
  e->r.linked=qtrue; VectorAdd(e->r.currentOrigin,e->r.mins,e->r.absmin); VectorAdd(e->r.currentOrigin,e->r.maxs,e->r.absmax);
@@ -163,7 +219,7 @@ void BS_Reset( int gametype ) {
   cl[i].ps.stats[STAT_MAX_HEALTH]=100;
   cl[i].ps.commandTime=level.time; cl[i].lastCmdTime=level.time; cl[i].useHold=ENTITYNUM_NONE;
   e->health=cl[i].ps.stats[STAT_HEALTH]=BS_HEALTH; e->takedamage=qtrue; e->r.contents=CONTENTS_BODY;
-  cl[i].ps.pm_type=PM_NORMAL; cl[i].ps.viewheight=DEFAULT_VIEWHEIGHT;
+  cl[i].ps.pm_type=PM_NORMAL; BG_SpawnStance(&cl[i].ps);	/* as ClientSpawn spawns them: standing */
   cl[i].ps.gravity=g_gravity.value; cl[i].ps.speed=g_speed.value;	/* as every ClientThink_real leaves them */
   VectorSet(e->r.mins,-PLAYER_WIDTH,-PLAYER_WIDTH,MINS_Z); VectorSet(e->r.maxs,PLAYER_WIDTH,PLAYER_WIDTH,DEFAULT_HEIGHT);
   e->die=player_die;
@@ -241,4 +297,11 @@ void BS_FreeTempEntities( void ) {
  int i;
  for(i=MAX_CLIENTS;i<level.num_entities;i++) if(g_entities[i].inuse && g_entities[i].freeAfterEvent) G_FreeEntity(&g_entities[i]);
 }
-void BS_ClearMarks( void ) { bs_markCount=0; bs_shotTraces=0; }
+void BS_ClearMarks( void ) { bs_markCount=0; bs_shotTraces=0; bs_volumeHits=0; bs_midLegShots=0; bs_damageCount=0; memset(bs_bulletHealth,0,sizeof(bs_bulletHealth)); }
+/* a player's own commands, as their client sends them (a target that moves) */
+void BS_Stance( int n, int buttons, int serverTime, float yaw ) {
+ usercmd_t c;
+ memset(&c,0,sizeof(c)); c.serverTime=serverTime; c.buttons=buttons; c.weapon=WP_MACHINEGUN;
+ c.angles[YAW]=ANGLE2SHORT(yaw);
+ BS_Command(n,&c);
+}

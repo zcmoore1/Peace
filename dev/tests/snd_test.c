@@ -143,6 +143,14 @@ static void TestInterrupts(void) {
  cmd.forwardmove=1; CHECK(!G_SNDUse(&g_entities[0],&cmd));
  CHECK(g_clients[0].ps.stats[STAT_USE_PROGRESS]==0);
  cmd.forwardmove=0; CHECK(G_SNDUse(&g_entities[0],&cmd));
+ /* MW2 gates no use on the stance: crouched or prone (the stance bits), or
+  * a held +movedown (upmove < 0), all plant; only a jump (upmove > 0) stops it */
+ cmd.buttons=BUTTON_USE|BUTTON_CROUCH; CHECK(G_SNDUse(&g_entities[0],&cmd));
+ cmd.buttons=BUTTON_USE|BUTTON_PRONE|BUTTON_TEMP_STANCE; CHECK(G_SNDUse(&g_entities[0],&cmd));
+ cmd.buttons=BUTTON_USE; cmd.upmove=-127; level.time+=50; CHECK(G_SNDUse(&g_entities[0],&cmd));
+ CHECK(g_clients[0].ps.stats[STAT_USE_PROGRESS]>0);	/* one hold throughout */
+ cmd.upmove=127; CHECK(!G_SNDUse(&g_entities[0],&cmd)); cmd.upmove=0;
+ CHECK(g_clients[0].ps.stats[STAT_USE_PROGRESS]==0);
  level.time+=201; CHECK(G_SNDUse(&g_entities[0],&cmd));
  CHECK(g_clients[0].ps.stats[STAT_USE_PROGRESS]==0); /* command gap restarts */
  cmd.buttons=BUTTON_USE_RELOAD; CHECK(G_SNDUse(&g_entities[0],&cmd)); /* use/reload uses it too */

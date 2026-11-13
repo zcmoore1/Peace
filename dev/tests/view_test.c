@@ -9,6 +9,9 @@
  *   never wider than the hip. The mouse follows tan(fov/2) / tan(65/2).
  * - The eye is the playerstate's viewheight above the origin, whatever pmove
  *   put there: nothing in the view assumes Quake 3's 26 (50 above the feet).
+ *   A stance change is shown think by think as pmove moves the eye (MW2's
+ *   curve), first and third person alike, with no cgame ease; the dead eye
+ *   falls at one rate.
  * Only the engine traps, the world and the weapon registry are stubbed. */
 #include "../../code/cgame/cg_view.c"
 
@@ -104,7 +107,7 @@ static void Reset(int width, int height) {
 	ps->weapon = WP_MACHINEGUN;
 	ps->weaponstate = WEAPON_READY;
 	ps->weaponAnimTime = -1;
-	ps->viewheight = DEFAULT_VIEWHEIGHT;
+	BG_SpawnStance(ps);	/* standing, as ClientSpawn spawns a player */
 	ps->commandTime = cg.time;
 	snap.ps = *ps;
 }
@@ -282,10 +285,11 @@ static void TestSightConfig(void) {
 }
 
 /* The eye is ps.viewheight above the origin, as the real Pmove sets it. */
-static void Step(pmove_t *move, int upmove) {
+static void Step(pmove_t *move, int buttons, int upmove) {
 	playerState_t *ps = &cg.predictedPlayerState;
 	memset(move, 0, sizeof(*move));
 	move->ps = ps;
+	move->cmd.buttons = buttons;
 	move->cmd.upmove = upmove;
 	move->cmd.weapon = BG_SLOT_COMMAND + SLOT_PRIMARY;
 	move->cmd.serverTime = ps->commandTime + 8;
@@ -299,45 +303,87 @@ static void Eye(float height) {
 	NEAR(cg.refdef.vieworg[1], ps->origin[1], 1e-4);
 	NEAR(cg.refdef.vieworg[2], ps->origin[2] + height, 1e-4);
 }
-static void TestEye(void) {
-	static const float heights[] = { 36, 16, 31.5f, 8 };	/* MW2's 60 and 40 above the feet, and others */
+/* third person: the camera starts from the same eye (8 above it, then back by
+ * the range, here 0), not from a fixed height */
+static void ThirdPersonEye(float height) {
 	playerState_t *ps = &cg.predictedPlayerState;
-	pmove_t move;
-	int i;
-	Reset(640, 480);
-	BG_SetSlotWeapon(ps, SLOT_PRIMARY, WP_MACHINEGUN);
-	ps->viewheight = 0;
-	Step(&move, 0);
-	CHECK(ps->viewheight == DEFAULT_VIEWHEIGHT && ps->groundEntityNum == ENTITYNUM_WORLD);
-	Eye(DEFAULT_VIEWHEIGHT);
-	Step(&move, -127);
-	CHECK((ps->pm_flags & PMF_DUCKED) && ps->viewheight == CROUCH_VIEWHEIGHT);
-	Eye(CROUCH_VIEWHEIGHT);
-	Step(&move, 0);
-	CHECK(!(ps->pm_flags & PMF_DUCKED) && ps->viewheight == DEFAULT_VIEWHEIGHT);
-	Eye(DEFAULT_VIEWHEIGHT);
-	printf("eye above the feet: standing %d, crouched %d (MW2's body: 60, 40)\n",
-		DEFAULT_VIEWHEIGHT - MINS_Z, CROUCH_VIEWHEIGHT - MINS_Z);
-	/* whatever the playerstate carries, nothing else */
-	for (i = 0; i < ARRAY_LEN(heights); i++) {
-		ps->viewheight = (int)heights[i];
-		Eye((int)heights[i]);
-	}
-	/* third person: the camera starts from the same eye (8 above it, then back
-	 * by the range, here 0), not from a fixed height */
-	ps->viewheight = CROUCH_VIEWHEIGHT;
 	cg.renderingThirdPerson = qtrue; cg_thirdPersonRange.value = 0; cg_thirdPersonAngle.value = 0;
 	View();
-	NEAR(cg.refdef.vieworg[2], ps->origin[2] + CROUCH_VIEWHEIGHT + 8, 1e-4);
-	ps->viewheight = DEFAULT_VIEWHEIGHT;
-	View();
-	NEAR(cg.refdef.vieworg[2], ps->origin[2] + DEFAULT_VIEWHEIGHT + 8, 1e-4);
+	NEAR(cg.refdef.vieworg[2], ps->origin[2] + height + 8, 1e-4);
 	cg.renderingThirdPerson = qfalse;
-	/* dead: the dead eye, from pmove too */
+}
+/* One stance change through the real Pmove, think by think until the eye
+ * reaches its end: the box (the flags) changes on the first think, the eye
+ * moves only one way and never past its end, and every think the first- and
+ * third-person views stand exactly on the playerstate's eye (pmove's curve,
+ * MW2's PM_ViewHeightAdjust; no cgame ease). Returns the thinks it took. */
+static int Leg(pmove_t *move, int buttons, int upmove, float to) {
+	playerState_t *ps = &cg.predictedPlayerState;
+	float from = ps->viewheight, last = from;
+	int thinks = 0;
+	while (ps->viewheight != to) {
+		CHECK(thinks * 8 <= 2 * BG_PRONE_LERP_MS);	/* a leg is never longer than prone's */
+		Step(move, buttons, upmove);
+		thinks++;
+		CHECK(!!(ps->pm_flags & PMF_DUCKED) == (to == CROUCH_VIEWHEIGHT));
+		if (to < from) CHECK(ps->viewheight <= last && ps->viewheight >= to);
+		else CHECK(ps->viewheight >= last && ps->viewheight <= to);
+		Eye(ps->viewheight);
+		ThirdPersonEye(ps->viewheight);
+		last = ps->viewheight;
+	}
+	return thinks;
+}
+static void TestEye(void) {
+	static const float heights[] = { 36, 16, 31.5f, 8, 35.73f, -13, 2.0625f };	/* MW2's 60 and 40 above the feet, the curve's fractions, others */
+	playerState_t *ps = &cg.predictedPlayerState;
+	pmove_t move;
+	float last;
+	int i, down, up, dead;
+	Reset(640, 480);
+	BG_SetSlotWeapon(ps, SLOT_PRIMARY, WP_MACHINEGUN);
+	BG_SpawnStance(ps);	/* as ClientSpawn spawns a player: standing, no leg */
+	Step(&move, 0, 0);
+	CHECK(ps->viewheight == DEFAULT_VIEWHEIGHT && ps->groundEntityNum == ENTITYNUM_WORLD);
+	Eye(DEFAULT_VIEWHEIGHT);
+	/* crouch as a held +movedown sends it: MW2's crouch level with TEMP, and
+	 * Quake's upmove; pmove takes whichever it reads. The eye follows pmove
+	 * over as many thinks as pmove takes. */
+	down = Leg(&move, BUTTON_CROUCH | BUTTON_TEMP_STANCE, -127, CROUCH_VIEWHEIGHT);
+	Eye(CROUCH_VIEWHEIGHT);
+	up = Leg(&move, 0, 0, DEFAULT_VIEWHEIGHT);
+	Eye(DEFAULT_VIEWHEIGHT);
+	printf("eye above the feet: standing %d, crouched %d (MW2's body: 60, 40); down in %d ms, up in %d ms\n",
+		DEFAULT_VIEWHEIGHT - MINS_Z, CROUCH_VIEWHEIGHT - MINS_Z, down * 8, up * 8);
+	/* whatever the playerstate carries, nothing else, first and third person */
+	for (i = 0; i < ARRAY_LEN(heights); i++) {
+		ps->viewheight = heights[i];
+		Eye(heights[i]);
+		ThirdPersonEye(heights[i]);
+	}
+	ps->viewheight = DEFAULT_VIEWHEIGHT;
+	/* dead: the dead eye, from pmove too, falling at one rate (the last think
+	 * may stop short at the end) */
 	ps->pm_type = PM_DEAD; ps->stats[STAT_HEALTH] = 0;
-	Step(&move, 0);
-	CHECK(ps->viewheight == DEAD_VIEWHEIGHT);
 	snap.ps.stats[STAT_HEALTH] = 0;
+	last = ps->viewheight; dead = 0;
+	{
+		float rate = 0;
+		while (ps->viewheight != DEAD_VIEWHEIGHT) {
+			float drop;
+			CHECK(dead * 8 <= 1000);
+			Step(&move, 0, 0); dead++;
+			snap.ps.stats[STAT_HEALTH] = 0;
+			drop = last - ps->viewheight;
+			CHECK(drop > 0 && ps->viewheight >= DEAD_VIEWHEIGHT);
+			if (ps->viewheight != DEAD_VIEWHEIGHT) {
+				if (rate) NEAR(drop, rate, 1e-3);
+				rate = drop;
+			} else if (rate) CHECK(drop <= rate + 1e-3);
+			Eye(ps->viewheight);
+			last = ps->viewheight;
+		}
+	}
 	Eye(DEAD_VIEWHEIGHT);
 }
 

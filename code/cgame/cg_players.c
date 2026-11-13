@@ -257,6 +257,13 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 	// walk backward animation
 	memcpy(&animations[LEGS_BACKWALK], &animations[LEGS_WALK], sizeof(animation_t));
 	animations[LEGS_BACKWALK].reversed = qtrue;
+	// prone (MW2's idleprone, walkprone, walkpronebk): the Quake 3 models have
+	// none, so the placeholder lies the straight standing idle and the crouch
+	// walk flat (CG_PlayerAngles), the crawl back being the crouch walk reversed
+	memcpy(&animations[LEGS_IDLEPR], &animations[LEGS_IDLE], sizeof(animation_t));
+	memcpy(&animations[LEGS_CRAWL], &animations[LEGS_WALKCR], sizeof(animation_t));
+	memcpy(&animations[LEGS_CRAWLB], &animations[LEGS_WALKCR], sizeof(animation_t));
+	animations[LEGS_CRAWLB].reversed = qtrue;
 	// flag moving fast
 	animations[FLAG_RUN].firstFrame = 0;
 	animations[FLAG_RUN].numFrames = 16;
@@ -1369,6 +1376,19 @@ static void CG_AddPainTwitch( centity_t *cent, vec3_t torsoAngles ) {
 
 /*
 ===============
+CG_PlayerProne
+
+Whether a player is drawn lying down: alive with MW2's EF_PRONE, which their
+entity carries from the prone flag the box follows. A corpse plays its death
+anim standing (picture only; Peace has no prone death animation).
+===============
+*/
+static qboolean CG_PlayerProne( const centity_t *cent ) {
+	return ( cent->currentState.eFlags & EF_PRONE ) && !( cent->currentState.eFlags & EF_DEAD );
+}
+
+/*
+===============
 CG_PlayerAngles
 
 Handles separate torso motion
@@ -1481,6 +1501,24 @@ static void CG_PlayerAngles( centity_t *cent, vec3_t legs[3], vec3_t torso[3], v
 
 	// pain twitch
 	CG_AddPainTwitch( cent, torsoAngles );
+
+	// MW2's prone body, a placeholder until there is prone art (owner's
+	// decision): the legs lie face down along the body's yaw and the ground's
+	// pitch under it (origin2[0..1], MW2's proneDirection and
+	// proneDirectionPitch, which the prone hit volume turns by too), with no
+	// lean: pitched 90 degrees down about the yaw's right axis, so the model's
+	// up runs head first along the body. The torso is held to the legs; the
+	// head is pitched back to look ahead, with the view's pitch. CG_Player puts
+	// the body behind the origin.
+	if ( CG_PlayerProne( cent ) ) {
+		legsAngles[YAW] = cent->currentState.origin2[0];
+		legsAngles[PITCH] = 90 + cent->currentState.origin2[1];
+		legsAngles[ROLL] = 0;
+		VectorCopy( legsAngles, torsoAngles );
+		dest = headAngles[PITCH] > 180 ? headAngles[PITCH] - 360 : headAngles[PITCH];
+		VectorCopy( legsAngles, headAngles );
+		headAngles[PITCH] += dest - 90;
+	}
 
 	// pull the angles back out of the hierarchial chain
 	AnglesSubtract( headAngles, torsoAngles, headAngles );
@@ -1703,9 +1741,10 @@ static void CG_PlayerFlag( centity_t *cent, qhandle_t hSkin, refEntity_t *torso 
 
 	updateangles = qfalse;
 	legsAnim = cent->currentState.legsAnim & ~ANIM_TOGGLEBIT;
-	if( legsAnim == LEGS_IDLE || legsAnim == LEGS_IDLECR ) {
+	if( legsAnim == LEGS_IDLE || legsAnim == LEGS_IDLECR || legsAnim == LEGS_IDLEPR ) {
 		flagAnim = FLAG_STAND;
-	} else if ( legsAnim == LEGS_WALK || legsAnim == LEGS_WALKCR ) {
+	} else if ( legsAnim == LEGS_WALK || BG_LegsAnimStance( legsAnim ) != BG_STANCE_STAND ) {
+		// walking, or moving crouched or prone, either way
 		flagAnim = FLAG_STAND;
 		updateangles = qtrue;
 	} else {
@@ -2285,6 +2324,29 @@ static void CG_ScalePlayerModel( refEntity_t *legs ) {
 
 /*
 ===============
+CG_PlaceProneModel
+
+The lying placeholder's root (owner's decision: a prone player overhangs the
+box behind the origin, as MW2's prone body does). The model's eye, the
+standing eye's distance up from its feet, sits on the prone eye: over the
+origin, PRONE_VIEWHEIGHT along the lying body's up. So the head is at the
+origin and the body runs back along the yaw, where MW2's prone room check
+traces it. The root is put where CG_ScalePlayerModel's pivot, the model's
+feet along its own up axis, is that rotated feet point. Picture only: the
+origin, box, lighting origin and every trace are untouched.
+===============
+*/
+static void CG_PlaceProneModel( const centity_t *cent, refEntity_t *legs ) {
+	vec3_t	eye, feet;
+
+	// the lying body's up is the model's back: axis[0], its face, looks down
+	VectorMA( cent->lerpOrigin, -PRONE_VIEWHEIGHT, legs->axis[0], eye );
+	VectorMA( eye, -( DEFAULT_VIEWHEIGHT - MINS_Z ), legs->axis[2], feet );
+	VectorMA( feet, -MINS_Z, legs->axis[2], legs->origin );
+}
+
+/*
+===============
 CG_Player
 ===============
 */
@@ -2370,6 +2432,9 @@ void CG_Player( centity_t *cent ) {
 	legs.customSkin = ci->legsSkin;
 
 	VectorCopy( cent->lerpOrigin, legs.origin );
+	if ( CG_PlayerProne( cent ) ) {
+		CG_PlaceProneModel( cent, &legs );
+	}
 	CG_ScalePlayerModel( &legs );
 
 	VectorCopy( cent->lerpOrigin, legs.lightingOrigin );

@@ -21,6 +21,7 @@ static void Ready(int primary, int secondary) {
  memset(&pml,0,sizeof(pml)); memset(fired,0,sizeof(fired)); suicides=0;
  cl.slot[0]=primary; cl.slot[1]=secondary;
  BG_ApplyClass(&ps,&cl);
+ BG_SpawnStance(&ps);	/* MW2's spawn eye, as ClientSpawn: standing, no leg */
  /* The mechanics below chain throws, so they carry two of each as the presets
   * did before MW2's counts (one frag, two flashes; the count test checks those). */
  ps.ammo[WP_FRAG]=2; ps.ammo[WP_FLASH]=2;
@@ -37,6 +38,16 @@ static void Step(int msec) {
 }
 static void Run(int msec) { while(msec-- > 0) Step(1); }
 static void Toggle(void) { move.cmd.weapon=BG_ToggleSlotWeapon(&ps,move.cmd.weapon); }
+/* PmoveSingle copies the command's moves into pml before anything reads
+ * them (a prone crawl stop zeroes the copies); a harness running the sprint
+ * check alone copies them as it does. */
+static void CheckSprint(void) { pml.forwardmove=move.cmd.forwardmove; pml.rightmove=move.cmd.rightmove; PM_CheckSprint(); }
+/* A stance as PM_CheckDuck leaves it: the flags follow the eye's target,
+ * which the stance's speed reads (BG_StanceScale). */
+static void SetFlags(int flags) {
+ ps.pm_flags=flags;
+ ps.viewHeightTarget=(flags&PMF_PRONE) ? BG_EYE_PRONE : (flags&PMF_DUCKED) ? BG_EYE_CROUCH : BG_EYE_STAND;
+}
 static void Returned(void) {
  int watchdog=10000; /* timeout only; no gameplay timing expectations */
  do { Step(1); } while (--watchdog && (ps.weapon!=move.cmd.weapon ||
@@ -304,12 +315,12 @@ static void KnifeTimeline(int gun, int msec) {
  int other = gun == WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN, t, now, hit = -1, over = -1, back = -1;
  Ready(gun, other);
  pml.groundPlane = qtrue; move.cmd.forwardmove = 127;
- move.cmd.buttons = BUTTON_MELEE; PM_CheckSprint(); Step(msec);
+ move.cmd.buttons = BUTTON_MELEE; CheckSprint(); Step(msec);
  CHECK(ps.weapon == WP_KNIFE && ps.weaponstate == WEAPON_RAISING && ps.weaponTime == BG_MELEE_DELAY);
  move.cmd.buttons = BUTTON_SPRINT;
  for (t = 1, now = msec; t < 20000 && back < 0; t++, now += msec) {
   int before = ps.weapon;
-  pml.groundPlane = qtrue; PM_CheckSprint();
+  pml.groundPlane = qtrue; CheckSprint();
   CHECK(!(ps.pm_flags & PMF_SPRINTING));	/* never while the knife or its raise runs */
   Step(msec);
   CHECK(ps.weaponstate != WEAPON_DROPPING);	/* nothing is ever put down */
@@ -326,7 +337,7 @@ static void KnifeTimeline(int gun, int msec) {
  CHECK(over >= BG_MELEE_TIME && over - msec < BG_MELEE_TIME);
  CHECK(back - over >= BG_WeaponQuickRaiseTime(gun) && back - over - msec < BG_WeaponQuickRaiseTime(gun));
  CHECK(ps.weaponstate == WEAPON_READY);
- for (t = 0; t < 5 && !(ps.pm_flags & PMF_SPRINTING); t++) { pml.groundPlane = qtrue; PM_CheckSprint(); Step(msec); }
+ for (t = 0; t < 5 && !(ps.pm_flags & PMF_SPRINTING); t++) { pml.groundPlane = qtrue; CheckSprint(); Step(msec); }
  CHECK(ps.pm_flags & PMF_SPRINTING);	/* and then sprint is allowed */
  move.cmd.buttons = 0; move.cmd.forwardmove = 0;
 }
@@ -350,7 +361,7 @@ static void TestKnifeTimeline(void) {
 static int sprintNow;
 static void RStep(void) {
  pml.groundPlane = qtrue;
- PM_CheckSprint(); sprintNow = !!(ps.pm_flags & PMF_SPRINTING);
+ CheckSprint(); sprintNow = !!(ps.pm_flags & PMF_SPRINTING);
  Step(1);
 }
 static int RecoverPhases(int gun, int button, int special, int *out, int *hold, int *down, int *draw) {
@@ -471,13 +482,13 @@ static void TestRecovery(void) {
 
 static void SprintStep(int msec) {
  pml.groundPlane=qtrue; move.cmd.forwardmove=127;
- PM_CheckSprint(); Step(msec);
+ CheckSprint(); Step(msec);
 }
 /* One think with chosen movement, sprint held unless 'held' is clear. */
 static void SprintMove(int held, int forward, int up, int ground) {
  move.cmd.buttons=held ? BUTTON_SPRINT : 0;
  move.cmd.forwardmove=forward; move.cmd.upmove=up; pml.groundPlane=ground;
- PM_CheckSprint(); Step(1);
+ CheckSprint(); Step(1);
  move.cmd.upmove=0;
 }
 static void TestSprintTransitions(void) {
@@ -548,10 +559,13 @@ static void TestSprintTransitions(void) {
   CHECK(ps.pm_flags&PMF_SPRINTING);
   if(i==0) SprintMove(1,0,0,1);						/* forward let go */
   else if(i==1) SprintMove(1,127,127,0);			/* jump pressed in the air */
-  else if(i==2) { ps.pm_flags|=PMF_DUCKED; SprintMove(1,127,0,1); ps.pm_flags&=~PMF_DUCKED; }
+  else if(i==2) {									/* a crouch asked for (MW2's end mask has the bit) */
+   move.cmd.buttons=BUTTON_SPRINT|BUTTON_CROUCH; move.cmd.forwardmove=127; pml.groundPlane=qtrue;
+   CheckSprint(); Step(1);
+  }
   else if(i==3) {									/* knife, all the way back */
    move.cmd.buttons=BUTTON_SPRINT|BUTTON_MELEE; move.cmd.forwardmove=127; pml.groundPlane=qtrue;
-   PM_CheckSprint(); Step(1);
+   CheckSprint(); Step(1);
    for(t=0;t<9000 && (ps.weaponAction&WA_TYPE_MASK);t++) SprintMove(1,127,0,1);
   } else { SprintMove(1,127,0,0); CHECK(ps.pm_flags&PMF_SPRINTING); continue; }	/* off a ledge: it goes on */
   CHECK(!(ps.pm_flags&PMF_SPRINTING));
@@ -569,7 +583,7 @@ static void TestSprintTransitions(void) {
   for(t=0;t<50;t++) SprintMove(1,127,0,0);
   CHECK(ps.pm_flags&PMF_SPRINTING);
   move.cmd.buttons=BUTTON_SPRINT|(i ? BUTTON_USE_RELOAD : BUTTON_RELOAD); move.cmd.forwardmove=127; pml.groundPlane=qfalse;
-  PM_CheckSprint(); Step(1);
+  CheckSprint(); Step(1);
   if(i) { ps.weapFlags|=PWF_USE_RELOAD; SprintMove(1,127,0,0); }
   CHECK(ps.weaponstate==WEAPON_RELOADING && !(ps.pm_flags&PMF_SPRINTING));
   for(t=0;t<4000;t++) SprintMove(1,127,0,1);
@@ -581,10 +595,10 @@ static void TestSprintTransitions(void) {
   int t;
   Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.ammo[WP_MACHINEGUN]=5;
   move.cmd.forwardmove=127; pml.groundPlane=qtrue;
-  move.cmd.buttons=BUTTON_RELOAD; PM_CheckSprint(); Step(1);
+  move.cmd.buttons=BUTTON_RELOAD; CheckSprint(); Step(1);
   CHECK(ps.weaponstate==WEAPON_RELOADING);
   for(t=0;t<300;t++) {
-   move.cmd.buttons=BUTTON_SPRINT|(i ? BUTTON_USE_RELOAD : BUTTON_RELOAD); PM_CheckSprint(); Step(1);
+   move.cmd.buttons=BUTTON_SPRINT|(i ? BUTTON_USE_RELOAD : BUTTON_RELOAD); CheckSprint(); Step(1);
   }
   CHECK(!(ps.pm_flags&PMF_SPRINTING) && ps.weaponstate==WEAPON_RELOADING);
  }
@@ -596,10 +610,10 @@ static void TestSprintTransitions(void) {
   for(t=0;t<300;t++) SprintMove(1,127,0,1);
   CHECK(ps.weaponstate==WEAPON_SPRINTING);
   move.cmd.buttons=BUTTON_SPRINT|BUTTON_ATTACK; move.cmd.forwardmove=127; pml.groundPlane=qtrue;
-  PM_CheckSprint(); Step(1);
+  CheckSprint(); Step(1);
   CHECK(!(ps.pm_flags&PMF_SPRINTING) && ps.weaponstate==WEAPON_SPRINT_OUT && !fired[WP_MACHINEGUN]);
   for(t=0;t<BG_WeaponSprintOutTime(WP_MACHINEGUN)+20;t++) {
-   move.cmd.buttons=BUTTON_SPRINT|(i ? 0 : BUTTON_ATTACK); PM_CheckSprint(); Step(1);
+   move.cmd.buttons=BUTTON_SPRINT|(i ? 0 : BUTTON_ATTACK); CheckSprint(); Step(1);
   }
   CHECK(!(ps.pm_flags&PMF_SPRINTING) && (fired[WP_MACHINEGUN]>0)==(i==0));
  }
@@ -612,12 +626,12 @@ static void TestSprintTransitions(void) {
   for(t=0;t<100;t++) SprintMove(1,127,0,1);
   CHECK(ps.pm_flags&PMF_SPRINTING);
   move.cmd.buttons=BUTTON_SPRINT|(i==0 ? BUTTON_LETHAL : i==1 ? BUTTON_TACTICAL : BUTTON_MELEE);
-  move.cmd.forwardmove=127; pml.groundPlane=qtrue; PM_CheckSprint(); Step(1);
+  move.cmd.forwardmove=127; pml.groundPlane=qtrue; CheckSprint(); Step(1);
   CHECK(!(ps.pm_flags&PMF_SPRINTING) && (ps.weapFlags&PWF_SPRINT_RELEASE));
  }
  Ready(WP_MACHINEGUN,WP_SHOTGUN);
  move.cmd.buttons=BUTTON_SPRINT|BUTTON_MELEE; move.cmd.forwardmove=127; pml.groundPlane=qtrue;
- PM_CheckSprint(); CHECK(!(ps.pm_flags&PMF_SPRINTING));
+ CheckSprint(); CHECK(!(ps.pm_flags&PMF_SPRINTING));
  Ready(WP_MACHINEGUN,WP_SHOTGUN);
  SprintMove(1,BG_SPRINT_FORWARD_MINIMUM,0,1); CHECK(!(ps.pm_flags&PMF_SPRINTING));
  SprintMove(1,BG_SPRINT_FORWARD_MINIMUM+1,0,1); CHECK(ps.pm_flags&PMF_SPRINTING);
@@ -635,7 +649,7 @@ static void TestSprintTransitions(void) {
   Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.weapon=equipment[i];
   ps.weaponAction=0; ps.weaponstate=WEAPON_DROPPING;
   move.cmd.buttons=BUTTON_SPRINT; move.cmd.forwardmove=127; pml.groundPlane=qtrue;
-  PM_CheckSprint(); CHECK(!(ps.pm_flags&PMF_SPRINTING));
+  CheckSprint(); CHECK(!(ps.pm_flags&PMF_SPRINTING));
  }
 }
 /* MW2's knife waits out the rechamber's bolt-close: a press while the action
@@ -670,7 +684,7 @@ static void TestAirSprintDuringAction(void) {
  for(i=0;i<2;i++) {
   Ready(WP_MACHINEGUN,WP_SHOTGUN);
   move.cmd.buttons=BUTTON_MELEE; move.cmd.forwardmove=127; pml.groundPlane=qtrue;
-  PM_CheckSprint(); Step(1);
+  CheckSprint(); Step(1);
   CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_MELEE);
   ps.jumpLand=i ? -1 : 0;
   SprintMove(1,127,0,0);
@@ -1975,7 +1989,7 @@ static void TestActionOutOfShot(void) {
  * holding the sprint button keeps an unscoped gun from aiming. */
 static void AimMove(int buttons) {
  move.cmd.buttons=buttons; move.cmd.forwardmove=127; move.cmd.upmove=0; pml.groundPlane=qtrue;
- PM_CheckSprint(); PM_CheckADS(); Step(1);
+ CheckSprint(); PM_CheckADS(); Step(1);
 }
 static void TestSprintLatch(void) {
  int t,i;
@@ -2089,7 +2103,7 @@ static void TestMovementScale(void) {
  move.cmd.forwardmove=127; normal=PM_WalkScale(127,0);
  CHECK(fabs(normal*127-190)<.001f);
  for(i=0;i<ARRAY_LEN(flags);i++) {
-  ps.pm_flags=flags[i]; scale=PM_WalkScale(127,0);
+  SetFlags(flags[i]); scale=PM_WalkScale(127,0);
   CHECK(fabs(scale*127-BG_PLAYER_SPEED*most[i])<.001f);
   /* Prediction may replay many commands from one snapshot, and Pmove's
    * substeps reuse one command; no evaluation may compound the modifier
@@ -2100,25 +2114,25 @@ static void TestMovementScale(void) {
    CHECK(ps.speed==BG_PLAYER_SPEED && !memcmp(&before,&move.cmd,sizeof(before)));
   }
  }
- ps.pm_flags=PMF_SPRINTING; CHECK(fabs(PM_WalkScale(127,0)*127-285)<.001f);
- ps.pm_flags=PMF_ADS; CHECK(fabs(PM_WalkScale(127,0)*127-76)<.001f);
- ps.pm_flags=PMF_DUCKED; CHECK(fabs(PM_WalkScale(127,0)*127-123.5f)<.001f);
- ps.pm_flags=PMF_DUCKED|PMF_ADS; CHECK(fabs(PM_WalkScale(127,0)*127-49.4f)<.001f);
+ SetFlags(PMF_SPRINTING); CHECK(fabs(PM_WalkScale(127,0)*127-285)<.001f);
+ SetFlags(PMF_ADS); CHECK(fabs(PM_WalkScale(127,0)*127-76)<.001f);
+ SetFlags(PMF_DUCKED); CHECK(fabs(PM_WalkScale(127,0)*127-123.5f)<.001f);
+ SetFlags(PMF_DUCKED|PMF_ADS); CHECK(fabs(PM_WalkScale(127,0)*127-49.4f)<.001f);
  CHECK(PM_WalkScale(0,0)==0);
  /* Strafe and backpedal change the magnitude when they win the max, never
   * the direction: D 152, S 133, S+D 152, W+D and W+A 190. */
- ps.pm_flags=0;
+ SetFlags(0);
  CHECK(fabs(PM_WalkScale(0,127)*127-152)<.001f && fabs(PM_WalkScale(0,-127)*127-152)<.001f);
  CHECK(fabs(PM_WalkScale(-127,0)*127-133)<.001f);
  CHECK(fabs(PM_WalkScale(-127,127)*sqrt(2.0f)*127-152)<.01f);
  CHECK(fabs(PM_WalkScale(127,127)*sqrt(2.0f)*127-190)<.01f && fabs(PM_WalkScale(127,-127)*sqrt(2.0f)*127-190)<.01f);
  /* A half stick crouched walks half of the crouch (Quake 3's clamp gave the
   * whole of it), and the crouch's upmove is no part of the scale. */
- ps.pm_flags=PMF_DUCKED;
+ SetFlags(PMF_DUCKED);
  CHECK(fabs(PM_WalkScale(64,0)*64-BG_PLAYER_SPEED*BG_CROUCH_SPEED_SCALE*64/127)<.001f);
  /* The sprint strafe only bends the sprint: 84 of 127 aside is 33.5 degrees
   * off forward, at the sprint's full speed. */
- ps.pm_flags=PMF_SPRINTING;
+ SetFlags(PMF_SPRINTING);
  CHECK((int)(127*BG_SPRINT_STRAFE_SCALE)==84 && (int)(-127*BG_SPRINT_STRAFE_SCALE)==-84);
  CHECK(fabs(PM_WalkScale(127,84)*sqrt(127*127+84*84.0f)-285)<.01f);
  /* Every class: its factor last, the aimed gun's adsMoveSpeedScale */
@@ -2127,20 +2141,20 @@ static void TestMovementScale(void) {
   CHECK(ps.weapon==moveClasses[i].primary && ps.moveClass==moveClasses[i].moveClass);
   CHECK(BG_WeaponMoveClass(moveClasses[i].primary)==moveClasses[i].moveClass);
   CHECK(fabs(BG_MoveClassScale(&ps)-moveClasses[i].factor)<1e-6f);
-  ps.pm_flags=0; CHECK(fabs(PM_WalkScale(127,0)*127-moveClasses[i].run)<.01f);
-  ps.pm_flags=PMF_SPRINTING; CHECK(fabs(PM_WalkScale(127,0)*127-moveClasses[i].sprint)<.01f);
-  ps.pm_flags=PMF_DUCKED; CHECK(fabs(PM_WalkScale(127,0)*127-moveClasses[i].crouch)<.01f);
-  ps.pm_flags=PMF_ADS; CHECK(fabs(PM_WalkScale(127,0)*127-moveClasses[i].aim)<.01f);
+  SetFlags(0); CHECK(fabs(PM_WalkScale(127,0)*127-moveClasses[i].run)<.01f);
+  SetFlags(PMF_SPRINTING); CHECK(fabs(PM_WalkScale(127,0)*127-moveClasses[i].sprint)<.01f);
+  SetFlags(PMF_DUCKED); CHECK(fabs(PM_WalkScale(127,0)*127-moveClasses[i].crouch)<.01f);
+  SetFlags(PMF_ADS); CHECK(fabs(PM_WalkScale(127,0)*127-moveClasses[i].aim)<.01f);
   /* the gun's scale is the aimed one's only: hip is the class run */
-  ps.pm_flags=0; ps.weapon=WP_SHOTGUN; CHECK(fabs(PM_WalkScale(127,0)*127-moveClasses[i].run)<.01f);
-  ps.pm_flags=PMF_ADS; CHECK(fabs(PM_WalkScale(127,0)*127-BG_PLAYER_SPEED*BG_ADS_SPEED_SCALE*2*moveClasses[i].factor)<.01f);
+  SetFlags(0); ps.weapon=WP_SHOTGUN; CHECK(fabs(PM_WalkScale(127,0)*127-moveClasses[i].run)<.01f);
+  SetFlags(PMF_ADS); CHECK(fabs(PM_WalkScale(127,0)*127-BG_PLAYER_SPEED*BG_ADS_SPEED_SCALE*2*moveClasses[i].factor)<.01f);
   /* The air is the base speed alone: no class, sprint, crouch or gun. */
-  ps.pm_flags=PMF_SPRINTING|PMF_DUCKED; CHECK(fabs(PM_AirScale(127,0)*127-190)<.001f);
-  ps.pm_flags=PMF_ADS; CHECK(fabs(PM_AirScale(127,0)*127-76)<.001f);
+  SetFlags(PMF_SPRINTING|PMF_DUCKED); CHECK(fabs(PM_AirScale(127,0)*127-190)<.001f);
+  SetFlags(PMF_ADS); CHECK(fabs(PM_AirScale(127,0)*127-76)<.001f);
   /* Swimming, flying and noclip (Quake 3's scale) take aim alone. */
-  ps.pm_flags=PMF_SPRINTING|PMF_DUCKED; move.cmd.forwardmove=127; move.cmd.upmove=0;
+  SetFlags(PMF_SPRINTING|PMF_DUCKED); move.cmd.forwardmove=127; move.cmd.upmove=0;
   CHECK(fabs(PM_CmdScale(&move.cmd)*127-190)<.001f);
-  ps.pm_flags=PMF_ADS; CHECK(fabs(PM_CmdScale(&move.cmd)*127-76)<.001f);
+  SetFlags(PMF_ADS); CHECK(fabs(PM_CmdScale(&move.cmd)*127-76)<.001f);
   move.cmd.forwardmove=0;
  }
  /* The hip spread's move term is over the player's own base speed: a full
@@ -2306,8 +2320,8 @@ static void TestViewBob(void) {
   const float strafe=(BG_STRAFE_SPEED_SCALE-1)*0.75f+1;
   const float most[]={1,BG_SPRINT_SPEED_SCALE,BG_CROUCH_SPEED_SCALE,BG_ADS_SPEED_SCALE,BG_BACK_SPEED_SCALE,
    strafe,(strafe+1)*0.5f,(strafe+1)*0.5f*(BG_BACK_SPEED_SCALE+1)*0.5f,BG_ADS_SPEED_SCALE*2};
-  Ready(i==8 ? WP_SHOTGUN : WP_M40A3,WP_MACHINEGUN); ps.speed=BG_PLAYER_SPEED; ps.groundEntityNum=0; ps.pm_flags=flags[i];
-  move.cmd.forwardmove=fm[i]; move.cmd.rightmove=rm[i]; pml.rightmove=rm[i];
+  Ready(i==8 ? WP_SHOTGUN : WP_M40A3,WP_MACHINEGUN); ps.speed=BG_PLAYER_SPEED; ps.groundEntityNum=0; SetFlags(flags[i]);
+  move.cmd.forwardmove=pml.forwardmove=fm[i]; move.cmd.rightmove=rm[i]; pml.rightmove=rm[i];
   ps.velocity[0]=BG_PLAYER_SPEED*most[i]; ps.bobCycle=10;
   pml.msec=100; PM_Footsteps();	/* long enough that each rate truncates apart */
   CHECK(fabs(PM_BobMaxSpeed()-ps.velocity[0])<.001f);
@@ -2318,7 +2332,7 @@ static void TestViewBob(void) {
  for(i=0;i<2;i++) {
   Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.speed=BG_PLAYER_SPEED; ps.groundEntityNum=0;
   if(i) ps.perks=1<<(PERK_LIGHTWEIGHT-1);
-  move.cmd.forwardmove=127; move.cmd.rightmove=pml.rightmove=0;
+  move.cmd.forwardmove=pml.forwardmove=127; move.cmd.rightmove=pml.rightmove=0;
   ps.velocity[0]=BG_PLAYER_SPEED*BG_MoveClassScale(&ps); ps.bobCycle=10; pml.msec=100;
   CHECK(PM_BobMaxSpeed()==BG_PLAYER_SPEED); PM_Footsteps();
   CHECK(ps.bobCycle==10+(int)(0.335f*BG_MoveClassScale(&ps)*100));
@@ -2328,10 +2342,10 @@ static void TestViewBob(void) {
  ps.velocity[0]=9.5f; ps.bobCycle=50; pml.msec=1000; PM_Footsteps(); CHECK(ps.bobCycle==50);
  pml.msec=8;
  ps.velocity[0]=BG_PLAYER_SPEED; ps.groundEntityNum=ENTITYNUM_NONE; PM_Footsteps(); CHECK(ps.bobCycle==50);
- ps.groundEntityNum=0; ps.velocity[0]=0; move.cmd.forwardmove=0; PM_Footsteps(); CHECK(ps.bobCycle==0);
+ ps.groundEntityNum=0; ps.velocity[0]=0; move.cmd.forwardmove=pml.forwardmove=0; PM_Footsteps(); CHECK(ps.bobCycle==0);
  /* Over a second of running the cycle keeps MW2's per-think truncation. */
  Ready(WP_M40A3,WP_MACHINEGUN); ps.speed=BG_PLAYER_SPEED; ps.groundEntityNum=0; ps.velocity[0]=BG_PLAYER_SPEED;
- move.cmd.forwardmove=127; pml.msec=8; ps.bobCycle=0; before=0;
+ move.cmd.forwardmove=pml.forwardmove=127; pml.msec=8; ps.bobCycle=0; before=0;
  for(steps=0;steps<100;steps++) { PM_Footsteps(); before+=(int)(0.335f*8); }
  CHECK(ps.bobCycle==(before&255));
  move.cmd.forwardmove=0;
@@ -2405,7 +2419,7 @@ static runStats_t FlatRun(int primary, int forward, int right, int up, int butto
  runStats_t r={0,0,0,0}; float x0,y0,v[250]; int t,n;
  FlatReady(primary,primary==WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN);
  if(buttons&BUTTON_ADS) { for(t=0;t<5;t++) FlatMove(0,0,up,buttons,8); CHECK(ps.pm_flags&PMF_ADS); }
- if(up<0) for(t=0;t<5;t++) FlatMove(0,0,up,buttons&~BUTTON_SPRINT,8);
+ if(buttons&BUTTON_CROUCH) for(t=0;t<5;t++) FlatMove(0,0,up,buttons&~BUTTON_SPRINT,8);
  x0=ps.origin[0]; y0=ps.origin[1];
  for(n=0;n<250;n++) {
   FlatMove(forward,right,up,buttons,8); v[n]=FlatSpeed();
@@ -2440,7 +2454,7 @@ static void TestWalkMatchesMW2(void) {
   { WP_M40A3, 127, 0, 0, BUTTON_SPRINT, 285, 152, 176, 264.8f },	/* sprint */
   { WP_M40A3, 0, 127, 0, 0, 152, 168, 184, 139.7f },			/* strafe (x0.8) */
   { WP_M40A3, -127, 0, 0, 0, 133, 184, 208, 120.4f },			/* backpedal (x0.7) */
-  { WP_M40A3, 127, 0, -127, 0, 124, 128, 136, 116.0f },		/* crouch (x0.65, accel 12) */
+  { WP_M40A3, 127, 0, 0, BUTTON_CROUCH, 124, 128, 136, 116.0f },	/* crouch (x0.65, accel 12) */
   { WP_M40A3, 127, 0, 0, BUTTON_ADS, 76, 176, 192, 69.3f }		/* aim (x0.4) */
  };
  runStats_t r; float ms, dist; int i;
@@ -2477,11 +2491,11 @@ static void TestClassSpeeds(void) {
   CHECK(Near(Steady(127,0,0,0),moveClasses[i].run));
   CHECK(Near(Steady(127,0,0,BUTTON_SPRINT),moveClasses[i].sprint) && (ps.pm_flags&PMF_SPRINTING));
   FlatReady(moveClasses[i].primary,moveClasses[i].secondary);
-  CHECK(Near(Steady(127,0,-127,0),moveClasses[i].crouch) && (ps.pm_flags&PMF_DUCKED));
+  CHECK(Near(Steady(127,0,0,BUTTON_CROUCH),moveClasses[i].crouch) && (ps.pm_flags&PMF_DUCKED));
   FlatReady(moveClasses[i].primary,moveClasses[i].secondary);
   CHECK(Near(Steady(127,0,0,BUTTON_ADS),moveClasses[i].aim) && (ps.pm_flags&PMF_ADS));
-  CHECK(Near(Steady(127,0,-127,BUTTON_ADS),moveClasses[i].aim*BG_CROUCH_SPEED_SCALE));
-  CHECK(Near(Steady(64,0,-127,0),BG_PLAYER_SPEED*BG_CROUCH_SPEED_SCALE*factor*64/127));
+  CHECK(Near(Steady(127,0,0,BUTTON_CROUCH|BUTTON_ADS),moveClasses[i].aim*BG_CROUCH_SPEED_SCALE));
+  CHECK(Near(Steady(64,0,0,BUTTON_CROUCH),BG_PLAYER_SPEED*BG_CROUCH_SPEED_SCALE*factor*64/127));
   /* the secondary in hand: the primary's class, its own aim scale */
   FlatReady(moveClasses[i].primary,moveClasses[i].secondary);
   move.cmd.weapon=moveClasses[i].secondary;
@@ -2567,11 +2581,14 @@ static void TestBodyHeights(void) {
   FlatMove(0,0,0,0,8);
   CHECK(!(ps.pm_flags&PMF_DUCKED) && move.mins[2]==MINS_Z && move.maxs[2]==DEFAULT_HEIGHT);
   CHECK(ps.viewheight==DEFAULT_VIEWHEIGHT && move.maxs[0]==PLAYER_WIDTH && move.mins[1]==-PLAYER_WIDTH);
-  FlatMove(0,0,-127,0,8);
-  CHECK((ps.pm_flags&PMF_DUCKED) && move.maxs[2]==CROUCH_HEIGHT && ps.viewheight==CROUCH_VIEWHEIGHT);
-  /* the ceiling comes down to top above the feet; let go of crouch */
+  /* MW2's crouch bit: the box at once, the eye along its leg */
+  FlatMove(0,0,0,BUTTON_CROUCH,8);
+  CHECK((ps.pm_flags&PMF_DUCKED) && move.maxs[2]==CROUCH_HEIGHT && ps.viewHeightLerpTarget==BG_EYE_CROUCH);
+  for(t=0;t<BG_EYE_LEG_MS;t+=8) FlatMove(0,0,0,BUTTON_CROUCH,8);
+  CHECK((ps.pm_flags&PMF_DUCKED) && ps.viewheight==CROUCH_VIEWHEIGHT && !ps.viewHeightLerpTarget);
+  /* the ceiling comes down to top above the feet; let go of crouch, wait out the leg */
   roomTop=ps.origin[2]+MINS_Z+top;
-  for(t=0;t<5;t++) FlatMove(0,0,0,0,8);
+  for(t=0;t<BG_EYE_LEG_MS+5*8;t+=8) FlatMove(0,0,0,0,8);
   CHECK(!!(ps.pm_flags&PMF_DUCKED)==(top<70) && ps.origin[2]==-MINS_Z);
   CHECK(ps.viewheight==(top<70 ? CROUCH_VIEWHEIGHT : DEFAULT_VIEWHEIGHT));
   CHECK(move.maxs[2]==(top<70 ? CROUCH_HEIGHT : DEFAULT_HEIGHT));

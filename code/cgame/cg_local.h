@@ -42,11 +42,21 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	LAND_DEFLECT_TIME	150
 #define	LAND_RETURN_TIME	300
 #define	STEP_TIME			200
-#define	DUCK_TIME			100
 #define	PAIN_TWITCH_TIME	200
 #define	WEAPON_SELECT_TIME	1400
 #define	ITEM_SCALEUP_TIME	1000
 #define	ZOOM_TIME			150
+// MW2's invalid-command hint (CG_SetInvalidCmdHint 0x587230, CG_DrawInvalidCmdHint
+// 0x58DB10): an event's parm 1..3 is the type parm + 2; it shows for
+// cg_invalidCmdHintDuration and blinks every cg_invalidCmdHintBlinkInterval,
+// MW2's 1800 and 600. Its text sits at MW2's rect 0 -125 about the centre.
+#define	CG_INVALID_HINT_MS			1800
+#define	CG_INVALID_HINT_BLINK_MS	600
+#define	CG_INVALID_HINT_NONE			0
+#define	CG_INVALID_HINT_STAND_BLOCKED	3	// GAME_STAND_BLOCKED "Can't Stand Here"
+#define	CG_INVALID_HINT_CROUCH_BLOCKED	4	// GAME_CROUCH_BLOCKED "Can't Crouch Here"
+#define	CG_INVALID_HINT_PRONE_BLOCKED	5	// CGAME_PRONE_BLOCKED "Prone Blocked"
+#define	CG_INVALID_HINT_Y			( SCREEN_HEIGHT / 2 - 125 )
 #define	ITEM_BLOB_TIME		200
 #define	MUZZLE_FLASH_TIME	20
 #define	SINK_TIME			1000		// time for fragments to sink into ground before going away
@@ -473,7 +483,7 @@ typedef struct {
 
 //======================================================================
 
-// all cg.stepTime, cg.duckTime, cg.landTime, etc are set to cg.time when the action
+// all cg.stepTime, cg.landTime, etc are set to cg.time when the action
 // occurs, and they will have visible effects for #define STEP_TIME or whatever msec after
 
 #define MAX_PREDICTED_EVENTS	16
@@ -537,9 +547,6 @@ typedef struct {
 	float		stepChange;				// for stair up smoothing
 	int			stepTime;
 
-	float		duckChange;				// for duck viewheight smoothing
-	int			duckTime;
-
 	float		landChange;				// for landing hard
 	int			landTime;
 
@@ -547,6 +554,14 @@ typedef struct {
 	int			weaponSelect;
 	int             weaponSelectSlot; // intent is a slot; weaponSelect is its HUD label
 	int			equippedOffhand;	// MW2's cg equippedOffHand: the offhand EV_SWITCH_OFFHAND last named
+
+	// MW2's invalid-command hint (cg+0x72FD0..0x72FD8): its type
+	// (CG_INVALID_HINT_*, 0 none), the weapon it was armed with and the time
+	// it was armed. CG_SetInvalidCmdHint arms it (cg_event.c); the draw clears
+	// it (CG_DrawInvalidCmdHint, cg_draw.c).
+	int			invalidCmdHintType;
+	int			invalidCmdHintWeapon;
+	int			invalidCmdHintTime;
 
 	// auto rotating items
 	vec3_t		autoAngles;
@@ -1377,6 +1392,7 @@ void CG_BuildSolidList( void );
 int	CG_PointContents( const vec3_t point, int passEntityNum );
 void CG_Trace( trace_t *result, const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end, 
 					 int skipNumber, int mask );
+void CG_ShotHitVolumes( trace_t *tr, const vec3_t start, const vec3_t end, int skipNumber );
 void CG_PredictPlayerState( void );
 void CG_LoadDeferredPlayers( void );
 
@@ -1477,12 +1493,16 @@ void CG_RegisterItemVisuals( int itemNum );
 
 void CG_FireWeapon( centity_t *cent, int weapon );
 qboolean CG_EventPlayerView( const centity_t *cent );
+void CG_SetInvalidCmdHint( int weapon, int parm );
+void CG_DrawInvalidCmdHint( void );
 void CG_PrepOffhand( centity_t *cent, int weapon );
 void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, impactSound_t soundType );
 void CG_MissileHitPlayer( int weapon, vec3_t origin, vec3_t dir, int entityNum );
 void CG_ShotgunFire( entityState_t *es );
 void CG_Bullet( vec3_t origin, int sourceEntityNum, vec3_t normal, qboolean flesh, int fleshEntityNum );
 void CG_FireBullets( centity_t *cent, int weapon );
+void CG_PlayerHitVolumesTrace( trace_t *tr, const vec3_t start, const vec3_t end, int entityNum,
+	const entityState_t *es, const vec3_t origin, const vec3_t mins, const vec3_t maxs );
 void CG_RecordShots( const playerState_t *before, const playerState_t *after );
 
 void CG_RailTrail( clientInfo_t *ci, vec3_t start, vec3_t end );

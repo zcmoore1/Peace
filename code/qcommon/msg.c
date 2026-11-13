@@ -770,7 +770,7 @@ netField_t	entityStateFields[] =
 { NETF(legsAnim), 8 },
 { NETF(groundEntityNum), GENTITYNUM_BITS },
 { NETF(pos.trType), 8 },
-{ NETF(eFlags), 19 },
+{ NETF(eFlags), 22 },	// MW2's stance on the entity: EF_CROUCHING (bit 20) and EF_PRONE (bit 21)
 { NETF(otherEntityNum), GENTITYNUM_BITS },
 { NETF(weapon), 8 },
 { NETF(clientNum), 8 },
@@ -1093,7 +1093,7 @@ netField_t	playerStateFields[] =
 { PSF(events[1]), 8 },
 { PSF(events[2]), 8 },	// MW2's ring holds four (0x742170-0x7421a0)
 { PSF(events[3]), 8 },
-{ PSF(pm_flags), 16 },
+{ PSF(pm_flags), 18 },	// PMF_PRONE (bit 16) and PMF_PRONEMOVE_OVERRIDDEN (bit 17); MW2's is 23 bits
 { PSF(groundEntityNum), GENTITYNUM_BITS },
 { PSF(weaponstate), 4 },
 { PSF(eFlags), 16 },
@@ -1102,7 +1102,18 @@ netField_t	playerStateFields[] =
 { PSF(speed), 16 },
 { PSF(delta_angles[1]), 16 },
 { PSF(externalEventParm), 8 },
-{ PSF(viewheight), -8 },
+{ PSF(viewheight), 0 },	// a float: MW2's eye curve (ps+0x11C, a full float)
+// MW2's eye leg and prone body (its netfields for ps+0x118..0x128 and
+// +0x160..0x168), beside the eye: the leg changes on every think it runs,
+// and the delta sends every field up to the last one that changed.
+{ PSF(viewHeightTarget), 8 },	// BG_EYE_*, 0..60 (MW2: signed 8)
+{ PSF(viewHeightLerpTime), PS_EYE_LEG_BITS },	// ms into the leg, below BG_PRONE_LERP_MS
+{ PSF(viewHeightLerpTarget), 8 },	// BG_EYE_* or 0 (MW2: signed 8)
+{ PSF(viewHeightLerpDown), 1 },
+{ PSF(proneDirection), 0 },	// MW2 sends full floats
+{ PSF(proneDirectionPitch), 0 },
+{ PSF(proneTorsoPitch), 0 },
+{ PSF(prevCmd), 17 },	// BG_PrevCmdPack: forwardmove, rightmove, BUTTON_ADS
 { PSF(damageEvent), 8 },
 { PSF(damageYaw), 8 },
 { PSF(damagePitch), 8 },

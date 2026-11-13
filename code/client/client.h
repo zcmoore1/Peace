@@ -136,6 +136,18 @@ typedef struct {
 	// runs leaveads, so equipment always ends a toggled aim.
 	qboolean	usingAds;
 
+	// MW2's stance (clientActive_t 0xB2F86C-0xB2F878, in MW2's order): the
+	// client's own stance, BG_STANCE_*, carried as a level in every command
+	// (CL_KeyMove). +stance arms a hold: stancePosition is the stance at the
+	// press and stanceTime its com_frameTime; the first command at least
+	// cl_stanceHoldTime later goes prone (stand, if armed from prone). cgame
+	// resets stance through _peaceSetStance, MW2's CL_SetStance, which never
+	// touches the hold. CL_ClearState's memset clears all four, as MW2's.
+	qboolean	stanceHeld;
+	int			stance;
+	int			stancePosition;
+	int			stanceTime;
+
 	// the client maintains its own idea of view angles, which are
 	// sent to the server each frame.  It is cleared to 0 upon entering each level.
 	// the server sends a delta each frame which is added to the locally

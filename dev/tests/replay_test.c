@@ -77,8 +77,13 @@ static void Play(int t) {
  players[0].origin[1]=t*.01f;
  players[0].viewangles[1]=t*.03f;
  players[0].weaponAnimTime=t%1000; players[0].weaponTime=1000-t%1000;
- players[0].pm_flags=PMF_ADS;
+ players[0].pm_flags=PMF_ADS|PMF_PRONE;
  players[0].moveClass=MOVECLASS_ROCKETLAUNCHER;	/* spawn-owned, not a clock */
+ /* MW2's stance: a leg's elapsed ms, its eye and the prone body, none a clock */
+ players[0].viewHeightTarget=BG_EYE_PRONE; players[0].viewHeightLerpTarget=BG_EYE_PRONE;
+ players[0].viewHeightLerpDown=1; players[0].viewHeightLerpTime=t%BG_PRONE_LERP_MS;
+ players[0].viewheight=CROUCH_VIEWHEIGHT-(t%BG_PRONE_LERP_MS)*.0625f;
+ players[0].proneDirection=t*.07f; players[0].proneTorsoPitch=-(t%45)*.5f;
  players[0].powerups[PW_QUAD]=15000;
  players[0].powerups[PW_REDFLAG]=INT_MAX;
  entities[1].s.pos.trBase[1]=t*.02f;
@@ -124,6 +129,11 @@ static void TestLobby(int step) {
   last=expected.serverTime-offset;
   CHECK(expected.ps.pm_flags&PMF_ADS);
   CHECK(expected.ps.moveClass==MOVECLASS_ROCKETLAUNCHER);	/* never rebased */
+  CHECK((expected.ps.pm_flags&PMF_PRONE) && expected.ps.viewHeightLerpTarget==BG_EYE_PRONE);
+  CHECK(expected.ps.viewHeightLerpTime==(expected.serverTime-offset)%BG_PRONE_LERP_MS);	/* elapsed, never rebased */
+  CHECK(expected.ps.viewheight==CROUCH_VIEWHEIGHT-((expected.serverTime-offset)%BG_PRONE_LERP_MS)*.0625f);
+  CHECK(expected.ps.proneDirection==(expected.serverTime-offset)*.07f);
+  CHECK(expected.ps.proneTorsoPitch==-((expected.serverTime-offset)%45)*.5f);
   CHECK(expected.ps.powerups[PW_QUAD]==15000+offset);
   CHECK(expected.ps.powerups[PW_REDFLAG]==INT_MAX);
   CHECK(expected.ps.weaponAnimTime+expected.ps.weaponTime==1000);

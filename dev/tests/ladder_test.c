@@ -106,6 +106,7 @@ static void Reset(float x, float y, float z) {
     ps.ammo[WP_SHOTGUN] = 3; ps.ammoReserve[WP_SHOTGUN] = 10;
     ps.ammo[WP_MACHINEGUN] = 10; ps.ammoReserve[WP_MACHINEGUN] = 60;
     VectorSet(ps.origin, x, y, z);
+    BG_SpawnStance(&ps);	/* MW2's spawn eye, as ClientSpawn: standing, no leg */
     pm = &move;
 }
 static void Tick(int dt) {
@@ -282,7 +283,7 @@ static void TestWeaponOrdering(void) {
             move.cmd.weapon = weapon == WP_SHOTGUN ? WP_MACHINEGUN : WP_SHOTGUN;
             WeaponTick(BG_LADDER_DROP_TIME);
             CHECK(ps.weaponstate == WEAPON_LADDER && ps.weapon == weapon);
-            PM_CheckADS(); PM_CheckSprint();
+            PM_CheckADS(); pml.forwardmove = move.cmd.forwardmove; PM_CheckSprint();
             CHECK(!(ps.pm_flags & (PMF_ADS | PMF_SPRINTING)));
             ps.stats[STAT_LADDER] = 0;
             move.cmd.buttons = 0;
@@ -569,8 +570,10 @@ static void StairTrace(trace_t *tr, const vec3_t start, const vec3_t mins, const
             SlopeBoxTrace(&t, &stairBoxes[i], start, lo, hi, end);
             for (k = 0; k < 3; k++) t.endpos[k] = start[k] + t.fraction * (end[k] - start[k]);
         } else {
+            /* the engine's temporary box is CONTENTS_BODY whatever the box
+             * stands for; the box's own contents were matched just above */
             clipHandle_t h = CM_TempBoxModel(stairBoxes[i].mn, stairBoxes[i].mx, qfalse);
-            CM_BoxTrace(&t, start, end, lo, hi, h, mask, qfalse);
+            CM_BoxTrace(&t, start, end, lo, hi, h, CONTENTS_BODY, qfalse);
         }
         if (t.allsolid) tr->allsolid = qtrue;
         if (t.startsolid) tr->startsolid = qtrue;
@@ -716,11 +719,11 @@ static void TestStepProgress(void) {
             AddStairBox(-1000, PLAYER_WIDTH + 1, -1000, 2000, 1000, 1000);
             AddStairBox(100, -1000, -MINS_Z + (c ? CROUCH_HEIGHT : DEFAULT_HEIGHT) + 8, 2000, 1000, 1000);
             StairReset(0, 0, 24.125f);
-            move.cmd.angles[YAW] = ANGLE2SHORT(20); move.cmd.forwardmove = 127; move.cmd.upmove = c ? -127 : 0;
+            move.cmd.angles[YAW] = ANGLE2SHORT(20); move.cmd.forwardmove = 127; move.cmd.buttons = c ? BUTTON_CROUCH : 0;
             for (t = 0; t < 3000 / frames[i]; t++) Tick(frames[i]);
             CHECK(ps.origin[0] > 100 + PLAYER_WIDTH && ps.groundEntityNum != ENTITYNUM_NONE);
         }
-        move.cmd.upmove = 0;
+        move.cmd.buttons = 0;
         for (c = 0; c < ARRAY_LEN(clear); c++) {
             /* the head where the front face meets the opening at y = 100 */
             float head = -MINS_Z + DEFAULT_HEIGHT - ny / nz * (100 - 2 * PLAYER_WIDTH);
@@ -1096,10 +1099,10 @@ static void TestCrouchedJump(void) {
     numStairBoxes = 0;
     AddStairBox(-1000, -1000, -1000, 1000, 1000, 0);
     AddStairBox(-1000, -1000, -MINS_Z + CROUCH_HEIGHT + 8, 100, 1000, 1000);
-    StairReset(0, 0, 24.125f); move.cmd.upmove = -127;
+    StairReset(0, 0, 24.125f); move.cmd.buttons = BUTTON_CROUCH;	/* MW2's crouch bit */
     for (t = 0; t < 60; t++) Tick(8);
     CHECK((ps.pm_flags & PMF_DUCKED) && ps.groundEntityNum != ENTITYNUM_NONE);
-    move.cmd.upmove = 127; Tick(8);
+    move.cmd.buttons = 0; move.cmd.upmove = 127; Tick(8);	/* stand, under it, and jump */
     CHECK((ps.pm_flags & PMF_DUCKED) && (ps.pm_flags & PMF_JUMP_HELD));
     CHECK(ps.groundEntityNum != ENTITYNUM_NONE && ps.jumpLand != -1 && ps.velocity[2] <= 0);
     move.cmd.forwardmove = 127;

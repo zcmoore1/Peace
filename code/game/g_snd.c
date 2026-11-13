@@ -453,7 +453,7 @@ qboolean G_SNDUse( gentity_t *ent, usercmd_t *cmd ) {
          level.time >= snd.deadline || !(cmd->buttons & (BUTTON_USE | BUTTON_USE_RELOAD)) ||
          (cmd->buttons & (BUTTON_ATTACK | BUTTON_RELOAD | BUTTON_SPRINT | BUTTON_ADS |
              BUTTON_MELEE | BUTTON_LETHAL | BUTTON_TACTICAL | BUTTON_ALTFIRE | BUTTON_TALK)) ||
-         cmd->forwardmove || cmd->rightmove || cmd->upmove ||
+         cmd->forwardmove || cmd->rightmove || cmd->upmove > 0 ||
          ps->groundEntityNum == ENTITYNUM_NONE || (ps->stats[STAT_LADDER] & LADDER_ATTACHED) ||
          ps->weaponstate != WEAPON_READY || (ps->weaponAction & WA_TYPE_MASK) ||
          VectorLengthSquared(ps->velocity) > 25*25 ) {

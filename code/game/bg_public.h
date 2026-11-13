@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-16"
+#define	GAME_VERSION		BASEGAME "-17"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -47,7 +47,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	VOTE_TIME			30000	// 30 seconds before vote times out
 
 // MW2's body (PM_CheckDuck 0x570A90-0x5710E4, view heights 0x570B03-0x570FA8):
-// 70 tall standing with the eye at 60, 50 crouched with the eye at 40, 30 wide.
+// 70 tall standing with the eye at 60, 50 crouched with the eye at 40, 30
+// prone with the eye at 11 (0x6FF310, 0x5710C7), 30 wide.
 // Peace keeps Quake 3's origin, MINS_Z (24) above the feet, so no map, spawn
 // or MINS_Z-translated MW2 offset moves: the box top and the eye are MW2's
 // heights above the feet less 24.
@@ -57,8 +58,17 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	DEFAULT_VIEWHEIGHT	36	// MW2's 60
 #define CROUCH_HEIGHT		26	// MW2's 50
 #define CROUCH_VIEWHEIGHT	16	// MW2's 40
+#define PRONE_HEIGHT		6	// MW2's 30
+#define PRONE_VIEWHEIGHT	-13	// MW2's 11
 #define DEAD_HEIGHT			-8
 #define	DEAD_VIEWHEIGHT		-16
+// The same eyes in MW2 units, above the feet: playerState_t.viewHeightTarget,
+// viewHeightLerpTarget and MW2's eye-curve tables are kept in these. pmove
+// writes ps->viewheight = eye + MINS_Z (exact in float).
+#define BG_EYE_STAND		( DEFAULT_VIEWHEIGHT - MINS_Z )	// 60
+#define BG_EYE_CROUCH		( CROUCH_VIEWHEIGHT - MINS_Z )	// 40
+#define BG_EYE_PRONE		( PRONE_VIEWHEIGHT - MINS_Z )	// 11
+#define BG_EYE_DEAD			( DEAD_VIEWHEIGHT - MINS_Z )	// 8
 #define INVUL_RADIUS		42
 
 //
@@ -273,6 +283,43 @@ typedef enum {
 #define BG_LADDER_JUMP_SCALE      0.75f	// MW2's Jump_PushOffLadder: of a jump's take-off speed
 #define BG_LADDER_YAW_CAP         100.0f	// MW2's bg_ladder_yawcap (0x7ADD0C, clamp 0x571B60): look either side of the ladder
 
+// MW2's stance (PM_CheckDuck 0x570A90, PM_ViewHeightAdjust 0x570270, the prone
+// view 0x571ED0, BG_CheckProneValid 0x420EB0). Constants, not cvars, so
+// prediction and the server always agree.
+#define BG_PRONE_LERP_MS          400	// the leg into or out of prone (0x721058; 0x4BFAE0)
+#define BG_PRONE_YAW_CAP          85.0f	// bg_prone_yawcap (0x7ADC28): the view either side of the body
+#define BG_PRONE_PITCH_CAP        45.0f	// the view pitch either side of proneTorsoPitch (0x70BCE4)
+// MW2's prone room check (BG_CheckProneValid 0x420EB0 and its callers, in MW2's
+// feet frame): the body lies feetDist behind the origin (at yaw - 180) and is
+// checked with a box BG_PRONE_TRACE_HALF each way, up to the prone box's top.
+// The prone hit volume (BG_PlayerHitVolumes) is that same body.
+#define BG_PRONE_FEET_DIST        50.0f	// entry, verify and the air check (0x570700, 0x574C80, 0x57245D)
+#define BG_PRONE_TURN_FEET_DIST   45.0f	// turning and the sync (0x5717D0, 0x572150, 0x57226E)
+#define BG_PRONE_TRACE_HALF       6.0f	// the traces' box, -6..6 each way (0x6E3618)
+// Water is sampled from the standing eye in every stance (MW2's stance code
+// reads no water): PM_SetWaterLevel and cgame's CG_WaterLevel.
+#define BG_WATER_SAMPLE_EYE       BG_EYE_STAND
+
+// The client's stance (MW2's StanceState in clientActive_t, CL_SetStance
+// 0x4630A0): cl_input.c's cl.stance and the _peaceSetStance argument.
+#define BG_STANCE_STAND           0
+#define BG_STANCE_CROUCH          1
+#define BG_STANCE_PRONE           2
+// The EV_STANCE_* events' parm (MW2's, 0x570A90-0x571D76): why pmove reset the
+// client's stance. EV_STANCE_INVALID raises only BG_STANCE_PARM_PRONE_BLOCKED.
+// MW2's hint (CG_SetInvalidCmdHint 0x587230) shows parm 1..3 as its types 3..5.
+#define BG_STANCE_PARM_FORCED          0	// no room asked: a sprint, the ladder, a spectator, the air fallback
+#define BG_STANCE_PARM_STAND_BLOCKED   1	// no room to stand
+#define BG_STANCE_PARM_CROUCH_BLOCKED  2	// no room to crouch
+#define BG_STANCE_PARM_PRONE_BLOCKED   3	// prone refused, or a prone turn blocked
+
+// MW2's pmove oldcmd, playerState_t.prevCmd: the previous command's moves and
+// aim, written once per command by Pmove (when a step ran), never per step.
+#define BG_PREVCMD_ADS_BIT        ( 1 << 16 )
+#define BG_PREVCMD_FORWARD(ps)    ( ( ( (ps)->prevCmd & 0xff ) ^ 0x80 ) - 0x80 )	// signed, as forwardmove
+#define BG_PREVCMD_RIGHT(ps)      ( ( ( ( (ps)->prevCmd >> 8 ) & 0xff ) ^ 0x80 ) - 0x80 )
+#define BG_PREVCMD_ADS(ps)        ( ( (ps)->prevCmd & BG_PREVCMD_ADS_BIT ) != 0 )
+
 // One signed-short stat: three flags + 12-bit inward-facing yaw. No extra
 // pm_flags bit or animation sequence (both fields are already full).
 #define LADDER_ATTACHED           1
@@ -342,6 +389,8 @@ typedef struct {
 #define PMF_SCOREBOARD		8192	// spectate as a scoreboard
 #define PMF_INVULEXPAND		16384	// invulnerability sphere set to full size
 #define PMF_PENDING_MAG		32768	// WNOTE_MAG_IN fired and the clip fill is queued for later this think. If a holster finishes first the fill never happens - that is the NAC. bit 15
+#define PMF_PRONE			(1<<16)	// MW2's PMF_PRONE (0x1): lying down; follows viewHeightTarget, as PMF_DUCKED does
+#define PMF_PRONEMOVE_OVERRIDDEN (1<<17)	// MW2's 0x200: a weapon action stopped the crawl until a new stick push
 
 #define	PMF_ALL_TIMES	(PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK)
 
@@ -497,6 +546,12 @@ typedef enum {
 #define	EF_AWARD_ASSIST		0x00020000		// draw a assist sprite
 #define EF_AWARD_DENIED		0x00040000		// denied
 #define EF_TEAMVOTED		0x00080000		// already cast a team vote
+// MW2's stance mirrored on the entity (its EF_CROUCHING 0x4 and EF_PRONE 0x8,
+// written with the flags at 0x571017-0x571102). Peace writes them only in
+// BG_PlayerStateToEntityState, from PMF_DUCKED and PMF_PRONE, never into
+// playerState_t.eFlags (16 bits on the wire): the entity's 22 bits carry them.
+#define EF_CROUCHING		0x00100000		// PMF_DUCKED
+#define EF_PRONE			0x00200000		// PMF_PRONE: origin2[0..1] carry the prone body's yaw and pitch
 
 // NOTE: may not have more than 16
 typedef enum {
@@ -677,6 +732,7 @@ void BG_BeginWeaponDraw(playerState_t *ps);
 #define BG_SPRINT_STRAFE_SCALE 0.667f	// player_sprintStrafeSpeedScale (0x7ADCEC): rightmove, truncated
 #define BG_ADS_SPEED_SCALE     0.4f	// PMF_WALKING's walk and air scale (0x572EE6, 0x56F470)
 #define BG_CROUCH_SPEED_SCALE  0.65f	// PM_CmdScaleForStance's crouch, a multiply (0x572C50)
+#define BG_PRONE_SPEED_SCALE   0.15f	// PM_CmdScaleForStance's prone (0x6DF6E0)
 #define BG_STRAFE_SPEED_SCALE  0.8f	// player_strafeSpeedScale (0x7ADCFC)
 #define BG_BACK_SPEED_SCALE    0.7f	// player_backSpeedScale (0x7ADC44)
 // MW2's player_view_pitch_up and _down (0x7AB3B4, 0x7A9F90; PM clamp 0x5718D0),
@@ -922,7 +978,16 @@ typedef enum {
 	EV_SWITCH_OFFHAND,		// MW2's 0x32, singleClient: the HUD's equipped offhand
 	EV_WEAPON_SWITCH_STARTED,	// MW2's 0x1c, serverOnly: the server's switch-start notice
 	EV_RESET_ADS,			// MW2's 0x11, singleClient: the client leaves a toggled aim
-	EV_PREP_OFFHAND			// MW2's 0x30: the offhand's pullback sound
+	EV_PREP_OFFHAND,		// MW2's 0x30: the offhand's pullback sound
+
+	// MW2's stance corrections (event table 0x795748: 6..9), singleClient
+	// (0x739af0). The parm is BG_STANCE_PARM_*. The player's own cgame resets
+	// the client's stance on the FORCE three (MW2's CL_SetStance) and arms the
+	// invalid-command hint on EV_STANCE_INVALID.
+	EV_STANCE_FORCE_STAND,	// MW2's 6
+	EV_STANCE_FORCE_CROUCH,	// MW2's 7
+	EV_STANCE_FORCE_PRONE,	// MW2's 8
+	EV_STANCE_INVALID		// MW2's 9: a prone turn blocked
 
 } entity_event_t;
 
@@ -1000,6 +1065,12 @@ typedef enum {
 	FLAG_RUN,
 	FLAG_STAND,
 	FLAG_STAND2RUN,
+
+	// prone (MW2's idleprone, walkprone, walkpronebk): no animation.cfg line,
+	// cgame builds their frames as it builds LEGS_BACKCR
+	LEGS_IDLEPR,
+	LEGS_CRAWL,
+	LEGS_CRAWLB,
 
 	MAX_TOTALANIMATIONS
 } animNumber_t;
@@ -1181,6 +1252,10 @@ void	BG_AddPredictableEventToPlayerstate( int newEvent, int eventParm, playerSta
 
 void	BG_TouchJumpPad( playerState_t *ps, entityState_t *jumppad );
 
+// Both also write MW2's stance and Peace's eye on an ET_PLAYER entity:
+// EF_CROUCHING and EF_PRONE from PMF_DUCKED and PMF_PRONE; origin2[2] =
+// ps->viewheight (the eye, unsnapped); while PMF_PRONE origin2[0] =
+// proneDirection and origin2[1] = proneDirectionPitch, else both 0.
 void	BG_PlayerStateToEntityState( playerState_t *ps, entityState_t *s, qboolean snap );
 void	BG_PlayerStateToEntityStateExtraPolate( playerState_t *ps, entityState_t *s, int time, qboolean snap );
 
@@ -1193,13 +1268,74 @@ qboolean	BG_PlayerTouchesItem( playerState_t *ps, entityState_t *item, int atTim
 int		BG_BulletSeed( int gameTime );
 float	BG_BulletRandom( int *seed );
 float	BG_BulletCrandom( int *seed );
-void	BG_ShotMuzzle( const vec3_t base, int viewheight, const vec3_t forward, vec3_t muzzle );
+void	BG_ShotMuzzle( const vec3_t base, float viewheight, const vec3_t forward, vec3_t muzzle );
 void	BG_PlayerShotBase( const playerState_t *ps, vec3_t base );
 void	BG_BulletEnd( int *seed, float spread, const vec3_t muzzle, const vec3_t forward,
 			const vec3_t right, const vec3_t up, vec3_t end );
 void	BG_ShotgunAxes( const vec3_t aim, vec3_t forward, vec3_t right, vec3_t up );
 void	BG_ShotgunPelletEnd( int *seed, const vec3_t origin, const vec3_t forward,
 			const vec3_t right, const vec3_t up, vec3_t end );
+
+// MW2's stance (bg_misc.c). The box: PM_DEAD DEAD_HEIGHT, else PMF_PRONE
+// PRONE_HEIGHT, PMF_DUCKED CROUCH_HEIGHT, else DEFAULT_HEIGHT (spectators
+// too); +-PLAYER_WIDTH, MINS_Z. Pmove's invulnerability sphere is its own.
+void	BG_PlayerBox( const playerState_t *ps, vec3_t mins, vec3_t maxs );
+int		BG_LegsAnimStance( int legsAnim );		// BG_STANCE_*; can lag a sliding player's stance
+qboolean	BG_TraceWalkable( const trace_t *tr );	// MW2's trace walkable byte: !startsolid && normal z >= MIN_WALK_NORMAL
+qboolean	BG_WeaponBlocksProne( int weapon );		// MW2's blocksProne: only riotshield_mp, so never in Peace
+void	BG_SpawnStance( playerState_t *ps );		// MW2's spawn eye (0x47DB25): standing, no leg
+int		BG_PrevCmdPack( const usercmd_t *cmd );	// playerState_t.prevCmd from a command
+// MW2's angle arithmetic, exact to a float (q_math's round to 1/65536 of a turn)
+float	BG_AngleNormalize360( float angle );
+float	BG_AngleNormalize180( float angle );
+float	BG_AngleDelta( float angle1, float angle2 );	// angle1 - angle2, in -180..180
+
+/*
+MW2 hits the posed skeleton (0x746A08, 0x4C8190); Peace approximates it with
+bullet-only hit volumes (owner's decision D7, dev/STANCE.md). Bullets and
+pellets alone use them - the server's damage traces (G_ShotTrace, for
+Bullet_Fire and ShotgunPellet) and every client's drawn bullets and pellets
+(CG_ShotTrace) through this one function, fed on both sides from the
+target's entityState_t and the move box its trace tests (the server:
+r.currentOrigin, r.mins, r.maxs; cgame: the origin and decoded box it traces
+the entity at, or the viewed player's ps through
+BG_PlayerStateToEntityState). The railgun, the lightning gun, knives, melee,
+the throwing knife and explosions keep the move box.
+  vols[0]           HITVOL_BOX, always: the move box, axis aligned. A caller
+                    whose engine trace already tests the box skips it.
+  HITVOL_OVER_BOX   alive and the eye (es->origin2[2]) above the box top
+                    (maxs[2]): the box's footprint from maxs[2] up to the eye
+                    plus BG_HIT_HEAD_ALLOWANCE, axis aligned. A player whose eye
+                    is still above the new box on a downward leg can be shot
+                    over it, as they can shoot over it.
+  HITVOL_PRONE_BODY alive with EF_PRONE: the body MW2's prone room check
+                    traces (BG_CheckProneValid), lying behind the origin along
+                    the prone direction: from the origin to BG_PRONE_FEET_DIST
+                    back, +-BG_PRONE_TRACE_HALF across, MINS_Z..PRONE_HEIGHT up,
+                    turned by origin2[1] (pitch) and origin2[0] (yaw).
+Returns the count (1..BG_MAX_HIT_VOLUMES). EF_DEAD gives the box alone.
+BG_HitVolumeTrace: the segment's first entry into one volume, its fraction
+and that face's outward normal; qfalse if it misses. A segment that starts
+inside a volume and leaves it misses, as the engine's box passes it
+(startsolid, the fraction kept); one that never leaves is a hit at 0.
+*/
+#define BG_MAX_HIT_VOLUMES		3
+#define BG_HIT_HEAD_ALLOWANCE	( DEFAULT_HEIGHT - DEFAULT_VIEWHEIGHT )	// 10: the box's reach above its eye, standing and crouched
+typedef enum {
+	HITVOL_BOX,
+	HITVOL_OVER_BOX,
+	HITVOL_PRONE_BODY
+} hitVolumeType_t;
+typedef struct {
+	int		type;		// hitVolumeType_t
+	vec3_t	center;		// the box's centre, world space
+	vec3_t	axis[3];	// its unit axes, world space
+	vec3_t	halfSize;	// half its extent along each axis
+} bgHitVolume_t;
+int		BG_PlayerHitVolumes( const entityState_t *es, const vec3_t origin, const vec3_t mins,
+			const vec3_t maxs, bgHitVolume_t vols[BG_MAX_HIT_VOLUMES] );
+qboolean	BG_HitVolumeTrace( const bgHitVolume_t *vol, const vec3_t start, const vec3_t end,
+			float *fraction, vec3_t normal );
 
 
 #define ARENAS_PER_TIER		4

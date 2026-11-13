@@ -666,6 +666,8 @@ qboolean G_FilterPacket (char *from);
 // g_weapon.c
 //
 void FireWeapon( gentity_t *ent );
+// a bullet's or a pellet's damage trace: the boxes, then the bullet-only hit volumes (BG_PlayerHitVolumes)
+void G_ShotTrace( trace_t *tr, const vec3_t start, const vec3_t end, int passent );
 #ifdef MISSIONPACK
 void G_StartKamikaze( gentity_t *ent );
 #endif

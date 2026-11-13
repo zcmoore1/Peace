@@ -1470,9 +1470,16 @@ char *eventnames[] = {
 	"EV_SWITCH_OFFHAND",
 	"EV_WEAPON_SWITCH_STARTED",
 	"EV_RESET_ADS",
-	"EV_PREP_OFFHAND"
+	"EV_PREP_OFFHAND",
+
+	"EV_STANCE_FORCE_STAND",
+	"EV_STANCE_FORCE_CROUCH",
+	"EV_STANCE_FORCE_PRONE",
+	"EV_STANCE_INVALID"
 
 };
+// one name per event, and every event number fits the rings' 8 bits
+typedef char eventNamesMatchEvents[(ARRAY_LEN( eventnames ) == EV_STANCE_INVALID + 1 && EV_STANCE_INVALID < 256) ? 1 : -1];
 
 /*
 ===============
@@ -1532,13 +1539,15 @@ EV_OFFHAND_END_NOTIFY and the four EV_SV_FIRE_WEAPON. Events only the player's
 own client plays (0x739af0): the four stance corrections, EV_SWITCH_OFFHAND,
 both EV_EMPTY_OFFHAND, EV_RESET_ADS, EV_MELEE_BLOOD, the five hint events and
 three EV_BULLET_HIT_CLIENT. Peace has a counterpart only for the offhand
-press's three below. Its one shot event, EV_FIRE_WEAPON, is both MW2's
+press's three below and the four stance events (MW2's 6..9, the list's first
+four). Its one shot event, EV_FIRE_WEAPON, is both MW2's
 EV_SV_FIRE_WEAPON (the shooter's own view and server) and the EV_FIRE_WEAPON
 MW2's server sends everyone else, so it is on neither list.
 ===============
 */
 static const int bg_serverOnlyEvents[] = { EV_WEAPON_SWITCH_STARTED };
-static const int bg_singleClientEvents[] = { EV_SWITCH_OFFHAND, EV_RESET_ADS };
+static const int bg_singleClientEvents[] = { EV_STANCE_FORCE_STAND, EV_STANCE_FORCE_CROUCH,
+	EV_STANCE_FORCE_PRONE, EV_STANCE_INVALID, EV_SWITCH_OFFHAND, EV_RESET_ADS };
 
 qboolean BG_EventReachesOthers( int event ) {
 	int i;
@@ -1560,8 +1569,14 @@ BG_PlayerEventsToEntity
 
 MW2's copy of the predictable ring onto the entity's (56eab0): every event
 since the last copy, oldest first, except the ones that never reach anyone
-else. Run after each command and at each frame's end, so nothing raised in
-one command is lost; a single command raises at most MAX_PS_EVENTS.
+else. Run after each command and at each frame's end, so a command's last
+MAX_PS_EVENTS events are copied. A command Pmove chops into several steps
+can raise more: MW2's stance events can come every step (EV_STANCE_INVALID
+while a prone turn stays blocked, EV_STANCE_FORCE_STAND on a ladder with a
+crouch or prone bit, a FORCE event until the client's stance is reset), so a
+shot followed by four of them in one chopped command falls out of the ring,
+as it does of MW2's four slots (and of ClientEvents, which reads the same
+last four). Nothing special-cases it; stance_test.c measures it.
 ===============
 */
 static void BG_PlayerEventsToEntity( playerState_t *ps, entityState_t *s ) {
@@ -1616,6 +1631,35 @@ void BG_TouchJumpPad( playerState_t *ps, entityState_t *jumppad ) {
 	ps->jumppad_frame = ps->pmove_framecount;
 	// give the player the velocity from the jumppad
 	VectorCopy( jumppad->origin2, ps->velocity );
+}
+
+/*
+========================
+BG_PlayerStanceToEntity
+
+MW2 mirrors the stance into its eFlags (EF_CROUCHING, EF_PRONE, written with
+the flags at 0x571017-0x571102), and the entity is how everyone else knows it.
+Peace writes them here only, from the flags, so playerState_t.eFlags never
+holds them. The eye, unsnapped, rides in origin2[2], which no ET_PLAYER used:
+others' drawn bullets start where the server's damage trace did, and the eye
+is what the bullet-only hit volumes reach up to (BG_PlayerHitVolumes). The
+prone body's yaw and pitch ride in origin2[0] and origin2[1] while prone.
+========================
+*/
+static void BG_PlayerStanceToEntity( const playerState_t *ps, entityState_t *s ) {
+	s->eFlags &= ~( EF_CROUCHING | EF_PRONE );
+	if ( ps->pm_flags & PMF_DUCKED ) {
+		s->eFlags |= EF_CROUCHING;
+	}
+	if ( ps->pm_flags & PMF_PRONE ) {
+		s->eFlags |= EF_PRONE;
+		s->origin2[0] = ps->proneDirection;
+		s->origin2[1] = ps->proneDirectionPitch;
+	} else {
+		s->origin2[0] = 0;
+		s->origin2[1] = 0;
+	}
+	s->origin2[2] = ps->viewheight;
 }
 
 /*
@@ -1680,6 +1724,8 @@ void BG_PlayerStateToEntityState( playerState_t *ps, entityState_t *s, qboolean 
 
 	s->loopSound = ps->loopSound;
 	s->generic1 = ps->generic1;
+
+	BG_PlayerStanceToEntity( ps, s );
 }
 
 /*
@@ -1747,6 +1793,8 @@ void BG_PlayerStateToEntityStateExtraPolate( playerState_t *ps, entityState_t *s
 
 	s->loopSound = ps->loopSound;
 	s->generic1 = ps->generic1;
+
+	BG_PlayerStanceToEntity( ps, s );
 }
 
 /*
@@ -1812,10 +1860,11 @@ float BG_BulletCrandom( int *seed ) {
 BG_ShotMuzzle
 
 Where a player's shot starts: the snapped origin the server's entity carries,
-up to the eye, 14 along the aim, snapped (the server's CalcMuzzlePoint).
+up to the eye, 14 along the aim, snapped (the server's CalcMuzzlePoint). The
+eye is a float: MW2's eye curve passes through fractions.
 ================
 */
-void BG_ShotMuzzle( const vec3_t base, int viewheight, const vec3_t forward, vec3_t muzzle ) {
+void BG_ShotMuzzle( const vec3_t base, float viewheight, const vec3_t forward, vec3_t muzzle ) {
 	VectorCopy( base, muzzle );
 	muzzle[2] += viewheight;
 	VectorMA( muzzle, 14, forward, muzzle );
@@ -1889,4 +1938,281 @@ void BG_ShotgunPelletEnd( int *seed, const vec3_t origin, const vec3_t forward,
 	VectorMA( origin, BG_BULLET_RANGE, forward, end );
 	VectorMA( end, r, right, end );
 	VectorMA( end, u, up, end );
+}
+
+/*
+=============================================================================
+
+MW2'S STANCE
+
+The shared half of MW2's stance button and prone (dev/STANCE.md): the box
+rule, the spawn eye, the previous command pmove keeps for the crawl and aim
+rules, and the bullet-only hit volumes the server's damage traces and every
+client's drawn bullets test alike.
+
+=============================================================================
+*/
+
+/*
+================
+BG_AngleNormalize360, BG_AngleNormalize180, BG_AngleDelta
+
+MW2's angle arithmetic (AngleNormalize360 0x438DC0, AngleDelta 0x446CA0 and
+the same pattern inlined for AngleNormalize180): a fraction of a turn, its
+whole turns taken off by floor, back to degrees. Exact to a float, where
+q_math's versions round to a 65536th of a turn. MW2's prone view, its pitch
+and its room check turn on these.
+================
+*/
+#define BG_INV_360	0.0027777778450399637	// MW2's 1/360, a float's (0x700240)
+
+float BG_AngleNormalize360( float angle ) {
+	float	turns = (float)( angle * BG_INV_360 );
+	float	whole = (float)floor( turns );
+
+	return (float)( ( (double)turns - whole ) * 360.0 );
+}
+
+float BG_AngleNormalize180( float angle ) {
+	float	turns = (float)( angle * BG_INV_360 );
+	float	whole = (float)floor( (float)( turns + 0.5 ) );
+
+	return (float)( ( (double)turns - whole ) * 360.0 );
+}
+
+float BG_AngleDelta( float angle1, float angle2 ) {
+	return BG_AngleNormalize180( angle1 - angle2 );
+}
+
+/*
+================
+BG_PlayerBox
+
+The one box rule, from the flags pmove keeps (they follow MW2's
+viewHeightTarget): dead, prone, crouched or standing. A spectator stands.
+Pmove's invulnerability sphere is its own.
+================
+*/
+void BG_PlayerBox( const playerState_t *ps, vec3_t mins, vec3_t maxs ) {
+	VectorSet( mins, -PLAYER_WIDTH, -PLAYER_WIDTH, MINS_Z );
+	VectorSet( maxs, PLAYER_WIDTH, PLAYER_WIDTH, DEFAULT_HEIGHT );
+	if ( ps->pm_type == PM_SPECTATOR ) {
+		return;
+	}
+	if ( ps->pm_type == PM_DEAD ) {
+		maxs[2] = DEAD_HEIGHT;
+	} else if ( ps->pm_flags & PMF_PRONE ) {
+		maxs[2] = PRONE_HEIGHT;
+	} else if ( ps->pm_flags & PMF_DUCKED ) {
+		maxs[2] = CROUCH_HEIGHT;
+	}
+}
+
+/*
+================
+BG_LegsAnimStance
+
+Another player's stance as their legs animation shows it. PM_Footsteps
+changes the legs with no move input only below xyspeed 5, so it can lag the
+stance while a player slides; EF_CROUCHING and EF_PRONE are exact.
+================
+*/
+int BG_LegsAnimStance( int legsAnim ) {
+	switch ( legsAnim & ~ANIM_TOGGLEBIT ) {
+	case LEGS_IDLEPR:
+	case LEGS_CRAWL:
+	case LEGS_CRAWLB:
+		return BG_STANCE_PRONE;
+	case LEGS_IDLECR:
+	case LEGS_WALKCR:
+	case LEGS_BACKCR:
+		return BG_STANCE_CROUCH;
+	default:
+		return BG_STANCE_STAND;
+	}
+}
+
+/*
+================
+BG_WeaponBlocksProne
+
+MW2's blocksProne (WeaponDef+0x66F), read by PlayerProneAllowed (0x570780).
+Only riotshield_mp sets it (the IW4 dump); Peace has no such weapon.
+================
+*/
+qboolean BG_WeaponBlocksProne( int weapon ) {
+	(void)weapon;
+	return qfalse;
+}
+
+/*
+================
+BG_SpawnStance
+
+MW2's spawn (0x47DB25-0x47DB68): the eye current and target standing, no
+leg running. Only the stance flags are cleared: PMF_RESPAWNED and
+PMF_TIME_KNOCKBACK, which ClientSpawn sets beside it, are left alone.
+================
+*/
+void BG_SpawnStance( playerState_t *ps ) {
+	ps->viewheight = DEFAULT_VIEWHEIGHT;
+	ps->viewHeightTarget = BG_EYE_STAND;
+	ps->viewHeightLerpTarget = 0;
+	ps->viewHeightLerpTime = 0;
+	ps->viewHeightLerpDown = 0;
+	ps->pm_flags &= ~( PMF_DUCKED | PMF_PRONE | PMF_PRONEMOVE_OVERRIDDEN );
+	ps->proneDirection = 0;
+	ps->proneDirectionPitch = 0;
+	ps->proneTorsoPitch = 0;
+}
+
+/*
+================
+BG_PrevCmdPack
+
+playerState_t.prevCmd, MW2's pmove oldcmd as far as prone reads it: the
+command's forwardmove and rightmove as bytes, and its aim button.
+================
+*/
+int BG_PrevCmdPack( const usercmd_t *cmd ) {
+	return ( cmd->forwardmove & 0xff ) | ( ( cmd->rightmove & 0xff ) << 8 ) |
+		( ( cmd->buttons & BUTTON_ADS ) ? BG_PREVCMD_ADS_BIT : 0 );
+}
+
+/*
+================
+BG_PlayerHitVolumes
+
+The volumes a bullet or pellet can hit a player in (bg_public.h has the
+contract): Peace's approximation of MW2's posed skeleton (0x746A08,
+0x4C8190), a placeholder, from what the target's entity carries.
+  - The move box, always first.
+  - Over the box: while the eye (origin2[2]) is above the box top, as on a
+    downward stance leg (the box drops at the leg's start, the eye follows
+    MW2's curve), the box's footprint from its top up to the eye plus
+    BG_HIT_HEAD_ALLOWANCE, the box's own reach above its eye. A player who
+    can fire over cover can be shot over it.
+  - The prone body: what MW2's prone room check traces (BG_CheckProneValid,
+    in bg_pmove.c, with the same BG_PRONE_* numbers), from the origin to
+    BG_PRONE_FEET_DIST behind it along the body's yaw (origin2[0]) and pitch
+    (origin2[1]), BG_PRONE_TRACE_HALF either side, from the feet to the
+    prone box's top.
+A corpse is its box alone.
+================
+*/
+int BG_PlayerHitVolumes( const entityState_t *es, const vec3_t origin, const vec3_t mins,
+	const vec3_t maxs, bgHitVolume_t vols[BG_MAX_HIT_VOLUMES] ) {
+	bgHitVolume_t	*v = &vols[0];
+	int				i, count = 1;
+	float			eye, top;
+	vec3_t			angles, forward, right, up;
+
+	v->type = HITVOL_BOX;
+	for ( i = 0; i < 3; i++ ) {
+		v->center[i] = origin[i] + 0.5f * ( mins[i] + maxs[i] );
+		v->halfSize[i] = 0.5f * ( maxs[i] - mins[i] );
+	}
+	AxisClear( v->axis );
+	if ( es->eFlags & EF_DEAD ) {
+		return count;
+	}
+
+	eye = es->origin2[2];
+	if ( eye > maxs[2] ) {
+		v = &vols[count++];
+		top = eye + BG_HIT_HEAD_ALLOWANCE;
+		v->type = HITVOL_OVER_BOX;
+		v->center[0] = origin[0] + 0.5f * ( mins[0] + maxs[0] );
+		v->center[1] = origin[1] + 0.5f * ( mins[1] + maxs[1] );
+		v->center[2] = origin[2] + 0.5f * ( maxs[2] + top );
+		v->halfSize[0] = 0.5f * ( maxs[0] - mins[0] );
+		v->halfSize[1] = 0.5f * ( maxs[1] - mins[1] );
+		v->halfSize[2] = 0.5f * ( top - maxs[2] );
+		AxisClear( v->axis );
+	}
+
+	if ( es->eFlags & EF_PRONE ) {
+		v = &vols[count++];
+		v->type = HITVOL_PRONE_BODY;
+		VectorSet( angles, es->origin2[1], es->origin2[0], 0 );
+		AngleVectors( angles, forward, right, up );
+		VectorNegate( forward, v->axis[0] );	// toward the feet
+		VectorCopy( right, v->axis[1] );
+		VectorCopy( up, v->axis[2] );
+		VectorCopy( origin, v->center );
+		VectorMA( v->center, 0.5f * BG_PRONE_FEET_DIST, v->axis[0], v->center );
+		VectorMA( v->center, 0.5f * ( MINS_Z + PRONE_HEIGHT ), v->axis[2], v->center );
+		VectorSet( v->halfSize, 0.5f * BG_PRONE_FEET_DIST, BG_PRONE_TRACE_HALF,
+			0.5f * ( PRONE_HEIGHT - MINS_Z ) );
+	}
+	return count;
+}
+
+/*
+================
+BG_HitVolumeTrace
+
+Where the segment start->end first enters a volume: the slab test along each
+of its axes. The fraction is along the whole segment, as a trace's is. A
+segment that only touches a face hits it. A start inside (or on a face) is
+the engine's box trace's (CM_TraceThroughBrush): a segment that gets out
+passes (the engine marks it startsolid and keeps the fraction), so a bullet
+fired from inside someone's volume, as from a muzzle over another prone
+player's legs, goes on; only a segment that never leaves is a hit, at 0, its
+normal facing back along it (zero for a segment with no length), as the
+engine's all-solid trace is.
+================
+*/
+qboolean BG_HitVolumeTrace( const bgHitVolume_t *vol, const vec3_t start, const vec3_t end,
+	float *fraction, vec3_t normal ) {
+	vec3_t	rel, dir;
+	float	enter, leave, s, d, t0, t1, t, side, enterSide;
+	int		i, face;
+
+	VectorSubtract( start, vol->center, rel );
+	VectorSubtract( end, start, dir );
+	enter = 0.0f;
+	leave = 1.0f;
+	face = -1;
+	enterSide = 0.0f;
+	for ( i = 0; i < 3; i++ ) {
+		s = DotProduct( rel, vol->axis[i] );
+		d = DotProduct( dir, vol->axis[i] );
+		if ( d == 0.0f ) {
+			// parallel to this pair of faces: inside them or never
+			if ( s < -vol->halfSize[i] || s > vol->halfSize[i] ) {
+				return qfalse;
+			}
+			continue;
+		}
+		t0 = ( -vol->halfSize[i] - s ) / d;
+		t1 = ( vol->halfSize[i] - s ) / d;
+		side = -1.0f;	// moving along the axis, it comes in through the near (-) face
+		if ( t0 > t1 ) {
+			t = t0; t0 = t1; t1 = t;
+			side = 1.0f;
+		}
+		if ( t0 > enter ) {
+			enter = t0;
+			face = i;
+			enterSide = side;
+		}
+		if ( t1 < leave ) {
+			leave = t1;
+		}
+		if ( enter > leave ) {
+			return qfalse;
+		}
+	}
+	if ( face < 0 && leave < 1.0f ) {
+		return qfalse;	// it starts inside and gets out: the engine's startsolid, no hit
+	}
+	*fraction = enter;
+	if ( face >= 0 ) {
+		VectorScale( vol->axis[face], enterSide, normal );
+	} else {
+		VectorNegate( dir, normal );
+		VectorNormalize( normal );
+	}
+	return qtrue;
 }

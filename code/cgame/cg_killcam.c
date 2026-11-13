@@ -27,7 +27,7 @@ void CG_Killcam_Transition( const snapshot_t *previous, const snapshot_t *next )
 	cg.soundBufferIn = cg.soundBufferOut = 0;
 	cg.rewardTime = cg.rewardStack = cg.centerPrintTime = 0;
 	cg.damageTime = cg.v_dmg_time = 0;
-	cg.stepTime = cg.landTime = cg.duckTime = 0;
+	cg.stepTime = cg.landTime = 0;
 	cg.adsTime = 0;
 	cg.adsClientNum = -1;
 	cg.zoomed = qfalse;

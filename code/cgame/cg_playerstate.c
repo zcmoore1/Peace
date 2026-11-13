@@ -535,10 +535,8 @@ void CG_TransitionPlayerState( playerState_t *ps, playerState_t *ops ) {
 	// run events
 	CG_CheckPlayerstateEvents( ps, ops );
 
-	// smooth the ducking viewheight change
-	if ( ps->viewheight != ops->viewheight ) {
-		cg.duckChange = ps->viewheight - ops->viewheight;
-		cg.duckTime = cg.time;
-	}
+	// The eye needs no smoothing here: pmove moves it along MW2's curve every
+	// think (PM_ViewHeightAdjust), and an unpredicted view lerps it between
+	// snapshots (CG_InterpolatePlayerState).
 }
 

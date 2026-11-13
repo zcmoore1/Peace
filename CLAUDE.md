@@ -939,6 +939,15 @@ source for MW2 behaviour; the owner rejects it.
   QVM. The import numbers above it never change. A new
   cgame on an older client calls an import that client does not have, which
   is one more reason protocol 86 needs the client rebuilt with the modules.
+- The pose traps (`CG_R_BUILDMODELPOSE`, `CG_R_BLENDMODELPOSES`) and
+  `refEntity_t` with its pose (`cl_vm.c`) take their QVM pointers through
+  `VM_ExplicitArgBlock`, which drops the game when the block runs past the
+  VM's memory, so a QVM cgame passes `cg.weaponPose` to either renderer as
+  native cgame does. The other traps still use `VMA` (`VM_ArgPtr`), which masks
+  only the start; give a new trap that hands the engine a whole block
+  `VM_ExplicitArgBlock`. Each renderer skins from a pose only when its joint
+  count is the model's, and `RE_BlendModelPoses` never writes past
+  `MAX_MODEL_JOINTS`.
 - Event rings: **protocol 86, GAME_VERSION -15** (one bump with the view
   kick's import and client-side bullets). The playerstate's
   `events[2..3]` and `eventParms[2..3]` (8 bits) sit beside `[0..1]`; the
@@ -1012,8 +1021,8 @@ source for MW2 behaviour; the owner rejects it.
   the full importer invokes it too. Sprint-in/out follow predicted transition
   locks for presentation only. Sprint/holster retention also covers draw,
   drop, initial pullout and fire/bolt clips through the generic layer owner.
-  Frame-only QVM/GL1 rendering crossfades the released source; native GL2 blends
-  skeletal poses. The full authored clip coverage currently belongs to SPAS;
+  Both renderers, native and QVM alike, blend skeletal poses; the frame-only
+  crossfade of the released source is the fallback for a model without poses. The full authored clip coverage currently belongs to SPAS;
   legacy placeholder weapons still need their own animation assets.
 - Known SPAS gaps: the drop is the draw reversed (resampled with ease-out
   progress `f*(2-f)` so a quick YY moves at once), and hands still use a flat placeholder.
@@ -1097,6 +1106,8 @@ and parms through the real `ClientThink`, the entity's ring, the switch-start
 log line, no per-event temp entity, `G_AddEvent` and the ring's aging.
 The native/QVM pointer-boundary test links `cl_vm.c` and `vm_ptr.c` directly;
 keep it independent of the full client and VM lifecycle so MSVC can link it.
+It also checks that an entity or pose running past the VM's memory is refused
+with ERR_DROP (`VM_ExplicitArgBlock`) before the renderer sees it.
 Loadouts UI and class definitions are documented in `dev/LOADOUTS.md`.
 
 `dev/tests/run-stance.sh` (`STANCE_TEST_FLAGS=-DMISSIONPACK`; `.cmd` for the
@@ -1191,6 +1202,22 @@ shot, the demo/killcam/follow gates and the QVM stub's number. It then builds
 the real `cg_kick.c` and `cg_syscalls.asm` into a QVM with q3lcc and q3asm,
 runs it on the real `vm_interpreted.c`, and checks that the real
 `CL_CgameSystemCalls` and `CL_FinishMove` receive exactly the kick cgame holds.
+It then does the same for the viewmodel's skeletal pose (`pose_qvm_test.c`):
+the real `cg_anim.c`, built into the QVM as a shipped cgame.qvm builds it, loads
+the SPAS's clip table through the file traps and hands the engine a viewmodel
+pointing at its own `cg.weaponPose` every frame; the two pose traps and the
+entity's pose pointer, called directly, reach the renderer as host pointers to
+the QVM's own poses, and a pose running past the QVM's memory is dropped at
+each of the three places. Both QVM tests share `qvm_engine.c`, the engine
+state and loader a real QVM runs in.
+
+`dev/tests/run-iqmpose.sh` builds each renderer's real `tr_model_iqm.c`
+(`iqm_pose_test.c`, plain for GL1, `-DIQM_POSE_GL2`) and loads the shipped
+SPAS and M40A3 viewmodels with the real `R_LoadIQM`. A pose built from frames
+skins exactly as the frames, a blend of two single-frame poses within float
+rounding of their lerp, and a pose whose joint count is not the model's is
+ignored. Both renderers' pose code is the same code: the runner requires the
+digest of GL1's every skin, built pose, blend and blended skin to be GL2's.
 
 `dev/tests/run-silentshot.sh` (`SILENTSHOT_TEST_FLAGS=-DMISSIONPACK`) models
 the client/server clocks as the fake reload test does and runs the real game
@@ -1242,7 +1269,7 @@ routing and the hint's arming, `view_test.c` the eye over every think of a
 stance change, and `player_model_test.c` the prone placeholder's pose.
 
 `run-bullets`, `run-kick`, `run-silentshot`, `run-view`, `run-stanceinput`,
-`run-stancecgame` and `run-stanceflow` have no `.cmd`. They link
+`run-stancecgame`, `run-stanceflow` and `run-iqmpose` have no `.cmd`. They link
 whole game, cgame and client files and rely on GNU ld's `--gc-sections` to
 drop the functions that reach engine code they do not build, and MSVC's
 linker resolves every external of every object first. Run them under WSL or

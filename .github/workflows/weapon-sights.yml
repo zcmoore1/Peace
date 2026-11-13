@@ -10,6 +10,8 @@ on:
       - 'code/client/**'
       - 'code/server/**'
       - 'code/renderercommon/**'
+      - 'code/renderergl1/**'
+      - 'code/renderergl2/**'
       - 'code/qcommon/vm.c'
       - 'code/qcommon/vm_ptr.c'
       - 'code/qcommon/qcommon.h'
@@ -100,6 +102,9 @@ jobs:
           STANCECGAME_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-stancecgame.sh
           sh dev/tests/run-stanceflow.sh
           STANCEFLOW_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-stanceflow.sh
+      - name: Test the viewmodel's skeletal pose in both renderers
+        run: |
+          sh dev/tests/run-iqmpose.sh
       - name: Build native and QVM game modules
         run: |
           cmake -S . -B out/ci -DBUILD_CLIENT=OFF -DBUILD_SERVER=OFF -DBUILD_RENDERER_GL1=OFF -DBUILD_RENDERER_GL2=OFF -DBUILD_GAME_LIBRARIES=ON -DBUILD_GAME_QVMS=ON

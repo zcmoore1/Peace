@@ -259,6 +259,9 @@ The engine also translates the skeletal pose's nested 32-bit QVM address at
 the cgame/UI rendering boundary. Previously, selecting an IQM weapon such as
 the SPAS from a QVM could pass that address to the native renderer as a pointer
 and crash; native DLLs bypass this translation and retain their actual pointers.
+A QVM cgame now hands its blended pose to either renderer as native cgame does,
+and the engine drops the game (`VM_ExplicitArgBlock`) rather than let a pose,
+or the entity carrying it, run past the QVM's memory.
 
 This UI and gameplay validation target Peace/baseq3. The legacy Team Arena
 missionpack builds but does not have this class menu. Its equipment capacity and

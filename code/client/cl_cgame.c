@@ -708,12 +708,22 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 	case CG_R_INPVS:
 		return re.inPVS( VMA(1), VMA(2) );
 
-	case CG_R_BUILDMODELPOSE:
-		return re.BuildModelPose( args[1], args[2], args[3], VMF(4), VMA(5) );
+	// whole poses inside the VM's memory: the renderer may read or write any of
+	// a pose's MAX_MODEL_JOINTS (VM_ExplicitArgBlock drops the game otherwise)
+	case CG_R_BUILDMODELPOSE: {
+		modelPose_t *pose = VM_ExplicitArgBlock( cgvm, args[5], sizeof( *pose ), "R_BuildModelPose's pose" );
+		return pose ? re.BuildModelPose( args[1], args[2], args[3], VMF(4), pose ) : qfalse;
+	}
 
-	case CG_R_BLENDMODELPOSES:
-		re.BlendModelPoses( VMA(1), VMA(2), VMF(3), VMA(4), VMF(5) );
+	case CG_R_BLENDMODELPOSES: {
+		modelPose_t *out = VM_ExplicitArgBlock( cgvm, args[1], sizeof( *out ), "R_BlendModelPoses' result" );
+		const modelPose_t *a = VM_ExplicitArgBlock( cgvm, args[2], sizeof( *a ), "R_BlendModelPoses' first pose" );
+		const modelPose_t *b = VM_ExplicitArgBlock( cgvm, args[4], sizeof( *b ), "R_BlendModelPoses' second pose" );
+		if ( out && a && b ) {
+			re.BlendModelPoses( out, a, VMF(3), b, VMF(5) );
+		}
 		return 0;
+	}
 
 	case CG_KEY_GETBINDINGNAME:
 		return Key_GetBindingName( VMA(1), args[2], VMA(3), args[4] );

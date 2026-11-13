@@ -54,10 +54,11 @@ importer's axis conversion. The rear aperture is approximately
 aperture ahead of the normal near plane. The reflex lens sits farther forward.
 
 The optic follows the same animated root as the gun, using the blended pose
-in native GL2 and the sampled frame tag in GL1/QVM. Its aiming dot is a
-depth-tested sprite inside the actual lens opening, not a HUD crosshair. The
-aim ray must intersect that opening before a dot is drawn. An animation that
-moves the lens away also takes the dot out of view.
+on both renderers, native or QVM (the sampled frame tag only for a model the
+renderer cannot pose). Its aiming dot is a depth-tested sprite inside the
+actual lens opening, not a HUD crosshair. The aim ray must intersect that
+opening before a dot is drawn. An animation that moves the lens away also takes
+the dot out of view.
 
 Rebuild the original optic assets with:
 

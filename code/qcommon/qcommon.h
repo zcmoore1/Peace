@@ -369,6 +369,7 @@ void	VM_Debug( int level );
 
 void	*VM_ArgPtr( intptr_t intValue );
 void	*VM_ExplicitArgPtr( vm_t *vm, intptr_t intValue );
+void	*VM_ExplicitArgBlock( vm_t *vm, intptr_t intValue, size_t size, const char *what );
 qboolean VM_IsNative( const vm_t *vm );
 
 #define	VMA(x) VM_ArgPtr(args[x])

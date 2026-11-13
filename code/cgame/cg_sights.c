@@ -257,7 +257,8 @@ void CG_Sights_Apply( int weapon, refEntity_t *hand ) {
 }
 
 /* The renderer's tag syscall samples frames, not entity.pose. Use the same
- * blended root transform as the gun on GL2; GL1/QVM use the named frame tag.
+ * blended root transform as the gun, on either renderer, native or QVM; the
+ * named frame tag is the fallback for a model the renderer cannot pose.
  * The configured joint must be parentless, so its local pose is model space.
  */
 static qboolean CG_Sights_Root( const weaponSights_t *def,

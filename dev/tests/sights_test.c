@@ -228,7 +228,7 @@ static void TestOptic(void) {
 	NEAR(rendered[1].origin[1],0);
 	NEAR(rendered[1].origin[2],0);
 	CHECK(rendered[1].origin[0]>4); /* lens stays in front of the near plane */
-	/* Blended GL2 pose and GL1/QVM frame tag must mount at the same point. */
+	/* The blended pose and the frame-tag fallback (a model with no pose) must mount at the same point. */
 	memset(&pose,0,sizeof(pose));
 	pose.numJoints=1;
 	pose.joints[0].rotate[3]=1;

@@ -60,3 +60,33 @@ void *VM_ExplicitArgPtr( vm_t *vm, intptr_t intValue ) {
 		return (void *)(vm->dataBase + (intValue & vm->dataMask));
 	}
 }
+
+/*
+============
+VM_ExplicitArgBlock
+
+A pointer to size bytes the VM handed the engine: VM_ExplicitArgPtr's pointer,
+but for a bytecode VM the whole block must also lie inside the VM's data
+(dataMask + 1 bytes), or the call drops with ERR_DROP. VM_ExplicitArgPtr masks
+only the start, so a block near the end would run on past the VM's memory into
+the engine's. A native module's pointers are its own and are not checked; NULL
+stays NULL.
+============
+*/
+void *VM_ExplicitArgBlock( vm_t *vm, intptr_t intValue, size_t size, const char *what ) {
+	size_t offset, length;
+
+	if ( !VM_ExplicitArgPtr( vm, intValue ) ) {
+		return NULL;
+	}
+	if ( vm->entryPoint ) {
+		return (void *)(vm->dataBase + intValue);
+	}
+	offset = (size_t)( intValue & vm->dataMask );
+	length = (size_t)vm->dataMask + 1;
+	if ( size > length || offset > length - size ) {
+		Com_Error( ERR_DROP, "VM %s: %s (%u bytes at 0x%x) runs past the VM's memory",
+			vm->name, what, (unsigned)size, (unsigned)offset );
+	}
+	return (void *)(vm->dataBase + offset);
+}

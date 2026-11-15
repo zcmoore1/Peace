@@ -996,6 +996,18 @@ Only in One Flag CTF games
 		{ "models/weapons2/grenadel/grenadel.md3", NULL, NULL, NULL },
 		"icons/iconw_grenade", "Tactical Insertion", 0, IT_WEAPON, WP_TACTICAL_INSERTION, "", ""
 	},
+	{
+		"weapon_m16", "sound/misc/w_pkup.wav",
+		{ "models/weapons2/m16/world.md3", NULL, NULL, NULL },
+		"icons/peace_m16", "M16 + Masterkey", 30, IT_WEAPON, WP_M16, "", ""
+	},
+	// Renderer registration for the integral mode; BG_WeaponItem refuses it as
+	// a standalone inventory item. Only the whole rifle can be picked up.
+	{
+		"weapon_masterkey", "sound/misc/w_pkup.wav",
+		{ "models/weapons2/m16/masterkey_world.md3", NULL, NULL, NULL },
+		"icons/peace_m16", "Masterkey", 4, IT_WEAPON, WP_MASTERKEY, "", ""
+	},
 	{NULL}
 };
 

@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/../.."
+mkdir -p out/tests
+flags="-std=c99 -O0 -g -ffunction-sections -fdata-sections ${MASTERKEY_TEST_FLAGS:-}"
+common="code/qcommon/q_math.c code/qcommon/q_shared.c"
+game="code/game/bg_loadout.c code/game/bg_misc.c code/game/bg_slidemove.c"
+${CC:-cc} $flags dev/tests/masterkey_test.c $game $common code/qcommon/msg.c code/qcommon/huffman.c -Wl,--gc-sections -lm -o out/tests/masterkey-test
+out/tests/masterkey-test
+${CC:-cc} $flags -DMASTERKEY_SERVER_TEST dev/tests/masterkey_test.c dev/tests/pickup_pmove_driver.c code/game/g_combat.c code/game/g_insertion.c $game $common -Wl,--gc-sections -lm -o out/tests/masterkey-server-test
+out/tests/masterkey-server-test
+${CC:-cc} $flags dev/tests/masterkey_selection_test.c code/cgame/cg_playerstate.c dev/tests/pickup_pmove_driver.c $game $common -Wl,--gc-sections -lm -o out/tests/masterkey-selection-test
+out/tests/masterkey-selection-test

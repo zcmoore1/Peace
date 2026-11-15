@@ -805,7 +805,9 @@ netField_t	entityStateFields[] =
 { NETF(constantLight), 32 },
 { NETF(frame), 16 },
 // The cgame's working copy only: the server leaves it 0, so it never costs a bit.
-{ NETF(event), 10 }
+{ NETF(event), 10 },
+{ NETF(weaponAltAmmo), 16 },
+{ NETF(weaponAltReserve), 16 }
 };
 
 
@@ -1134,8 +1136,12 @@ netField_t	playerStateFields[] =
 { PSF(slotReserve[1]), 16 },
 { PSF(slotAttachments[0]), 8 },
 { PSF(slotAttachments[1]), 8 },
-{ PSF(slotFlags[0]), 3 },
-{ PSF(slotFlags[1]), 3 },
+{ PSF(slotFlags[0]), 5 },
+{ PSF(slotFlags[1]), 5 },
+{ PSF(slotAltAmmo[0]), 16 },
+{ PSF(slotAltAmmo[1]), 16 },
+{ PSF(slotAltReserve[0]), 16 },
+{ PSF(slotAltReserve[1]), 16 },
 { PSF(pickupTarget), GENTITYNUM_BITS },
 { PSF(pickupSerial), 32 },
 { PSF(pickupTime), 11 },

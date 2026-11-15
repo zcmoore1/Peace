@@ -709,7 +709,8 @@ static void ShootGun( int weapon ) {
 	testPs.weaponAnimTime = -1;
 	testPs.stats[STAT_HEALTH] = 100;
 	testPs.stats[STAT_WEAPONS] = (1 << weapon) | (1 << otherGun);
-	testPs.stats[STAT_SLOT_PRIMARY] = weapon;
+	testPs.stats[STAT_SLOT_PRIMARY] = BG_BaseWeapon(weapon);
+	if (BG_BaseWeapon(weapon) != weapon) testPs.slotFlags[SLOT_PRIMARY] = BG_GUN_ALTERNATE;
 	testPs.stats[STAT_SLOT_SECONDARY] = otherGun;
 	testPs.ammo[weapon] = BG_WeaponMagSize( weapon );
 	testPs.ammoReserve[weapon] = BG_WeaponMaxReserve( weapon );

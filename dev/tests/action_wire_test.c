@@ -27,7 +27,9 @@ int main(void) {
   to.weaponDraw=j&1; to.slotAmmo[0]=7; to.slotAmmo[1]=2;
   to.slotReserve[0]=29; to.slotReserve[1]=40;
   to.slotAttachments[0]=i&1; to.slotAttachments[1]=j&1;
-  to.slotFlags[0]=i&7; to.slotFlags[1]=j&7;	/* with the generation bit */
+  to.slotFlags[0]=i&31; to.slotFlags[1]=j&31; /* generation, mode and both chamber debts */
+  to.slotAltAmmo[0]=i&3; to.slotAltAmmo[1]=j&3;
+  to.slotAltReserve[0]=i&15; to.slotAltReserve[1]=j&15;
   { const int hints[4]={0,37,ENTITYNUM_WORLD,ENTITYNUM_NONE}; to.cursorHintEntIndex=hints[(i+j)&3]; }
   from.cursorHint=i%CURSOR_HINT_COUNT; to.cursorHint=j%CURSOR_HINT_COUNT;	/* every hint type, from every other */
   to.pickupTarget=1023; to.pickupSerial=2147483000; to.pickupTime=1000;
@@ -54,6 +56,8 @@ int main(void) {
   CHECK(decoded.weaponDraw==to.weaponDraw && decoded.slotAmmo[0]==7 && decoded.slotAmmo[1]==2);
   CHECK(decoded.slotReserve[0]==29 && decoded.slotReserve[1]==40);
   CHECK(decoded.slotFlags[0]==to.slotFlags[0] && decoded.slotFlags[1]==to.slotFlags[1]);
+  CHECK(decoded.slotAltAmmo[0]==to.slotAltAmmo[0] && decoded.slotAltAmmo[1]==to.slotAltAmmo[1]);
+  CHECK(decoded.slotAltReserve[0]==to.slotAltReserve[0] && decoded.slotAltReserve[1]==to.slotAltReserve[1]);
   CHECK(decoded.slotAttachments[0]==to.slotAttachments[0] && decoded.slotAttachments[1]==to.slotAttachments[1]);
   CHECK(decoded.pickupTarget==1023 && decoded.pickupSerial==to.pickupSerial && decoded.pickupTime==1000);
   CHECK(decoded.pickupSlot==to.pickupSlot && decoded.pickupHeld==to.pickupHeld);
@@ -67,7 +71,7 @@ int main(void) {
  /* the use hint's six types in PS_CURSOR_HINT_BITS (3, protocol 84): both
   * Tactical Insertion types, the top one included, each from every other.
   * Protocol 85 adds grenadeTimeLeft. */
- CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==86);
+ CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==87);
  for(i=0;i<CURSOR_HINT_COUNT;i++) for(j=0;j<CURSOR_HINT_COUNT;j++) {
   memset(&from,0,sizeof(from)); to=from; from.cursorHint=i; to.cursorHint=j;
   to.cursorHintEntIndex=MAX_CLIENTS+j;

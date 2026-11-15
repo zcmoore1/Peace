@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-15"
+#define	GAME_VERSION		BASEGAME "-16"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			-40
@@ -537,6 +537,8 @@ typedef enum {
 	WP_M40A3,            // scoped bolt-action rifle; appended to preserve class IDs
 	WP_THROWING_KNIFE,   // lethal equipment: thrown, sticks, picked back up (MW2's)
 	WP_TACTICAL_INSERTION,	// lethal equipment: planted where you stand, your next spawn (MW2's)
+	WP_M16,                // rifle with an integral underbarrel shotgun (one inventory instance)
+	WP_MASTERKEY,          // M16 alternate firing mode, never a separate loadout slot
 
 	WP_NUM_WEAPONS
 } weapon_t;
@@ -556,9 +558,10 @@ typedef enum {
 // Slot intent survives replacement of its contents (and two differently
 // attached copies of one gun). Plain weapon IDs remain valid for bots/tools.
 #define BG_SLOT_COMMAND 128
-// cmd.weapon BG_SLOT_COMMAND + slot + SLOT_COUNT * the slot's generation bit,
-// so a selection made before the client saw a pickup can be told apart
-#define BG_IS_SLOT_COMMAND(s) ((s) >= BG_SLOT_COMMAND && (s) < BG_SLOT_COMMAND + 2 * SLOT_COUNT)
+// cmd.weapon carries slot, pickup generation, and requested firing mode.
+// Keep mode separate from generation: toggling it must not acknowledge a pickup.
+#define BG_SLOT_ALTERNATE (2 * SLOT_COUNT)
+#define BG_IS_SLOT_COMMAND(s) ((s) >= BG_SLOT_COMMAND && (s) < BG_SLOT_COMMAND + 4 * SLOT_COUNT)
 #define BG_ATTACHMENT_REDDOT 1
 #define BG_MAX_CLASS_ATTACHMENTS 2
 #define BG_ATTACHMENTS_LEGACY 256 // version-2 class encoding of cg_sight fallback
@@ -569,6 +572,8 @@ int BG_WeaponAttachmentMask(int weapon);
 #define BG_GUN_FIRST_DRAW 1
 #define BG_GUN_UNCHAMBERED 2
 #define BG_GUN_GENERATION 4	// slotFlags only: flipped each time a pickup replaces the slot
+#define BG_GUN_ALTERNATE 8   // the instance's last selected firing mode
+#define BG_GUN_ALT_UNCHAMBERED 16
 #define BG_PICKUP_RANGE 128.0f	// MW2's player_useRadius, eye to item
 // MW2's Player_ActivateHoldCmd, one rule for every hold-to-use usable, the
 // throwing knife and the floor gun alike, in ms from the press: a use from
@@ -602,8 +607,13 @@ typedef enum {
 #define BG_PICKUP_OWNER_DELAY 1000	// MW2: your own dropped gun waits this long
 typedef struct {
 	int weapon, attachments, ammo, reserve, flags;
+	int altAmmo, altReserve;
 } bg_weaponInstance_t;
+int BG_BaseWeapon(int weapon);
+int BG_AlternateWeapon(int weapon);
 int BG_RequestedSlot(const playerState_t *ps, int selection);
+int BG_RequestedWeapon(const playerState_t *ps, int selection);
+int BG_WeaponCommand(const playerState_t *ps, int slot, qboolean alternate);
 int BG_SlotCommand(const playerState_t *ps, int slot);
 qboolean BG_SlotCommandCurrent(const playerState_t *ps, int selection);
 qboolean BG_OffhandOut(const playerState_t *ps);

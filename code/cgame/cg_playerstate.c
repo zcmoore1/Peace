@@ -55,6 +55,7 @@ void CG_CheckAmmo( void ) {
 		case WP_GRENADE_LAUNCHER:
 		case WP_RAILGUN:
 		case WP_SHOTGUN:
+		case WP_MASTERKEY:
 #ifdef MISSIONPACK
 		case WP_PROX_LAUNCHER:
 #endif
@@ -201,6 +202,8 @@ void CG_Respawn( void ) {
 	// select the weapon the server says we are using
 	cg.weaponSelect = cg.snap->ps.weapon;
 	cg.weaponSelectSlot = cg.snap->ps.stats[STAT_ACTIVE_SLOT];
+	cg.weaponSelectAlternate = !!(cg.snap->ps.slotFlags[cg.weaponSelectSlot] & BG_GUN_ALTERNATE);
+	cg.weaponSelectGeneration = cg.snap->ps.slotFlags[cg.weaponSelectSlot] & BG_GUN_GENERATION;
 }
 
 extern char *eventnames[];

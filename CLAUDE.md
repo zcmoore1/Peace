@@ -1003,6 +1003,16 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
 
 ## Adding a weapon — touches TWO lists
 
+- M16 / Masterkey (`WP_M16` / `WP_MASTERKEY`, 18/19 base or 21/22 missionpack)
+  are one inventory instance with two firing modes. `weapalt` toggles the mode
+  (keyboard B, D-pad down). Slot commands carry mode separately from pickup
+  generation; both ammo pools and pump debt survive drops and pickups. Its
+  original prototype geometry, animation and timing data come from
+  `assets/source/m16/weapon.json` via `dev/tools/build_m16.py`; the rifle is
+  currently automatic, with no claim of retail MW2 burst/timing/recoil accuracy.
+  It uses ordinary note/holster/raise rules. Never add a special NAC for it.
+  Protocol 87 / game -16 adds the alternate ammo fields. Run `run-masterkey`,
+  `m16_asset_test.py` and `test-masterkey.ps1`; see `dev/M16.md`.
 - M300 Praetorian (`WP_M40A3`) is a separate, appended weapon (15 basegame / 18 missionpack). The
   Sniper preset occupies the former Scout index; custom-class indices and
   existing serialized weapon IDs are unchanged. Railgun remains selectable.

@@ -877,9 +877,11 @@ void FireWeapon( gentity_t *ent ) {
 		Weapon_LightningFire( ent );
 		break;
 	case WP_SHOTGUN:
+	case WP_MASTERKEY:
 		weapon_supershotgun_fire( ent );
 		break;
 	case WP_MACHINEGUN:
+	case WP_M16:
 		if ( g_gametype.integer != GT_TEAM ) {
 			Bullet_Fire( ent, MACHINEGUN_DAMAGE, MOD_MACHINEGUN );
 		} else {

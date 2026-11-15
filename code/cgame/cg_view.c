@@ -788,7 +788,7 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	// clock (its linear base, as MW2's weapon position fraction) leans the
 	// game pad's turn rate toward the ADS rate; it is picture state, read
 	// only by the client's look input, never by gameplay.
-	trap_SetUserCmdValue( cg.snap ? BG_SlotCommand( &cg.snap->ps, cg.weaponSelectSlot ) :
+	trap_SetUserCmdValue( cg.snap ? BG_WeaponCommand( &cg.snap->ps, cg.weaponSelectSlot, cg.weaponSelectAlternate ) :
 		BG_SLOT_COMMAND + cg.weaponSelectSlot, cg.zoomSensitivity, cg.adsFrac );
 
 	// this counter will be bumped for every valid scene we generate

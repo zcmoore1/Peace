@@ -193,7 +193,8 @@ static const struct { int weapon; const char *name; int attachments; } classWeap
 	{WP_RAILGUN, "Railgun", BG_ATTACHMENT_REDDOT}, {WP_ROCKET_LAUNCHER, "Rocket launcher", BG_ATTACHMENT_REDDOT},
 	{WP_GRENADE_LAUNCHER, "Grenade launcher", BG_ATTACHMENT_REDDOT}, {WP_LIGHTNING, "Lightning gun", BG_ATTACHMENT_REDDOT},
 	{WP_PLASMAGUN, "Plasma gun", BG_ATTACHMENT_REDDOT}, {WP_BFG, "BFG", BG_ATTACHMENT_REDDOT},
-	{WP_M40A3, "M300 Praetorian", 0}
+	{WP_M40A3, "M300 Praetorian", 0},
+	{WP_M16, "M16 + Masterkey", 0}
 };
 
 int BG_WeaponAttachmentMask(int weapon) {
@@ -346,9 +347,23 @@ qboolean BG_SerializeClass( const bg_class_t *loadout, char *text, int size ) {
 // count, using the latest requested weapon rather than an acknowledged snapshot.
 // The slot command a client sends for a slot, carrying the generation it
 // last saw for it (a pickup flips it, server side, in the slot's flags).
+int BG_BaseWeapon(int weapon) {
+	return weapon == WP_MASTERKEY ? WP_M16 : weapon;
+}
+
+int BG_AlternateWeapon(int weapon) {
+	return BG_BaseWeapon(weapon) == WP_M16 ? WP_MASTERKEY : WP_NONE;
+}
+
+int BG_WeaponCommand(const playerState_t *ps, int slot, qboolean alternate) {
+	if (slot < 0 || slot >= SLOT_COUNT) slot = 0;
+	return BG_SLOT_COMMAND + slot + ((ps->slotFlags[slot] & BG_GUN_GENERATION) ? SLOT_COUNT : 0) +
+		((alternate && BG_AlternateWeapon(ps->stats[STAT_SLOT_PRIMARY + slot])) ? BG_SLOT_ALTERNATE : 0);
+}
+
 int BG_SlotCommand(const playerState_t *ps, int slot) {
 	if (slot < 0 || slot >= SLOT_COUNT) slot = 0;
-	return BG_SLOT_COMMAND + slot + ((ps->slotFlags[slot] & BG_GUN_GENERATION) ? SLOT_COUNT : 0);
+	return BG_WeaponCommand(ps, slot, (ps->slotFlags[slot] & BG_GUN_ALTERNATE) != 0);
 }
 
 // False for a slot command sent before the client saw that slot's pickup:
@@ -357,7 +372,7 @@ qboolean BG_SlotCommandCurrent(const playerState_t *ps, int selection) {
 	int slot;
 	if (!BG_IS_SLOT_COMMAND(selection)) return qtrue;
 	slot = (selection - BG_SLOT_COMMAND) % SLOT_COUNT;
-	return ((selection - BG_SLOT_COMMAND) >= SLOT_COUNT) == !!(ps->slotFlags[slot] & BG_GUN_GENERATION);
+	return !!((selection - BG_SLOT_COMMAND) & SLOT_COUNT) == !!(ps->slotFlags[slot] & BG_GUN_GENERATION);
 }
 
 int BG_ToggleSlotWeapon( const playerState_t *ps, int selection ) {
@@ -365,7 +380,7 @@ int BG_ToggleSlotWeapon( const playerState_t *ps, int selection ) {
 	if (BG_IS_SLOT_COMMAND(selection))
 		return BG_SlotCommand(ps, ((selection - BG_SLOT_COMMAND) % SLOT_COUNT + 1) % SLOT_COUNT);
 	for ( slot = 0; slot < SLOT_COUNT; slot++ )
-		if ( selection == ps->stats[STAT_SLOT_PRIMARY + slot] ) break;
+		if ( BG_BaseWeapon(selection) == ps->stats[STAT_SLOT_PRIMARY + slot] ) break;
 	if ( slot == SLOT_COUNT ) slot = ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ? SLOT_SECONDARY : SLOT_PRIMARY;
 	next = (slot + 1) % SLOT_COUNT;
 	weapon = ps->stats[STAT_SLOT_PRIMARY + next];

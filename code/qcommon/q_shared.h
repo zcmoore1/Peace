@@ -1207,6 +1207,7 @@ typedef struct playerState_s {
 	// Slot-owned inventory. ammo[] remains the working cache used by weapon
 	// notes; stowed variants of the same base gun keep independent magazines.
 	int             slotAmmo[2], slotReserve[2], slotAttachments[2], slotFlags[2];
+	int             slotAltAmmo[2], slotAltReserve[2]; // integral underbarrel's independent ammunition
 	int             pickupTarget, pickupSerial, pickupTime, pickupSlot, pickupHeld;
 	int             cursorHintEntIndex;	// MW2's sticky use hint, written only by the server
 	int             cursorHint;	// MW2's cursorHint: what that hint is usable as now (cursorHint_t), rewritten every end-frame
@@ -1369,6 +1370,7 @@ typedef struct entityState_s {
 	int		torsoAnim;		// mask off ANIM_TOGGLEBIT
 
 	int		generic1;
+	int weaponAltAmmo, weaponAltReserve; // dropped inventory instance's underbarrel payload
 } entityState_t;
 
 typedef enum {

@@ -621,7 +621,9 @@ static const char *cg_viewModelBase[WP_NUM_WEAPONS] = {
 	"",                                 // WP_SEMTEX (procedural MD3 hand pose)
 	"models/weapons2/m40a3/view",         // WP_M40A3
 	"",                                 // WP_THROWING_KNIFE (MD3 hand and tagged knife)
-	""                                  // WP_TACTICAL_INSERTION (placeholder: the flash's legacy hands and grenade)
+	"",                                 // WP_TACTICAL_INSERTION (placeholder: the flash's legacy hands and grenade)
+	"models/weapons2/m16/view",          // WP_M16
+	"models/weapons2/m16/masterkey"      // WP_MASTERKEY (the same gun, its underbarrel mode)
 };
 
 /*
@@ -820,6 +822,7 @@ void CG_RegisterWeapon( int weaponNum ) {
 #endif
 
 	case WP_MACHINEGUN:
+	case WP_M16:
 		MAKERGB( weaponInfo->flashDlightColor, 1, 1, 0 );
 		weaponInfo->flashSound[0] = trap_S_RegisterSound( "sound/weapons/machinegun/machgf1b.wav", qfalse );
 		weaponInfo->flashSound[1] = trap_S_RegisterSound( "sound/weapons/machinegun/machgf2b.wav", qfalse );
@@ -830,6 +833,7 @@ void CG_RegisterWeapon( int weaponNum ) {
 		break;
 
 	case WP_SHOTGUN:
+	case WP_MASTERKEY:
 		MAKERGB( weaponInfo->flashDlightColor, 1, 1, 0 );
 		weaponInfo->flashSound[0] = trap_S_RegisterSound( "sound/weapons/shotgun/sshotf1b.wav", qfalse );
 		weaponInfo->ejectBrassFunc = CG_ShotgunEjectBrass;
@@ -1778,7 +1782,7 @@ void CG_DrawWeaponSelect( void ) {
 	bits = cg.snap->ps.stats[ STAT_WEAPONS ];
 	count = 0;
 	for ( i = 1 ; i < MAX_WEAPONS ; i++ ) {
-		if ( bits & ( 1 << i ) ) {
+		if ( (bits & ( 1 << i )) && BG_BaseWeapon(i) == i ) {
 			count++;
 		}
 	}
@@ -1787,7 +1791,7 @@ void CG_DrawWeaponSelect( void ) {
 	y = 380;
 
 	for ( i = 1 ; i < MAX_WEAPONS ; i++ ) {
-		if ( !( bits & ( 1 << i ) ) ) {
+		if ( !( bits & ( 1 << i ) ) || BG_BaseWeapon(i) != i ) {
 			continue;
 		}
 
@@ -1797,7 +1801,7 @@ void CG_DrawWeaponSelect( void ) {
 		CG_DrawPic( x, y, 32, 32, cg_weapons[i].weaponIcon );
 
 		// draw selection marker
-		if ( i == cg.weaponSelect ) {
+		if ( i == BG_BaseWeapon(cg.weaponSelect) ) {
 			CG_DrawPic( x-4, y-4, 40, 40, cgs.media.selectShader );
 		}
 
@@ -1839,6 +1843,17 @@ static qboolean CG_WeaponSelectable( int i ) {
 	return qtrue;
 }
 
+// A newly requested slot starts in that instance's saved mode. Mode toggles
+// themselves keep local intent, just as Y keeps its requested slot, so two
+// presses before the next snapshot still reverse each other.
+static void CG_SelectWeaponSlot( const playerState_t *ps, int slot ) {
+	if (slot < 0 || slot >= SLOT_COUNT) slot = SLOT_PRIMARY;
+	cg.weaponSelectSlot = slot;
+	cg.weaponSelectAlternate = !!(ps->slotFlags[slot] & BG_GUN_ALTERNATE);
+	cg.weaponSelectGeneration = cg.snap->ps.slotFlags[slot] & BG_GUN_GENERATION;
+	cg.weaponSelect = BG_RequestedWeapon(ps, BG_WeaponCommand(ps, slot, cg.weaponSelectAlternate));
+}
+
 /*
 ===============
 CG_NextWeapon_f
@@ -1863,8 +1878,7 @@ void CG_NextWeapon_f( void ) {
 	// for the gun's return.
 	if (!(ps->weaponAction & WA_FIRED) &&
 		BG_OffhandCancelable(BG_QuickActionWeapon(ps, ps->weaponAction))) {
-		cg.weaponSelectSlot = ps->stats[STAT_ACTIVE_SLOT];
-		cg.weaponSelect = BG_ActiveSlotWeapon(ps);
+		CG_SelectWeaponSlot(ps, ps->stats[STAT_ACTIVE_SLOT]);
 		cg.weaponSelectTime = cg.time;
 		return;
 	}
@@ -1874,8 +1888,8 @@ void CG_NextWeapon_f( void ) {
 	// here, so the toggle is always primary <-> secondary.
 	// Toggle the requested selection, not the last acknowledged active slot.
 	// A second press must reverse the first even before a server snapshot lands.
-	cg.weaponSelectSlot = BG_RequestedSlot(ps, BG_ToggleSlotWeapon(ps, BG_SlotCommand(ps, cg.weaponSelectSlot)));
-	want = ps->stats[STAT_SLOT_PRIMARY + cg.weaponSelectSlot];
+	CG_SelectWeaponSlot(ps, (cg.weaponSelectSlot + 1) % SLOT_COUNT);
+	want = cg.weaponSelect;
 
 	if ( want <= WP_NONE || want >= WP_NUM_WEAPONS ) {
 		return;					// empty slot - nothing to swap to
@@ -1896,6 +1910,22 @@ CG_PrevWeapon_f
 void CG_PrevWeapon_f( void ) {
 	// With 2 slots prev and next are the same toggle.
 	CG_NextWeapon_f();
+}
+
+/* The underbarrel is a mode of the selected inventory instance. All timing,
+ * reversal and readiness still belong to the ordinary shared weapon code. */
+void CG_AltWeapon_f( void ) {
+	playerState_t *ps;
+	int base;
+	if (!cg.snap || (cg.snap->ps.pm_flags & PMF_FOLLOW)) return;
+	CG_ValidateWeaponSelect();
+	ps = &cg.predictedPlayerState;
+	base = ps->stats[STAT_SLOT_PRIMARY + cg.weaponSelectSlot];
+	if (BG_AlternateWeapon(base) == WP_NONE) return;
+	cg.weaponSelectAlternate = !cg.weaponSelectAlternate;
+	cg.weaponSelect = BG_RequestedWeapon(ps,
+		BG_WeaponCommand(ps, cg.weaponSelectSlot, cg.weaponSelectAlternate));
+	cg.weaponSelectTime = cg.time;
 }
 
 /*
@@ -1924,13 +1954,15 @@ void CG_Weapon_f( void ) {
 	if ( ! ( cg.snap->ps.stats[STAT_WEAPONS] & ( 1 << num ) ) ) {
 		return;		// don't have the weapon
 	}
-	if ( num != cg.snap->ps.stats[STAT_SLOT_PRIMARY] &&
-	     num != cg.snap->ps.stats[STAT_SLOT_SECONDARY] ) {
+	if ( BG_BaseWeapon(num) != cg.snap->ps.stats[STAT_SLOT_PRIMARY] &&
+	     BG_BaseWeapon(num) != cg.snap->ps.stats[STAT_SLOT_SECONDARY] ) {
 		return; // melee/equipment are button actions, never standalone selections
 	}
 
 	cg.weaponSelect = num;
 	cg.weaponSelectSlot = BG_RequestedSlot(&cg.snap->ps, num);
+	cg.weaponSelectAlternate = BG_BaseWeapon(num) != num;
+	cg.weaponSelectGeneration = cg.snap->ps.slotFlags[cg.weaponSelectSlot] & BG_GUN_GENERATION;
 }
 
 /*
@@ -1958,8 +1990,7 @@ void CG_OutOfAmmoChange( void ) {
 
 	if ( other > WP_NONE && other < WP_NUM_WEAPONS &&
 	     ( ps->stats[STAT_WEAPONS] & ( 1 << other ) ) ) {
-		cg.weaponSelect = other;
-		cg.weaponSelectSlot = (ps->stats[STAT_ACTIVE_SLOT] + 1) % SLOT_COUNT;
+		CG_SelectWeaponSlot(ps, (ps->stats[STAT_ACTIVE_SLOT] + 1) % SLOT_COUNT);
 	}
 }
 
@@ -1979,13 +2010,21 @@ void CG_ValidateWeaponSelect( void ) {
 	}
 	ps  = &cg.snap->ps;
 	if (cg.predictedPlayerState.weaponAction & WA_RETURNING) {
-		cg.weaponSelectSlot = cg.predictedPlayerState.stats[STAT_ACTIVE_SLOT];
-		cg.weaponSelect = BG_ActiveSlotWeapon(&cg.predictedPlayerState);
+		CG_SelectWeaponSlot(&cg.predictedPlayerState,
+			cg.predictedPlayerState.stats[STAT_ACTIVE_SLOT]);
 		return;
 	}
-	if (cg.weaponSelectSlot < 0 || cg.weaponSelectSlot >= SLOT_COUNT)
-		cg.weaponSelectSlot = ps->stats[STAT_ACTIVE_SLOT];
-	cg.weaponSelect = ps->stats[STAT_SLOT_PRIMARY + cg.weaponSelectSlot];
+	if (cg.weaponSelectSlot < 0 || cg.weaponSelectSlot >= SLOT_COUNT ||
+		cg.weaponSelectGeneration != (ps->slotFlags[cg.weaponSelectSlot] & BG_GUN_GENERATION)) {
+		// A pickup replaces an instance, not the latest requested slot. Its new
+		// mode is the only reason a snapshot may replace local mode intent.
+		CG_SelectWeaponSlot(ps, cg.weaponSelectSlot < 0 || cg.weaponSelectSlot >= SLOT_COUNT ?
+			ps->stats[STAT_ACTIVE_SLOT] : cg.weaponSelectSlot);
+	}
+	if (BG_AlternateWeapon(ps->stats[STAT_SLOT_PRIMARY + cg.weaponSelectSlot]) == WP_NONE)
+		cg.weaponSelectAlternate = qfalse;
+	cg.weaponSelect = BG_RequestedWeapon(ps,
+		BG_WeaponCommand(ps, cg.weaponSelectSlot, cg.weaponSelectAlternate));
 }
 
 
@@ -2959,7 +2998,9 @@ void CG_FireBullets( centity_t *cent, int weapon ) {
 
 	switch ( weapon ) {
 	case WP_MACHINEGUN:
+	case WP_M16:
 	case WP_SHOTGUN:
+	case WP_MASTERKEY:
 	case WP_LIGHTNING:
 	case WP_RAILGUN:
 	case WP_M40A3:
@@ -2981,6 +3022,7 @@ void CG_FireBullets( centity_t *cent, int weapon ) {
 
 	switch ( weapon ) {
 	case WP_SHOTGUN:
+	case WP_MASTERKEY:
 		CG_ShotgunBlast( shot.muzzle, shot.forward, shot.seed, shot.shooter );
 		break;
 	case WP_RAILGUN:

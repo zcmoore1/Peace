@@ -38,7 +38,12 @@ void CG_Killcam_Transition( const snapshot_t *previous, const snapshot_t *next )
 	VectorClear(cg.predictedError);
 	cg.thisFrameTeleport = cg.nextFrameTeleport = qtrue;
 	cg.eventSequence = next->ps.eventSequence;
-	if ( !(next->snapFlags & SNAPFLAG_REPLAY) ) cg.weaponSelect = next->ps.weapon;
+	if ( !(next->snapFlags & SNAPFLAG_REPLAY) ) {
+		cg.weaponSelect = next->ps.weapon;
+		cg.weaponSelectSlot = next->ps.stats[STAT_ACTIVE_SLOT];
+		cg.weaponSelectAlternate = !!(next->ps.slotFlags[cg.weaponSelectSlot] & BG_GUN_ALTERNATE);
+		cg.weaponSelectGeneration = next->ps.slotFlags[cg.weaponSelectSlot] & BG_GUN_GENERATION;
+	}
 }
 
 void CG_Killcam_Draw( void ) {

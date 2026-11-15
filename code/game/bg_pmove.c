@@ -27,6 +27,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "bg_public.h"
 #include "bg_local.h"
 #include "bg_m40a3_data.h"
+#include "bg_m16_data.h"
 
 pmove_t		*pm;
 pml_t		pml;
@@ -1868,6 +1869,8 @@ static const int bg_weaponMagSize[MAX_WEAPONS] = {
 	M40_MAG_SIZE,
 	1,		// WP_THROWING_KNIFE (one in hand)
 	1,		// WP_TACTICAL_INSERTION (one in hand)
+	M16_MAG_SIZE,
+	MASTERKEY_MAG_SIZE,
 };
 
 // ---------------------------------------------------------------------------
@@ -1987,6 +1990,22 @@ static const bg_weaponNote_t bgnotes_m40_end[] = {
 	{ M40_RELOAD_CLOSE_MS, WNOTE_BOLT_CLOSED, 0 }, { 0, WNOTE_NONE, 0 }
 };
 
+// Original prototype data, authored with the models; no retail MW2 timing claim.
+static const bg_weaponNote_t bgnotes_m16_reload[] = {
+	{ M16_MAG_OUT_MS, WNOTE_MAG_OUT, 0 },
+	{ M16_MAG_IN_MS, WNOTE_MAG_IN, 0 }, { 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_masterkey_fire[] = {
+	{ MASTERKEY_BOLT_OPEN_MS, WNOTE_BOLT_OPEN, 0 },
+	{ MASTERKEY_BOLT_CLOSE_MS, WNOTE_BOLT_CLOSED, 0 }, { 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_masterkey_loop[] = {
+	{ MASTERKEY_ROUND_IN_MS, WNOTE_MAG_IN, 1 }, { 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_masterkey_end[] = {
+	{ MASTERKEY_RELOAD_CLOSE_MS, WNOTE_BOLT_CLOSED, 0 }, { 0, WNOTE_NONE, 0 }
+};
+
 /* Length is the refire, so this and the addTime in PM_Weapon are one number.
    A zero-length entry means the weapon has no modelled fire animation and
    behaves exactly as it did before: FIRING until the lock runs out. */
@@ -2011,7 +2030,9 @@ static const bg_weaponAnimSeg_t bg_weaponFire[MAX_WEAPONS] = {
 	/* WP_SEMTEX          */ { 0, bgnotes_none },
 	/* WP_M40A3           */ { M40_FIRE_MS, bgnotes_m40_fire },
 	/* WP_THROWING_KNIFE  */ { 0, bgnotes_none },
-	/* WP_TACTICAL_INSERTION */ { 0, bgnotes_none }
+	/* WP_TACTICAL_INSERTION */ { 0, bgnotes_none },
+	/* WP_M16             */ { 0, bgnotes_none },
+	/* WP_MASTERKEY       */ { MASTERKEY_FIRE_MS, bgnotes_masterkey_fire }
 };
 
 int BG_WeaponFireLength( int weapon ) {
@@ -2047,6 +2068,10 @@ static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
 	                             { M40_RELOAD_END_MS, bgnotes_m40_end } }, qtrue },
 	/* WP_THROWING_KNIFE  */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 	/* WP_TACTICAL_INSERTION */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
+	/* WP_M16             */ { { SEG_NONE, { M16_RELOAD_MS, bgnotes_m16_reload }, SEG_NONE } },
+	/* WP_MASTERKEY       */ { { { MASTERKEY_RELOAD_START_MS, bgnotes_none },
+	                             { MASTERKEY_RELOAD_LOOP_MS, bgnotes_masterkey_loop },
+	                             { MASTERKEY_RELOAD_END_MS, bgnotes_masterkey_end } }, qtrue },
 };
 
 // Holster / deploy lengths. Always stamped on a weapon change - never 0, so a
@@ -2075,6 +2100,7 @@ static const int bg_weaponDropTime[MAX_WEAPONS] = {
 	M40_DROP_MS,
 	BG_RAPID_DROP_TIME,	// WP_THROWING_KNIFE
 	BG_RAPID_DROP_TIME,	// WP_TACTICAL_INSERTION
+	M16_DROP_MS, MASTERKEY_DROP_MS,
 };
 
 static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
@@ -2101,6 +2127,7 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 	M40_RAISE_MS,
 	BG_THROWING_KNIFE_PULL_MS,	// WP_THROWING_KNIFE: throwingknife_mp holdFireTime 0, in hand on the press
 	BG_INSERTION_IGNITE_MS,	// WP_TACTICAL_INSERTION: flare_mp's holdFireTime, the ignite
+	M16_RAISE_MS, MASTERKEY_RAISE_MS,
 };
 
 // MW2's quickDropTime and quickRaiseTime (its weapon files): the gun going
@@ -2118,6 +2145,7 @@ static const int bg_weaponQuickDropTime[MAX_WEAPONS] = {
 	M40_QUICK_DROP_MS,
 	250,	// WP_THROWING_KNIFE
 	250,	// WP_TACTICAL_INSERTION
+	250, 250, // prototype M16 / Masterkey
 };
 static const int bg_weaponQuickRaiseTime[MAX_WEAPONS] = {
 	250,	// WP_NONE
@@ -2138,6 +2166,7 @@ static const int bg_weaponQuickRaiseTime[MAX_WEAPONS] = {
 	M40_QUICK_RAISE_MS,	// MW2's Intervention
 	250,	// WP_THROWING_KNIFE
 	250,	// WP_TACTICAL_INSERTION
+	750, 750, // prototype M16 / Masterkey
 };
 
 int BG_WeaponMagSize( int weapon ) {
@@ -2176,14 +2205,16 @@ static const int bg_weaponSprintInTime[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	250, 250, 250,
 #endif
-	150, 150, 150, 150, M40_SPRINT_IN_MS, 150, 150	// ..., WP_THROWING_KNIFE, WP_TACTICAL_INSERTION
+	150, 150, 150, 150, M40_SPRINT_IN_MS, 150, 150,
+	M16_SPRINT_IN_MS, MASTERKEY_SPRINT_IN_MS
 };
 static const int bg_weaponSprintOutTime[MAX_WEAPONS] = {
 	180, 180, 250, 250, 300, 300, 250, 300, 250, 350, 150,
 #ifdef MISSIONPACK
 	300, 300, 300,
 #endif
-	180, 180, 180, 180, M40_SPRINT_OUT_MS, 180, 180	// ..., WP_THROWING_KNIFE, WP_TACTICAL_INSERTION
+	180, 180, 180, 180, M40_SPRINT_OUT_MS, 180, 180,
+	M16_SPRINT_OUT_MS, MASTERKEY_SPRINT_OUT_MS
 };
 
 int BG_WeaponSprintInTime( int weapon ) {
@@ -2276,18 +2307,29 @@ int BG_WeaponQuickRaiseTime( int weapon ) {
 }
 
 int BG_ActiveSlotWeapon( const playerState_t *ps ) {
-	return ps->stats[ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ?
-		STAT_SLOT_SECONDARY : STAT_SLOT_PRIMARY];
+	int slot = ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ? SLOT_SECONDARY : SLOT_PRIMARY;
+	int weapon = ps->stats[STAT_SLOT_PRIMARY + slot], alternate = BG_AlternateWeapon(weapon);
+	return alternate && (ps->slotFlags[slot] & BG_GUN_ALTERNATE) ? alternate : weapon;
 }
 
 int BG_RequestedSlot(const playerState_t *ps, int selection) {
 	int slot, active = ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ? SLOT_SECONDARY : SLOT_PRIMARY;
 	if (BG_IS_SLOT_COMMAND(selection))
 		return (selection - BG_SLOT_COMMAND) % SLOT_COUNT;
+	selection = BG_BaseWeapon(selection);
 	if (selection == ps->stats[STAT_SLOT_PRIMARY + active]) return active;
 	for (slot = 0; slot < SLOT_COUNT; slot++)
 		if (selection == ps->stats[STAT_SLOT_PRIMARY + slot]) return slot;
 	return active;
+}
+
+int BG_RequestedWeapon(const playerState_t *ps, int selection) {
+	int slot = BG_RequestedSlot(ps, selection);
+	int weapon = ps->stats[STAT_SLOT_PRIMARY + slot], alternate = BG_AlternateWeapon(weapon);
+	if (!BG_SlotCommandCurrent(ps, selection)) return WP_NONE;
+	if (BG_IS_SLOT_COMMAND(selection))
+		return alternate && ((selection - BG_SLOT_COMMAND) & BG_SLOT_ALTERNATE) ? alternate : weapon;
+	return alternate && selection == alternate ? alternate : weapon;
 }
 
 // Equipment out or on its way out: MW2's offhand states 0x10-0x14, from the gun
@@ -2327,6 +2369,7 @@ int BG_WeaponDrawTime(const playerState_t *ps) {
 
 void BG_GetSlot(const playerState_t *ps, int slot, bg_weaponInstance_t *gun) {
 	int active = ps->stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY ? SLOT_SECONDARY : SLOT_PRIMARY;
+	int alternate;
 	memset(gun, 0, sizeof(*gun));
 	if (slot < 0 || slot >= SLOT_COUNT) return;
 	gun->weapon = ps->stats[STAT_SLOT_PRIMARY + slot];
@@ -2334,6 +2377,8 @@ void BG_GetSlot(const playerState_t *ps, int slot, bg_weaponInstance_t *gun) {
 	gun->flags = ps->slotFlags[slot] & ~BG_GUN_GENERATION;
 	gun->ammo = ps->slotAmmo[slot];
 	gun->reserve = ps->slotReserve[slot];
+	gun->altAmmo = ps->slotAltAmmo[slot];
+	gun->altReserve = ps->slotAltReserve[slot];
 	if (gun->weapon <= WP_NONE || gun->weapon >= WP_NUM_WEAPONS) return;
 	// Unique base IDs use the existing note engine's working registers. Only
 	// a stowed duplicate needs its private cache until it becomes active.
@@ -2342,6 +2387,13 @@ void BG_GetSlot(const playerState_t *ps, int slot, bg_weaponInstance_t *gun) {
 		gun->reserve = ps->ammoReserve[gun->weapon];
 		gun->flags &= ~BG_GUN_UNCHAMBERED;
 		if (ps->stats[STAT_UNCHAMBERED] & (1 << gun->weapon)) gun->flags |= BG_GUN_UNCHAMBERED;
+		alternate = BG_AlternateWeapon(gun->weapon);
+		if (alternate) {
+			gun->altAmmo = ps->ammo[alternate];
+			gun->altReserve = ps->ammoReserve[alternate];
+			gun->flags &= ~BG_GUN_ALT_UNCHAMBERED;
+			if (ps->stats[STAT_UNCHAMBERED] & (1 << alternate)) gun->flags |= BG_GUN_ALT_UNCHAMBERED;
+		}
 	}
 }
 
@@ -2352,12 +2404,14 @@ static void BG_StoreSlots(playerState_t *ps) {
 		BG_GetSlot(ps, slot, &gun);
 		ps->slotAmmo[slot] = gun.ammo;
 		ps->slotReserve[slot] = gun.reserve;
+		ps->slotAltAmmo[slot] = gun.altAmmo;
+		ps->slotAltReserve[slot] = gun.altReserve;
 		ps->slotFlags[slot] = (ps->slotFlags[slot] & BG_GUN_GENERATION) | gun.flags;
 	}
 }
 
 static void BG_LoadSlots(playerState_t *ps) {
-	int i, slot, weapon, active = ps->stats[STAT_ACTIVE_SLOT];
+	int i, slot, weapon, alternate, active = ps->stats[STAT_ACTIVE_SLOT];
 	// Load the held slot last when two instances share a base ID.
 	for (i = 1; i >= 0; i--) {
 		slot = (active + i) % SLOT_COUNT;
@@ -2367,19 +2421,31 @@ static void BG_LoadSlots(playerState_t *ps) {
 		ps->ammoReserve[weapon] = ps->slotReserve[slot];
 		ps->stats[STAT_UNCHAMBERED] &= ~(1 << weapon);
 		if (ps->slotFlags[slot] & BG_GUN_UNCHAMBERED) ps->stats[STAT_UNCHAMBERED] |= 1 << weapon;
+		alternate = BG_AlternateWeapon(weapon);
+		if (alternate) {
+			ps->ammo[alternate] = ps->slotAltAmmo[slot];
+			ps->ammoReserve[alternate] = ps->slotAltReserve[slot];
+			ps->stats[STAT_UNCHAMBERED] &= ~(1 << alternate);
+			if (ps->slotFlags[slot] & BG_GUN_ALT_UNCHAMBERED) ps->stats[STAT_UNCHAMBERED] |= 1 << alternate;
+		}
 	}
 }
 
 void BG_PutSlot(playerState_t *ps, int slot, const bg_weaponInstance_t *gun) {
+	int alternate = BG_AlternateWeapon(gun->weapon);
 	if (slot < 0 || slot >= SLOT_COUNT || gun->weapon <= WP_NONE ||
-		gun->weapon >= WP_NUM_WEAPONS || BG_IsActionWeapon(gun->weapon)) return;
+		gun->weapon >= WP_NUM_WEAPONS || BG_IsActionWeapon(gun->weapon) ||
+		BG_BaseWeapon(gun->weapon) != gun->weapon) return;
 	BG_StoreSlots(ps);
 	ps->stats[STAT_SLOT_PRIMARY + slot] = gun->weapon;
 	ps->slotAttachments[slot] = gun->attachments & BG_WeaponAttachmentMask(gun->weapon);
 	ps->slotAmmo[slot] = MAX(0, MIN(gun->ammo, BG_WeaponMagSize(gun->weapon)));
 	ps->slotReserve[slot] = MAX(0, MIN(gun->reserve, BG_WeaponMaxReserve(gun->weapon)));
+	ps->slotAltAmmo[slot] = alternate ? MAX(0, MIN(gun->altAmmo, BG_WeaponMagSize(alternate))) : 0;
+	ps->slotAltReserve[slot] = alternate ? MAX(0, MIN(gun->altReserve, BG_WeaponMaxReserve(alternate))) : 0;
 	ps->slotFlags[slot] = (ps->slotFlags[slot] & BG_GUN_GENERATION) |
-		(gun->flags & (BG_GUN_FIRST_DRAW | BG_GUN_UNCHAMBERED));
+		(gun->flags & (BG_GUN_FIRST_DRAW | BG_GUN_UNCHAMBERED |
+			(alternate ? BG_GUN_ALTERNATE | BG_GUN_ALT_UNCHAMBERED : 0)));
 	BG_LoadSlots(ps);
 	BG_RebuildWeaponMask(ps);
 }
@@ -2407,21 +2473,31 @@ void BG_BeginWeaponDraw(playerState_t *ps) {
 
 qboolean BG_WeaponItem(const entityState_t *item, bg_weaponInstance_t *gun) {
 	gitem_t *def;
+	int alternate;
+	memset(gun, 0, sizeof(*gun));
 	if (!item || item->eType != ET_ITEM || (item->eFlags & EF_NODRAW) ||
 		item->modelindex < 1 || item->modelindex >= bg_numItems) return qfalse;
 	def = &bg_itemlist[item->modelindex];
 	if (def->giType != IT_WEAPON || BG_IsActionWeapon(def->giTag) ||
-		BG_WeaponMagSize(def->giTag) <= 0) return qfalse;
+		BG_WeaponMagSize(def->giTag) <= 0 || BG_BaseWeapon(def->giTag) != def->giTag) return qfalse;
 	gun->weapon = def->giTag;
+	alternate = BG_AlternateWeapon(gun->weapon);
 	gun->attachments = item->generic1 & BG_WeaponAttachmentMask(gun->weapon);
 	gun->flags = BG_GUN_FIRST_DRAW;
 	if (item->modelindex2) {
 		gun->ammo = item->time2 & 65535;
 		gun->reserve = (unsigned int)item->time2 >> 16;
 		gun->flags |= item->otherEntityNum2 & BG_GUN_UNCHAMBERED;
+		if (alternate) {
+			gun->altAmmo = item->weaponAltAmmo;
+			gun->altReserve = item->weaponAltReserve;
+			gun->flags |= item->otherEntityNum2 & (BG_GUN_ALTERNATE | BG_GUN_ALT_UNCHAMBERED);
+		}
 	} else {
 		gun->ammo = BG_WeaponMagSize(gun->weapon);
 		gun->reserve = BG_WeaponMaxReserve(gun->weapon);
+		gun->altAmmo = BG_WeaponMagSize(alternate);
+		gun->altReserve = BG_WeaponMaxReserve(alternate);
 	}
 	return qtrue;
 }
@@ -2537,6 +2613,7 @@ static const int bg_weaponMaxReserve[MAX_WEAPONS] = {
 	M40_RESERVE,
 	0,		// WP_THROWING_KNIFE
 	0,		// WP_TACTICAL_INSERTION
+	M16_RESERVE, MASTERKEY_RESERVE,
 };
 
 int BG_WeaponMaxReserve( int weapon ) {
@@ -2571,6 +2648,7 @@ static const int bg_weaponSpread[MAX_WEAPONS] = {
 	M40_HIP_SPREAD,
 	0,		// WP_THROWING_KNIFE
 	0,		// WP_TACTICAL_INSERTION
+	200, 0, // rifle spread; underbarrel uses the shared pellet pattern
 };
 
 static const float bg_weaponAdsSpreadScale[MAX_WEAPONS] = {
@@ -2578,7 +2656,7 @@ static const float bg_weaponAdsSpreadScale[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	.15f, .15f, .15f,
 #endif
-	.15f, .15f, .15f, .15f, M40_ADS_SPREAD_SCALE, .15f, .15f	// ..., WP_THROWING_KNIFE, WP_TACTICAL_INSERTION
+	.15f, .15f, .15f, .15f, M40_ADS_SPREAD_SCALE, .15f, .15f, .15f, .15f
 };
 
 // Aimed through an overlay scope rather than over the sights (MW2's
@@ -2588,7 +2666,7 @@ static const int bg_weaponScopeOverlay[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	0, 0, 0,
 #endif
-	0, 0, 0, 0, M40_SCOPE_OVERLAY, 0, 0	// ..., WP_THROWING_KNIFE, WP_TACTICAL_INSERTION
+	0, 0, 0, 0, M40_SCOPE_OVERLAY, 0, 0, 0, 0
 };
 
 int BG_WeaponScopeOverlay( int weapon ) {
@@ -2810,6 +2888,7 @@ void BG_RebuildWeaponMask( playerState_t *ps ) {
 		w = ps->stats[STAT_SLOT_PRIMARY + i];
 		if ( w > WP_NONE && w < WP_NUM_WEAPONS ) {
 			mask |= ( 1 << w );
+			if (BG_AlternateWeapon(w)) mask |= 1 << BG_AlternateWeapon(w);
 		}
 	}
 
@@ -2846,6 +2925,8 @@ void BG_SetSlotWeapon( playerState_t *ps, int slot, int weapon ) {
 	gun.weapon = weapon;
 	gun.ammo = BG_WeaponMagSize(weapon);
 	gun.reserve = BG_WeaponMaxReserve(weapon);
+	gun.altAmmo = BG_WeaponMagSize(BG_AlternateWeapon(weapon));
+	gun.altReserve = BG_WeaponMaxReserve(BG_AlternateWeapon(weapon));
 	BG_PutSlot(ps, slot, &gun);
 }
 
@@ -2877,6 +2958,12 @@ void BG_ApplyClass( playerState_t *ps, const bg_class_t *cl ) {
 		ps->ammoReserve[w] = BG_WeaponMaxReserve( w );
 		ps->slotAmmo[i] = ps->ammo[w];
 		ps->slotReserve[i] = ps->ammoReserve[w];
+		ps->slotAltAmmo[i] = BG_WeaponMagSize(BG_AlternateWeapon(w));
+		ps->slotAltReserve[i] = BG_WeaponMaxReserve(BG_AlternateWeapon(w));
+		if (BG_AlternateWeapon(w)) {
+			ps->ammo[BG_AlternateWeapon(w)] = ps->slotAltAmmo[i];
+			ps->ammoReserve[BG_AlternateWeapon(w)] = ps->slotAltReserve[i];
+		}
 		ps->slotFlags[i] = 0;
 		ps->slotAttachments[i] = cl->attachments[i] < 0 ? 0 : cl->attachments[i];
 	}
@@ -3581,7 +3668,7 @@ static int PM_DesiredWeapon( void ) {
 	// unowned selection as weapon 0) until the selection catches up, about a
 	// round trip, as MW2's select hand-off does.
 	if ( !BG_SlotCommandCurrent( pm->ps, pm->cmd.weapon ) ) return WP_NONE;
-	return pm->ps->stats[STAT_SLOT_PRIMARY + BG_RequestedSlot(pm->ps, pm->cmd.weapon)];
+	return BG_RequestedWeapon(pm->ps, pm->cmd.weapon);
 }
 
 static int PM_DesiredSlot(void) {
@@ -3666,7 +3753,14 @@ static void PM_FinishWeaponChange( void ) {
 
 	// Save the old instance before loading the new slot's working registers.
 	// Quick actions keep the same slot; their ammo occupies separate entries.
-	if (!BG_IsActionWeapon(weapon)) BG_SelectSlot(pm->ps, PM_DesiredSlot());
+	if (!BG_IsActionWeapon(weapon)) {
+		BG_SelectSlot(pm->ps, PM_DesiredSlot());
+		if (weapon != WP_NONE) {
+			pm->ps->slotFlags[pm->ps->stats[STAT_ACTIVE_SLOT]] &= ~BG_GUN_ALTERNATE;
+			if (weapon != BG_BaseWeapon(weapon))
+				pm->ps->slotFlags[pm->ps->stats[STAT_ACTIVE_SLOT]] |= BG_GUN_ALTERNATE;
+		}
+	}
 	pm->ps->weapon      = weapon;
 	// No gun to draw: the hand stays empty and ready, as a pickup's take leaves
 	// it, and no slot's first deployment is spent on it.
@@ -4327,10 +4421,14 @@ static void PM_Weapon( void ) {
 		addTime = 633;			// MW2 Shoot anim, 38f @60fps
 		break;
 	case WP_M40A3:
+	case WP_MASTERKEY:
 		addTime = BG_WeaponFireLength(pm->ps->weapon);
 		break;
 	case WP_MACHINEGUN:
 		addTime = 100;
+		break;
+	case WP_M16:
+		addTime = M16_FIRE_MS;
 		break;
 	case WP_GRENADE_LAUNCHER:
 		addTime = 800;

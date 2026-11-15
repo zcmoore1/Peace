@@ -2462,7 +2462,8 @@ static void CG_DrawLoadoutHud( void ) {
 	ps = &cg.predictedPlayerState;
 	x  = 420;
 	y  = 380;
-	if (cg.weaponSelect == ps->stats[STAT_SLOT_PRIMARY] || cg.weaponSelect == ps->stats[STAT_SLOT_SECONDARY]) {
+	if (BG_BaseWeapon(cg.weaponSelect) == ps->stats[STAT_SLOT_PRIMARY] ||
+		BG_BaseWeapon(cg.weaponSelect) == ps->stats[STAT_SLOT_SECONDARY]) {
 		gitem_t *selected = BG_FindItemForWeapon(cg.weaponSelect);
 		CG_DrawSmallString(x, y - SMALLCHAR_HEIGHT - 4, selected->pickup_name, 1.0f);
 	}
@@ -2481,10 +2482,14 @@ static void CG_DrawLoadoutHud( void ) {
 
 		if ( BG_WeaponMagSize( slotWpn ) > 0 ) {
 			bg_weaponInstance_t gun;
+			qboolean alternate;
 			BG_GetSlot(ps, i, &gun);
-			Com_sprintf( line, sizeof( line ), "%s  %i / %i",
+			alternate = BG_AlternateWeapon(slotWpn) && (cg.weaponSelectSlot == i ?
+				cg.weaponSelectAlternate : (gun.flags & BG_GUN_ALTERNATE) != 0);
+			Com_sprintf( line, sizeof( line ), "%s%s  %i / %i",
 				( i == SLOT_PRIMARY ) ? "1" : "2",
-				gun.ammo, gun.reserve );
+				alternate ? " MK" : "",
+				alternate ? gun.altAmmo : gun.ammo, alternate ? gun.altReserve : gun.reserve );
 		} else {
 			Com_sprintf( line, sizeof( line ), "%s  --",
 				( i == SLOT_PRIMARY ) ? "1" : "2" );

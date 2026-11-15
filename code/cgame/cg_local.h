@@ -525,6 +525,8 @@ typedef struct {
 	// input state sent to server
 	int			weaponSelect;
 	int             weaponSelectSlot; // intent is a slot; weaponSelect is its HUD label
+	qboolean        weaponSelectAlternate; // requested mode; never overwritten by an older snapshot
+	int             weaponSelectGeneration; // replacing the selected instance resets its mode intent
 	int			equippedOffhand;	// MW2's cg equippedOffHand: the offhand EV_SWITCH_OFFHAND last named
 
 	// auto rotating items
@@ -1389,6 +1391,7 @@ void CG_PositionRotatedEntityOnTag( refEntity_t *entity, const refEntity_t *pare
 void CG_NextWeapon_f( void );
 void CG_PrevWeapon_f( void );
 void CG_Weapon_f( void );
+void CG_AltWeapon_f( void );
 
 // cg_sights.c: visual alignment, independent of the animation layers
 void CG_Sights_Register( int weapon, const char *path );

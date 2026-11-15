@@ -572,6 +572,10 @@ static void CG_PeaceDump_f( void ) {
 		BG_GetSlot(ps, i, &gun);
 		CG_Printf("inventory %i   weapon %i   attachments %i   ammo %i / %i   flags %i\n",
 			i, gun.weapon, gun.attachments, gun.ammo, gun.reserve, gun.flags);
+		if (BG_AlternateWeapon(gun.weapon))
+			CG_Printf("   underbarrel %i / %i   selected %s   requested %s\n",
+				gun.altAmmo, gun.altReserve, gun.flags & BG_GUN_ALTERNATE ? "underbarrel" : "rifle",
+				cg.weaponSelectSlot == i && cg.weaponSelectAlternate ? "underbarrel" : "rifle");
 	}
 	if (cg.snap) for (i = 0; i < cg.snap->numEntities; i++) {
 		const entityState_t *item = &cg.snap->entities[i];
@@ -581,6 +585,8 @@ static void CG_PeaceDump_f( void ) {
 		BG_EvaluateTrajectory(&item->pos, cg.snap->serverTime, origin);
 		CG_Printf("floor    entity %i   weapon %i   attachments %i   ammo %i / %i   at %.1f %.1f %.1f\n",
 			item->number, gun.weapon, gun.attachments, gun.ammo, gun.reserve, origin[0], origin[1], origin[2]);
+		if (BG_AlternateWeapon(gun.weapon))
+			CG_Printf("   underbarrel %i / %i   flags %i\n", gun.altAmmo, gun.altReserve, gun.flags);
 	}
 	if (cg.snap) for (i = 0; i < cg.snap->numEntities; i++) {
 		const entityState_t *ti = &cg.snap->entities[i];
@@ -682,6 +688,7 @@ static consoleCommand_t	commands[] = {
 	{ "sizeup", CG_SizeUp_f },
 	{ "sizedown", CG_SizeDown_f },
 	{ "weapnext", CG_NextWeapon_f },
+	{ "weapalt", CG_AltWeapon_f },
 	{ "weapprev", CG_PrevWeapon_f },
 	{ "weapon", CG_Weapon_f },
 	{ "tcmd", CG_TargetCommand_f },

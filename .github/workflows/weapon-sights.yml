@@ -20,6 +20,7 @@ on:
       - 'assets/baseq3/**'
       - 'assets/source/spas12/**'
       - 'assets/source/m40a3/**'
+      - 'assets/source/m16/**'
       - 'dev/tests/**'
       - 'dev/tools/build_sight_assets.js'
       - 'dev/tools/build_ladder_map.py'
@@ -28,6 +29,7 @@ on:
       - 'dev/tools/import_spas.py'
       - 'dev/tools/build_spas_sprint.py'
       - 'dev/tools/build_m40a3.py'
+      - 'dev/tools/build_m16.py'
       - '.github/workflows/weapon-sights.yml'
 permissions:
   contents: read
@@ -60,6 +62,12 @@ jobs:
           python3 dev/tests/m40a3_asset_test.py
           sh dev/tests/run-sniper.sh
           SNIPER_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-sniper.sh
+      - name: Check M16 and Masterkey assets, modes and inventory
+        run: |
+          python3 dev/tools/build_m16.py --check
+          python3 dev/tests/m16_asset_test.py
+          sh dev/tests/run-masterkey.sh
+          MASTERKEY_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-masterkey.sh
       - name: Test ladders against the real BSP collision engine
         run: |
           sh dev/tests/run-ladders.sh

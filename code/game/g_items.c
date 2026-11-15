@@ -252,6 +252,8 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 		BG_GetSlot(ps, slot, &held);
 		// Scavenging never reloads the held magazine or changes its chamber.
 		held.reserve = MIN(BG_WeaponMaxReserve(wep), held.reserve + floor.ammo + floor.reserve);
+		held.altReserve = MIN(BG_WeaponMaxReserve(BG_AlternateWeapon(wep)),
+			held.altReserve + floor.altAmmo + floor.altReserve);
 		BG_PutSlot(ps, slot, &held);
 	}
 
@@ -830,7 +832,7 @@ void G_CommitWeaponPickup(gentity_t *player, int buttons) {
 			ps->weaponAnimTime = -1;
 			ps->pm_flags &= ~PMF_PENDING_MAG;
 		} else {
-			ps->weapon = gun.weapon;
+			ps->weapon = BG_ActiveSlotWeapon(ps);
 		}
 	}
 	G_LogPrintf("Item: %i %s\n", player->s.number, item->item->classname);
@@ -1004,7 +1006,9 @@ gentity_t *G_DropWeapon(gentity_t *owner, int slot) {
 	item->s.clientNum = owner->s.number;
 	item->s.generic1 = gun.attachments;
 	item->s.time2 = (gun.ammo & 65535) | ((unsigned int)gun.reserve << 16);
-	item->s.otherEntityNum2 = gun.flags & BG_GUN_UNCHAMBERED;
+	item->s.otherEntityNum2 = gun.flags & (BG_GUN_UNCHAMBERED | BG_GUN_ALTERNATE | BG_GUN_ALT_UNCHAMBERED);
+	item->s.weaponAltAmmo = gun.altAmmo;
+	item->s.weaponAltReserve = gun.altReserve;
 	item->s.apos.trType = TR_STATIONARY;
 	VectorSet(item->s.apos.trBase, 0, angles[YAW], 90);
 	return item;

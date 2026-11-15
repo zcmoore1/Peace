@@ -29,7 +29,7 @@ void CG_DrawBigStringColor( int x, int y, const char *s, vec4_t color ) { abort(
 void CG_DrawPic( float x, float y, float width, float height, qhandle_t hShader ) { abort(); }
 int CG_DrawStrlen( const char *str ) { abort(); }
 void CG_EntityEvent( centity_t *cent, vec3_t position ) { abort(); }
-void QDECL CG_Error( const char *msg, ... ) Q_NO_RETURN { abort(); }
+void QDECL CG_Error( const char *msg, ... ) { abort(); }	/* noreturn: cg_local.h's prototype */
 qboolean CG_EventPlayerView( const centity_t *cent ) { abort(); }
 float *CG_FadeColor( int startMsec, int totalMsec ) { abort(); }
 void CG_ImpactMark( qhandle_t markShader, const vec3_t origin, const vec3_t dir, float orientation, float r, float g, float b, float a, qboolean alphaFade, float radius, qboolean temporary ) { abort(); }

@@ -177,6 +177,7 @@ void G_ShotTrace( trace_t *tr, const vec3_t start, const vec3_t end, int passent
 	float			fraction, best;
 	int				i, n, v, hit = -1;
 
+	VectorClear( hitNormal );	// set with hit; cleared so no compiler sees it unset
 	trap_Trace( tr, start, NULL, NULL, end, passent, MASK_SHOT );
 	best = tr->fraction;
 	for ( i = 0; i < level.maxclients; i++ ) {

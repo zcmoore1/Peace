@@ -479,7 +479,7 @@ void SV_ReplayReset( qboolean enabled ) {
 // caller's; recording stops at toTime, so the clip never moves under it.
 int SV_ReplayStart( int clientNum, int fromTime, int toTime, int beginTime ) {
 	int i;
-	replayFrame_t *frame;
+	replayFrame_t *frame = NULL;	// count >= 2: the loop below always sets it
 	// The whole window must stay in the history until toTime is recorded,
 	// and the final sample must be captured before playback begins.
 	if ( !replay.frames || replay.count < 2 || clientNum < 0 ||

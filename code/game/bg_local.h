@@ -30,7 +30,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // lie in PRONE_BEND_MIN..PRONE_BEND_MAX (0x421A6C, 0x421A79), and the legs'
 // pitch is first held to the torso's + PRONE_WAIST_HOLD (0x4219F9), so the
 // bend is never below -PRONE_WAIST_HOLD and the minimum never fails
-#define	PRONE_BEND_MIN		-50.0f	// 0x6E5388
+#define	PRONE_BEND_MIN		(-50.0f)	// 0x6E5388
 #define	PRONE_BEND_MAX		70.0f	// 0x6FC914
 #define	PRONE_WAIST_HOLD	10.0f	// 0x721550
 #define	STEPSIZE_DOWN	9		// MW2's push down past a ground move, every stance (0x4B1ACC, 0x4B1C8D)

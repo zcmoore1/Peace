@@ -15,6 +15,13 @@ the user asked for this block verbatim.
 
 When a pull is also needed, put `git pull origin <branch>` between the two lines.
 
+The owner builds with MSVC; Linux GCC builds and tests do not see its
+preprocessor. **Define every negative constant in parentheses**
+(`#define MINS_Z (-24)`): MSVC pastes a sign written against a bare negative
+macro inside a macro argument into one token, so `VectorMA( a, -MINS_Z, b, c )`
+with `-24` became `--24` (error C2105, '--' needs l-value) where GCC builds.
+`gcc -E -traditional-cpp` substitutes text the same way and shows it.
+
 ## Branches
 
 - `dev` — **the development branch.** Work here and pull from here. It grew

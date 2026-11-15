@@ -28,7 +28,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	GAME_VERSION		BASEGAME "-18"
 
 #define	DEFAULT_GRAVITY		800
-#define	GIB_HEALTH			-40
+#define	GIB_HEALTH			(-40)
 #define	ARMOR_PROTECTION	0.66
 
 #define	MAX_ITEMS			256
@@ -42,7 +42,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define	LIGHTNING_RANGE		768
 
-#define	SCORE_NOT_PRESENT	-9999	// for the CS_SCORES[12] when only one player is present
+#define	SCORE_NOT_PRESENT	(-9999)	// for the CS_SCORES[12] when only one player is present
 
 #define	VOTE_TIME			30000	// 30 seconds before vote times out
 
@@ -53,15 +53,15 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // or MINS_Z-translated MW2 offset moves: the box top and the eye are MW2's
 // heights above the feet less 24.
 #define PLAYER_WIDTH		15
-#define	MINS_Z				-24
+#define	MINS_Z				(-24)
 #define DEFAULT_HEIGHT		46	// MW2's 70 above the feet
 #define	DEFAULT_VIEWHEIGHT	36	// MW2's 60
 #define CROUCH_HEIGHT		26	// MW2's 50
 #define CROUCH_VIEWHEIGHT	16	// MW2's 40
 #define PRONE_HEIGHT		6	// MW2's 30
-#define PRONE_VIEWHEIGHT	-13	// MW2's 11
-#define DEAD_HEIGHT			-8
-#define	DEAD_VIEWHEIGHT		-16
+#define PRONE_VIEWHEIGHT	(-13)	// MW2's 11
+#define DEAD_HEIGHT			(-8)
+#define	DEAD_VIEWHEIGHT		(-16)
 // The same eyes in MW2 units, above the feet: playerState_t.viewHeightTarget,
 // viewHeightLerpTarget and MW2's eye-curve tables are kept in these. pmove
 // writes ps->viewheight = eye + MINS_Z (exact in float).
@@ -158,8 +158,8 @@ typedef enum {
 typedef enum { SND_WAITING, SND_COUNTDOWN, SND_LIVE, SND_PLANTED, SND_ROUND_OVER } sndPhase_t;
 typedef enum { SND_NONE, SND_ELIMINATION, SND_TIME, SND_DEFUSED, SND_EXPLODED, SND_DRAW } sndResult_t;
 #define SND_MAX_SITES 2
-#define SND_USE_PLANT -2
-#define SND_USE_DEFUSE -3
+#define SND_USE_PLANT (-2)
+#define SND_USE_DEFUSE (-3)
 
 typedef enum { GENDER_MALE, GENDER_FEMALE, GENDER_NEUTER } gender_t;
 

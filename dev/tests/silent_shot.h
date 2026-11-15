@@ -40,7 +40,7 @@ typedef struct {
 } ssSnapshot_t;
 void SE_Reset( void );
 void SE_Frame( int svTime );				/* after the game's frame: SV_RecordReplayFrame */
-int SE_ReplayStart( int client, int fromTime, int toTime );
+int SE_ReplayStart( int client, int fromTime, int toTime, int beginTime );
 void SE_Snapshot( int client, ssSnapshot_t *out );	/* SV_BuildClientSnapshot, through the codec */
 
 /* ---- cgame: silent_shot_client.c ---- */
@@ -48,6 +48,8 @@ typedef struct {
 	int		gunFire[SS_CLIENTS];	/* EV_FIRE_WEAPON naming the gun, played for each client's entity number */
 	int		playerGunFire;		/* ... of them, from the playerstate (MW2's isPlayerView) */
 	int		knifeThrows;		/* EV_FIRE_WEAPON naming the throwing knife */
+	int		otherFlashFire[SS_CLIENTS];	/* EV_FIRE_WEAPON naming another weapon with a flash of its own (a frag's
+						 * placeholder art), for each entity: CG_FireWeapon puts that one's out */
 	int		gunSounds[SS_CLIENTS];	/* the gun's fire sound started on each client's entity */
 	int		flashes;			/* entities flashing this frame (muzzleFlashTime == cg.time) */
 	int		playerFlash;		/* the predicted (or replayed) player's own muzzle flash */

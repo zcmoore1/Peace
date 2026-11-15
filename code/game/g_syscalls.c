@@ -34,8 +34,8 @@ void trap_ReplayReset( qboolean enabled ) {
 	syscall( G_REPLAY_RESET, enabled );
 }
 
-int trap_ReplayStart( int clientNum, int fromTime, int toTime ) {
-	return syscall( G_REPLAY_START, clientNum, fromTime, toTime );
+int trap_ReplayStart( int clientNum, int fromTime, int toTime, int beginTime ) {
+	return syscall( G_REPLAY_START, clientNum, fromTime, toTime, beginTime );
 }
 
 

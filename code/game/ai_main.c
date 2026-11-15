@@ -901,8 +901,10 @@ void BotInputToUserCommand(bot_input_t *bi, usercmd_t *ucmd, int delta_angles[3]
 	if (bi->actionflags & ACTION_MOVERIGHT) ucmd->rightmove = 127;
 	//jump/moveup
 	if (bi->actionflags & ACTION_JUMP) ucmd->upmove = 127;
-	//crouch/movedown
-	if (bi->actionflags & ACTION_CROUCH) ucmd->upmove = -127;
+	//crouch: MW2's stance is a level in the command, and a bot's crouch is a
+	//held one (+movedown: the crouch bit and the held-key bit, so no refusal
+	//event resets a client stance it does not have)
+	if (bi->actionflags & ACTION_CROUCH) ucmd->buttons |= BUTTON_CROUCH | BUTTON_TEMP_STANCE;
 }
 
 /*

@@ -68,3 +68,4 @@ void trap_S_AddLoopingSound( int entityNum, const vec3_t origin, const vec3_t ve
 sfxHandle_t trap_S_RegisterSound( const char *sample, qboolean compressed ) { abort(); }
 void trap_S_StartLocalSound( sfxHandle_t sfx, int channelNum ) { abort(); }
 void trap_S_StartSound( vec3_t origin, int entityNum, int entchannel, sfxHandle_t sfx ) { abort(); }
+void CG_ShotHitVolumes( trace_t *tr, const vec3_t start, const vec3_t end, int skipNumber ) { abort(); }

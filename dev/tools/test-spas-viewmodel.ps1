@@ -23,7 +23,7 @@ set g_gametype 0
 set com_maxfps 60
 set com_fixedtime 16
 set cg_drawGun 1
-set cg_fov 90
+set cg_fov 65
 set cg_gun_x 0
 set cg_gun_y 0
 set cg_gun_z 0

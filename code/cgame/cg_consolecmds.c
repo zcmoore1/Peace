@@ -520,8 +520,8 @@ static void CG_PeaceDump_f( void ) {
 	CG_Printf( "position %.1f %.1f %.1f   ground %i   health %i\n",
 		ps->origin[0], ps->origin[1], ps->origin[2], ps->groundEntityNum,
 		ps->stats[STAT_HEALTH] );
-	CG_Printf( "movement base %i   perkScale %.3f   velocity %.1f %.1f %.1f\n",
-		ps->speed, BG_MovementScale(ps), ps->velocity[0], ps->velocity[1], ps->velocity[2] );
+	CG_Printf( "movement base %i   moveClass %i   classScale %.4f   velocity %.1f %.1f %.1f\n",
+		ps->speed, ps->moveClass, BG_MoveClassScale(ps), ps->velocity[0], ps->velocity[1], ps->velocity[2] );
 	if ( cgs.gametype == GT_SND ) {
 		CG_Printf( "snd      %s\n", CG_ConfigString(CS_SND) );
 		CG_Printf( "sites    %s\n", CG_ConfigString(CS_SND_SITES) );
@@ -533,10 +533,28 @@ static void CG_PeaceDump_f( void ) {
 	CG_Printf( "anim     elapsed %i   seq %s   pendingMag %s\n",
 		ps->weaponAnimTime, CG_PD_SeqName( ps->weaponAnimSeq ),
 		( ps->pm_flags & PMF_PENDING_MAG ) ? "YES" : "no" );
-	CG_Printf( "flags    sprint %s  ads %s  ducked %s\n",
+	CG_Printf( "flags    sprint %s  ads %s  ducked %s  prone %s  crawlStopped %s\n",
 		( ps->pm_flags & PMF_SPRINTING ) ? "Y" : "n",
 		( ps->pm_flags & PMF_ADS )       ? "Y" : "n",
-		( ps->pm_flags & PMF_DUCKED )    ? "Y" : "n" );
+		( ps->pm_flags & PMF_DUCKED )    ? "Y" : "n",
+		( ps->pm_flags & PMF_PRONE )     ? "Y" : "n",
+		( ps->pm_flags & PMF_PRONEMOVE_OVERRIDDEN ) ? "Y" : "n" );
+	// MW2's stance: the eye (Peace units) and its leg (MW2 units above the
+	// feet), the prone body, and what the last command asked (the client's
+	// stance itself is the client's: cl_debugButtons prints it)
+	{
+		usercmd_t	cmd;
+		int			bits;
+		trap_GetUserCmd( trap_GetCurrentCmdNumber(), &cmd );
+		bits = cmd.buttons & BUTTON_STANCE_MASK;
+		CG_Printf( "stance   eye %.3f   target %i   leg %i (%s) %i ms   cmd %s%s%s%s\n",
+			ps->viewheight, ps->viewHeightTarget, ps->viewHeightLerpTarget,
+			ps->viewHeightLerpDown ? "down" : "up", ps->viewHeightLerpTime,
+			bits ? "" : "stand", ( bits & BUTTON_PRONE ) ? "PRONE " : "",
+			( bits & BUTTON_CROUCH ) ? "CROUCH " : "", ( bits & BUTTON_TEMP_STANCE ) ? "TEMP" : "" );
+		CG_Printf( "prone    direction %.2f   pitch %.2f   torsoPitch %.2f\n",
+			ps->proneDirection, ps->proneDirectionPitch, ps->proneTorsoPitch );
+	}
 
 	CG_Printf( "slots    primary %i   secondary %i   active %i\n",
 		ps->stats[STAT_SLOT_PRIMARY], ps->stats[STAT_SLOT_SECONDARY],

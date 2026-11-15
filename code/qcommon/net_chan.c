@@ -431,9 +431,40 @@ typedef struct {
 typedef struct {
 	loopmsg_t	msgs[MAX_LOOPBACK];
 	int			get, send;
+	qboolean	holding;	// NET_HoldLoopPackets: packets from heldFrom on wait
+	int			heldFrom;
 } loopback_t;
 
 loopback_t	loopbacks[2];
+
+
+/*
+===============
+NET_HoldLoopPackets
+
+Packets sent to sock's loopback queue from now on stay queued until
+NET_ReleaseLoopPackets; packets already in it can still be read.
+
+Com_Frame holds the local client's queue across its own SV_Frame, so a host
+reads its server's snapshots in its next frame, as MW2's host does (MW2's
+server runs in a thread of its own; see Com_Frame).
+===============
+*/
+void NET_HoldLoopPackets( netsrc_t sock )
+{
+	loopback_t	*loop;
+
+	loop = &loopbacks[sock];
+	if ( !loop->holding ) {
+		loop->holding = qtrue;
+		loop->heldFrom = loop->send;
+	}
+}
+
+void NET_ReleaseLoopPackets( netsrc_t sock )
+{
+	loopbacks[sock].holding = qfalse;
+}
 
 
 qboolean	NET_GetLoopPacket (netsrc_t sock, netadr_t *net_from, msg_t *net_message)
@@ -448,6 +479,9 @@ qboolean	NET_GetLoopPacket (netsrc_t sock, netadr_t *net_from, msg_t *net_messag
 
 	if (loop->get >= loop->send)
 		return qfalse;
+
+	if (loop->holding && loop->get >= loop->heldFrom)
+		return qfalse;		// held: read in the next Com_Frame
 
 	i = loop->get & (MAX_LOOPBACK-1);
 	loop->get++;

@@ -116,6 +116,8 @@ gentity_t *SelectCTFSpawnPoint(team_t team,int state,vec3_t origin,vec3_t angles
 void MoveClientToIntermission(gentity_t *e) { (void)e; }
 void FindIntermissionPoint(void) { }
 void CalculateRanks(void) { }
+/* player_die's final killcam: nothing here reaches a score limit (above) */
+int trap_ReplayStart(int killer,int from,int to,int begin) { (void)killer;(void)from;(void)to;(void)begin; abort(); return 0; }
 int BotAIShutdownClient(int n,qboolean r) { (void)n;(void)r; return 0; }
 void G_RemoveQueuedBotBegin(int n) { (void)n; }
 void BotTestAAS(vec3_t o) { (void)o; }
@@ -160,7 +162,7 @@ void SS_Reset( int gun, int lethal, int levelTime ) {
  memset(&level,0,sizeof(level)); memset(g_entities,0,sizeof(g_entities)); memset(clients,0,sizeof(clients));
  level.time=levelTime; level.previousTime=levelTime-50; level.num_entities=MAX_CLIENTS; level.maxclients=SS_CLIENTS;
  level.clients=clients; level.gentities=g_entities;
- g_gametype.integer=GT_SND; g_knockback.integer=0; g_speed.value=320; g_gravity.value=DEFAULT_GRAVITY;
+ g_gametype.integer=GT_SND; g_knockback.integer=0; g_speed.value=BG_PLAYER_SPEED; g_gravity.value=DEFAULT_GRAVITY;
  g_smoothClients.integer=1; g_quadfactor.value=3;
  pmove_msec.integer=8; pmove_fixed.integer=0;
  for(i=0;i<SS_CLIENTS;i++) {

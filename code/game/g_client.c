@@ -24,10 +24,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 // g_client.c -- client functions that don't happen every frame
 
-static vec3_t	playerMins = {-15, -15, -24};
-static vec3_t	playerMaxs = {15, 15, 32};
+// The server's player box: MW2's 70-unit body over Peace's origin (bg_public.h).
+static vec3_t	playerMins = {-PLAYER_WIDTH, -PLAYER_WIDTH, MINS_Z};
+static vec3_t	playerMaxs = {PLAYER_WIDTH, PLAYER_WIDTH, DEFAULT_HEIGHT};
 
-/*QUAKED info_player_deathmatch (1 0 1) (-16 -16 -24) (16 16 32) initial
+/*QUAKED info_player_deathmatch (1 0 1) (-16 -16 -24) (16 16 46) initial
 potential spawning position for deathmatch games.
 The first time a player enters the game, they will be at an 'initial' spot.
 Targets will be fired when someone spawns in on them.
@@ -47,7 +48,7 @@ void SP_info_player_deathmatch( gentity_t *ent ) {
 	}
 }
 
-/*QUAKED info_player_start (1 0 0) (-16 -16 -24) (16 16 32)
+/*QUAKED info_player_start (1 0 0) (-16 -16 -24) (16 16 46)
 equivalent to info_player_deathmatch
 */
 void SP_info_player_start(gentity_t *ent) {
@@ -514,17 +515,39 @@ SetClientViewAngle
 ==================
 */
 void SetClientViewAngle( gentity_t *ent, vec3_t angle ) {
-	int			i;
+	playerState_t	*ps = &ent->client->ps;
+	vec3_t			view;
+	float			d;
+	int				i;
+
+	// MW2's (0x428010-0x42823F): a prone player's new view keeps the prone
+	// view's limits, the yaw within BG_PRONE_YAW_CAP of the body and the
+	// pitch within BG_PRONE_PITCH_CAP of proneTorsoPitch (PM_ProneViewAngles)
+	VectorCopy( angle, view );
+	if ( ps->pm_flags & PMF_PRONE ) {
+		d = BG_AngleDelta( ps->proneDirection, view[YAW] );
+		if ( d > BG_PRONE_YAW_CAP ) {
+			view[YAW] = BG_AngleNormalize360( ps->proneDirection - BG_PRONE_YAW_CAP );
+		} else if ( d < -BG_PRONE_YAW_CAP ) {
+			view[YAW] = BG_AngleNormalize360( ps->proneDirection + BG_PRONE_YAW_CAP );
+		}
+		d = BG_AngleDelta( ps->proneTorsoPitch, view[PITCH] );
+		if ( d > BG_PRONE_PITCH_CAP ) {
+			view[PITCH] = BG_AngleNormalize180( ps->proneTorsoPitch - BG_PRONE_PITCH_CAP );
+		} else if ( d < -BG_PRONE_PITCH_CAP ) {
+			view[PITCH] = BG_AngleNormalize180( ps->proneTorsoPitch + BG_PRONE_PITCH_CAP );
+		}
+	}
 
 	// set the delta angle
 	for (i=0 ; i<3 ; i++) {
 		int		cmdAngle;
 
-		cmdAngle = ANGLE2SHORT(angle[i]);
-		ent->client->ps.delta_angles[i] = cmdAngle - ent->client->pers.cmd.angles[i];
+		cmdAngle = ANGLE2SHORT(view[i]);
+		ps->delta_angles[i] = cmdAngle - ent->client->pers.cmd.angles[i];
 	}
-	VectorCopy( angle, ent->s.angles );
-	VectorCopy (ent->s.angles, ent->client->ps.viewangles);
+	VectorCopy( view, ent->s.angles );
+	VectorCopy (ent->s.angles, ps->viewangles);
 }
 
 /*
@@ -1230,8 +1253,12 @@ void ClientSpawn(gentity_t *ent) {
 	G_SetOrigin( ent, spawn_origin );
 	VectorCopy( spawn_origin, client->ps.origin );
 
-	// the respawned flag will be cleared after the attack and jump keys come up
+	// the respawned flag will be cleared after the attack and prone come up
 	client->ps.pm_flags |= PMF_RESPAWNED;
+	// MW2's spawn eye (0x47DB25): standing, no leg running, before the spawn
+	// angles are set so they are never prone-clamped. A spawn that runs no
+	// Pmove (S&D's frozen start) has its eye from here.
+	BG_SpawnStance( &client->ps );
 
 	trap_GetUsercmd( client - level.clients, &ent->client->pers.cmd );
 	SetClientViewAngle( ent, spawn_angles );

@@ -683,6 +683,10 @@ void SV_Init (void)
 	sv_killserver = Cvar_Get ("sv_killserver", "0", 0);
 	sv_mapChecksum = Cvar_Get ("sv_mapChecksum", "", CVAR_ROM);
 	sv_lanForceRate = Cvar_Get ("sv_lanForceRate", "1", CVAR_ARCHIVE );
+	// MW2's onlinegame (registered 0x404cfd, default 1; IW4x's dedicated
+	// server sets it too): the snapshot interval for clients that are neither
+	// loopback nor LAN (SV_ClientSnapshotMsec).
+	sv_onlineGame = Cvar_Get ("sv_onlineGame", "1", 0 );
 #ifndef STANDALONE
 	sv_strictAuth = Cvar_Get ("sv_strictAuth", "1", CVAR_ARCHIVE );
 #endif

@@ -2444,11 +2444,14 @@ static void CG_DrawWeaponPickup(void) {
 	}
 }
 
+// The lethal this life showed with ammo, for its 0 count (CG_DrawLoadoutHud).
+static int cg_hudLethal, cg_hudLethalClient = -1, cg_hudLethalSpawn;
+
 static void CG_DrawLoadoutHud( void ) {
 	playerState_t	*ps;
 	char			line[64];
 	int				x, y;
-	int				i, slotWpn;
+	int				i, slotWpn, lethal;
 	vec4_t			dim    = { 1.0f, 1.0f, 1.0f, 0.45f };
 	vec4_t			bright = { 1.0f, 1.0f, 1.0f, 1.0f };
 
@@ -2500,12 +2503,23 @@ static void CG_DrawLoadoutHud( void ) {
 
 	// Equipment counts are just the ammo on those weapon entries. The offhand
 	// last switched to (EV_SWITCH_OFFHAND, MW2's equipped offhand) is the
-	// bright one once there is one.
+	// bright one once there is one. MW2 keeps showing the class's lethal at 0;
+	// BG_LethalWeapon falls back to the frag once the last one is spent and the
+	// mask rebuilt, so the picture remembers this life's lethal (picture only).
+	lethal = BG_LethalWeapon( ps );
+	if ( ps->clientNum != cg_hudLethalClient || ps->persistant[PERS_SPAWN_COUNT] != cg_hudLethalSpawn ) {
+		cg_hudLethalClient = ps->clientNum;
+		cg_hudLethalSpawn = ps->persistant[PERS_SPAWN_COUNT];
+		cg_hudLethal = WP_NONE;
+	}
+	if ( ps->ammo[lethal] > 0 ) cg_hudLethal = lethal;
+	else if ( cg_hudLethal != WP_NONE ) lethal = cg_hudLethal;
 	Com_sprintf( line, sizeof( line ), "%s %i   ",
-		BG_LethalWeapon(ps) == WP_SEMTEX ? "SEMTEX" :
-		BG_LethalWeapon(ps) == WP_THROWING_KNIFE ? "KNIFE" :
-		BG_LethalWeapon(ps) == WP_TACTICAL_INSERTION ? "TI" : "LETHAL",
-		ps->ammo[BG_LethalWeapon(ps)] );
+		lethal == WP_SEMTEX ? "SEMTEX" :
+		lethal == WP_THROWING_KNIFE ? "KNIFE" :
+		lethal == WP_TACTICAL_INSERTION ? "TI" :
+		lethal == WP_FRAG && cg_hudLethal == WP_FRAG ? "FRAG" : "LETHAL",
+		ps->ammo[lethal] );
 	trap_R_SetColor( bright );
 	CG_DrawSmallString( x, y, line, cg.equippedOffhand == WP_FLASH ? dim[3] : bright[3] );
 	x += CG_DrawStrlen( line ) * SMALLCHAR_WIDTH;
@@ -2868,8 +2882,8 @@ static qboolean CG_SNDUseInRange( void ) {
 			VectorSubtract(ps->origin,origin,delta);
 			if ( VectorLengthSquared(delta) <= radius*radius ) return qtrue;
 		}
-	} else if ( phase == SND_PLANTED && cgs.clientinfo[cg.clientNum].team != TEAM_SPECTATOR &&
-		cgs.clientinfo[cg.clientNum].team != attack ) {
+	} else if ( phase == SND_PLANTED && !atoi(Info_ValueForKey(state,"result")) &&
+		cgs.clientinfo[cg.clientNum].team != TEAM_SPECTATOR && cgs.clientinfo[cg.clientNum].team != attack ) {
 		VectorSet(origin,atoi(Info_ValueForKey(state,"x")),atoi(Info_ValueForKey(state,"y")),atoi(Info_ValueForKey(state,"z")));
 		VectorSubtract(ps->origin,origin,delta);
 		if ( VectorLengthSquared(delta) <= 72*72 ) return qtrue;
@@ -2915,6 +2929,9 @@ static void CG_DrawSND( void ) {
 		status = result == SND_DEFUSED ? "BOMB DEFUSED" : result == SND_EXPLODED ? "BOMB DETONATED" :
 			result == SND_TIME ? "TIME EXPIRED" : result == SND_DRAW ? "DRAW" : "TEAM ELIMINATED";
 		Com_sprintf(text,sizeof(text),"%s - %s",status,winner == TEAM_RED ? "RED WINS" : winner == TEAM_BLUE ? "BLUE WINS" : "NO WINNER");
+	} else if ( result == SND_DEFUSED || result == SND_EXPLODED ) {
+		// the bomb is done; play goes on until the round ends (sd.gsc's delay)
+		Com_sprintf(text,sizeof(text),"%s",result == SND_DEFUSED ? "BOMB DEFUSED" : "BOMB DETONATED");
 	} else {
 		Com_sprintf(text,sizeof(text),"%s  %i:%02i  %s",status,seconds/60,seconds%60,
 			phase == SND_PLANTED ? "BOMB PLANTED" : carrier == cg.clientNum ? "YOU HAVE THE BOMB" :
@@ -2934,7 +2951,7 @@ static void CG_DrawSND( void ) {
 		if ( phase == SND_LIVE && carrier == cg.clientNum && VectorLengthSquared(delta) <= radius*radius )
 			prompt = "Hold USE to plant - stay still";
 	}
-	if ( phase == SND_PLANTED || (phase == SND_LIVE && carrier < 0 && ownTeam == attack) ) {
+	if ( (phase == SND_PLANTED && result == SND_NONE) || (phase == SND_LIVE && carrier < 0 && ownTeam == attack) ) {
 		VectorSet(origin,atoi(Info_ValueForKey(state,"x")),atoi(Info_ValueForKey(state,"y")),atoi(Info_ValueForKey(state,"z")));
 		CG_SNDMarker(origin,"BOMB",gold);
 		VectorSubtract(ps->origin,origin,delta);
@@ -2948,6 +2965,53 @@ static void CG_DrawSND( void ) {
 		CG_FillRect(220,334,200*Com_Clamp(0,1,ps->stats[STAT_USE_PROGRESS]/1000.0f),6,gold);
 	}
 	if ( prompt ) CG_SNDText(314,prompt,gold);
+}
+
+/*
+=================
+CG_DrawInvalidCmdHint
+
+MW2's invalid-command hint (CG_DrawInvalidCmdHint 0x58DB10, ownerdraw 113 of
+hud_720.menu): "Prone Blocked" while a prone turn is blocked, and MW2's two
+blocked-stance texts, which no Peace event arms. Shown CG_INVALID_HINT_MS
+from when it was armed, then cleared here, by the draw, and nowhere else; its
+alpha ramps from 0 to 1 every CG_INVALID_HINT_BLINK_MS of that. So an event
+every think shows three ramps, and the first event after the clear arms it
+again: it blinks for as long as the block lasts. MW2 shows it unless a menu
+is up or a client is spectated (the item's visible when: !ui_active() &&
+!spectatingclient()); the scoreboard does not hide it. While it is hidden this
+does not run, so the type is not cleared and a same-type event does not
+restamp it.
+=================
+*/
+void CG_DrawInvalidCmdHint( void ) {
+	const char	*text;
+	vec4_t		color;
+
+	if ( ( trap_Key_GetCatcher() & KEYCATCH_UI ) || ( cg.snap->ps.pm_flags & PMF_FOLLOW ) ||
+	     cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR ) {
+		return;
+	}
+	if ( cg.invalidCmdHintTime + CG_INVALID_HINT_MS < cg.time ) {
+		cg.invalidCmdHintType = CG_INVALID_HINT_NONE;
+	}
+	switch ( cg.invalidCmdHintType ) {
+	case CG_INVALID_HINT_STAND_BLOCKED:
+		text = "Can't Stand Here";
+		break;
+	case CG_INVALID_HINT_CROUCH_BLOCKED:
+		text = "Can't Crouch Here";
+		break;
+	case CG_INVALID_HINT_PRONE_BLOCKED:
+		text = "Prone Blocked";
+		break;
+	default:
+		return;
+	}
+	color[0] = color[1] = color[2] = 1.0f;
+	color[3] = (float)( ( cg.time - cg.invalidCmdHintTime ) % CG_INVALID_HINT_BLINK_MS ) / (float)CG_INVALID_HINT_BLINK_MS;
+	CG_DrawStringExt( SCREEN_WIDTH / 2 - CG_DrawStrlen( text ) * SMALLCHAR_WIDTH / 2, CG_INVALID_HINT_Y, text, color,
+		qfalse, qtrue, SMALLCHAR_WIDTH, SMALLCHAR_HEIGHT, 0 );
 }
 
 static void CG_Draw2D(stereoFrame_t stereoFrame)
@@ -3060,6 +3124,7 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 	if ( !cg.scoreBoardShowing) {
 		CG_DrawCenterString();
 	}
+	CG_DrawInvalidCmdHint();
 }
 
 

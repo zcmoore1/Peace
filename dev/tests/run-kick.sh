@@ -47,7 +47,25 @@ cc="${CC:-cc} -std=gnu99 -O0 -g -ffunction-sections -fdata-sections ${KICK_TEST_
 for f in code/qcommon/vm.c code/qcommon/vm_interpreted.c code/qcommon/vm_ptr.c; do
  $cc -c "$f" $client -o $q/$(basename "$f" .c).o
 done
-$cc dev/tests/kick_qvm_test.c dev/tests/kick_qvm_stubs.c code/qcommon/q_math.c code/qcommon/q_shared.c $client \
+$cc dev/tests/kick_qvm_test.c dev/tests/qvm_engine.c dev/tests/kick_qvm_stubs.c code/qcommon/q_math.c code/qcommon/q_shared.c $client \
  $q/vm.o $q/vm_interpreted.o $q/vm_ptr.o out/tests/kick-cl-input.o out/tests/kick-cl-cgame.o \
  -Wl,--gc-sections -lm -o out/tests/kick-qvm-test
 out/tests/kick-qvm-test $q/kick.qvm
+
+# The viewmodel's skeletal pose across the same QVM boundary: the real
+# cg_anim.c, built as a shipped cgame.qvm builds it (Q3_VM), hands its
+# cg.weaponPose to the engine through the real cg_syscalls.asm,
+# vm_interpreted.c, CL_CgameSystemCalls and cl_vm.c; and the bounds check
+# refuses a pose running past the QVM's memory.
+pasm=""
+for f in dev/tests/pose_qvm_cgame.c code/cgame/cg_anim.c code/game/bg_pmove.c code/game/bg_loadout.c code/game/bg_misc.c \
+ code/game/bg_slidemove.c code/qcommon/q_math.c code/qcommon/q_shared.c code/game/bg_lib.c; do
+ $t/q3lcc $lccdefs -o $q/pose-$(basename "$f" .c).asm "$f"
+ pasm="$pasm $q/pose-$(basename "$f" .c).asm"
+done
+$t/q3asm -o $q/pose.qvm $pasm code/cgame/cg_syscalls.asm
+$cc -DQVM_STUBS_POSE -c dev/tests/kick_qvm_stubs.c -o $q/pose-qvm-stubs.o
+$cc dev/tests/pose_qvm_test.c dev/tests/qvm_engine.c code/client/cl_vm.c code/qcommon/q_math.c code/qcommon/q_shared.c $client \
+ $q/vm.o $q/vm_interpreted.o $q/vm_ptr.o $q/pose-qvm-stubs.o out/tests/kick-cl-input.o out/tests/kick-cl-cgame.o \
+ -Wl,--gc-sections -lm -o out/tests/pose-qvm-test
+out/tests/pose-qvm-test $q/pose.qvm

@@ -28,8 +28,11 @@ ${CC:-cc} $flags dev/tests/offhand_server_test.c code/game/g_active.c code/game/
 out/tests/offhand-server-test
 ${CC:-cc} $flags dev/tests/class_menu_test.c code/q3_ui/ui_atoms.c code/q3_ui/ui_qmenu.c code/q3_ui/ui_mfield.c code/game/bg_loadout.c $common -Wl,--gc-sections -lm -o out/tests/class-menu-test
 out/tests/class-menu-test
-${CC:-cc} $flags dev/tests/action_wire_test.c code/qcommon/msg.c code/qcommon/huffman.c $common -Wl,--gc-sections -lm -o out/tests/action-wire-test
+${CC:-cc} $flags dev/tests/action_wire_test.c code/qcommon/msg.c code/qcommon/huffman.c code/game/bg_misc.c code/game/bg_loadout.c $common -Wl,--gc-sections -lm -o out/tests/action-wire-test
 out/tests/action-wire-test
+# MW2's stance: the shared bg definitions (box, spawn eye, events, the hit volumes' ray test).
+${CC:-cc} $flags dev/tests/stance_shared_test.c code/game/bg_pmove.c $game $common -Wl,--gc-sections -lm -o out/tests/stance-shared-test
+out/tests/stance-shared-test
 # MW2's event rings end to end: the real Pmove and BG_PlayerStateToEntityState,
 # the codec, and the cgame's snapshot transition and event playback.
 ${CC:-cc} $flags dev/tests/event_ring_test.c dev/tests/event_ring_wire.c dev/tests/fake_reload_pmove.c code/cgame/cg_event.c code/cgame/cg_kick.c code/cgame/cg_weapons.c code/cgame/cg_playerstate.c code/qcommon/msg.c code/qcommon/huffman.c $game $common -Wl,--gc-sections -lm -o out/tests/event-ring-test

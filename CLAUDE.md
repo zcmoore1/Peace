@@ -38,6 +38,17 @@ Both go in `out\build\x64-Debug\Debug\baseq3\`:
 - `dev/peace-autoexec.cfg` → rename to `autoexec.cfg`
 - `dev/peace-gamepad.cfg` → copy as-is, keep the name (autoexec execs it by name)
 
+The stance binds are MW2's (owner's decision). PC (MW2's
+`default_mp_controls.cfg`): SPACE `+gostand` (stands up; jumps only when
+standing), CTRL `toggleprone`, `c` `togglecrouch` (a toggle now, not a held
+crouch). Pad: RS `+stance` (MW2's Tactical stance button: tap to crouch or
+stand, hold `cl_stanceHoldTime`, 300ms, to go prone or up from prone), A
+`+gostand`. `+movedown` and `+prone` are MW2's held crouch and prone, unbound;
+`+moveup` raises one stance, then jumps. The q3_ui controls menu has MW2's PC
+rows and defaults (attack on MOUSE1). `cl_debugButtons 1` also prints the
+command a `+stance` hold fired in and each change of a command's stance bits.
+See `dev/STANCE.md`.
+
 ## Diagnostics
 
 - `qconsole.log` and `peacedump.txt` land in the **homepath**, not the build dir:
@@ -118,7 +129,21 @@ source for MW2 behaviour; the owner rejects it.
 - **Bolting is a state, not a phase of firing.** `WEAPON_FIRING` is the shot;
   `WEAPON_BOLTING` is the action being worked. "Bolting" covers bolt, pump,
   cock and lever — they differ only in cycle length and note placement, never
-  in code. It cannot fire and CAN be holstered out of. A knife waits for
+  in code. It cannot fire, it cannot be sprinted out of, and it CAN be
+  holstered out of. Sprint is MW2's `PM_Weapon_CheckForSprint` (iw4x
+  0x578060), which does nothing while the gun is FIRING or RECHAMBERING;
+  the sprint flag, speed and meter run as usual (MW2's sprint gates never
+  test those states). MW2's shot ends READY owing its action, and the sprint
+  check comes before `CheckForRechamber` (0x575a30, which starts the action
+  only from READY), so a sprint already on when the shot ends takes the gun
+  there and the action stays owed: step 4d works all of it once the gun is
+  back up (a deferral, never a cancel). The shot ends on the think its clock
+  reaches `WNOTE_BOLT_OPEN` (`PM_ShotOver`; that note moves the state in
+  step 2, after step 1b), and that think lowers. Once the action is under
+  way step 1b never lowers `WEAPON_BOLTING`: you run while it finishes and
+  the gun lowers the think after step 4c ends it, chambered. (MW2 lowers on
+  the READY think after the shot's last; Peace on that last think, so its
+  window ends a think sooner.) A knife waits for
   `WNOTE_BOLT_CLOSED` (MW2's knife refuses the rechamber's pending bolt-close
   delay): a press before it is lost, one after it cuts the tail short. It ends on the anim
   clock, never on the lock. A reload is taken at once out of the shot or the
@@ -129,10 +154,12 @@ source for MW2 behaviour; the owner rejects it.
 - **The bolt cancel is the reload cancel.** `WNOTE_BOLT_CLOSED` on the fire
   animation carries no rounds. Like `WNOTE_MAG_IN` it clears the lock on its
   think and only queues its completion: the chambering commits in step 4, the
-  same commit point as a reload's fill and delayed action. A swap, sprint or
-  ladder grab that completes on that exact think is still instant, but it
-  returns before step 4, so the chamber debt stays owed (owner's
-  rule: a successful NAC does not complete the pump). One think later — the
+  same commit point as a reload's fill and delayed action. A swap or ladder
+  grab that completes on that exact think is still instant, but it returns
+  before step 4, so the chamber debt stays owed (owner's rule: a successful
+  NAC does not complete the pump). A sprint is not one of them: it never
+  lowers a gun in the action, so the note has no sprint lock to take and
+  there is no "bolt NAC into a sprint" (MW2 has none). One think later — the
   late cancel — the chambering has committed and is kept. It is the same note,
   in the same place, that opens the reload's window. Never write a second
   cancel.
@@ -160,9 +187,20 @@ source for MW2 behaviour; the owner rejects it.
 - **Clip frame ranges are data.** They live in the `.cfg` beside the model and
   are read by `CG_WeapAnim_RegisterClips`. Re-exporting a model must never mean
   editing C, and no weapon may be named in that loader.
-- **cgame is picture only.** It never touches ammo or weapon state. The one
-  approved exception (owner's decision) is MW2's view kick, and only the kick:
-  cgame authors it and the client adds it into the command's aim.
+- **cgame is picture only.** It never touches ammo or weapon state. The owner
+  has approved two exceptions. The first is MW2's view kick, and only the
+  kick: cgame authors it and the client adds it into the command's aim. The
+  second is MW2's `CL_SetStance`, and only it: on the player's own
+  `EV_STANCE_FORCE_STAND/CROUCH/PRONE` (MW2's 6-8, 0x4DD48F-0x4DD4EB), and
+  after every prediction pass while the predicted playerstate has
+  `PMF_RESPAWNED` (0x5901AF), cgame puts the client's stance where pmove put
+  the body, through the hidden console command `_peaceSetStance` (leaveads's
+  channel: the next frame's `Cbuf_Execute` runs it before that frame's command
+  is built, the command a direct call reaches). Client input only, the
+  player's own view only (never a demo, a killcam or a followed player), and a
+  held stance key refuses it as MW2's does; it never touches the `+stance`
+  hold, and pmove alone decides the body. Never let cgame write the stance
+  anywhere else.
 - **The view kick is MW2's, and the tilt emerges (owner's rule).** The
   predicted player's own `EV_FIRE_WEAPON` assigns the kick's angular velocity
   (`BG_WeaponFireRecoil`'s view part, MW2's 0x4a5fe0, ADS data only at
@@ -199,11 +237,13 @@ source for MW2 behaviour; the owner rejects it.
   went. With nothing predicted (a demo, a followed player, the killcam) it is
   drawn from the state the event came in, MW2's predictedPlayerState.
   Everyone else's comes from the shooter's entity event and what the entity
-  carries (its last command's snapped origin, whole-degree aim and
-  `pos.trTime`, no aim state, so the hip's spread): exact only when the entity
-  shows the shot's own think (MW2 seeds others' from the clock). The viewed
-  player is never in their own snapshot, so `CG_ShotTrace` tests their box,
-  but only while they have one: with no health and no `PM_DEAD` corpse (S&D's
+  carries (its last command's snapped origin, its eye unsnapped in
+  `origin2[2]`, whole-degree aim, `pos.trTime` and MW2's `EF_CROUCHING`/
+  `EF_PRONE` for the spread's stance; no aim state, so the hip's spread):
+  exact only when the entity shows the shot's own think (MW2 seeds others'
+  from the clock). The viewed player is never in their own snapshot, so
+  `CG_ShotTrace` tests their box (`BG_PlayerBox`), but only while they have
+  one: with no health and no `PM_DEAD` corpse (S&D's
   player out of the round, unlinked on the server) the bullet goes through.
   Damage, ammo and weapon state stay the server's and pmove's; the fire event's
   parm names the gun that fired, never a seed or spread. Projectiles, both
@@ -211,6 +251,27 @@ source for MW2 behaviour; the owner rejects it.
   The fake bullet now shows its tracer and impacts on the shooter's screen,
   with no damage, as MW2's does; no window moved. Run
   `dev/tests/run-bullets.sh`.
+- **What a bullet hits is Peace's approximation of MW2's skeleton (owner's
+  decision; a placeholder, not a match).** MW2 hits the posed skeleton,
+  never its move box. Peace's bullets and pellets hit the move box plus two
+  bullet-only volumes from `BG_PlayerHitVolumes`, the one function the
+  server's damage trace (`G_ShotTrace`, for `Bullet_Fire` and
+  `ShotgunPellet`) and cgame's drawn bullets and pellets (`CG_ShotTrace`)
+  both call, on the target's entity and the box their own trace tests: over
+  the box while the eye is above it (a downward stance leg, 110ms of stand to
+  crouch and 106ms of crouch to prone, in whole thinks: whoever can fire over
+  cover can be shot over it), up to the eye plus `BG_HIT_HEAD_ALLOWANCE`; and, prone, the
+  body MW2's prone room check traces (`BG_PRONE_FEET_DIST` behind the
+  origin, `BG_PRONE_TRACE_HALF` either side, feet to the prone top, turned
+  by the body's yaw and pitch on the entity). The nearest entry wins; a
+  shot that starts inside a volume and leaves it passes, as the engine's
+  own box passes one (startsolid, the fraction kept); a corpse is its box.
+  Everything else keeps the move box: the railgun, the lightning gun,
+  knives, melee, the throwing knife, explosions, collision.
+  Everything the volumes read is on the entity (`EF_DEAD`, `EF_PRONE`,
+  `origin2`), so both sides agree whenever they see the same entity. Never
+  let one side test a volume the other does not, and never add a volume
+  that reads anything but the entity and the box.
 - **Aim follows simulation permission, never a scheduled scope flash.** Aim
   progress belongs to the player and survives weapon/slot/attachment changes.
   `BG_CanAimDownSights` is the shared physical rule (no empty hand, no quick
@@ -225,9 +286,69 @@ source for MW2 behaviour; the owner rejects it.
   exception may manufacture a visible flash. Multiple movement updates before
   a render may pass through this overlap unseen. It reads only fields that
   already travel: no protocol or game version change.
-- **Movement modifiers are per-command values.** `PM_CmdScale` must not write
-  sprint/ADS multipliers into `ps.speed`: prediction replay and pmove substeps
-  would apply them repeatedly, making speed depend on latency or command count.
+- **Movement modifiers are per-command values.** `PM_WalkScale`,
+  `PM_AirScale` and `PM_CmdScale` must not write sprint/ADS/crouch/class
+  multipliers into `ps.speed`, and nothing writes the command: prediction
+  replay and pmove substeps would apply them repeatedly, making speed depend
+  on latency or command count. MW2 writes its sprint strafe into the command;
+  Peace scales this think's copy, `pml.rightmove`, set from the command at the
+  top of `PmoveSingle`. MW2's prone crawl stops zero the command too; Peace
+  zeroes this think's copies (`pml.forwardmove`, `pml.rightmove`), and every
+  mover, the bob, the legs and the sprint read the copies. The stance's speed
+  (`BG_StanceScale`) is read from the eye's state every think, and MW2's
+  `oldcmd` (`ps.prevCmd`) is written once a command, never per step.
+- **The walk is MW2's (owner's rule: MW2's numbers, at IW4x's exe defaults).**
+  `g_speed` is 190 (`BG_PLAYER_SPEED`; the world was already MW2's, so nothing
+  else is scaled, never by 0.8). `PM_WalkScale` is MW2's `PM_CmdScale_Walk`
+  (0x572DB0), for `PM_WalkMove` only: forward and right only (the crouch's
+  upmove never counts); a backward forwardmove worth 0.7 of itself and a
+  rightmove 0.8 (`BG_BACK_SPEED_SCALE`, `BG_STRAFE_SPEED_SCALE`; the retail
+  playlist's 1 and 1 are one line each), the larger setting the magnitude,
+  never the direction; then aim x0.4, the sprint x1.5 and the stance
+  (`BG_StanceScale`, MW2's PM_CmdScaleForStance: the crouch x0.65, prone
+  x0.15, and the ramps between them over the 400ms prone legs), each a float
+  multiply; the aimed gun's `adsMoveSpeedScale`
+  (`BG_WeaponAdsMoveScale`: SPAS 2, the rest 1); and the class speed last
+  (`BG_MoveClassScale`). While sprinting the walk truncates `pml.rightmove` to
+  0.667 of itself before the jump check, so a take-off's air move reads it too.
+  The air is the base speed alone, x0.4 aimed: no class, sprint, crouch or gun.
+  Friction 5.5, walk accel 9 standing, 12 crouched and 19 prone, 1.0 on slick
+  ground or under knockback; noclip keeps Quake 3's 10 and 9 under their own names. The
+  class speed is MW2's script (`updateMoveSpeedScale`): `ps.moveClass` is set
+  once, at spawn, by `BG_ApplyClass` from the class's primary through the
+  catalog's move-class column, and a swap or a pickup never changes it. Guns
+  with no MW2 twin take the script's default 1.0 (owner's choice). Lightweight
+  (MW2's perk; Peace's Expeditious slot, same ID) multiplies the class speed by
+  1.07, so it is the ground walk's alone. The bob's most (`PM_BobMaxSpeed`,
+  MW2's PM_GetMaxSpeed 0x573850) mixes the strafe and back scales MW2's own way
+  and leaves the class speed out, so a rifle class bobs at 95% of the rate.
+  Pitch is clamped at 85 up and 85 down (`BG_VIEW_PITCH_UP/DOWN`, constants
+  so prediction always agrees; the playlist's 70 is one line each). MW2's flash
+  `moveSpeedScale` 1.2 is not ported: MW2 keeps the gun in `ps->weapon` through
+  an offhand and Peace does not. Sprint and aim are still decided after the
+  move (MW2 decides them before it): one think late. Tests read every number
+  from the code (`BG_PLAYER_SPEED` and the scale constants), never a literal.
+- **The body is MW2's.** 70 tall standing with the eye at 60, 50 crouched with
+  the eye at 40, 30 prone with the eye at 11, 30 wide, above the feet. Peace
+  keeps its origin `MINS_Z` (24) above the feet, so `DEFAULT_HEIGHT` is 46,
+  `CROUCH_HEIGHT` 26, `PRONE_HEIGHT` 6, `DEFAULT_VIEWHEIGHT` 36,
+  `CROUCH_VIEWHEIGHT` 16 and `PRONE_VIEWHEIGHT` -13: no map, spawn, death drop
+  or TI ground point moves. `BG_PlayerBox` is the one box rule (pmove, the
+  server's entity, cgame's viewed player); every eye-based reach (use,
+  throwback, knife, muzzle, the PVS) reads `ps.viewheight`, a float. Never
+  hard-code a box or an eye in code or tests. The stance is MW2's: the command
+  carries it as a level (`BUTTON_PRONE`, `BUTTON_CROUCH`, `BUTTON_TEMP_STANCE`
+  for a held key) and `PM_CheckDuck` decides what the body can do, asking for
+  room (other players never block it) and saying what it refused or forced
+  through the single-client `EV_STANCE_*` events. The eye runs MW2's curve in
+  pmove (`PM_ViewHeightAdjust`, its four waypoint tables), a leg at a time,
+  the elapsed ms in `viewHeightLerpTime` (never a clock); the flags and the
+  box follow the eye's target, so the box drops at a leg's start and a request
+  mid-leg waits. Prone is MW2's room check (`BG_CheckProne`), view, crawl and
+  weapon rules. Drop shots, crouch spam, a queued prone and a sprint out of
+  prone come out of these rules: never name one in code, and never write the
+  command (a stopped crawl zeroes this think's copies). See `dev/STANCE.md`.
+  MW2's landing stun, mantle and dive are not ported.
 - **Selection is a slot toggle.** `weapnext` advances the latest requested slot
   modulo `SLOT_COUNT`, not the server's last acknowledged active slot. If an
   unfinished ordinary holster's destination returns to the gun still held,
@@ -388,7 +509,10 @@ source for MW2 behaviour; the owner rejects it.
   `WA_FIRED`; the server reads what is left and zeroes it at the throw
   (`fire_equipment`'s fuse, MW2's 5e9400). IW4x's bg_weaponOffHandFix zeroes
   it after a HOLD cancel only (0x578F52; the INIT and PREPARE cancels have none
-  yet), and Peace's ladder takes the offhand, fuse and all. The launch is MW2's
+  yet). A ladder grab takes nothing: MW2's ladder drop is a weapon change,
+  which waits out every melee and offhand state and the quick raise after one
+  (`PM_LadderWeapon` holds `LADDER_HOLSTER` until the latch clears), so the
+  fuse runs on and no new quick action starts on the ladder. The launch is MW2's
   (4c3690): forward times projectileSpeed, plus projectileSpeedUp and the
   flattened forward's projectileSpeedForward (`BG_OffhandLaunchVelocity`),
   snapped, then the thrower's velocity along it, its component only and
@@ -442,16 +566,20 @@ source for MW2 behaviour; the owner rejects it.
   held), the aim button, a reload or use/reload button, the knife and equipment
   buttons (grenade or not), holding jump, forward under
   `BG_SPRINT_FORWARD_MINIMUM` (105, MW2's `player_sprintForwardMinimum`),
-  ducking, deep water (MW2 has no swimming). `PWF_SPRINT_RELEASE` is set while
+  a held crouch or prone bit, deep water (MW2 has no swimming). The stance
+  bits end a sprint but do not keep one from starting (MW2's two masks): a
+  sprint begun from a crouch or prone needs room to stand and stands the
+  player up on its first think with `EV_STANCE_FORCE_STAND`, so the client's
+  stance is reset before its next command. `PWF_SPRINT_RELEASE` is set while
   the button stays down from the sprint it started or ended, and only letting
   go clears it: MW2's previous-buttons test and `sprintButtonUpRequired` in one
   bit (a quick action sets it in `PM_UpdateWeaponAction`). So a sprint ended
   under its button waits for it to come up - except after a jump: MW2's
   `Jump_Start` clears the wait (`pml.jumped`), so a held button sprints again
   as soon as jump is let go. MW2 has no ground test: a sprint goes on and can
-  start in the air (once jump is let go). Its speed applies only on the ground
-  (`PM_CmdScale` with `pml.walking`, as MW2 scales its walk and not its air
-  move), so a sprint begun in the air pays off on landing. Prediction carries
+  start in the air (once jump is let go). Its speed (x1.5) applies only on
+  the ground (`PM_WalkScale`, as MW2 scales its walk and not its air move), so
+  a sprint begun in the air pays off on landing. Prediction carries
   the flag in `weapFlags`. Never make a sprint need its button held. MW2's
   sprint time: `BG_SPRINT_TIME` (4s) in `ps.sprintUsed`, used while sprinting
   and refilled 1:1 while not; spent, the sprint ends like any other, and a
@@ -467,10 +595,42 @@ source for MW2 behaviour; the owner rejects it.
   and aim, times speed, capped at 8 units. `CG_OffsetFirstPersonView` adds it;
   Quake's angle bob and run tilt are gone (MW2 tilts neither at the hip).
   `PM_Footsteps` turns the cycle at MW2's rate (speed over the posture's most,
-  times 0.335 standing, 0.34 ducked, 0.36 backpedalling, less aimed, 0.5
-  sprinting) and holds it in the air, so a sprint switching in the air moves
+  `PM_BobMaxSpeed`, times 0.335 standing, 0.34 ducked, 0.36 backpedalling, less aimed, 0.5
+  sprinting, 0.25 prone whatever the aim or direction; prone's amplitude is
+  MW2's (0.02, 0.005) with no aim blend) and holds it in the air, so a sprint switching in the air moves
   the camera, as in MW2. Picture only: the muzzle, aim and the gun's own bob
   are unchanged.
+- **The FOV is MW2's.** `cg_fov` (default 65, held to 65-80 by `CG_ClampFov`)
+  is horizontal at 4:3, widened for the view (Hor+): `CG_ProjectFov` fixes the
+  height by tan(fovY/2) = 0.75 tan(fov/2) and lets the width follow the aspect.
+  `CG_ViewFov` is MW2's `CG_GetViewFov`: intermission 90, then
+  lerp(cg_fov, min(cg_fov, zoom), f), where zoom is the sight file's `zoomfov`
+  (MW2's `adsZoomFov`; 50 without a file) and f the one aim blend that also
+  moves the gun and the hipfire HUD. The mouse follows tan(fov/2)/tan(32.5).
+  Never scale the hip FOV for aim, and never let a sight widen the view.
+- **The eye is the playerstate's.** The first- and third-person view origins
+  add `ps.viewheight` (a float: MW2's curve passes through fractions),
+  whatever pmove put there; nothing in cgame writes 26, 50 or any other eye
+  height. Another player's eye is their own `ps.viewheight`, which
+  `BG_PlayerStateToEntityState` writes unsnapped into their ET_PLAYER entity's
+  `origin2[2]` (owner's decision: their drawn bullets start where the server's
+  damage trace did, mid-leg too); never guess it from the legs animation.
+- **The player picture fills the box.** The player models are Quake 3
+  placeholders authored 56 tall. `CG_ScalePlayerModel` scales the legs by
+  `CG_PLAYER_MODEL_SCALE` ((DEFAULT_HEIGHT - MINS_Z)/56, x1.25 for MW2's 70)
+  about the feet, and the tag functions carry `nonNormalizedAxes` down the
+  chain, so the torso, head, gun, barrel, flash and flag scale with it; the
+  shadow, sprites and splash follow. Every live player, corpse and podium
+  player goes through it. Prone is the owner's one exception to filling the
+  box (MW2's prone body overhangs its 30-tall box too): a live player with
+  `EF_PRONE` lies face down along the legs' yaw, which is the body's (MW2's
+  `proneDirection` and the ground's pitch, `origin2[0..1]`), the model's eye on
+  the prone eye over the origin and the body running back behind it, where
+  MW2's prone room check and the prone hit volume put it, scaled about the
+  rotated feet (`CG_PlaceProneModel`); a placeholder until there is prone art.
+  Picture only: no origin, box, trace or lighting
+  origin moves. Code that measures directions on a scaled piece (the flag's
+  swing) must normalise its axes first.
 - **Jumps and landings are MW2's.** A jump leaves at `BG_JumpVelocity`, MW2's
   sqrt(2 g jump_height) for `BG_JUMP_HEIGHT` 39 (249.8 at gravity 800; Q3's
   270 is gone). The engine rounds velocity to nearest every think, as MW2
@@ -508,10 +668,15 @@ source for MW2 behaviour; the owner rejects it.
   water jump and flight leave the ground before the step move. Peace has no
   mantle. All three are durations or positions, never clocks, so a replay
   rebases none.
-  MW2's damaging-landing stun is not ported (Peace keeps Q3's fall damage).
+  MW2's damaging-landing stun is not ported (Peace keeps Q3's fall damage;
+  its doubling reads only the crouch, so a prone landing is not doubled, as
+  MW2's landing reads no stance). Lying down starts a landing's slowdown in
+  `jumpLand` (MW2's Jump_ActivateSlowdown), unless knockback's timer runs:
+  friction 2.5x easing off, and a jump soon after is lower. A jump needs the
+  standing stance; from a crouch or prone the press is spent.
 - **Air control is MW2's.** `PM_AirMove` uses `PM_AirScale`, MW2's air move
-  speed: base speed over forward/right only, slowed by `pm_adsScale` while
-  aiming (MW2's air scale keeps the walking scale aiming sets) - no jump axis
+  speed: base speed over forward/right only, slowed by `BG_ADS_SPEED_SCALE`
+  (0.4) while aiming (MW2's air scale keeps the walking scale aiming sets) - no jump axis
   and no sprint (Quake's held jump would cut it to 71%). `PM_Accelerate` pushes at least as
   hard as at `pm_stopspeed` except on a ladder, as MW2's accelerate does. So
   holding forward never slows a sprint jump, and pulling back always brakes it
@@ -581,12 +746,46 @@ source for MW2 behaviour; the owner rejects it.
   trigger on the same command, as MW2 checks reload before it fires. Never
   predict the bit on the client, never hold the gun back after a quick action,
   and never name a trick. How wide the window is comes only from the client's
-  clock, which is MW2's (`CL_DriftTimeDelta`, 0x5a1ad0): it sits one snapshot
-  interval plus 16ms behind the newest snapshot, and prediction replays from
-  the time-selected `cg.nextSnap`, so on your own host a release up to ~16ms
-  before the gun is up always fakes and up to ~66ms sometimes does (sv_fps 20,
-  MW2's fixed frame). Never move that clock toward the newest snapshot.
-  `dev/FAKE_RELOAD.md` has the measured windows.
+  clock and the host's frame, both MW2's. The clock (`CL_DriftTimeDelta`,
+  0x5a1ad0) sits one snapshot interval plus 16ms behind the newest snapshot,
+  and prediction replays from the time-selected `cg.nextSnap`. The host reads
+  its own server's snapshot a frame after the server sent it (below). So on
+  your own host (sv_fps 20, MW2's fixed frame, 125 fps) a release up to 16ms
+  before the gun is up always fakes and up to 64ms sometimes does, and a
+  trigger pull up to 24ms after X (three commands at 125 fps, two at 85) is
+  always a fake bullet and up to ~75ms sometimes is. Never move that clock
+  toward the newest snapshot. `dev/FAKE_RELOAD.md` has the measured windows.
+- **A host reads its own snapshots a frame late, as MW2's does (owner's rule:
+  do what MW2 does).** MW2 runs its server in a thread of its own: `SV_Frame`
+  (0x627610) only signals it (0x627695) and returns, and the thread's game
+  frame and snapshots (0x415cd0, 0x4517b0) come after the main thread's second
+  event loop (0x47dfc6), so the snapshot is read in the next frame (0x47dd80).
+  Peace's `Com_Frame` holds what `SV_Frame` sends the local client
+  (`NET_HoldLoopPackets`) and releases it before the next frame's first event
+  loop. Nothing else waits: commands, the server's answers to the client's own
+  packets, and remote clients keep ioquake3's timing. Over every snapshot
+  phase it moves the own-host fake reload and fake bullet exactly one frame
+  later (the suite checks the fake bullet gap by gap); the wild scope rides
+  on the fake reload. Never read the host's snapshot in the frame that made
+  it, and never touch Pmove, the use/reload bit, the clock or the picture rule
+  for these windows. `run-fakereload.sh` runs every own-host case through the
+  real `Com_Frame` and loopback and checks it against the harness's model.
+- **Snapshots come at MW2's rate, not the client's (owner's rule: do what MW2
+  does).** MW2's `SV_UserinfoChanged` parses `snaps` and replaces it
+  (0x401a8a): a snapshot every 100ms while `onlinegame` is set (default 1;
+  IW4x's dedicated server sets it too), else 50ms, and
+  `SV_SendMessageToClient` sends a loopback or LAN client one every server
+  frame regardless (0x48ff84, 0x490033). Peace's server does the same
+  (`sv_onlineGame`, default 1; `SV_ClientSnapshotMsec`,
+  `SV_SnapshotEveryFrame`, `SV_SnapshotDue`; a bot or the dummy, sent
+  nothing, keeps every frame); `snaps` has no say. Online,
+  half the snapshots make the base older and every window wider, which is
+  most of why MW2 felt easier there, though X must now be held across one of
+  them to be seen at all; your own host and LAN are unchanged.
+  `sv_lanForceRate 0` treats a LAN client (127.0.0.1 included) as an internet
+  one. Never honour `snaps` again or move this into Pmove, the use/reload bit
+  or the clocks; `replay_test.c` checks the rule and the fake reload harness
+  models it for every ping row (`dev/FAKE_RELOAD.md`).
 - **The gun never un-plays an action it showed (owner's rule).**
   `cg_weappicture.c` draws the viewmodel from its own run of the client's
   commands through the real `Pmove` once prediction is corrected away from a
@@ -699,11 +898,13 @@ source for MW2 behaviour; the owner rejects it.
 
 ## Capacity limits
 
-- `pm_flags` — **full.** All 16 networked bits used. A 17th needs the wire
-  format widened.
+- `pm_flags` — **full.** All 18 networked bits used: protocol 88 widened the
+  field from 16 for MW2's `PMF_PRONE` (bit 16) and `PMF_PRONEMOVE_OVERRIDDEN`
+  (bit 17). A 19th needs `msg.c` widened again (MW2's is 23 bits).
 - `STAT_WEAPONS` — full 32-bit wire mask at `PS_STAT_WEAPONS`. `MAX_WEAPONS`
   is 24; the M300 is 15, the throwing knife 16 and the Tactical Insertion 17
-  in baseq3 (18, 19 and 20 in missionpack; `WP_NUM_WEAPONS` 18 / 21). The
+  in baseq3 (18, 19 and 20 in missionpack). M16/Masterkey append 18/19
+  (21/22 in missionpack; `WP_NUM_WEAPONS` 20 / 23). The
   networked `ps.weapon` is 5 bits, so no weapon may pass 31. Other
   stats remain signed int16: their bit 15 must stay unused.
 - `weaponAnimSeq` — **full.** 2 bits in `msg.c`; all four values are taken
@@ -712,7 +913,7 @@ source for MW2 behaviour; the owner rejects it.
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 10-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 86 (GAME_VERSION -15) requires client, server
+  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 89 (GAME_VERSION -18) requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
@@ -736,6 +937,35 @@ source for MW2 behaviour; the owner rejects it.
   after a cook-out. Every offhand's fuseTime fits (the throwing knife's 30000
   the longest). A duration, never rebased by the replay. `EV_GRENADE_SUICIDE`
   (MW2's 0x5d) is appended to `entity_event_t`.
+  Protocol 87 (GAME_VERSION -16) adds `moveClass` (`PS_MOVECLASS_BITS` 4,
+  beside `perks`): MW2's class speed (`moveClass_t`, nine classes, the riot
+  shield's included, guarded by the static assert in `bg_loadout.c`). Spawn
+  owned and predicted; not a clock, so the replay never rebases it.
+  Protocol 88 (GAME_VERSION -17) is MW2's stance and prone. `viewheight` is a
+  float (MW2's eye curve passes through fractions; same offset and size).
+  Beside it: `viewHeightTarget` (8, `BG_EYE_*` in MW2 units above the feet,
+  0 = never set), `viewHeightLerpTime` (`PS_EYE_LEG_BITS` 10: ms into the
+  running leg, always below `BG_PRONE_LERP_MS`), `viewHeightLerpTarget` (8,
+  0 = no leg), `viewHeightLerpDown` (1), `proneDirection`,
+  `proneDirectionPitch` and `proneTorsoPitch` (full floats, MW2 ps+0x160..)
+  and `prevCmd` (17: MW2's oldcmd, `BG_PrevCmdPack`, written per command,
+  never per step). None is a clock: the replay rebases none of them. The
+  usercmd carries the stance in bits 22-24 (`BUTTON_PRONE`, `BUTTON_CROUCH`,
+  `BUTTON_TEMP_STANCE`; 25-31 spare). An ET_PLAYER entity carries MW2's
+  `EF_CROUCHING`/`EF_PRONE` (bits 20, 21: the entity's `eFlags` is 22 bits,
+  which also lets `EF_TEAMVOTED`, bit 19, through), the eye unsnapped in
+  `origin2[2]` and, while prone, the body's yaw and pitch in `origin2[0..1]`
+  (`BG_PlayerStateToEntityState`); never in `playerState_t.eFlags`, whose 16
+  bits would drop them. The legs anims gain `LEGS_IDLEPR`, `LEGS_CRAWL`,
+  `LEGS_CRAWLB` (40 in all; legsAnim stays 8 bits with the toggle at 128).
+  The stance events can come every think (`EV_STANCE_INVALID` while a prone
+  turn stays blocked, `EV_STANCE_FORCE_STAND` on a ladder with a crouch or
+  prone bit, any FORCE event until the client's stance is reset), and they
+  share MW2's four predictable slots: a command Pmove chops into five or more
+  steps (pmove_fixed with a small pmove_msec, or a long command) can push its
+  shot out of the last four that `ClientEvents` reads, as MW2's ring would.
+  Never special-case it; `stance_test.c` prints the cases (with 66ms chops
+  the shot always stays).
   Dropped ET_ITEM uses `generic1` for attachments, `time2` for packed magazine
   and reserve, `otherEntityNum2` for chamber debt, and `time` as a spawn serial.
 - cgame imports are appended after `CG_KEY_GETBINDINGNAME`:
@@ -747,6 +977,15 @@ source for MW2 behaviour; the owner rejects it.
   QVM. The import numbers above it never change. A new
   cgame on an older client calls an import that client does not have, which
   is one more reason protocol 86 needs the client rebuilt with the modules.
+- The pose traps (`CG_R_BUILDMODELPOSE`, `CG_R_BLENDMODELPOSES`) and
+  `refEntity_t` with its pose (`cl_vm.c`) take their QVM pointers through
+  `VM_ExplicitArgBlock`, which drops the game when the block runs past the
+  VM's memory, so a QVM cgame passes `cg.weaponPose` to either renderer as
+  native cgame does. The other traps still use `VMA` (`VM_ArgPtr`), which masks
+  only the start; give a new trap that hands the engine a whole block
+  `VM_ExplicitArgBlock`. Each renderer skins from a pose only when its joint
+  count is the model's, and `RE_BlendModelPoses` never writes past
+  `MAX_MODEL_JOINTS`.
 - Event rings: **protocol 86, GAME_VERSION -15** (one bump with the view
   kick's import and client-side bullets). The playerstate's
   `events[2..3]` and `eventParms[2..3]` (8 bits) sit beside `[0..1]`; the
@@ -756,9 +995,9 @@ source for MW2 behaviour; the owner rejects it.
   `entityState_t` grew by nine ints, so `sharedEntity_t`/`gentity_t` offsets
   moved: the engine, the server and every native and QVM module are rebuilt
   together, and older demos do not play. Event numbers are 8 bits on both
-  rings, so `entity_event_t` stays below 256 (it ends at `EV_PREP_OFFHAND`,
-  well under); parms are 8 bits as before (a weapon, a direction byte, a sound
-  index). Client-side bullets add no field: the server simply stops sending
+  rings, so `entity_event_t` stays below 256 (it ends at `EV_STANCE_INVALID`,
+  95, well under; `bg_misc.c` asserts it and one name per event); parms are 8
+  bits as before (a weapon, a direction byte, a sound index). Client-side bullets add no field: the server simply stops sending
   hitscan impact, tracer, blast and beam temp entities, so a client older
   than protocol 86 would draw none.
 - `perks` is a five-bit spawn-owned playerstate field. All three class perk
@@ -768,8 +1007,10 @@ source for MW2 behaviour; the owner rejects it.
   note/holster/fill ordering. Fire/bolt, swap and pickup timings stay unchanged.
   Inaudible filters shared footstep events only; falling damage events still
   reach the server, which separately applies 9 Lives (no fall damage).
-  Expeditious scales each command's movement and crouch/water/ladder limits
-  through `BG_MovementScale`; never mutate `ps.speed`, jump impulse or timers.
+  Lightweight is MW2's: x1.07 on the class speed (`BG_MoveClassScale`, the
+  catalog's `movementPercent` 107), which only the ground walk (and its wading
+  clamp) reads; never the air, a ladder, swimming, the jump or the bob, and
+  never by mutating `ps.speed`, jump impulse or timers.
   Second Nature raises the per-gun class attachment limit to two. Only Red dot
   is implemented so far; the capacity rule must not invent other attachments.
   Pickup instances keep their own attachments regardless of the looter's perks.
@@ -783,7 +1024,9 @@ source for MW2 behaviour; the owner rejects it.
   and 12-bit inward-facing yaw into bits 0–14. No bit 15, no extra pm_flags.
   Ladder contact stamps `BG_LADDER_DROP_TIME` before the unchanged note pass;
   its destination completes before queued ammo fill, just like a normal holster.
-  Never add a reload/NAC-specific ladder branch. See `dev/LADDERS.md`.
+  Like any weapon change it waits for a latched quick action (MW2's
+  CheckForChangeWeapon refuses the melee and offhand states). Never add a
+  reload/NAC-specific ladder branch. See `dev/LADDERS.md`.
 
 ## Weapon animation assets
 
@@ -816,8 +1059,8 @@ source for MW2 behaviour; the owner rejects it.
   the full importer invokes it too. Sprint-in/out follow predicted transition
   locks for presentation only. Sprint/holster retention also covers draw,
   drop, initial pullout and fire/bolt clips through the generic layer owner.
-  Frame-only QVM/GL1 rendering crossfades the released source; native GL2 blends
-  skeletal poses. The full authored clip coverage currently belongs to SPAS;
+  Both renderers, native and QVM alike, blend skeletal poses; the frame-only
+  crossfade of the released source is the fallback for a model without poses. The full authored clip coverage currently belongs to SPAS;
   legacy placeholder weapons still need their own animation assets.
 - Known SPAS gaps: the drop is the draw reversed (resampled with ease-out
   progress `f*(2-f)` so a quick YY moves at once), and hands still use a flat placeholder.
@@ -834,7 +1077,11 @@ which `#include`s `bg_pmove.c` and drives `PM_Weapon` directly — reload
 segments, ammo conservation, swap/sprint ordering and the fire cycle, plus
 shoot-reload resets (instant reload, fastest NAC, Fayde, YY too early) on every
 gun with a worked action, the close note's chamber commit (early, exact and
-late cancels by swap, sprint and ladder, at every think length) and the aim a
+late cancels by swap and ladder, at every think length), a sprint begun in the
+shot or on its last think lowering the gun where the shot ends with the whole
+action still owed, and one begun on the think after it, in the action or on any
+think around the close note waiting for the whole cycle (`PM_Weapon` alone and
+full `Pmove` with a real sprint press, SPAS and M300, at every think length) and the aim a
 NAC carries onto the incoming gun through full `Pmove`. Every
 timing in it is read from the shipped tables; never write a literal there, or
 retiming a weapon breaks the test without telling you anything.
@@ -842,8 +1089,13 @@ retiming a weapon breaks the test without telling you anything.
 `dev/tests/run-loadouts.cmd` (or `.sh`) checks class validation/persistence,
 modulo selection, same-update YY firing, reload/pull-out cancellation, tap/hold
 actions, the sprint latch and its ending conditions, aim with sprint held, MW2
-air control (stick-only push, aim scale, stopspeed floor, ladder exempt), all
-all ten action bits through the actual network codec, and pose release. It
+air control (stick-only push, aim scale, stopspeed floor, ladder exempt), MW2's
+walk through the real Pmove against MW2's own arithmetic at 8ms (run, rifle
+class, sprint, strafe, backpedal, crouch and aim: steady speed, 90%/99% times,
+a second's distance, the stops), every class's run, sprint, crouch, aim and
+half stick (the secondary and a pickup keeping the spawn class), the sprint
+strafe (a 132ms command scales once), the pitch clamp, the 70/50 body (a 70
+gap stands, 69 does not), all ten action bits through the actual network codec, and pose release. It
 also builds `knife_missile_test.c` (the throwing knife's real launch, impact,
 carry and rest code), `knife_corpse_test.c` (the real `CopyToBodyQue`,
 `BodySink`, `G_FreeEntity` and use code with a carried knife) and
@@ -858,8 +1110,9 @@ commands, and the cancel allowed (Semtex, throwing knife, TI) or refused (frag,
 flash, whose Y waits behind the recovery). `TestFragCook` drives the frag's
 cook: the fuse at the release, the cook-out at every think length and on every
 step of a several-step command (with and without a gun), the event's frag, a
-hand that lives keeping the -1 until the next offhand, a death and a ladder
-while cooking. `offhand_server_test.c` (sh only) runs the real `ClientThink`,
+hand that lives keeping the -1 until the next offhand, a death, and a ladder
+grabbed while cooking (the fuse runs on, the throw or cook-out, then the ladder
+drop on the think the latch would clear without one). `offhand_server_test.c` (sh only) runs the real `ClientThink`,
 `ClientEvents`, `FireWeapon`, missiles and `player_die`: every launch velocity,
 start time and fuse, the cook-out's suicide and explosion (also on commands
 the real `Pmove` chops, pmove_fixed or not, gun or empty hand), god mode and a
@@ -867,11 +1120,17 @@ kill in its raise, the death drop of every class, and a release on the
 command a fall kills its holder.
 Pose checks cover source retention, ladder holsters, loop/endpoint semantics,
 reload/action exclusions, ordinary sprint reversal and frame-only crossfades,
-plus YY flow (reversed draw, eased return, fire cut-in) through the real
-`PM_Weapon`, which is why the pose test links `pickup_pmove_driver.c`.
+plus YY flow (reversed draw, eased return, fire cut-in) and a sprint over the
+shot (lowered where it ends, carrying the fire clip, the whole action played
+from its start once back up) or the action (fire clip to its end, entry from
+rest after it) through the real `PM_Weapon`, which is why the pose test links
+`pickup_pmove_driver.c`.
 The glide return is compared frame by frame with the ordinary sprint exit
 from the same posture (carry, loop, exit under way, partial entry), in both
 rendering paths, for SPAS and M300.
+`stance_shared_test.c` checks the shared stance definitions and the hit
+volumes' contract and geometry (`BG_PlayerHitVolumes`, `BG_HitVolumeTrace`);
+`offhand_server_test.c` also checks a prone death drop and a prone throw.
 `event_ring_test.c` (with `event_ring_wire.c`) runs MW2's event rings end to
 end: the real Pmove and `BG_PlayerStateToEntityState`, the real codec, and
 the cgame's real snapshot transition, `CG_CheckEvents`, `CG_FireWeapon`,
@@ -885,7 +1144,37 @@ and parms through the real `ClientThink`, the entity's ring, the switch-start
 log line, no per-event temp entity, `G_AddEvent` and the ring's aging.
 The native/QVM pointer-boundary test links `cl_vm.c` and `vm_ptr.c` directly;
 keep it independent of the full client and VM lifecycle so MSVC can link it.
+It also checks that an entity or pose running past the VM's memory is refused
+with ERR_DROP (`VM_ExplicitArgBlock`) before the renderer sees it.
 Loadouts UI and class definitions are documented in `dev/LOADOUTS.md`.
+
+`dev/tests/run-stance.sh` (`STANCE_TEST_FLAGS=-DMISSIONPACK`; `.cmd` for the
+pmove half) runs MW2's stance and prone. `stance_test.c` drives the real
+`Pmove` against brushes traced as the engine traces a brush (floors, walls,
+ceilings, steps, slopes, water, ladders, bodies), spawning through
+`BG_SpawnStance`, every think counted from the tables and constants (a leg of
+L ms started on think t0 ends on t0 + ceil(L / msec)) at 8, 16 and 33ms: the
+eye on every think of all four legs, both prone transitions, a request mid-leg,
+the reversal, the dead eye, the stance scale and crawl speeds against MW2's
+arithmetic, a 132ms command against two 66ms ones, the bob, every room
+refusal and its event, `BG_CheckProne` path by path (the two walkables apart,
+the bend), steep ground and ledges, the crawl into a wall, the prone step, the
+turn, the blocked turn and its event every think, the 0.98 undo, the pitch,
+the crawl against every weapon action and aim, the slowdown, sprint, jump,
+ladder, talk and respawn, the over-the-box windows with the hit volume that
+covers them, the ring budget and the turn's cost (both printed), and water.
+`stance_server_test.c` runs the real `ClientThink`, `G_ShotTrace`, railgun,
+knife and `SetClientViewAngle`: the prone legs and the leg over the box are
+hit, a shot past every volume misses, the railgun and the knife keep the box,
+two players prone in a file (the shooter's muzzle inside the other's body:
+over them and turned away, a miss; into their box, a hit, through the real
+`Bullet_Fire`), and the server agrees with `BG_PlayerHitVolumes` on rays
+through every volume, every frame the over-box lasts on a crouch-to-prone leg
+reached by its state and as many after (each volume must be hit; every wait
+is for a state, never a written time). Test harnesses that
+call pmove pieces directly copy the command's moves into `pml.forwardmove`
+and `pml.rightmove` first, as `PmoveSingle` does; crouch with `BUTTON_CROUCH`,
+never `upmove`.
 
 `dev/tests/run-sights.cmd` builds `sights_test.c` with the shared bg code:
 sight configs, the aim clock, and the SPAS-to-M300 NAC through full `Pmove`
@@ -910,11 +1199,20 @@ TI's checks in every suite.
 (MW2's client time base through the real `CL_DriftTimeDelta`, snapshot
 selection by the client clock, sv_fps frames, ping) with the real `Pmove` on both
 sides, the server's use/reload step after each command, and the real `cg_anim`
-+ `cg_weappicture.c` on the client. On the SPAS and the M300 it checks the fake
++ `cg_weappicture.c` on the client. 0 ms is your own host, in `Com_Frame`'s
+order with the snapshot held a frame; the `.sh` also runs every own-host case
+through the real `Com_Frame` and loopback (`common.c`, `net_chan.c`,
+`fake_reload_engine.c`), requires the same outcome, and checks that only
+`SV_Frame`'s packets wait. On the SPAS and the M300 it checks the fake
 reload after knife/frag/Semtex cancel, tap vs hold, aiming/shooting/real reload
 during it, `+reload` never faking, no fake shot, the lone knife, the fake bullet
-and the M300 wild scope at 0/50/100/200 ms. `FAKERELOAD_PROBE=1` prints every
-tap timing; `FAKERELOAD_SVFPS` changes the server rate.
+(per tap, and over every snapshot phase on your own host, one frame later than
+ioquake3's host) and the M300 wild scope at 0/50/100/200 ms.
+`FAKERELOAD_PROBE=1` prints every tap timing; `FAKERELOAD_SVFPS` changes the
+server rate; `FAKERELOAD_BULLETS=1` prints the fake bullet over every phase
+(`FAKERELOAD_CLFRAME`, `FAKERELOAD_ONLINEGAME=0` for 50ms snapshots online,
+`FAKERELOAD_MAXPACKETS`, `FAKERELOAD_HOSTHOLD=0` for ioquake3's host). Every
+ping row is an internet client of Peace's server: a snapshot every 100ms.
 
 `dev/tests/run-gamepad-aim.cmd` (or `.sh`) drives the real `cl_gamepadaim.c`:
 the radial deadzone, the squared move with its diagonal stretch, floor
@@ -935,7 +1233,12 @@ hit, and that the shooter's client draws every bullet, pellet and beam where
 the server's damage traces ended (hip and aimed, still and moving, aim moving,
 one or several commands a frame, lag), the unpredicted path, other players'
 view from the entity event (the victim's own box included), the sky, a
-projectile and the fake bullet.
+projectile and the fake bullet. With the stance it checks the hit volumes
+(bullets and pellets stopped by a prone target's body behind its box, and
+over a target's box while its eye is above it, on the server and every
+screen), drop shots drawn from the eye the shooter's entity carries on every
+think of both legs, and every bullet's real `G_Damage` (wrapped by the
+linker) against its mark.
 
 `dev/tests/run-kick.sh` (`KICK_TEST_FLAGS=-DMISSIONPACK` for the other
 numbering) runs MW2's view kick through the real `cg_kick.c`, `cg_event.c`,
@@ -946,6 +1249,22 @@ shot, the demo/killcam/follow gates and the QVM stub's number. It then builds
 the real `cg_kick.c` and `cg_syscalls.asm` into a QVM with q3lcc and q3asm,
 runs it on the real `vm_interpreted.c`, and checks that the real
 `CL_CgameSystemCalls` and `CL_FinishMove` receive exactly the kick cgame holds.
+It then does the same for the viewmodel's skeletal pose (`pose_qvm_test.c`):
+the real `cg_anim.c`, built into the QVM as a shipped cgame.qvm builds it, loads
+the SPAS's clip table through the file traps and hands the engine a viewmodel
+pointing at its own `cg.weaponPose` every frame; the two pose traps and the
+entity's pose pointer, called directly, reach the renderer as host pointers to
+the QVM's own poses, and a pose running past the QVM's memory is dropped at
+each of the three places. Both QVM tests share `qvm_engine.c`, the engine
+state and loader a real QVM runs in.
+
+`dev/tests/run-iqmpose.sh` builds each renderer's real `tr_model_iqm.c`
+(`iqm_pose_test.c`, plain for GL1, `-DIQM_POSE_GL2`) and loads the shipped
+SPAS and M40A3 viewmodels with the real `R_LoadIQM`. A pose built from frames
+skins exactly as the frames, a blend of two single-frame poses within float
+rounding of their lerp, and a pose whose joint count is not the model's is
+ignored. Both renderers' pose code is the same code: the runner requires the
+digest of GL1's every skin, built pose, blend and blended skin to be GL2's.
 
 `dev/tests/run-silentshot.sh` (`SILENTSHOT_TEST_FLAGS=-DMISSIONPACK`) models
 the client/server clocks as the fake reload test does and runs the real game
@@ -965,7 +1284,39 @@ out of an S&D round in the line of fire draws the bullets through their absent
 body. `run-loadouts.sh` checks that a body and a podium model start with an
 empty ring (`body_ring_test.c`).
 
-`run-bullets`, `run-kick` and `run-silentshot` have no `.cmd`. They link
+`dev/tests/run-view.sh` (`VIEW_TEST_FLAGS=-DMISSIONPACK` for the other
+numbering) runs the camera through the real `CG_CalcViewValues` with the real
+sights and `Pmove`: MW2's projection at 4:3, 16:10, 16:9 and 21:9, the 65-80
+range, intermission, the aimed lerp from the shipped sight files at every hip
+FOV, the sensitivity, and the eye at every stance from `ps.viewheight`. Then
+the real `CG_Player`, tag chain and `CG_AddPlayerWeapon` draw live players, a
+leaning runner, a corpse, a podium player and the viewer's mirror body: the
+feet stay, the top reaches the box top, and every attachment sits where the
+unscaled assembly would, scaled about the feet.
+
+MW2's stance button and its cgame half (`dev/STANCE.md`):
+`dev/tests/run-stanceinput.sh` (`STANCEINPUT_TEST_FLAGS`) drives the real
+`cl_input.c` commands and command builder through the real `cmd.c`, `cvar.c`
+and `cl_keys.c` key path frame by frame at 8, 16 and 33 ms: the tap/hold
+matrix from every stance, exactly `cl_stanceHoldTime`, the held stance keys,
+every toggle and gate, `+gostand`/`+moveup` (the jump under a held
+`+movedown` or `+prone`: DOWN never cancels it, MW2's 0x400 being its own
+bit), `_peaceSetStance`, a hold across death and a console opened mid-hold.
+`run-stancecgame.sh` (`STANCECGAME_TEST_FLAGS`) runs the respawn reset in the real
+`CG_PredictPlayerState`, the unpredicted eye's lerp and MW2's invalid-command
+hint through its real arm and draw. `run-stanceflow.sh`
+(`STANCEFLOW_TEST_FLAGS`) runs client, Pmove and cgame end to end: a sprint
+from a crouch toggle (and from a held crouch, which ends it and crouches once
+the stand leg the sprint started has run out), a blocked stand-up, prone
+refused, the respawn, a prone turn blocked into a wall with the hint
+blinking, `+stance` while sprinting, and `+gostand` under a held `+movedown`
+or `+prone` (spent lowered, no jump when the key is let go under it, a ladder
+jump-off with the crouch held). `event_ring_test.c` checks the stance events'
+routing and the hint's arming, `view_test.c` the eye over every think of a
+stance change, and `player_model_test.c` the prone placeholder's pose.
+
+`run-bullets`, `run-kick`, `run-silentshot`, `run-view`, `run-stanceinput`,
+`run-stancecgame`, `run-stanceflow` and `run-iqmpose` have no `.cmd`. They link
 whole game, cgame and client files and rely on GNU ld's `--gc-sections` to
 drop the functions that reach engine code they do not build, and MSVC's
 linker resolves every external of every object first. Run them under WSL or
@@ -990,16 +1341,55 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   `SND_WaitForPlayers` frees it too (MW2's round restart frees everything).
 - QVM `sscanf` returns zero even after parsing! Do not use its return count
   to validate HUD data. The S&D site reader uses `COM_Parse` instead.
+- **The round end is MW2's endGame (owner's rule: do what MW2 does).** A round
+  is postgame the moment it ends - no damage, no use - but alive players keep
+  full control (`G_SNDClientThink` returns qfalse, so the real Pmove runs) until
+  `snd.freezeTime`: the deciding moment plus `ROUNDEND_FREEZE_DELAY` (1050:
+  endGame's waitframe and `freezePlayerForRoundEnd( 1.0 )`). The deciding moment
+  is the decisive death's time for an elimination, else the frame the result
+  comes. That window is why a knife pressed after the round-winning shot comes
+  out; never shorten it or freeze on the kill's frame. An elimination is
+  decided inside the death, as MW2's onDeadEvent is (`player_die` ->
+  `G_SNDRecordKill` -> `SND_CheckElimination`): from that moment nothing later
+  in the same frame - a missile landing, a grenade going off, the rest of a
+  blast - deals damage or changes the result, so the first decisive death
+  decides. `G_SNDRunFrame` only catches teams emptied without a death
+  (disconnects, team changes); that is the only draw. A detonation or defuse
+  first waits out sd.gsc's delay (`SND_DETONATION_DELAY` 3000,
+  `SND_DEFUSE_DELAY` 1500) with phase still `SND_PLANTED` and `snd.result`
+  set: play and damage go on, eliminations are ignored, nothing more can be
+  used. Timeouts end at once. The freeze is still `PM_FREEZE` (MW2's
+  `PMF_FROZEN` would keep running the weapon; that needs the owner's OK and a
+  protocol bump).
 - Round-winning killcams use a bounded engine snapshot history in
   `sv_snapshot.c`, including the killer's player state and original visibility.
-  `trap_ReplayStart` returns the shared playback deadline; S&D must wait for it
-  before spawning the next round, and `LogExit` must reuse it on the final round.
+  The window is MW2's final killcam: `KILLCAM_REWIND` 4000 before the death to
+  `KILLCAM_LINGER` 1950 after it. `trap_ReplayStart( killer, from, to, begin )`
+  records on to `to`, pins the clip, and plays it from `begin` at a constant
+  offset: S&D passes the death plus `KILLCAM_ROUND_DELAY` (5050, roundEndWait(
+  4, true )) or, on the match-winning round, `KILLCAM_MATCH_DELAY` (4550).
+  Elsewhere only the kill whose score ended the match gets one (MW2's
+  `finalKill`, _gamescore.gsc): `player_die` asks for it with the kill plus
+  `KILLCAM_GAME_DELAY` (6050) when that kill's `AddScore` queued the
+  intermission; a time or capture limit never replays an earlier kill. It
+  returns the shared playback deadline; S&D starts the next round
+  `SND_KILLCAM_RESTART` (100) after it, and the intermission waits for it.
+  Every mode freezes its survivors `ROUNDEND_FREEZE_DELAY` after the game
+  ends (MW2's endGame freezes before its round/game branch):
+  `ClientGameEndFrozen` in `ClientThink_real`, with `PM_FREEZE` as in S&D.
+  `SV_ReplayStart` refuses a window longer than the history
+  (`REPLAY_HISTORY_MSEC` 6500), one ending more than `KILLCAM_LINGER` ahead, or a
+  `begin` before the last sample. This changed the game/server syscall, not the
+  wire: rebuild the server and game modules together.
   `SNAPFLAG_REPLAY` disables client prediction and marks presentation cuts.
   Playback rebases absolute clocks only; never rewind live entities, change
   weapon/note timers, predict the viewer's input, or use their local PVS history.
   Reset capture each round and on map restart. Objective/world/disconnect wins
   without a decisive enemy kill use the normal result pause. Run
-  `dev/tests/run-replay.sh` alongside the S&D tests.
+  `dev/tests/run-replay.sh` alongside the S&D tests; `run-snd.sh` includes
+  `snd_roundend_test.c`, the round-winning shot and the knife after it, a
+  defender's knife still in the air at the deciding death, and a team game's
+  score-limit and time-limit ends through the real server.
 
 ## Adding a weapon — touches TWO lists
 
@@ -1011,7 +1401,8 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   `assets/source/m16/weapon.json` via `dev/tools/build_m16.py`; the rifle is
   currently automatic, with no claim of retail MW2 burst/timing/recoil accuracy.
   It uses ordinary note/holster/raise rules. Never add a special NAC for it.
-  Protocol 87 / game -16 adds the alternate ammo fields. Run `run-masterkey`,
+  Protocol 89 / game -18 adds the alternate ammo fields after stance's 88/-17.
+  The sight files use `zoomfov` in degrees. Run `run-masterkey`,
   `m16_asset_test.py` and `test-masterkey.ps1`; see `dev/M16.md`.
 - M300 Praetorian (`WP_M40A3`) is a separate, appended weapon (15 basegame / 18 missionpack). The
   Sniper preset occupies the former Scout index; custom-class indices and
@@ -1021,6 +1412,8 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   clip/sight configs and `bg_m40a3_data.h`. `--check` is deterministic/read-only.
   Keep every IQM/MD3 surface below 1000 vertices for GL1. Run
   `dev/tests/run-sniper.sh` and `dev/tests/m40a3_asset_test.py`.
+- `zoomfov` in a viewmodel's `.sights` file is MW2's `adsZoomFov` in `cg_fov`
+  degrees; the M300's comes from `weapon.json`'s `ads_zoom_fov` (15).
 - `scope` in a viewmodel's `.sights` file opts into the aspect-correct ocular
   overlay. At full ADS the overlay replaces the gun picture; its animation
   layers still advance. This never changes ADS permission or note clocks.

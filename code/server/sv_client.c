@@ -1437,22 +1437,12 @@ void SV_UserinfoChanged( client_t *cl ) {
 		}
 	}
 
-	// snaps command
-	val = Info_ValueForKey (cl->userinfo, "snaps");
-	
-	if(strlen(val))
-	{
-		i = atoi(val);
-		
-		if(i < 1)
-			i = 1;
-		else if(i > sv_fps->integer)
-			i = sv_fps->integer;
-
-		i = 1000 / i;
-	}
-	else
-		i = 50;
+	// The snapshot rate is MW2's, not the client's: SV_UserinfoChanged
+	// (0x401950) parses `snaps` and then replaces it (0x401a8a-0x401aa1)
+	// with a snapshot every 100ms under onlinegame, else 50ms. A loopback or
+	// LAN client gets one every server frame whatever this says
+	// (SV_SnapshotEveryFrame).
+	i = SV_ClientSnapshotMsec();
 
 	if(i != cl->snapshotMsec)
 	{

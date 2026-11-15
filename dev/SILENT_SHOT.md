@@ -148,13 +148,17 @@ One cgame runs at a time, so each case runs twice: as the shooter (whose
 commands, kick and all, are kept with the time each reached the server), then
 as an opponent watching from the side, live and then through the round's
 killcam, started as S&D starts it (`SV_ReplayStart` from the death minus
-`KILLCAM_REWIND` to the death plus `KILLCAM_LINGER`). The server runs the
+`KILLCAM_REWIND` to the death plus `KILLCAM_LINGER`, MW2's 4 s and 1.95 s,
+played from the death plus `KILLCAM_ROUND_DELAY`, 5.05 s, so the opponent
+watches live until then). The server runs the
 same both times, and that is checked. Every case checks: the shot is real
 and hits; the server sends no impact or tracer; the shooter's client plays
 the shot once with its sound, flash and every impact where the server's
 damage went, and kicks; the opponent hears and sees it once with the gun,
 whose flash the real `CG_AddPlayerWeapon` draws on the shooter's model with
-the gun's flash model, light and muzzle tag, and the snapshot that brings the
+the gun's flash model, light and muzzle tag (until another weapon's fire with
+a flash of its own plays: the frag control's throw, now live as well), and
+the snapshot that brings the
 shot already shows the knife exactly when the press ran in the shot's frame;
 the killcam loses its fire event, sound, flash and every drawn bullet exactly
 when the server ran the shot and the press in one frame, and shows them
@@ -183,6 +187,14 @@ Two simplifications, neither of which the windows depend on: nobody dies
 (the victim has 30000 health, so the replay is started directly, as S&D
 would start it at the death), and the client's clock starts 600ms before the
 shot, still drifting toward its target as it does all through play.
+
+That the knife can come out at all after a round-winning shot is MW2's round
+end: everyone keeps full control for 1.05 s after the deciding death (endGame's
+waitframe and `freezePlayerForRoundEnd( 1.0 )`), and the killcam's window runs
+1.95 s past it. Peace used to freeze the survivors on the frame after the kill,
+so a press after that never ran. `snd_roundend_test.c` (`run-snd.sh`) plays it
+through the real `g_snd.c`, `ClientThink` and `Pmove`; see
+`dev/SEARCH_AND_DESTROY.md`.
 
 ## Where Peace and MW2 still differ
 

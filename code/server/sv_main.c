@@ -58,6 +58,7 @@ cvar_t	*sv_gametype;
 cvar_t	*sv_pure;
 cvar_t	*sv_floodProtect;
 cvar_t	*sv_lanForceRate; // dedicated 1 (LAN) server forces local client rates to 99999 (bug #491)
+cvar_t	*sv_onlineGame;	// MW2's onlinegame: an internet client gets a snapshot every 100ms, else 50ms
 #ifndef STANDALONE
 cvar_t	*sv_strictAuth;
 #endif

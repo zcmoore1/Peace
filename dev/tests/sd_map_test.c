@@ -25,7 +25,9 @@ void QDECL Com_Error(int level, const char *fmt, ...) {
     va_start(args, fmt); vfprintf(stderr, fmt, args); va_end(args);
     exit(1);
 }
-void trap_SnapVector(float *v) { SnapVector(v); }
+/* the engine rounds to nearest (Q_SnapVector), as MW2 does: never q_shared's
+ * truncating SnapVector, which makes an 8ms jump 35.8 high instead of 41.3 */
+void trap_SnapVector(float *v) { v[0]=rintf(v[0]); v[1]=rintf(v[1]); v[2]=rintf(v[2]); }
 #ifdef HUNK_DEBUG
 void *Hunk_AllocDebug(int size, ha_pref preference, char *label, char *file, int line) {
     (void)label; (void)file; (void)line; (void)preference;
@@ -111,8 +113,8 @@ static int Count(const char *classname) {
 }
 
 /* --- real collision + real movement ---------------------------------------- */
-static const vec3_t playerMins = { -15, -15, -24 };
-static const vec3_t playerMaxs = { 15, 15, 32 };
+static const vec3_t playerMins = { -PLAYER_WIDTH, -PLAYER_WIDTH, MINS_Z };
+static const vec3_t playerMaxs = { PLAYER_WIDTH, PLAYER_WIDTH, DEFAULT_HEIGHT };
 
 static void Trace(trace_t *tr, const vec3_t start, const vec3_t mins,
                   const vec3_t maxs, const vec3_t end, int pass, int mask) {
@@ -139,7 +141,7 @@ static void Reset(const vec3_t at) {
     move.trace = Trace; move.pointcontents = Contents;
     move.tracemask = MASK_PLAYERSOLID;
     ps.pm_type = PM_NORMAL;
-    ps.speed = 320; ps.gravity = 800;
+    ps.speed = BG_PLAYER_SPEED; ps.gravity = 800;
     ps.groundEntityNum = ENTITYNUM_NONE;
     ps.weaponstate = WEAPON_READY;
     ps.weaponAnimTime = -1;

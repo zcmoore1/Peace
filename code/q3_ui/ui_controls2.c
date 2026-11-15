@@ -112,16 +112,22 @@ typedef struct
 #define ID_CHAT3		32
 #define ID_CHAT4		33
 #define ID_TOGGLEMENU	34
+// MW2's PC stance rows (ui_mp/pc_options_movement.menu); ID_MOVEUP is its
+// "Stand/Jump" (+gostand) and ID_MOVEDOWN its "Hold Crouch" (+movedown)
+#define ID_CROUCH		35
+#define ID_PRONE		36
+#define ID_HOLDPRONE	37
+#define ID_STANCE		38
 
 // all others
-#define ID_FREELOOK		35
-#define ID_INVERTMOUSE	36
-#define ID_ALWAYSRUN	37
-#define ID_AUTOSWITCH	38
-#define ID_MOUSESPEED	39
-#define ID_JOYENABLE	40
-#define ID_JOYTHRESHOLD	41
-#define ID_SMOOTHMOUSE	42
+#define ID_FREELOOK		39
+#define ID_INVERTMOUSE	40
+#define ID_ALWAYSRUN	41
+#define ID_AUTOSWITCH	42
+#define ID_MOUSESPEED	43
+#define ID_JOYENABLE	44
+#define ID_JOYTHRESHOLD	45
+#define ID_SMOOTHMOUSE	46
 
 #define ANIM_IDLE		0
 #define ANIM_RUN		1
@@ -170,6 +176,10 @@ typedef struct
 	menuaction_s		stepright;
 	menuaction_s		moveup;
 	menuaction_s		movedown;
+	menuaction_s		crouch;
+	menuaction_s		prone;
+	menuaction_s		holdprone;
+	menuaction_s		stance;
 	menuaction_s		turnleft;
 	menuaction_s		turnright;
 	menuaction_s		sidestep;
@@ -236,8 +246,8 @@ static bind_t g_bindings[] =
 	{"+back", 			"backpedal",		ID_BACKPEDAL,	ANIM_BACK,		K_DOWNARROW,	-1,		-1, -1},
 	{"+moveleft", 		"step left",		ID_MOVELEFT,	ANIM_STEPLEFT,	',',			-1,		-1, -1},
 	{"+moveright", 		"step right",		ID_MOVERIGHT,	ANIM_STEPRIGHT,	'.',			-1,		-1, -1},
-	{"+moveup",			"up / jump",		ID_MOVEUP,		ANIM_JUMP,		K_SPACE,		-1,		-1, -1},
-	{"+movedown",		"down / crouch",	ID_MOVEDOWN,	ANIM_CROUCH,	'c',			-1,		-1, -1},
+	{"+gostand",		"stand / jump",		ID_MOVEUP,		ANIM_JUMP,		K_SPACE,		-1,		-1, -1},
+	{"+movedown",		"hold crouch",		ID_MOVEDOWN,	ANIM_CROUCH,	-1,				-1,		-1, -1},
 	{"+left", 			"turn left",		ID_LEFT,		ANIM_TURNLEFT,	K_LEFTARROW,	-1,		-1, -1},
 	{"+right", 			"turn right",		ID_RIGHT,		ANIM_TURNRIGHT,	K_RIGHTARROW,	-1,		-1, -1},
 	{"+strafe", 		"sidestep / turn",	ID_STRAFE,		ANIM_IDLE,		K_ALT,			-1,		-1, -1},
@@ -255,7 +265,7 @@ static bind_t g_bindings[] =
 	{"weapon 7",		"railgun",			ID_WEAPON7,		ANIM_WEAPON7,	'7',			-1,		-1, -1},
 	{"weapon 8",		"plasma gun",		ID_WEAPON8,		ANIM_WEAPON8,	'8',			-1,		-1, -1},
 	{"weapon 9",		"BFG",				ID_WEAPON9,		ANIM_WEAPON9,	'9',			-1,		-1, -1},
-	{"+attack", 		"attack",			ID_ATTACK,		ANIM_ATTACK,	K_CTRL,			-1,		-1, -1},
+	{"+attack", 		"attack",			ID_ATTACK,		ANIM_ATTACK,	K_MOUSE1,		-1,		-1, -1},
 	{"weapprev",		"prev weapon",		ID_WEAPPREV,	ANIM_IDLE,		'[',			-1,		-1, -1},
 	{"weapnext", 		"next weapon",		ID_WEAPNEXT,	ANIM_IDLE,		']',			-1,		-1, -1},
 	{"+button3", 		"gesture",			ID_GESTURE,		ANIM_GESTURE,	K_MOUSE3,		-1,		-1, -1},
@@ -264,6 +274,13 @@ static bind_t g_bindings[] =
 	{"messagemode3", 	"chat - target",	ID_CHAT3,		ANIM_CHAT,		-1,				-1,		-1, -1},
 	{"messagemode4", 	"chat - attacker",	ID_CHAT4,		ANIM_CHAT,		-1,				-1,		-1, -1},
 	{"togglemenu", 		"toggle menu",		ID_TOGGLEMENU,	ANIM_IDLE,		K_ESCAPE,		-1,		-1, -1},
+	// MW2's PC defaults (default_mp_controls.cfg): c and CTRL toggle; the held
+	// forms and the console's stance button are unbound. The preview has no
+	// prone animation (past MAX_ANIMATIONS): it shows the crouch.
+	{"togglecrouch",	"crouch",			ID_CROUCH,		ANIM_CROUCH,	'c',			-1,		-1, -1},
+	{"toggleprone",		"prone",			ID_PRONE,		ANIM_CROUCH,	K_CTRL,			-1,		-1, -1},
+	{"+prone",			"hold prone",		ID_HOLDPRONE,	ANIM_CROUCH,	-1,				-1,		-1, -1},
+	{"+stance",			"change stance",	ID_STANCE,		ANIM_CROUCH,	-1,				-1,		-1, -1},
 	{(char*)NULL,		(char*)NULL,		0,				0,				-1,				-1,		-1,	-1},
 };
 
@@ -289,7 +306,11 @@ static menucommon_s *g_movement_controls[] =
 	(menucommon_s *)&s_controls.stepleft,      
 	(menucommon_s *)&s_controls.stepright,     
 	(menucommon_s *)&s_controls.moveup,        
+	(menucommon_s *)&s_controls.crouch,
+	(menucommon_s *)&s_controls.prone,
 	(menucommon_s *)&s_controls.movedown,      
+	(menucommon_s *)&s_controls.holdprone,
+	(menucommon_s *)&s_controls.stance,
 	(menucommon_s *)&s_controls.turnleft,      
 	(menucommon_s *)&s_controls.turnright,     
 	(menucommon_s *)&s_controls.sidestep,
@@ -1311,6 +1332,30 @@ static void Controls_MenuInit( void )
 	s_controls.movedown.generic.ownerdraw = Controls_DrawKeyBinding;
 	s_controls.movedown.generic.id        = ID_MOVEDOWN;
 
+	s_controls.crouch.generic.type	    = MTYPE_ACTION;
+	s_controls.crouch.generic.flags     = QMF_LEFT_JUSTIFY|QMF_PULSEIFFOCUS|QMF_GRAYED|QMF_HIDDEN;
+	s_controls.crouch.generic.callback  = Controls_ActionEvent;
+	s_controls.crouch.generic.ownerdraw = Controls_DrawKeyBinding;
+	s_controls.crouch.generic.id        = ID_CROUCH;
+
+	s_controls.prone.generic.type	   = MTYPE_ACTION;
+	s_controls.prone.generic.flags     = QMF_LEFT_JUSTIFY|QMF_PULSEIFFOCUS|QMF_GRAYED|QMF_HIDDEN;
+	s_controls.prone.generic.callback  = Controls_ActionEvent;
+	s_controls.prone.generic.ownerdraw = Controls_DrawKeyBinding;
+	s_controls.prone.generic.id        = ID_PRONE;
+
+	s_controls.holdprone.generic.type	   = MTYPE_ACTION;
+	s_controls.holdprone.generic.flags     = QMF_LEFT_JUSTIFY|QMF_PULSEIFFOCUS|QMF_GRAYED|QMF_HIDDEN;
+	s_controls.holdprone.generic.callback  = Controls_ActionEvent;
+	s_controls.holdprone.generic.ownerdraw = Controls_DrawKeyBinding;
+	s_controls.holdprone.generic.id        = ID_HOLDPRONE;
+
+	s_controls.stance.generic.type	    = MTYPE_ACTION;
+	s_controls.stance.generic.flags     = QMF_LEFT_JUSTIFY|QMF_PULSEIFFOCUS|QMF_GRAYED|QMF_HIDDEN;
+	s_controls.stance.generic.callback  = Controls_ActionEvent;
+	s_controls.stance.generic.ownerdraw = Controls_DrawKeyBinding;
+	s_controls.stance.generic.id        = ID_STANCE;
+
 	s_controls.turnleft.generic.type	  = MTYPE_ACTION;
 	s_controls.turnleft.generic.flags     = QMF_LEFT_JUSTIFY|QMF_PULSEIFFOCUS|QMF_GRAYED|QMF_HIDDEN;
 	s_controls.turnleft.generic.callback  = Controls_ActionEvent;
@@ -1591,7 +1636,11 @@ static void Controls_MenuInit( void )
 	Menu_AddItem( &s_controls.menu, &s_controls.stepleft );
 	Menu_AddItem( &s_controls.menu, &s_controls.stepright );
 	Menu_AddItem( &s_controls.menu, &s_controls.moveup );
+	Menu_AddItem( &s_controls.menu, &s_controls.crouch );
+	Menu_AddItem( &s_controls.menu, &s_controls.prone );
 	Menu_AddItem( &s_controls.menu, &s_controls.movedown );
+	Menu_AddItem( &s_controls.menu, &s_controls.holdprone );
+	Menu_AddItem( &s_controls.menu, &s_controls.stance );
 	Menu_AddItem( &s_controls.menu, &s_controls.turnleft );
 	Menu_AddItem( &s_controls.menu, &s_controls.turnright );
 	Menu_AddItem( &s_controls.menu, &s_controls.sidestep );

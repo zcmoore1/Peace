@@ -56,8 +56,13 @@ void QDECL CG_Printf( const char *fmt, ... ) {
 		if ( cent->currentState.eventParm == gun ) {
 			frame->gunFire[eventEntity]++;
 			if ( cg.eventPlayerState ) frame->playerGunFire++;
-		} else if ( cent->currentState.eventParm == WP_THROWING_KNIFE ) {
-			frame->knifeThrows++;
+		} else {
+			int parm = cent->currentState.eventParm;
+			if ( parm > WP_NONE && parm < WP_NUM_WEAPONS ) {
+				CG_RegisterWeapon( parm );	/* as CG_FireWeapon is about to */
+				if ( cg_weapons[parm].flashModel ) frame->otherFlashFire[eventEntity]++;
+			}
+			if ( parm == WP_THROWING_KNIFE ) frame->knifeThrows++;
 		}
 	}
 	if ( !strncmp( fmt, "Event %s just for client", 24 ) ) {

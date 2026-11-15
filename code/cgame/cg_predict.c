@@ -78,13 +78,60 @@ void CG_BuildSolidList( void ) {
 
 /*
 ====================
+CG_EntityBox
+
+The box an entity's s.solid encodes (SV_LinkEntity's packing), about its origin.
+====================
+*/
+static void CG_EntityBox( const entityState_t *ent, vec3_t bmins, vec3_t bmaxs ) {
+	int x, zd, zu;
+
+	x = (ent->solid & 255);
+	zd = ((ent->solid>>8) & 255);
+	zu = ((ent->solid>>16) & 255) - 32;
+
+	bmins[0] = bmins[1] = -x;
+	bmaxs[0] = bmaxs[1] = x;
+	bmins[2] = -zd;
+	bmaxs[2] = zu;
+}
+
+/*
+====================
+CG_ShotHitVolumes
+
+Every player in the snapshot a drawn bullet or pellet can hit, but the
+shooter: their volumes past the box, each at the origin and decoded box
+CG_ClipMoveToEntities traces it at. The viewed player, never in a snapshot,
+is CG_ShotTrace's.
+====================
+*/
+void CG_ShotHitVolumes( trace_t *tr, const vec3_t start, const vec3_t end, int skipNumber ) {
+	int				i;
+	centity_t		*cent;
+	entityState_t	*ent;
+	vec3_t			bmins, bmaxs;
+
+	for ( i = 0 ; i < cg_numSolidEntities ; i++ ) {
+		cent = cg_solidEntities[ i ];
+		ent = &cent->currentState;
+		if ( ent->number == skipNumber || ent->eType != ET_PLAYER || ent->solid == SOLID_BMODEL ) {
+			continue;
+		}
+		CG_EntityBox( ent, bmins, bmaxs );
+		CG_PlayerHitVolumesTrace( tr, start, end, ent->number, ent, cent->lerpOrigin, bmins, bmaxs );
+	}
+}
+
+/*
+====================
 CG_ClipMoveToEntities
 
 ====================
 */
 static void CG_ClipMoveToEntities ( const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end,
 							int skipNumber, int mask, trace_t *tr ) {
-	int			i, x, zd, zu;
+	int			i;
 	trace_t		trace;
 	entityState_t	*ent;
 	clipHandle_t 	cmodel;
@@ -107,14 +154,7 @@ static void CG_ClipMoveToEntities ( const vec3_t start, const vec3_t mins, const
 			BG_EvaluateTrajectory( &cent->currentState.pos, cg.physicsTime, origin );
 		} else {
 			// encoded bbox
-			x = (ent->solid & 255);
-			zd = ((ent->solid>>8) & 255);
-			zu = ((ent->solid>>16) & 255) - 32;
-
-			bmins[0] = bmins[1] = -x;
-			bmaxs[0] = bmaxs[1] = x;
-			bmins[2] = -zd;
-			bmaxs[2] = zu;
+			CG_EntityBox( ent, bmins, bmaxs );
 
 			cmodel = trap_CM_TempBoxModel( bmins, bmaxs );
 			VectorCopy( vec3_origin, angles );
@@ -240,6 +280,11 @@ static void CG_InterpolatePlayerState( qboolean grabAngles ) {
 		i += 256;		// handle wraparound
 	}
 	out->bobCycle = prev->ps.bobCycle + f * ( i - prev->ps.bobCycle );
+
+	// the eye between the two snapshots, as the origin: MW2's curve, which
+	// pmove runs every think, would otherwise step at the snapshot rate
+	// (picture only; a demo, a followed player, the killcam)
+	out->viewheight = prev->ps.viewheight + f * ( next->ps.viewheight - prev->ps.viewheight );
 
 	for ( i = 0 ; i < 3 ; i++ ) {
 		out->origin[i] = prev->ps.origin[i] + f * (next->ps.origin[i] - prev->ps.origin[i] );
@@ -635,6 +680,15 @@ void CG_PredictPlayerState( void ) {
 
 	if ( cg_showmiss.integer > 1 ) {
 		CG_Printf( "[%i : %i] ", cg_pmove.cmd.serverTime, cg.time );
+	}
+
+	// MW2's respawn reset (0x5901AF, after every prediction pass, moved or
+	// not): while the predicted state is PMF_RESPAWNED the client's stance is
+	// stand (CL_SetStance, which a held stance key refuses). pmove keeps the
+	// flag while a command carries BUTTON_PRONE, so a player who died prone
+	// spawns standing. Only the player's own prediction gets here.
+	if ( cg.predictedPlayerState.pm_flags & PMF_RESPAWNED ) {
+		trap_SendConsoleCommand( va( "_peaceSetStance %i\n", BG_STANCE_STAND ) );
 	}
 
 	if ( !moved ) {

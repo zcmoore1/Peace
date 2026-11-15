@@ -267,20 +267,20 @@ static void PM_ProjectVelocity( const vec3_t in, const vec3_t normal, vec3_t out
 PM_StepSlideMove
 
 MW2's (PM_StepSlideMove 0x4b1810). From the ground a blocked move, or any move
-on a slope, steps up STEPSIZE and slides again; every ground move is then
-pushed down as far as STEPSIZE_DOWN past the lift, so stairs and curbs are
-walked both ways, never flown off: no landing, no landing cut, the jump state
-kept. In the air nothing steps but a jump, and only up to its own height above
+on a slope, steps up STEPSIZE (STEPSIZE_PRONE prone) and slides again; every
+ground move is then pushed down as far as STEPSIZE_DOWN past the lift, so
+stairs and curbs are walked both ways, never flown off: no landing, no landing
+cut, the jump state kept. In the air nothing steps but a jump, and only up to its own height above
 where it left the ground (Jump_GetStepHeight). The step lands on ground no
 steeper than STEP_LAND_NORMAL (only walkable ground for a jump's step), never
 on a player, and is kept only if it got farther along the move than the
 unstepped slide, and for a jump only below its own height
 (Jump_IsPlayerAboveMax); otherwise the unstepped slide is pushed down instead.
 A jump's step takes what it gained off the rise left (Jump_ClampVelocity). A
-walked step costs speed by its height.
+prone body with no room where a ground move ended takes the move back
+(PM_VerifyPronePosition). A walked step costs speed by its height.
 ==================
 */
-#define	STEPSIZE_DOWN		9
 #define	STEP_FLAT_NORMAL	0.9f
 #define	STEP_LAND_NORMAL	0.3f
 
@@ -300,15 +300,15 @@ void PM_StepSlideMove( qboolean gravity ) {
 	VectorCopy (pm->ps->velocity, start_v);
 
 	bumped = PM_SlideMove( gravity );
-	stepSize = STEPSIZE;
+	// MW2's step is lower prone (0x4B18B3); the push down past it is not
+	stepSize = ( pm->ps->pm_flags & PMF_PRONE ) ? STEPSIZE_PRONE : STEPSIZE;
 
 	if ( pm->ps->groundEntityNum == ENTITYNUM_NONE ) {
 		if ( !bumped || pm->ps->jumpLand >= 0 ) {
 			return;
 		}
-		stepSize = pm->ps->jumpOriginZ + BG_JUMP_HEIGHT - start_o[2];
-		if ( stepSize > STEPSIZE ) {
-			stepSize = STEPSIZE;
+		if ( pm->ps->jumpOriginZ + BG_JUMP_HEIGHT - start_o[2] < stepSize ) {
+			stepSize = pm->ps->jumpOriginZ + BG_JUMP_HEIGHT - start_o[2];
 		}
 		if ( stepSize < 1 ) {
 			return;
@@ -390,6 +390,12 @@ void PM_StepSlideMove( qboolean gravity ) {
 		if ( pm->ps->velocity[2] > most ) {
 			pm->ps->velocity[2] = most;
 		}
+	}
+
+	// MW2's PM_VerifyPronePosition (0x4B1D19-0x4B1D44): a prone body with no
+	// room where the ground move ended undoes it, before the step's speed loss
+	if ( hadGround && pm->ps->pm_type < PM_DEAD && !PM_VerifyPronePosition( start_o, start_v ) ) {
+		return;
 	}
 
 	// the eye smooths only what the step added to the unstepped slide

@@ -209,7 +209,7 @@ int main(void) {
  ChooseWeapon(0,WP_M40A3); CHECK(!classEdit.draft.attachments[0]);
  Activate(&classEdit.attachment[0]); CHECK(classPicker.count==1 && !classPicker.rows[0].value);
  CHECK(strstr(classPicker.rows[0].description,"built-in")); Key(K_ESCAPE);
- ChoosePerk(2,PERK_EXPEDITIOUS);
+ ChoosePerk(2,PERK_LIGHTWEIGHT);
 
  /* Actual name widget, cancel and validation; Save Only versus equip. */
  Activate(&classEdit.name); Screen(&className.menu,3);
@@ -221,7 +221,7 @@ int main(void) {
  CHECK(!strcmp(active,vars[Find("peace_loadout")].value));
  cl=ReadClass("peace_class_0"); CHECK(!strcmp(cl.name,"Trickshot"));
  CHECK(cl.slot[0]==WP_M40A3 && cl.slot[1]==WP_SHOTGUN && cl.lethal==WP_SEMTEX && cl.lethalCount==1);
- CHECK(cl.tacticalCount==2 && cl.perk[0]==PERK_QUICK_RELOAD && cl.perk[1]==PERK_NO_FALL_DAMAGE && cl.perk[2]==PERK_EXPEDITIOUS);
+ CHECK(cl.tacticalCount==2 && cl.perk[0]==PERK_QUICK_RELOAD && cl.perk[1]==PERK_NO_FALL_DAMAGE && cl.perk[2]==PERK_LIGHTWEIGHT);
  Activate(&classSelect.rows[BG_ClassCount()]); CHECK(UI_ClassSelected()==BG_ClassCount());
  CHECK(!strcmp(vars[Find("peace_loadout")].value,vars[Find("peace_class_0")].value));
  OpenEditor(0); CHECK(!UI_ClassDirty());

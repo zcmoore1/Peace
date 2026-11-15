@@ -28,19 +28,23 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // extra alignment padding in a 64-bit native refEntity_t. Marshal the prefix
 // and resolve the nested pointer before handing the entity to either renderer.
 // The same boundary is used by cgame and UI, including entities with no pose.
+// Both blocks must lie inside the VM's memory (VM_ExplicitArgBlock drops the
+// game otherwise): the renderer reads the whole pose later, in its back end.
 void CL_AddRefEntityFromVM( vm_t *vm, intptr_t entityAddress ) {
-	const byte *source = VM_ExplicitArgPtr(vm, entityAddress);
+	const byte *source;
 	refEntity_t entity;
 	int poseOffset;
 	const size_t prefixSize = offsetof(refEntity_t, rotation) + sizeof(float);
-	if ( !source ) return;
 	if ( VM_IsNative(vm) ) {
-		re.AddRefEntityToScene((const refEntity_t *)source);
+		source = VM_ExplicitArgPtr(vm, entityAddress);
+		if ( source ) re.AddRefEntityToScene((const refEntity_t *)source);
 		return;
 	}
+	source = VM_ExplicitArgBlock(vm, entityAddress, prefixSize + sizeof(poseOffset), "refEntity_t");
+	if ( !source ) return;
 	Com_Memset(&entity, 0, sizeof(entity));
 	Com_Memcpy(&entity, source, prefixSize);
 	Com_Memcpy(&poseOffset, source + prefixSize, sizeof(poseOffset));
-	entity.pose = VM_ExplicitArgPtr(vm, poseOffset);
+	entity.pose = VM_ExplicitArgBlock(vm, poseOffset, sizeof(modelPose_t), "refEntity_t's pose");
 	re.AddRefEntityToScene(&entity);
 }

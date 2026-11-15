@@ -46,9 +46,9 @@ int main(void) {
  for(i=0;i<2;i++) {
   gentity_t *e=&g_entities[i]; e->client=&cl[i]; e->inuse=qtrue;
   e->s.number=i; e->health=100; BG_ApplyClass(&cl[i].ps,BG_Class(0));
-  cl[i].ps.clientNum=i; cl[i].ps.pm_type=PM_NORMAL; cl[i].ps.viewheight=26; cl[i].ps.stats[STAT_HEALTH]=100;
+  cl[i].ps.clientNum=i; cl[i].ps.pm_type=PM_NORMAL; cl[i].ps.viewheight=DEFAULT_VIEWHEIGHT; cl[i].ps.stats[STAT_HEALTH]=100;
   cl[i].lastCmdTime=level.time;
-  e->r.maxs[2]=32; e->r.mins[2]=-24;
+  e->r.maxs[2]=DEFAULT_HEIGHT; e->r.mins[2]=MINS_Z;
  }
  { bg_weaponInstance_t gun={0}; gun.weapon=WP_RAILGUN; gun.ammo=3; gun.reserve=7;
    BG_PutSlot(&cl[1].ps,SLOT_PRIMARY,&gun); }

@@ -39,7 +39,9 @@ After emission, Y updates the selected slot/HUD immediately but queues the
 physical swap. The throw completes, the original gun recovers, then the normal
 weapon drop starts on the exact frame its raise lock expires. A second Y toggles
 the pending slot modulo two and can cancel that queued swap. An emitted
-projectile is never recalled or refunded. Ladder ownership overrides equipment.
+projectile is never recalled or refunded. A ladder grabbed with the Semtex out
+waits: the throw or cancel and the gun's quick raise finish, then the ladder takes
+the hands. No Semtex starts on a ladder.
 This queue is no longer a Semtex exception: every knife and grenade defers a Y
 the same way (MW2's CheckForChangeWeapon refuses its melee and offhand states),
 and YY cannot cancel the gun's quick raise after a cancel or a throw.

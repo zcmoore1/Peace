@@ -1,4 +1,4 @@
 // Eye behind the modeled rear aperture, on the front-post axis.
 iron 3.5 -4.8 -2.35 0 0 0
 timing 180 150
-fov 0.72
+zoomfov 64.8

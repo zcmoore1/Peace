@@ -473,12 +473,20 @@ void SV_ReplayReset( qboolean enabled ) {
 	replay.frames = frames;
 }
 
-int SV_ReplayStart( int clientNum, int fromTime, int toTime ) {
+// Records on to toTime, then plays fromTime..toTime to everyone from
+// beginTime, at game speed: MW2's archive playback is a constant offset
+// (SpectatorClientEndFrame). The round's pause before beginTime is the
+// caller's; recording stops at toTime, so the clip never moves under it.
+int SV_ReplayStart( int clientNum, int fromTime, int toTime, int beginTime ) {
 	int i;
 	replayFrame_t *frame;
+	// The whole window must stay in the history until toTime is recorded,
+	// and the final sample must be captured before playback begins.
 	if ( !replay.frames || replay.count < 2 || clientNum < 0 ||
 	     clientNum >= sv_maxclients->integer || fromTime >= toTime ||
-	     toTime > sv.time + 1000 || toTime < sv.time || replay.endTime > sv.time ) return 0;
+	     toTime - fromTime > REPLAY_HISTORY_MSEC - REPLAY_SAMPLE_MSEC ||
+	     toTime > sv.time + KILLCAM_LINGER || toTime < sv.time ||
+	     beginTime < toTime + REPLAY_SAMPLE_MSEC || replay.endTime > sv.time ) return 0;
 	// Start at an actual recorded frame, never extend the clip with a frozen
 	// opening when the kill happens early in a round or the killer just joined.
 	for ( i = 0; i < replay.count; i++ ) {
@@ -489,9 +497,8 @@ int SV_ReplayStart( int clientNum, int fromTime, int toTime ) {
 	replay.clientNum = clientNum;
 	replay.fromTime = frame->time;
 	replay.toTime = toTime;
-	// Allow the final sample to be captured before switching to playback.
-	replay.beginTime = toTime + REPLAY_SAMPLE_MSEC;
-	replay.endTime = replay.beginTime + toTime - replay.fromTime;
+	replay.beginTime = beginTime;
+	replay.endTime = beginTime + toTime - replay.fromTime;
 	Com_Printf("Replay: client %i source %i..%i playback %i..%i\n", clientNum,
 		replay.fromTime, toTime, replay.beginTime, replay.endTime);
 	return replay.endTime;
@@ -805,6 +812,48 @@ void SV_SendClientSnapshot( client_t *client ) {
 
 /*
 =======================
+SV_ClientSnapshotMsec
+
+MW2's snapshot interval (SV_UserinfoChanged 0x401a8a-0x401aa1): 100ms when
+the server is an online game (sv_onlineGame, MW2's onlinegame, default 1),
+else 50ms. The client's `snaps` is not read.
+=======================
+*/
+int SV_ClientSnapshotMsec( void ) {
+	return sv_onlineGame->integer ? 100 : 50;
+}
+
+/*
+=======================
+SV_SnapshotEveryFrame
+
+MW2's SV_SendMessageToClient (0x48ff84, 0x490033) sends a loopback or LAN
+client a snapshot every server frame, whatever its snapshot interval says.
+A bot (or the training dummy) is sent nothing: its AI reads the snapshot
+built for it, so it keeps one every frame as before.
+=======================
+*/
+qboolean SV_SnapshotEveryFrame( const client_t *client ) {
+	return client->netchan.remoteAddress.type == NA_LOOPBACK ||
+		client->netchan.remoteAddress.type == NA_BOT ||
+		( sv_lanForceRate->integer && Sys_IsLANAddress( client->netchan.remoteAddress ) );
+}
+
+/*
+=======================
+SV_SnapshotDue
+
+Whether a client's snapshot interval has run out on this server frame. Any
+other client than loopback or LAN waits it out (and its rate, below).
+=======================
+*/
+qboolean SV_SnapshotDue( const client_t *client ) {
+	return SV_SnapshotEveryFrame( client ) ||
+		svs.time - client->lastSnapshotTime >= client->snapshotMsec * com_timescale->value;
+}
+
+/*
+=======================
 SV_SendClientMessages
 =======================
 */
@@ -821,7 +870,7 @@ void SV_SendClientMessages(void)
 		if(!c->state)
 			continue;		// not connected
 
-		if(svs.time - c->lastSnapshotTime < c->snapshotMsec * com_timescale->value)
+		if(!SV_SnapshotDue(c))
 			continue;		// It's not time yet
 
 		if(*c->downloadName)
@@ -833,8 +882,7 @@ void SV_SendClientMessages(void)
 			continue;		// Drop this snapshot if the packet queue is still full or delta compression will break
 		}
 
-		if(!(c->netchan.remoteAddress.type == NA_LOOPBACK ||
-		     (sv_lanForceRate->integer && Sys_IsLANAddress(c->netchan.remoteAddress))))
+		if(!SV_SnapshotEveryFrame(c))
 		{
 			// rate control for clients not on LAN 
 			if(SV_RateMsec(c) > 0)

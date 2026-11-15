@@ -567,7 +567,7 @@ void CG_GrappleTrail( centity_t *ent, const weaponInfo_t *wi ) {
 	memset( &beam, 0, sizeof( beam ) );
 	//FIXME adjust for muzzle position
 	VectorCopy ( cg_entities[ ent->currentState.otherEntityNum ].lerpOrigin, beam.origin );
-	beam.origin[2] += 26;
+	beam.origin[2] += DEFAULT_VIEWHEIGHT;
 	AngleVectors( cg_entities[ ent->currentState.otherEntityNum ].lerpAngles, forward, NULL, up );
 	VectorMA( beam.origin, -6, up, beam.origin );
 	VectorCopy( origin, beam.oldorigin );
@@ -1088,7 +1088,6 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 	refEntity_t  beam;
 	vec3_t   forward;
 	vec3_t   muzzlePoint, endPoint;
-	int      anim;
 
 	if (cent->currentState.weapon != WP_LIGHTNING) {
 		return;
@@ -1128,12 +1127,8 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 		VectorCopy(cent->lerpOrigin, muzzlePoint );
 	}
 
-	anim = cent->currentState.legsAnim & ~ANIM_TOGGLEBIT;
-	if ( anim == LEGS_WALKCR || anim == LEGS_IDLECR ) {
-		muzzlePoint[2] += CROUCH_VIEWHEIGHT;
-	} else {
-		muzzlePoint[2] += DEFAULT_VIEWHEIGHT;
-	}
+	// the player's own eye, which its entity carries (origin2[2]: ps.viewheight)
+	muzzlePoint[2] += cent->currentState.origin2[2];
 
 	VectorMA( muzzlePoint, 14, forward, muzzlePoint );
 
@@ -1383,6 +1378,8 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 
 	MatrixMultiply(lerped.axis, ((refEntity_t *)parent)->axis, gun.axis);
 	gun.backlerp = parent->backlerp;
+	// a scaled body (cg_players.c) scales the gun it holds
+	gun.nonNormalizedAxes = parent->nonNormalizedAxes;
 
 	CG_AddWeaponWithPowerups( &gun, cent->currentState.powerups );
 
@@ -1537,7 +1534,6 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	refEntity_t	hand;
 	centity_t	*cent;
 	clientInfo_t	*ci;
-	float		fovOffset;
 	vec3_t		angles;
 	weaponInfo_t	*weapon;
 
@@ -1584,13 +1580,6 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		return;
 	}
 
-	// drop gun lower at higher fov
-	if ( cg_fov.integer > 90 ) {
-		fovOffset = -0.2 * ( cg_fov.integer - 90 );
-	} else {
-		fovOffset = 0;
-	}
-
 	cent = &cg.predictedPlayerEntity;	// &cg_entities[cg.snap->ps.clientNum];
 	CG_RegisterWeapon( ps->weapon );
 	weapon = &cg_weapons[ ps->weapon ];
@@ -1606,7 +1595,7 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 
 	VectorMA( hand.origin, cg_gun_x.value, cg.refdef.viewaxis[0], hand.origin );
 	VectorMA( hand.origin, cg_gun_y.value, cg.refdef.viewaxis[1], hand.origin );
-	VectorMA( hand.origin, (cg_gun_z.value+fovOffset), cg.refdef.viewaxis[2], hand.origin );
+	VectorMA( hand.origin, cg_gun_z.value, cg.refdef.viewaxis[2], hand.origin );
 	// A short universal lowering works for the placeholder MD3s too, and does
 	// not take animation-layer ownership away from the existing still-swap rule.
 	if ( !weapon->viewModel && (ps->stats[STAT_LADDER] & LADDER_HOLSTER) ) {
@@ -2385,6 +2374,46 @@ CLIENT-SIDE BULLET TRACES
 
 /*
 ================
+CG_PlayerHitVolumesTrace
+
+A bullet or pellet against one player's hit volumes past the move box
+(BG_PlayerHitVolumes, owner's decision D7: Peace's approximation of MW2's
+skeleton), the same function the server's damage traces use, fed the same
+way: the player's entity state and the box the trace tests it at. The engine
+trace has already tested the box; the nearest other volume entered before
+what it hit becomes the hit, at its own fraction and face.
+================
+*/
+void CG_PlayerHitVolumesTrace( trace_t *tr, const vec3_t start, const vec3_t end, int entityNum,
+	const entityState_t *es, const vec3_t origin, const vec3_t mins, const vec3_t maxs ) {
+	bgHitVolume_t	vols[BG_MAX_HIT_VOLUMES];
+	vec3_t			normal;
+	float			f;
+	int				i, n;
+
+	n = BG_PlayerHitVolumes( es, origin, mins, maxs, vols );
+	for ( i = 0; i < n; i++ ) {
+		if ( vols[i].type == HITVOL_BOX ) {
+			continue;	// the engine trace's
+		}
+		if ( !BG_HitVolumeTrace( &vols[i], start, end, &f, normal ) || f >= tr->fraction ) {
+			continue;
+		}
+		tr->fraction = f;
+		tr->endpos[0] = start[0] + f * ( end[0] - start[0] );
+		tr->endpos[1] = start[1] + f * ( end[1] - start[1] );
+		tr->endpos[2] = start[2] + f * ( end[2] - start[2] );
+		VectorCopy( normal, tr->plane.normal );
+		tr->plane.dist = DotProduct( tr->endpos, normal );
+		tr->entityNum = entityNum;
+		tr->surfaceFlags = 0;
+		tr->contents = CONTENTS_BODY;
+		tr->startsolid = tr->allsolid = qfalse;
+	}
+}
+
+/*
+================
 CG_ShotTrace
 
 A drawn shot's trace. The viewed player (the one cg.predictedPlayerState is)
@@ -2393,15 +2422,28 @@ someone else's bullet stops in them, as the server's did. Only while they
 have a body there: a viewer with no health and no PM_DEAD corpse (S&D's
 player out of the round, or waiting for the next one) is unlinked on the
 server, and the bullet goes through.
+
+A bullet or a pellet (hitVolumes) also tests every player's bullet-only hit
+volumes past the box (BG_PlayerHitVolumes, owner's decision D7), as the
+server's damage trace does: the viewed player's from their own playerstate,
+through the entity conversion the server's entity comes from.
 ================
 */
-static void CG_ShotTrace( trace_t *tr, const vec3_t start, const vec3_t end, int shooter, int mask ) {
-	const playerState_t	*ps = &cg.predictedPlayerState;
+static void CG_ShotTrace( trace_t *tr, const vec3_t start, const vec3_t end, int shooter, int mask,
+	qboolean hitVolumes ) {
+	playerState_t	*ps = &cg.predictedPlayerState;
+	entityState_t	es;
 	trace_t		body;
 	vec3_t		mins, maxs;
 
 	CG_Trace( tr, start, NULL, NULL, end, shooter, mask );
-	if ( shooter == ps->clientNum || !( mask & CONTENTS_BODY ) ) {
+	if ( !( mask & CONTENTS_BODY ) ) {
+		return;
+	}
+	if ( hitVolumes ) {
+		CG_ShotHitVolumes( tr, start, end, shooter );
+	}
+	if ( shooter == ps->clientNum ) {
 		return;
 	}
 	if ( ps->pm_type == PM_SPECTATOR || ps->pm_type == PM_NOCLIP || ps->pm_type == PM_INTERMISSION ||
@@ -2409,14 +2451,17 @@ static void CG_ShotTrace( trace_t *tr, const vec3_t start, const vec3_t end, int
 	     ( ps->stats[STAT_HEALTH] <= 0 && ps->pm_type != PM_DEAD ) ) {
 		return;
 	}
-	VectorSet( mins, -PLAYER_WIDTH, -PLAYER_WIDTH, MINS_Z );
-	VectorSet( maxs, PLAYER_WIDTH, PLAYER_WIDTH, ps->pm_type == PM_DEAD ? DEAD_HEIGHT :
-		( ps->pm_flags & PMF_DUCKED ) ? CROUCH_HEIGHT : DEFAULT_HEIGHT );
+	BG_PlayerBox( ps, mins, maxs );
 	trap_CM_TransformedBoxTrace( &body, start, end, NULL, NULL, trap_CM_TempBoxModel( mins, maxs ),
 		mask, ps->origin, vec3_origin );
 	if ( body.fraction < tr->fraction ) {
 		body.entityNum = ps->clientNum;
 		*tr = body;
+	}
+	if ( hitVolumes ) {
+		memset( &es, 0, sizeof( es ) );
+		BG_PlayerStateToEntityState( ps, &es, qfalse );
+		CG_PlayerHitVolumesTrace( tr, start, end, ps->clientNum, &es, ps->origin, mins, maxs );
 	}
 }
 
@@ -2453,7 +2498,7 @@ static void CG_ShotgunPellet( vec3_t start, vec3_t end, int skipNum ) {
 	trace_t		tr;
 	int sourceContentType, destContentType;
 
-	CG_ShotTrace( &tr, start, end, skipNum, MASK_SHOT );
+	CG_ShotTrace( &tr, start, end, skipNum, MASK_SHOT, qtrue );
 
 	sourceContentType = CG_PointContents( start, 0 );
 	destContentType = CG_PointContents( tr.endpos, 0 );
@@ -2661,7 +2706,6 @@ CG_CalcMuzzlePoint
 static qboolean	CG_CalcMuzzlePoint( int entityNum, vec3_t muzzle ) {
 	vec3_t		forward;
 	centity_t	*cent;
-	int			anim;
 
 	if ( entityNum == cg.snap->ps.clientNum ) {
 		VectorCopy( cg.snap->ps.origin, muzzle );
@@ -2679,12 +2723,7 @@ static qboolean	CG_CalcMuzzlePoint( int entityNum, vec3_t muzzle ) {
 	VectorCopy( cent->currentState.pos.trBase, muzzle );
 
 	AngleVectors( cent->currentState.apos.trBase, forward, NULL, NULL );
-	anim = cent->currentState.legsAnim & ~ANIM_TOGGLEBIT;
-	if ( anim == LEGS_WALKCR || anim == LEGS_IDLECR ) {
-		muzzle[2] += CROUCH_VIEWHEIGHT;
-	} else {
-		muzzle[2] += DEFAULT_VIEWHEIGHT;
-	}
+	muzzle[2] += cent->currentState.origin2[2];	// the shooter's eye (ps.viewheight)
 
 	VectorMA( muzzle, 14, forward, muzzle );
 
@@ -2792,7 +2831,7 @@ typedef struct {
 	int		clientNum;
 	int		gameTime;		// the command's time: MW2's seed
 	vec3_t	base;			// the snapped origin the server's muzzle starts from
-	int		viewheight;
+	float	viewheight;		// the eye, a float on MW2's curve
 	vec3_t	viewangles;
 	float	spreadScale;	// BG_SpreadScale of that state
 } cgShotRecord_t;
@@ -2831,7 +2870,7 @@ void CG_RecordShots( const playerState_t *before, const playerState_t *after ) {
 	}
 }
 
-static void CG_ShotAim( cgShot_t *shot, const vec3_t base, int viewheight, const vec3_t viewangles ) {
+static void CG_ShotAim( cgShot_t *shot, const vec3_t base, float viewheight, const vec3_t viewangles ) {
 	AngleVectors( viewangles, shot->forward, shot->right, shot->up );
 	BG_ShotMuzzle( base, viewheight, shot->forward, shot->muzzle );
 }
@@ -2865,18 +2904,16 @@ static void CG_PlayerShot( const playerState_t *ps, int sequence, int weapon, cg
 ================
 CG_EntityShot
 
-Someone else's shot, from their entity's event: its snapped origin, its aim
-(snapped to whole degrees), the time of its last command and the spread its
-motion and stance show. Aiming is not on the entity, so it is the hip's.
+Someone else's shot, from their entity's event: its snapped origin, its eye
+(origin2[2], the shooter's ps.viewheight, unsnapped: the eye the server's
+muzzle used, on every think of a stance's eye curve), its aim (snapped to
+whole degrees), the time of its last command and the spread its motion and
+stance show. The stance is MW2's EF_CROUCHING and EF_PRONE, written from the
+flags the shot's spread read. Aiming is not on the entity, so it is the hip's.
 ================
 */
 static void CG_EntityShot( const entityState_t *es, int weapon, cgShot_t *shot ) {
 	playerState_t	ps;
-	int				anim;
-	qboolean		crouched;
-
-	anim = es->legsAnim & ~ANIM_TOGGLEBIT;
-	crouched = anim == LEGS_WALKCR || anim == LEGS_IDLECR || anim == LEGS_BACKCR;
 
 	memset( &ps, 0, sizeof( ps ) );
 	ps.weapon = weapon;
@@ -2884,11 +2921,14 @@ static void CG_EntityShot( const entityState_t *es, int weapon, cgShot_t *shot )
 	if ( es->pos.trType == TR_LINEAR_STOP ) {
 		VectorCopy( es->pos.trDelta, ps.velocity );
 	}
-	if ( crouched ) {
+	if ( es->eFlags & EF_CROUCHING ) {
 		ps.pm_flags |= PMF_DUCKED;
 	}
+	if ( es->eFlags & EF_PRONE ) {
+		ps.pm_flags |= PMF_PRONE;
+	}
 
-	CG_ShotAim( shot, es->pos.trBase, crouched ? CROUCH_VIEWHEIGHT : DEFAULT_VIEWHEIGHT, es->apos.trBase );
+	CG_ShotAim( shot, es->pos.trBase, es->origin2[2], es->apos.trBase );
 	shot->seed = BG_BulletSeed( es->pos.trTime );
 	shot->spread = BG_WeaponBaseSpread( weapon ) * BG_SpreadScale( &ps );
 	shot->shooter = es->number;
@@ -2908,7 +2948,7 @@ static void CG_BulletShot( const cgShot_t *shot ) {
 	int		seed = shot->seed;
 
 	BG_BulletEnd( &seed, shot->spread, shot->muzzle, shot->forward, shot->right, shot->up, end );
-	CG_ShotTrace( &tr, shot->muzzle, end, shot->shooter, MASK_SHOT );
+	CG_ShotTrace( &tr, shot->muzzle, end, shot->shooter, MASK_SHOT, qtrue );
 	if ( tr.surfaceFlags & SURF_NOIMPACT ) {
 		return;		// the server's bullet ends there unseen
 	}
@@ -2974,7 +3014,7 @@ static void CG_LightningImpact( const cgShot_t *shot ) {
 	vec3_t	end;
 
 	VectorMA( shot->muzzle, LIGHTNING_RANGE, shot->forward, end );
-	CG_ShotTrace( &tr, shot->muzzle, end, shot->shooter, MASK_SHOT );
+	CG_ShotTrace( &tr, shot->muzzle, end, shot->shooter, MASK_SHOT, qfalse );	// a beam: the box alone
 	if ( tr.entityNum == ENTITYNUM_NONE ) {
 		return;
 	}

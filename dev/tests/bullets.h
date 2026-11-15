@@ -22,8 +22,13 @@ int BS_Missiles( void );
 int BS_Snapshot( int viewer, entityState_t *out, int max );
 void BS_FreeTempEntities( void );
 void BS_ClearMarks( void );
+void BS_Stance( int n, int buttons, int serverTime, float yaw );
 extern bwMark_t bs_marks[BW_MAX_MARKS];
 extern int bs_markCount, bs_shotTraces;
+extern int bs_volumeHits;		/* shots a hit volume past a box stopped (D7) */
+extern int bs_midLegShots;		/* bullets fired from an eye between two stances */
+extern bwMark_t bs_damage[BW_MAX_MARKS];	/* the real bullet code's G_Damage points, in order */
+extern int bs_damageCount, bs_bulletHealth[BS_CLIENTS];	/* and the health each player lost to them */
 
 /* client: bullets_client.c, one cgame at a time */
 void BC_Reset( int clientNum );

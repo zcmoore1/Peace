@@ -1173,14 +1173,14 @@ void SP_team_CTF_blueplayer( gentity_t *ent ) {
 }
 
 
-/*QUAKED team_CTF_redspawn (1 0 0) (-16 -16 -24) (16 16 32)
+/*QUAKED team_CTF_redspawn (1 0 0) (-16 -16 -24) (16 16 46)
 potential spawning position for red team in CTF games.
 Targets will be fired when someone spawns in on them.
 */
 void SP_team_CTF_redspawn(gentity_t *ent) {
 }
 
-/*QUAKED team_CTF_bluespawn (0 0 1) (-16 -16 -24) (16 16 32)
+/*QUAKED team_CTF_bluespawn (0 0 1) (-16 -16 -24) (16 16 46)
 potential spawning position for blue team in CTF games.
 Targets will be fired when someone spawns in on them.
 */

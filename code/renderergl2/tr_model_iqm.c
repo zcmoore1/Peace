@@ -1340,6 +1340,19 @@ void R_AddIQMSurfaces( trRefEntity_t *ent ) {
 }
 
 
+// The pose cgame blended for this entity (refEntity_t.pose), when its joint
+// count is this model's: one with another count (built for another model, or
+// filled badly by a QVM) would skin from the wrong joints, so the entity's
+// frames skin instead.
+static const iqmTransform_t *R_IQMEntityPose( const iqmData_t *data ) {
+	const modelPose_t *pose = backEnd.currentEntity->e.pose;
+
+	if ( pose && pose->numJoints == data->num_poses ) {
+		return (const iqmTransform_t *)pose->joints;
+	}
+	return NULL;
+}
+
 // Convert relative joint transforms to skinning matrices.
 // relativeJoints is an array of num_poses iqmTransform_t (same layout as modelJointTransform_t).
 static void RelativeJointsToMatrices( iqmData_t *data, const iqmTransform_t *relativeJoints, float *poseMats ) {
@@ -1412,13 +1425,19 @@ qboolean RE_BuildModelPose( qhandle_t hModel, int frame, int oldframe, float bac
 		return qfalse;
 
 	data = model->modelData;
-	if ( !data->num_poses )
+	// no poses, or poses with no frame to read them from
+	if ( !data->num_poses || !data->num_frames )
 		return qfalse;
 
 	outPose->numJoints = data->num_poses;
 
-	frame    = data->num_frames ? frame    % data->num_frames : 0;
-	oldframe = data->num_frames ? oldframe % data->num_frames : 0;
+	// wrapped into the model's frames, either way past either end
+	frame    = frame    % data->num_frames;
+	oldframe = oldframe % data->num_frames;
+	if ( frame < 0 )
+		frame += data->num_frames;
+	if ( oldframe < 0 )
+		oldframe += data->num_frames;
 
 	outJoint = outPose->joints;
 
@@ -1461,6 +1480,11 @@ void RE_BlendModelPoses( modelPose_t *out,
 
 	t = weightB / total;
 	numJoints = a->numJoints < b->numJoints ? a->numJoints : b->numJoints;
+	// never past the pose's joints (a QVM's pose counts are its own)
+	if ( numJoints < 0 )
+		numJoints = 0;
+	if ( numJoints > MAX_MODEL_JOINTS )
+		numJoints = MAX_MODEL_JOINTS;
 	out->numJoints = numJoints;
 
 	for ( i = 0; i < numJoints; i++ ) {
@@ -1553,8 +1577,10 @@ void RB_IQMSurfaceAnim( surfaceType_t *surface ) {
 	outColor = tess.color[tess.numVertexes];
 
 	if ( data->num_poses > 0 ) {
-		if ( backEnd.currentEntity->e.pose ) {
-			RelativeJointsToMatrices( data, (const iqmTransform_t *)backEnd.currentEntity->e.pose->joints, poseMats );
+		const iqmTransform_t *entityPose = R_IQMEntityPose( data );
+
+		if ( entityPose ) {
+			RelativeJointsToMatrices( data, entityPose, poseMats );
 		} else {
 			ComputePoseMats( data, frame, oldframe, backlerp, poseMats );
 		}
@@ -1772,8 +1798,10 @@ void RB_IQMSurfaceAnimVao(srfVaoIQModel_t * surface)
 		float		backlerp = backEnd.currentEntity->e.backlerp;
 		int i;
 
-		if ( backEnd.currentEntity->e.pose ) {
-			RelativeJointsToMatrices( surface->iqmData, (const iqmTransform_t *)backEnd.currentEntity->e.pose->joints, jointMats );
+		const iqmTransform_t *entityPose = R_IQMEntityPose( surface->iqmData );
+
+		if ( entityPose ) {
+			RelativeJointsToMatrices( surface->iqmData, entityPose, jointMats );
 		} else {
 			ComputePoseMats( surface->iqmData, frame, oldframe, backlerp, jointMats );
 		}

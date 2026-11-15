@@ -84,6 +84,7 @@ typedef struct {
 	/* the opponent, live */
 	int liveFire, liveSound, liveFlash, liveDrawn;
 	int liveFlashFrames, liveFlashWrong, liveFlashUnderOffhand;	/* the shooter's flash as their weapon draws it */
+	int liveOtherFlash;	/* another weapon's fire with its own flash (a frag's throw) has played since */
 	/* the opponent, watching the round killcam */
 	int kcSnaps, kcFire, kcSound, kcFlash, kcDrawn, kcEntityFire, kcKnifeSnaps, kcForeignAngles;
 	float kcPeak[3];
@@ -199,8 +200,11 @@ static void Observe( int role, const ccFrame_t *f, int *lastSnapTime ) {
 		O.liveDrawn += f->impacts + f->tracers + f->smokes;
 		/* the flash is the fired gun's: its model, on its own muzzle tag, with
 		 * its light, whatever the entity holds by then (MW2's es.weapon is
-		 * still the gun) */
-		if ( f->flashDrawn[SS_SHOOTER] ) {
+		 * still the gun) - until another weapon's fire event puts out a flash
+		 * of its own: the frag's throw, which plays live now that the round's
+		 * killcam waits for the round's end */
+		if ( f->otherFlashFire[SS_SHOOTER] ) O.liveOtherFlash = 1;
+		if ( f->flashDrawn[SS_SHOOTER] && !O.liveOtherFlash ) {
 			O.liveFlashFrames++;
 			if ( f->flashDrawn[SS_SHOOTER] != C.gun || f->flashTag[SS_SHOOTER] != C.gun || f->flashLight[SS_SHOOTER] != C.gun ) O.liveFlashWrong++;
 			if ( f->flashHeld[SS_SHOOTER] != C.gun ) O.liveFlashUnderOffhand++;
@@ -293,9 +297,11 @@ static void Run( int role ) {
 				switched = 1;
 			}
 			if ( role == ROLE_WATCHER && watcherView != VIEW_OPPONENT && now > startPress + 1500 ) break;
-			/* the round is won by the shot: S&D's killcam (g_snd.c), from the death */
+			/* the round is won by the shot: S&D's killcam (g_snd.c), from the
+			 * death, played when the round's pause is over */
 			if ( watcherView == VIEW_OPPONENT && O.svShots && !replayEnd ) {
-				replayEnd = SE_ReplayStart( SS_SHOOTER, O.svShotLevel - KILLCAM_REWIND, O.svShotLevel + KILLCAM_LINGER );
+				replayEnd = SE_ReplayStart( SS_SHOOTER, O.svShotLevel - KILLCAM_REWIND, O.svShotLevel + KILLCAM_LINGER,
+					O.svShotLevel + KILLCAM_ROUND_DELAY );
 				CHECK( replayEnd > levelTime );
 			}
 			if ( sqTail - sqHead >= 8 ) { fprintf( stderr, "snapshot queue full\n" ); exit( 1 ); }

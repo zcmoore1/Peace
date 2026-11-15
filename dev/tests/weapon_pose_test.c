@@ -215,9 +215,11 @@ static void TestOwnership(weapAnimDef_t *def) {
   * destinations. This intentionally catches per-weapon/per-destination rules. */
  for(w=0;w<ARRAY_LEN(weapons);w++) for(s=0;s<ARRAY_LEN(states);s++) for(ladder=0;ladder<2;ladder++) {
   BeginSource(def,&ps,weapons[w],states[s]); clip=StateClip(states[s]);
+  /* Pmove keeps the action under a sprint (MW2's CheckForSprint), as it
+   * keeps a raise or a drop: the sprint flag alone acquires their clip. The
+   * shot's end lowers the gun into the sprint entry. */
   ps.pm_flags|=PMF_SPRINTING;
-  if(states[s]==WEAPON_FIRING || states[s]==WEAPON_BOLTING)
-   ps.weaponstate=WEAPON_SPRINT_IN;
+  if(states[s]==WEAPON_FIRING) ps.weaponstate=WEAPON_SPRINT_IN;
   Update(def,&ps,1);
   /* Sprint clips acquire on the drop itself; other clips acquire on entry. */
   ps.weaponstate=WEAPON_DROPPING;
@@ -263,12 +265,18 @@ static void TestOwnership(weapAnimDef_t *def) {
  Update(def,&ps,1);
  CHECK(!cg_retainedActive && cg_weapLayers[LAYER_MOVE].clip==WANIM_RAISE);
  CHECK(cg_weapLayers[LAYER_MOVE].fit==MOVE_FIT_REVERSE && fabs(cg_weapLayers[LAYER_MOVE].time-time)<1);
- /* With no holster, a finished one-shot releases to normal sprint carry. */
+ /* With no holster, a finished one-shot releases to normal sprint entry: the
+  * action ends READY under the sprint flag, and the entry follows. */
  BeginSource(def,&ps,WP_SHOTGUN,WEAPON_BOLTING);
- ps.pm_flags=PMF_SPRINTING; ps.weaponstate=WEAPON_SPRINT_IN; Update(def,&ps,1);
- CHECK(cg_retainedActive);
+ ps.pm_flags=PMF_SPRINTING; Update(def,&ps,1);
+ CHECK(cg_retainedActive && retained->clip==WANIM_FIRE);
  Update(def,&ps,(int)CG_WeapAnim_ClipLength(def,WANIM_FIRE)*2);
- ps.weaponstate=WEAPON_SPRINTING; Update(def,&ps,1);
+ ps.weaponstate=WEAPON_READY; ps.weaponAnimTime=-1; Update(def,&ps,1);
+ CHECK(!cg_retainedActive && cg_weapLayers[LAYER_SPRINT].weight==0);
+ ps.weaponstate=WEAPON_SPRINT_IN; ps.weaponTime=BG_WeaponSprintInTime(ps.weapon); Update(def,&ps,1);
+ CHECK(!cg_retainedActive && cg_weapLayers[LAYER_SPRINT].clip==WANIM_SPRINT_IN);
+ CHECK(cg_weapLayers[LAYER_SPRINT].startFraction==0);
+ ps.weaponstate=WEAPON_SPRINTING; ps.weaponTime=0; Update(def,&ps,1);
  CHECK(!cg_retainedActive && cg_weapLayers[LAYER_SPRINT].clip==WANIM_SPRINT_LOOP);
 }
 
@@ -834,6 +842,77 @@ static int SprintExitFrames(playerState_t *ps,int weapon,modelPose_t *poses) {
  }
  return n;
 }
+/* A sprint over the shot or the action, through the real PM_Weapon. Pmove
+ * keeps the shot to its end and the action to its end (MW2's
+ * PM_Weapon_CheckForSprint returns on FIRING/RECHAMBERING). MW2's shot ends
+ * READY and its sprint check comes before the rechamber, so a sprint already
+ * on lowers the gun where the shot ends, carrying the fire clip it was
+ * showing, and the action is still owed: once the gun is back up it plays the
+ * whole cycle from its start. A sprint begun in the action lets the fire clip
+ * play to its end with no sprint posture over it, and the entry starts from
+ * rest on the think after the cycle ends READY: the gun never drops into a
+ * carry over an unfinished pump or bolt. */
+static void TestSprintAfterTheCycle(int gun) {
+ animLayer_t *base=&cg_weapLayers[LAYER_BASE],*sprint=&cg_weapLayers[LAYER_SPRINT];
+ animLayer_t *retained=&cg_weapLayers[LAYER_RETAINED];
+ int press,t;
+ /* pressed in the shot, in the action, and in the action after its close */
+ for(press=0;press<3;press++) {
+  FlowBeginWith(gun); FlowSlot(SLOT_SECONDARY);
+  for(t=0;t<10000 && !(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_READY &&
+   cg_weapLayers[LAYER_MOVE].weight==0);t+=8) FlowStep();
+  CHECK(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_READY);
+  flow.cmd.buttons=BUTTON_ATTACK; FlowStep(); flow.cmd.buttons=0;
+  CHECK(flowPs.weaponstate==WEAPON_FIRING && base->clip==WANIM_FIRE);
+  CHECK(flowPs.stats[STAT_UNCHAMBERED]&(1<<gun));
+  for(t=0;t<10000 && press && !(flowPs.weaponstate==WEAPON_BOLTING &&
+   (press==1 || !(flowPs.stats[STAT_UNCHAMBERED]&(1<<gun))));t+=8) FlowStep();
+  CHECK(flowPs.weaponstate==(press ? WEAPON_BOLTING : WEAPON_FIRING));
+  flowPs.pm_flags|=PMF_SPRINTING;
+  if(!press) {
+   /* the shot plays on to its end, then the gun lowers there, the action owed */
+   for(t=0;t<10000;t+=8) {
+    FlowStep();
+    if(flowPs.weaponstate!=WEAPON_FIRING) break;
+    CHECK(sprint->weight==0);
+   }
+   CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN && flowPs.weaponTime==BG_WeaponSprintInTime(gun));
+   CHECK(flowPs.stats[STAT_UNCHAMBERED]&(1<<gun));
+   /* the picture carries the fire clip it was showing into the sprint */
+   CHECK(cg_retainedActive && retained->clip==WANIM_FIRE);
+   for(t=0;t<BG_WeaponSprintInTime(gun)+8 && flowPs.weaponstate==WEAPON_SPRINT_IN;t+=8) FlowStep();
+   CHECK(flowPs.weaponstate==WEAPON_SPRINTING && (flowPs.stats[STAT_UNCHAMBERED]&(1<<gun)));
+   for(t=0;t<2000;t+=8) FlowStep();
+   CHECK(!cg_retainedActive && sprint->clip==WANIM_SPRINT_LOOP && sprint->weight==1);
+   /* back up: the whole action, from the start of its clip */
+   flowPs.pm_flags&=~PMF_SPRINTING;
+   for(t=0;t<BG_WeaponSprintOutTime(gun)+8 && flowPs.weaponstate!=WEAPON_BOLTING;t+=8) FlowStep();
+   CHECK(flowPs.weaponstate==WEAPON_BOLTING && flowPs.weaponAnimTime==0);
+   FlowStep();
+   CHECK(flowPs.weaponstate==WEAPON_BOLTING && flowPs.weaponAnimTime==8);
+   CHECK(base->clip==WANIM_FIRE && base->time<CG_WeapAnim_ClipLength(&bg_weapAnimDefs[gun],WANIM_FIRE)/4);
+   for(t=0;t<10000 && flowPs.weaponstate==WEAPON_BOLTING;t+=8) FlowStep();
+   CHECK(flowPs.weaponstate==WEAPON_READY && !(flowPs.stats[STAT_UNCHAMBERED]&(1<<gun)));
+   continue;
+  }
+  for(t=0;t<10000;t+=8) {
+   FlowStep();
+   if(flowPs.weaponstate==WEAPON_READY) break;
+   CHECK(flowPs.weaponstate==WEAPON_BOLTING);
+   CHECK(base->clip==WANIM_FIRE && sprint->weight==0);
+   CHECK(!cg_retainedActive || (retained->clip==WANIM_FIRE && fabs(retained->time-base->time)<.5f));
+  }
+  /* The cycle's last think: chambered, still no sprint posture. */
+  CHECK(flowPs.weaponstate==WEAPON_READY && !(flowPs.stats[STAT_UNCHAMBERED]&(1<<gun)));
+  CHECK(sprint->weight==0);
+  FlowStep();
+  CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN && flowPs.weaponTime==BG_WeaponSprintInTime(gun));
+  CHECK(!cg_retainedActive && retained->targetWeight==0);
+  CHECK(sprint->clip==WANIM_SPRINT_IN && sprint->weight==1 && sprint->startFraction==0);
+  for(t=0;t<BG_WeaponSprintInTime(gun)+8 && flowPs.weaponstate==WEAPON_SPRINT_IN;t+=8) FlowStep();
+  CHECK(flowPs.weaponstate==WEAPON_SPRINTING && sprint->clip==WANIM_SPRINT_LOOP && sprint->weight==1);
+ }
+}
 static void TestSprintReturnLikeExit(weapAnimDef_t *def,int weapon,const char *path) {
  static modelPose_t exitPoses[SPRINT_FRAMES];
  animLayer_t *move=&cg_weapLayers[LAYER_MOVE];
@@ -961,7 +1040,7 @@ static void FlowWorldBegin(void) {
  CHECK(flowPs.weapon==WP_SHOTGUN && flowPs.weaponstate==WEAPON_READY);
  flow.trace=FlowFloorTrace;flow.pointcontents=FlowFloorContents;flow.tracemask=MASK_PLAYERSOLID;
  flow.cmd.forwardmove=127;flowPs.commandTime=flow.cmd.serverTime;
- flowPs.speed=320;flowPs.gravity=800;flowPs.origin[2]=24;
+ flowPs.speed=BG_PLAYER_SPEED;flowPs.gravity=800;flowPs.origin[2]=24;
  flowPs.groundEntityNum=ENTITYNUM_WORLD;FlowWorldStep(qtrue);
  CHECK(flowPs.groundEntityNum==ENTITYNUM_WORLD);
 }
@@ -1257,6 +1336,7 @@ int main(void) {
  TestRestampLower(def,WP_SHOTGUN); TestRetainedKeptHolster(); TestSnapshotRestamp(def);
  TestShortDropKept();
  TestSprintFlow(def);
+ TestSprintAfterTheCycle(WP_SHOTGUN);
  TestSprintReturnLikeExit(def,WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm");
  TestSprintReturnUnmoved(WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm");
  TestSprintReentry(def);
@@ -1273,5 +1353,6 @@ int main(void) {
  TestOwnership(def); TestExclusions(def);
  TestPictureContinuity(def,WP_M40A3,"assets/baseq3/models/weapons2/m40a3/view.iqm");
  TestActionHandoff(WP_M40A3);
+ TestSprintAfterTheCycle(WP_M40A3);
  printf("PASS: %d weapon presentation ownership checks\n",checks); return 0;
 }

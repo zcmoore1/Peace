@@ -881,9 +881,10 @@ qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec ) 
 	return anyLayer;
 }
 
-// Apply the pose to the actual IQM entity. Both renderers support IQM frame
-// sampling; GL1 currently has no external-pose implementation, so keep the
-// active layers' frames as a crossfaded fallback without changing that renderer.
+// Apply the pose to the actual IQM entity. Both renderers skin from the
+// blended pose; the active layers' frames stay set as a crossfaded fallback,
+// for a model without poses and for the renderer's tag lookups (tag_flash),
+// which sample frames only.
 static qboolean CG_WeapAnim_SampleLayers(const weapAnimDef_t *def, refEntity_t *entity) {
 	qboolean sampled = qfalse;
 	int i;
@@ -894,7 +895,7 @@ static qboolean CG_WeapAnim_SampleLayers(const weapAnimDef_t *def, refEntity_t *
 		if (sampled && layer->weight < .999f) {
 			// Frame-only renderers have one interpolation pair, not a full pose
 			// stack. Crossfade nearest source/destination samples instead of
-			// abruptly changing clips at weight .5 (the old QVM/GL1 pop).
+			// abruptly changing clips at weight .5 (the old frame-only pop).
 			entity->frame = entity->backlerp >= .5f ? entity->oldframe : entity->frame;
 			entity->oldframe = source.backlerp >= .5f ? source.oldframe : source.frame;
 			entity->backlerp = layer->weight;
@@ -934,12 +935,9 @@ qboolean CG_WeapAnim_HoldsDrop(void) {
 
 qboolean CG_WeapAnim_Apply( playerState_t *ps, refEntity_t *entity, int msec ) {
 	if ( ps->weapon <= WP_NONE || ps->weapon >= WP_NUM_WEAPONS ) return qfalse;
+	// native or QVM alike: a QVM's pose pointer is translated, and bounds
+	// checked, at the engine's boundary (CL_AddRefEntityFromVM)
 	entity->pose = CG_WeapAnim_BuildPose( ps, entity->hModel, msec ) ? &cg.weaponPose : NULL;
-#ifdef Q3_VM
-	// A nested VM pointer in refEntity_t is not translated by the renderer
-	// syscall. Use ordinary IQM frames in QVM builds, just as GL1 does.
-	entity->pose = NULL;
-#endif
 	return CG_WeapAnim_SampleLayers(&bg_weapAnimDefs[ps->weapon], entity);
 }
 

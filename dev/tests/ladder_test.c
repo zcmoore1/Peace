@@ -95,7 +95,7 @@ static void Reset(float x, float y, float z) {
     move.trace = Trace; move.pointcontents = Contents;
     move.tracemask = MASK_PLAYERSOLID;
     ps.pm_type = PM_NORMAL;
-    ps.speed = 320; ps.gravity = 800;
+    ps.speed = BG_PLAYER_SPEED; ps.gravity = 800;
     ps.groundEntityNum = ENTITYNUM_NONE;
     ps.weaponstate = WEAPON_READY;
     ps.weaponAnimTime = -1;
@@ -106,6 +106,7 @@ static void Reset(float x, float y, float z) {
     ps.ammo[WP_SHOTGUN] = 3; ps.ammoReserve[WP_SHOTGUN] = 10;
     ps.ammo[WP_MACHINEGUN] = 10; ps.ammoReserve[WP_MACHINEGUN] = 60;
     VectorSet(ps.origin, x, y, z);
+    BG_SpawnStance(&ps);	/* MW2's spawn eye, as ClientSpawn: standing, no leg */
     pm = &move;
 }
 static void Tick(int dt) {
@@ -131,7 +132,7 @@ static void TestGrabAndHang(int dt) {
         CHECK(ps.velocity[0] == 0);
         CHECK(ps.velocity[1] > 0 && ps.velocity[2] < 0);
         CHECK(ps.origin[1] > 0 && ps.origin[2] < 220);
-        CHECK(fabs(AngleSubtract(ps.viewangles[YAW], LADDER_FACING(ps.stats[STAT_LADDER]))) <= 90.01f);
+        CHECK(fabs(AngleSubtract(ps.viewangles[YAW], LADDER_FACING(ps.stats[STAT_LADDER]))) <= BG_LADDER_YAW_CAP + 0.01f);
         CHECK(ps.weaponstate == WEAPON_DROPPING);
         CHECK(ps.weaponTime == BG_LADDER_DROP_TIME);
         Run(BG_LADDER_DROP_TIME, dt);
@@ -282,7 +283,7 @@ static void TestWeaponOrdering(void) {
             move.cmd.weapon = weapon == WP_SHOTGUN ? WP_MACHINEGUN : WP_SHOTGUN;
             WeaponTick(BG_LADDER_DROP_TIME);
             CHECK(ps.weaponstate == WEAPON_LADDER && ps.weapon == weapon);
-            PM_CheckADS(); PM_CheckSprint();
+            PM_CheckADS(); pml.forwardmove = move.cmd.forwardmove; PM_CheckSprint();
             CHECK(!(ps.pm_flags & (PMF_ADS | PMF_SPRINTING)));
             ps.stats[STAT_LADDER] = 0;
             move.cmd.buttons = 0;
@@ -318,19 +319,30 @@ static void TestWeaponOrdering(void) {
     }
 }
 
+/* MW2's bg_ladder_yawcap (100, clamp 0x571B60): the view turns freely to
+ * BG_LADDER_YAW_CAP either side of facing into the ladder and stops there,
+ * the excess taken out of delta_angles, so turning back moves it at once. */
 static void TestViewAndModes(void) {
-    int yaw, mode;
-    for (yaw = 0; yaw < 360; yaw++) {
+    int yaw, mode, side;
+    CHECK(BG_LADDER_YAW_CAP == 100.0f);
+    for (yaw = 0; yaw < 360; yaw++) for (side = -1; side <= 1; side += 2) {
+        float facing;
         Reset(111, 0, 180);
         ps.stats[STAT_LADDER] = LADDER_ATTACHED |
             ((ANGLE2SHORT(yaw) >> 4) << LADDER_YAW_SHIFT);
         CHECK((short)ps.stats[STAT_LADDER] == ps.stats[STAT_LADDER]);
-        move.cmd.angles[YAW] = ANGLE2SHORT(yaw + 120);
+        facing = LADDER_FACING(ps.stats[STAT_LADDER]);
+        /* inside the cap, past Peace's old 90: free, nothing wound up */
+        move.cmd.angles[YAW] = ANGLE2SHORT(facing + side * (BG_LADDER_YAW_CAP - 5));
         PM_UpdateViewAngles(&ps, &move.cmd);
-        CHECK(fabs(AngleSubtract(ps.viewangles[YAW], LADDER_FACING(ps.stats[STAT_LADDER]))) <= 90.01f);
-        move.cmd.angles[YAW] -= ANGLE2SHORT(10);
+        CHECK(fabs(AngleSubtract(ps.viewangles[YAW], facing) - side * (BG_LADDER_YAW_CAP - 5)) < 0.02f);
+        CHECK(ps.delta_angles[YAW] == 0);
+        move.cmd.angles[YAW] = ANGLE2SHORT(facing + side * (BG_LADDER_YAW_CAP + 20));
         PM_UpdateViewAngles(&ps, &move.cmd);
-        CHECK(fabs(AngleSubtract(ps.viewangles[YAW], LADDER_FACING(ps.stats[STAT_LADDER])) - 80) < 0.02f);
+        CHECK(fabs(AngleSubtract(ps.viewangles[YAW], facing) - side * BG_LADDER_YAW_CAP) < 0.02f);
+        move.cmd.angles[YAW] -= side * ANGLE2SHORT(10);
+        PM_UpdateViewAngles(&ps, &move.cmd);
+        CHECK(fabs(AngleSubtract(ps.viewangles[YAW], facing) - side * (BG_LADDER_YAW_CAP - 10)) < 0.02f);
     }
     for (mode = PM_NOCLIP; mode <= PM_SPINTERMISSION; mode++) {
         Reset(111, 0, 180);
@@ -558,8 +570,10 @@ static void StairTrace(trace_t *tr, const vec3_t start, const vec3_t mins, const
             SlopeBoxTrace(&t, &stairBoxes[i], start, lo, hi, end);
             for (k = 0; k < 3; k++) t.endpos[k] = start[k] + t.fraction * (end[k] - start[k]);
         } else {
+            /* the engine's temporary box is CONTENTS_BODY whatever the box
+             * stands for; the box's own contents were matched just above */
             clipHandle_t h = CM_TempBoxModel(stairBoxes[i].mn, stairBoxes[i].mx, qfalse);
-            CM_BoxTrace(&t, start, end, lo, hi, h, mask, qfalse);
+            CM_BoxTrace(&t, start, end, lo, hi, h, CONTENTS_BODY, qfalse);
         }
         if (t.allsolid) tr->allsolid = qtrue;
         if (t.startsolid) tr->startsolid = qtrue;
@@ -705,11 +719,11 @@ static void TestStepProgress(void) {
             AddStairBox(-1000, PLAYER_WIDTH + 1, -1000, 2000, 1000, 1000);
             AddStairBox(100, -1000, -MINS_Z + (c ? CROUCH_HEIGHT : DEFAULT_HEIGHT) + 8, 2000, 1000, 1000);
             StairReset(0, 0, 24.125f);
-            move.cmd.angles[YAW] = ANGLE2SHORT(20); move.cmd.forwardmove = 127; move.cmd.upmove = c ? -127 : 0;
+            move.cmd.angles[YAW] = ANGLE2SHORT(20); move.cmd.forwardmove = 127; move.cmd.buttons = c ? BUTTON_CROUCH : 0;
             for (t = 0; t < 3000 / frames[i]; t++) Tick(frames[i]);
             CHECK(ps.origin[0] > 100 + PLAYER_WIDTH && ps.groundEntityNum != ENTITYNUM_NONE);
         }
-        move.cmd.upmove = 0;
+        move.cmd.buttons = 0;
         for (c = 0; c < ARRAY_LEN(clear); c++) {
             /* the head where the front face meets the opening at y = 100 */
             float head = -MINS_Z + DEFAULT_HEIGHT - ny / nz * (100 - 2 * PLAYER_WIDTH);
@@ -882,6 +896,177 @@ static void TestLadderJumpHeight(int dt) {
     for (t = 0, top = ps.origin[2]; t < 2000 / dt && ps.velocity[2] > 0; t++) { Tick(dt); if (ps.origin[2] > top) top = ps.origin[2]; }
     CHECK(fabs(top - ps.jumpOriginZ - rise) < 3);  /* the 8ms rounding adds what TestLanding allows */
 }
+/* MW2's jump_ladderPushVel: a jump off a still hang, looking straight at the
+ * ladder (where MW2's push along the view, reflected off the ladder, is the
+ * same), leaves at BG_LADDER_JUMP_PUSH (128) away from the face, with nothing
+ * sideways. */
+static void TestLadderPush(int dt) {
+    vec3_t angles, out;
+    CHECK(BG_LADDER_JUMP_PUSH == 128.0f);
+    Reset(111, 0, 180);
+    Tick(dt); CHECK(Attached());
+    Run(1000, dt); CHECK(Attached() && VectorLength(ps.velocity) == 0);
+    VectorSet(angles, 0, LADDER_FACING(ps.stats[STAT_LADDER]), 0);
+    AngleVectors(angles, out, NULL, NULL);
+    VectorNegate(out, out);
+    move.cmd.upmove = 127; Tick(dt); move.cmd.upmove = 0;
+    CHECK(!Attached() && ps.jumpLand == -1);
+    CHECK(fabs(ps.velocity[0] * out[0] + ps.velocity[1] * out[1] - BG_LADDER_JUMP_PUSH) <= 0.5f);
+    CHECK(fabs(ps.velocity[0] * out[1] - ps.velocity[1] * out[0]) <= 0.5f);
+}
+/* MW2's ladder drop is a weapon change, which CheckForChangeWeapon refuses in
+ * every melee and offhand state and in the quick raise after one
+ * (578bc0-578c04): a ladder grabbed with the knife, a frag or a Semtex out
+ * takes nothing from it. The knife lands; the frag cooks on, and is thrown on
+ * its release or goes off in the hand at the end of its fuse; the Semtex is
+ * thrown, or Y cancels it; the gun comes back on its quick raise; and the
+ * ladder drop starts on the think the latch clears, never before. Nothing new
+ * starts on the ladder meanwhile. The grab is real contact with the shipped
+ * BSP, through the real Pmove. */
+static int fired[MAX_WEAPONS], suicides;
+static void QuickTick(int dt) {
+    int seq = ps.eventSequence;
+    Tick(dt);
+    for (; seq < ps.eventSequence; seq++) {
+        int ev = ps.events[seq & (MAX_PS_EVENTS - 1)];
+        if (ev == EV_FIRE_WEAPON) fired[ps.eventParms[seq & (MAX_PS_EVENTS - 1)]]++;
+        if (ev == EV_GRENADE_SUICIDE) suicides++;
+    }
+}
+static void QuickReset(int lethal, int dt) {
+    bg_class_t cl = *BG_Class(0);
+    int t;
+    Reset(-150, 0, 24.125f);  /* the floor, well away from the ladder */
+    cl.slot[0] = WP_SHOTGUN; cl.slot[1] = WP_MACHINEGUN;
+    cl.lethal = lethal; cl.lethalCount = BG_ClassEquipmentCount(lethal);
+    CHECK(BG_ValidateClass(&cl));
+    BG_ApplyClass(&ps, &cl);
+    memset(fired, 0, sizeof(fired)); suicides = 0;
+    for (t = 0; t < 200; t += dt) QuickTick(dt);
+    CHECK(!Attached() && ps.groundEntityNum == ENTITYNUM_WORLD);
+    CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_READY && !ps.weaponAction);
+}
+static qboolean LadderHasHands(void) {
+    return (ps.stats[STAT_LADDER] & LADDER_HOLSTER) || ps.weaponstate == WEAPON_LADDER;
+}
+static void GrabWithAction(int dt) {
+    int latch = ps.weaponAction & (WA_TYPE_MASK | WA_FIRED), weapon = ps.weapon;
+    VectorSet(ps.origin, 111, 0, 180); VectorClear(ps.velocity);
+    ps.groundEntityNum = ENTITYNUM_NONE;
+    QuickTick(dt);
+    CHECK(Attached() && !LadderHasHands());
+    CHECK((ps.weaponAction & WA_TYPE_MASK) == (latch & WA_TYPE_MASK) && ps.weapon == weapon);
+}
+/* hang on until the ladder takes the hands: never while the latch holds, and
+ * on the think it clears. press: an offhand button pressed once in the gun's
+ * quick raise, which starts nothing on a ladder. */
+static void UntilLadderDrop(int dt, int press) {
+    int t;
+    for (t = 0; t < 10000 && !LadderHasHands(); t += dt) {
+        CHECK(Attached() && (ps.weaponAction & WA_TYPE_MASK));
+        if (press && (ps.weaponAction & WA_FIRED) && !BG_IsActionWeapon(ps.weapon)) {
+            /* the gun's quick raise: equipment pressed here would start the
+             * next throw off a ladder; on one it starts nothing */
+            int flashes = ps.ammo[WP_FLASH], latch = ps.weaponAction & (WA_TYPE_MASK | WA_FIRED);
+            CHECK(flashes > 0);
+            move.cmd.buttons = press; QuickTick(dt); move.cmd.buttons = 0;
+            CHECK(ps.ammo[WP_FLASH] == flashes && ps.weapon == WP_SHOTGUN);
+            CHECK(!(ps.weaponAction & WA_TYPE_MASK) || (ps.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == latch);
+            press = 0;
+            continue;
+        }
+        QuickTick(dt);
+    }
+    CHECK(t < 10000 && !press && Attached() && !(ps.weaponAction & WA_TYPE_MASK));
+    CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_DROPPING &&
+          (ps.stats[STAT_LADDER] & LADDER_HOLSTER) && ps.weaponTime == BG_LADDER_DROP_TIME);
+    CHECK(BG_HolsterTime(&ps) == BG_LADDER_DROP_TIME);
+    for (; ps.weaponstate != WEAPON_LADDER && t < 20000; t += dt) QuickTick(dt);
+    CHECK(ps.weaponstate == WEAPON_LADDER && ps.weapon == WP_SHOTGUN && Attached());
+}
+static void TestOffhandGrab(int dt) {
+    const int fuse = BG_OffhandFuseTime(WP_FRAG);
+    int k, t, left;
+    /* the frag: k 0 thrown on the ladder, 1 cooked out on it, 2 the ladder
+     * left again before its release */
+    for (k = 0; k < 3; k++) {
+        QuickReset(WP_FRAG, dt);
+        move.cmd.buttons = BUTTON_LETHAL;
+        for (t = 0; t < 5000 && !(ps.weapon == WP_FRAG && ps.weaponstate == WEAPON_READY); t += dt) QuickTick(dt);
+        CHECK(ps.grenadeTimeLeft == fuse && (ps.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == WA_LETHAL);
+        for (t = 0; t < 1000; t += dt) QuickTick(dt);
+        left = ps.grenadeTimeLeft;
+        CHECK(left < fuse && left > 0);
+        GrabWithAction(dt);
+        /* the fuse runs on through the grab */
+        CHECK(ps.grenadeTimeLeft == left - dt && ps.weapon == WP_FRAG && ps.weaponstate == WEAPON_READY);
+        for (t = 0; t < 400; t += dt) {
+            left = ps.grenadeTimeLeft; QuickTick(dt);
+            CHECK(Attached() && !LadderHasHands() && ps.grenadeTimeLeft == left - dt);
+        }
+        CHECK(!fired[WP_FRAG] && !suicides && ps.ammo[WP_FRAG] == 1);
+        if (k == 2) {
+            move.cmd.upmove = 127; QuickTick(dt); move.cmd.upmove = 0;
+            CHECK(!Attached() && !LadderHasHands() && ps.weapon == WP_FRAG);
+            move.cmd.buttons = 0; QuickTick(dt);
+            CHECK(fired[WP_FRAG] == 1);
+            for (t = 0; t < 10000 && (ps.weaponAction & WA_TYPE_MASK); t += dt) {
+                QuickTick(dt); CHECK(!LadderHasHands());
+            }
+            CHECK(ps.weapon == WP_SHOTGUN && !LadderHasHands() && !(ps.weaponAction & WA_TYPE_MASK));
+            continue;
+        }
+        if (k == 1) {
+            /* held to the end of its fuse: MW2's grenade suicide, on the ladder */
+            for (t = 0; t < fuse && ps.grenadeTimeLeft > 0; t += dt) QuickTick(dt);
+            CHECK(suicides == 1 && ps.grenadeTimeLeft == -1 && !fired[WP_FRAG] && ps.ammo[WP_FRAG] == 0);
+            move.cmd.buttons = 0;
+        } else {
+            move.cmd.buttons = 0; QuickTick(dt);
+            CHECK(fired[WP_FRAG] == 1 && ps.ammo[WP_FRAG] == 0 && (ps.weaponAction & WA_FIRED));
+            CHECK(Attached() && !LadderHasHands());
+        }
+        UntilLadderDrop(dt, k == 0 ? BUTTON_TACTICAL : 0);
+        CHECK(fired[WP_FRAG] == (k == 0) && suicides == (k == 1));
+    }
+    /* the knife: out on its press, the grab, then its hit on the ladder */
+    QuickReset(WP_FRAG, dt);
+    move.cmd.buttons = BUTTON_MELEE; QuickTick(dt); move.cmd.buttons = 0;
+    CHECK(ps.weapon == WP_KNIFE && !fired[WP_KNIFE]);
+    GrabWithAction(dt);
+    for (t = 0; t < BG_MELEE_DELAY && !fired[WP_KNIFE]; t += dt) {
+        CHECK(!LadderHasHands()); QuickTick(dt);
+    }
+    CHECK(fired[WP_KNIFE] == 1 && Attached() && !LadderHasHands());
+    /* a frag pressed after the hit would cut the knife off a ladder; on one
+     * it starts nothing */
+    move.cmd.buttons = BUTTON_LETHAL; QuickTick(dt); move.cmd.buttons = 0;
+    CHECK(ps.weapon == WP_KNIFE && (ps.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == (WA_MELEE | WA_FIRED));
+    CHECK(ps.ammo[WP_FRAG] == BG_ClassEquipmentCount(WP_FRAG) && !LadderHasHands());
+    UntilLadderDrop(dt, BUTTON_TACTICAL);
+    CHECK(fired[WP_KNIFE] == 1 && !fired[WP_SHOTGUN]);
+    /* the Semtex: k 0 thrown on the ladder, 1 cancelled there with Y */
+    for (k = 0; k < 2; k++) {
+        QuickReset(WP_SEMTEX, dt);
+        move.cmd.buttons = BUTTON_LETHAL;
+        for (t = 0; t < 5000 && !(ps.weapon == WP_SEMTEX && ps.weaponstate == WEAPON_READY); t += dt) QuickTick(dt);
+        CHECK(ps.weapon == WP_SEMTEX && ps.weaponstate == WEAPON_READY && !fired[WP_SEMTEX]);
+        GrabWithAction(dt);
+        for (t = 0; t < 300; t += dt) { QuickTick(dt); CHECK(Attached() && !LadderHasHands()); }
+        if (k) {
+            move.cmd.buttons |= BUTTON_WEAPON_SWAP; QuickTick(dt);
+            CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_RAISING &&
+                  ps.weaponTime == BG_WeaponQuickRaiseTime(WP_SHOTGUN));
+            move.cmd.buttons = 0;
+        } else {
+            move.cmd.buttons = 0; QuickTick(dt);
+            CHECK(fired[WP_SEMTEX] == 1);
+        }
+        CHECK(Attached() && !LadderHasHands() && ps.grenadeTimeLeft >= 0);
+        UntilLadderDrop(dt, 0);
+        CHECK(fired[WP_SEMTEX] == !k && ps.ammo[WP_SEMTEX] == BG_ClassEquipmentCount(WP_SEMTEX) - !k);
+    }
+}
 /* MW2's Jump_Start ends any running timer (pm_time = 0): a hop right after a
  * landing fast enough to start Q3's landing timer has no timer left, so a
  * ceiling clips it at once instead of holding it pressed under it. */
@@ -914,10 +1099,10 @@ static void TestCrouchedJump(void) {
     numStairBoxes = 0;
     AddStairBox(-1000, -1000, -1000, 1000, 1000, 0);
     AddStairBox(-1000, -1000, -MINS_Z + CROUCH_HEIGHT + 8, 100, 1000, 1000);
-    StairReset(0, 0, 24.125f); move.cmd.upmove = -127;
+    StairReset(0, 0, 24.125f); move.cmd.buttons = BUTTON_CROUCH;	/* MW2's crouch bit */
     for (t = 0; t < 60; t++) Tick(8);
     CHECK((ps.pm_flags & PMF_DUCKED) && ps.groundEntityNum != ENTITYNUM_NONE);
-    move.cmd.upmove = 127; Tick(8);
+    move.cmd.buttons = 0; move.cmd.upmove = 127; Tick(8);	/* stand, under it, and jump */
     CHECK((ps.pm_flags & PMF_DUCKED) && (ps.pm_flags & PMF_JUMP_HELD));
     CHECK(ps.groundEntityNum != ENTITYNUM_NONE && ps.jumpLand != -1 && ps.velocity[2] <= 0);
     move.cmd.forwardmove = 127;
@@ -1025,6 +1210,8 @@ int main(void) {
         TestTraverseAndExit(steps[i]);
         TestJump(steps[i]);
         TestLadderJumpHeight(steps[i]);
+        TestLadderPush(steps[i]);
+        TestOffhandGrab(steps[i]);
         TestBottomExit(steps[i]);
         TestPredictionReplay(steps[i]);
     }
@@ -1045,6 +1232,6 @@ int main(void) {
     TestCrouchedJump();
     TestStepRules();
     for (i = 0; i < numAllocations; i++) free(allocations[i]);
-    printf("PASS: ladder BSP collision, momentum, traversal, detach, yaw, weapon ordering, prediction replay, steps and jumps (%d checks).\n", checks);
+    printf("PASS: ladder BSP collision, momentum, traversal, detach, yaw, push, offhand grabs, weapon ordering, prediction replay, steps and jumps (%d checks).\n", checks);
     return 0;
 }

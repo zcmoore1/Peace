@@ -14,7 +14,7 @@
   "sprint_out_ms": 250,
   "ads_in_ms": 180,
   "ads_out_ms": 150,
-  "fov_scale": 0.72,
+  "ads_zoom_fov": 64.8,
   "masterkey": {
     "mag_size": 4,
     "reserve": 16,
@@ -33,6 +33,6 @@
     "sprint_out_ms": 250,
     "ads_in_ms": 180,
     "ads_out_ms": 150,
-    "fov_scale": 0.72
+    "ads_zoom_fov": 64.8
   }
 }

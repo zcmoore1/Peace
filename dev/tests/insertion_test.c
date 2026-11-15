@@ -143,6 +143,8 @@ void ClientEndFrame(gentity_t *e) {
   G_IsInsertion(&g_entities[e->client->ps.cursorHintEntIndex])) spawnHinted++;
 }
 void CalculateRanks(void) { }
+/* player_die's final killcam: nothing here reaches a score limit (above) */
+int trap_ReplayStart(int killer,int from,int to,int begin) { (void)killer;(void)from;(void)to;(void)begin; abort(); return 0; }
 int BotAIShutdownClient(int n,qboolean r) { (void)n;(void)r; return 0; }
 void G_RemoveQueuedBotBegin(int n) { (void)n; }
 void BotTestAAS(vec3_t o) { (void)o; }
@@ -377,15 +379,29 @@ static void TestSpawn(void) {
  spawnHinted=0; hinted=endFrames;
  ClientSpawn(&g_entities[0]);
  CHECK(endFrames==hinted+1 && !spawnHinted);	/* its first hint pass never saw it */
+ /* the real ClientSpawn's box is MW2's body over Peace's origin: 30 wide,
+  * 70 tall, MINS_Z below the origin; the eye 60 above the feet; and the move
+  * class is the class primary's (the preset's Machinegun: MW2's rifle) */
+ CHECK(g_entities[0].r.mins[0]==-PLAYER_WIDTH && g_entities[0].r.maxs[1]==PLAYER_WIDTH);
+ CHECK(g_entities[0].r.mins[2]==MINS_Z && g_entities[0].r.maxs[2]==DEFAULT_HEIGHT);
+ CHECK(g_entities[0].r.maxs[2]-g_entities[0].r.mins[2]==70 && DEFAULT_VIEWHEIGHT-MINS_Z==60);
+ CHECK(cl[0].ps.moveClass==BG_WeaponMoveClass(cl[0].ps.stats[STAT_SLOT_PRIMARY]) && cl[0].ps.moveClass==MOVECLASS_RIFLE);
  CHECK(VectorCompare(cl[0].ps.origin,spot) && fabs(AngleNormalize180(cl[0].ps.viewangles[YAW]-30))<0.01f);
  CHECK(cl[0].ps.viewangles[PITCH]==0 && cl[0].ps.viewangles[ROLL]==0);
  CHECK(!ti->inuse && !Insertions() && cl[1].ps.cursorHintEntIndex==ENTITYNUM_NONE);
  CHECK(cl[0].ps.cursorHintEntIndex!=number && g_entities[0].health>0 && cl[0].ps.ammo[WP_TACTICAL_INSERTION]==1);
  CHECK(cl[0].insertionSpotValid && VectorCompare(cl[0].insertionSpot,spot));	/* the new life's first spot */
  CHECK(g_entities[1].health>0);
- /* the next life spawns normally: it was used up */
+ /* the next life spawns normally: it was used up. It died lying down, its
+  * body turned away: MW2's spawn eye stands it up with no leg running, before
+  * the spawn's angles, which no prone clamp touches (BG_SpawnStance) */
+ cl[0].ps.pm_flags|=PMF_PRONE|PMF_PRONEMOVE_OVERRIDDEN; cl[0].ps.viewHeightTarget=BG_EYE_PRONE;
+ cl[0].ps.viewheight=PRONE_VIEWHEIGHT; cl[0].ps.proneDirection=270; cl[0].ps.viewHeightLerpTarget=BG_EYE_PRONE;
  Die(0); ClientSpawn(&g_entities[0]);
  CHECK(cl[0].ps.origin[0]==-800 && cl[0].ps.origin[1]==0 && NEAR(cl[0].ps.viewangles[YAW],90));
+ CHECK(!(cl[0].ps.pm_flags&(PMF_PRONE|PMF_DUCKED|PMF_PRONEMOVE_OVERRIDDEN)) && cl[0].ps.viewheight==DEFAULT_VIEWHEIGHT);
+ CHECK(cl[0].ps.viewHeightTarget==BG_EYE_STAND && !cl[0].ps.viewHeightLerpTarget && g_entities[0].r.maxs[2]==DEFAULT_HEIGHT);
+ CHECK(!(g_entities[0].s.eFlags&(EF_PRONE|EF_CROUCHING)) && g_entities[0].s.origin2[2]==DEFAULT_VIEWHEIGHT);
  /* someone standing on it: a normal spawn, the TI gone, nobody telefragged */
  ti=Planted(0,100,50); VectorCopy(ti->pos1,spot);
  Stand(1,spot[0]+10,spot[1],spot[2]); Stand(0,-300,300,24); Die(0);

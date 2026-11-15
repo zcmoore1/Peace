@@ -457,7 +457,11 @@ def build():
     shaders+='icons/peace_m16\n{\n nopicmip\n { map icons/peace_m16.tga\n blendFunc blend\n }\n}\n'
     # Leave the rear aperture beyond the engine's 4-unit near plane in ADS.
     eye=add(ORIGIN,(-8.5,0,3.65))
-    sights=f'// Eye behind the modeled rear aperture, on the front-post axis.\niron {eye[0]} {eye[1]} {eye[2]} 0 0 0\ntiming {data["ads_in_ms"]} {data["ads_out_ms"]}\nfov {data["fov_scale"]}\n'
+    def sights(source):
+        return (f'// Eye behind the modeled rear aperture, on the front-post axis.\n'
+                f'iron {eye[0]} {eye[1]} {eye[2]} 0 0 0\n'
+                f'timing {source["ads_in_ms"]} {source["ads_out_ms"]}\n'
+                f'zoomfov {source["ads_zoom_fov"]}\n').encode()
     flash=Mesh()
     flash.face('flash',0,[(6,-1.2,0),(9,-1.2,0),(9,1.2,0),(6,1.2,0)])
     flash.face('flash',0,[(6,0,-1.2),(9,0,-1.2),(9,0,1.2),(6,0,1.2)])
@@ -475,10 +479,10 @@ def build():
         for macro,key in dict(names,**extra).items():header.append(f'#define {prefix}_{macro} {source[key]}')
     header+=['#endif','']
     return {'assets/baseq3/'+PREFIX+'view.iqm':model,'assets/baseq3/'+PREFIX+'view.cfg':cfg,
-            'assets/baseq3/'+PREFIX+'view.sights':sights.encode(),
+            'assets/baseq3/'+PREFIX+'view.sights':sights(data),
             'assets/baseq3/'+PREFIX+'masterkey.iqm':altmodel,
             'assets/baseq3/'+PREFIX+'masterkey.cfg':altcfg,
-            'assets/baseq3/'+PREFIX+'masterkey.sights':sights.encode(),
+            'assets/baseq3/'+PREFIX+'masterkey.sights':sights(shotgun),
             'assets/baseq3/'+PREFIX+'world.md3':md3(world),
             'assets/baseq3/'+PREFIX+'masterkey_world.md3':md3(world,True),
             'assets/baseq3/'+PREFIX+'world_flash.md3':md3(flash),
@@ -495,7 +499,9 @@ if __name__=='__main__':
     parser.add_argument('--check',action='store_true');args=parser.parse_args()
     for name,data in build().items():
         path=ROOT/name
-        if args.check:assert path.read_bytes()==data,'Stale generated asset: '+name
+        if args.check:
+            actual=path.read_text().encode() if path.suffix in ('.cfg','.sights','.shader','.h') else path.read_bytes()
+            assert actual==data,'Stale generated asset: '+name
         else:path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(data)
         print(('Checked' if args.check else 'Built')+f' {name} ({len(data)} bytes)')
     parts=list(surface_parts(geometry()))

@@ -151,6 +151,8 @@ gentity_t *SelectCTFSpawnPoint(team_t team,int state,vec3_t origin,vec3_t angles
 void MoveClientToIntermission(gentity_t *e) { (void)e; }
 void FindIntermissionPoint(void) { }
 void CalculateRanks(void) { }
+/* player_die's final killcam: nothing here reaches a score limit (above) */
+int trap_ReplayStart(int killer,int from,int to,int begin) { (void)killer;(void)from;(void)to;(void)begin; abort(); return 0; }
 int BotAIShutdownClient(int n,qboolean r) { (void)n;(void)r; return 0; }
 void G_RemoveQueuedBotBegin(int n) { (void)n; }
 void BotTestAAS(vec3_t o) { (void)o; }
@@ -219,7 +221,7 @@ static void Reset(int row) {
  memset(boomTime,0,sizeof(boomTime));
  level.time=10000; level.previousTime=level.time-CMD_MSEC; level.num_entities=MAX_CLIENTS; level.maxclients=2;
  level.clients=cl; level.gentities=g_entities;
- g_gametype.integer=GT_FFA; g_knockback.integer=1000; g_speed.value=320; g_gravity.value=DEFAULT_GRAVITY;
+ g_gametype.integer=GT_FFA; g_knockback.integer=1000; g_speed.value=BG_PLAYER_SPEED; g_gravity.value=DEFAULT_GRAVITY;
  pmove_msec.integer=8; pmove_fixed.integer=0; sndCanDamage=qtrue; viewPitch=0; forwardMove=0; cmdWeapon=WP_SHOTGUN;
  for(i=0;i<2;i++) {
   gentity_t *e=&g_entities[i]; bg_class_t c=*BG_Class(0);
@@ -765,8 +767,40 @@ static void TestEventRing(void) {
    CHECK(w->s.eventSequence==0 && w->s.events[3]==EV_GENERAL_SOUND && w->s.eventParms[3]==5); }
 }
 
+/* Lying down (dev/STANCE.md): MW2's death drop reads no stance, so a prone
+ * holder's grenade leaves BG_OFFHAND_DEATH_HEIGHT above the origin as a
+ * standing one's does (5df990-5df9b0); a prone throw leaves from the prone
+ * eye's muzzle, as every reach reads ps.viewheight. */
+static void ProneOut(void) {
+ int t;
+ for(t=0;t<1000 && !(ps->viewHeightTarget==BG_EYE_PRONE && !ps->viewHeightLerpTarget);t+=CMD_MSEC) Frame(BUTTON_PRONE);
+ CHECK((ps->pm_flags&PMF_PRONE) && ps->viewheight==PRONE_VIEWHEIGHT && g_entities[THROWER].r.maxs[2]==PRONE_HEIGHT);
+ Frame(Button(WP_FRAG)|BUTTON_PRONE);
+ for(t=0;t<10000 && !(ps->weapon==WP_FRAG && ps->weaponstate==WEAPON_READY);t+=CMD_MSEC) Frame(Button(WP_FRAG)|BUTTON_PRONE);
+ CHECK(ps->weapon==WP_FRAG && ps->grenadeTimeLeft>0 && (ps->pm_flags&PMF_PRONE));
+}
+static void TestProne(void) {
+ int from; gentity_t *m=NULL; vec3_t at;
+ Reset(FRAG); from=level.num_entities;
+ ProneOut();
+ VectorCopy(g_entities[THROWER].r.currentOrigin,at);
+ Kill();
+ CHECK(Spawned(from,&m)==1 && NEAR(m->s.pos.trBase[0],at[0]) && NEAR(m->s.pos.trBase[1],at[1]) &&
+  NEAR(m->s.pos.trBase[2],at[2]+BG_OFFHAND_DEATH_HEIGHT));
+ /* thrown lying down: from the prone muzzle */
+ Reset(FRAG); from=level.num_entities;
+ ProneOut();
+ Command(BUTTON_PRONE);
+ CHECK(Spawned(from,&m)==1 && (ps->weaponAction&WA_FIRED));
+ { vec3_t forward, muzzle; AngleVectors(ps->viewangles,forward,NULL,NULL);
+   VectorCopy(g_entities[THROWER].s.pos.trBase,muzzle); muzzle[2]+=PRONE_VIEWHEIGHT; VectorMA(muzzle,14,forward,muzzle);
+   SnapVector(muzzle); CHECK(VectorCompare(m->s.pos.trBase,muzzle)); }
+ World();
+}
+
 int main(void) {
  TestData(); TestThrow(); TestCook(); TestChoppedCookOut(); TestDeathDrop(); TestReleaseOnFatalFall();
+ TestProne();
  TestEventRing();
  printf("PASS: %d offhand server checks\n",checks); return 0;
 }

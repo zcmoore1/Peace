@@ -257,6 +257,13 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 	// walk backward animation
 	memcpy(&animations[LEGS_BACKWALK], &animations[LEGS_WALK], sizeof(animation_t));
 	animations[LEGS_BACKWALK].reversed = qtrue;
+	// prone (MW2's idleprone, walkprone, walkpronebk): the Quake 3 models have
+	// none, so the placeholder lies the straight standing idle and the crouch
+	// walk flat (CG_PlayerAngles), the crawl back being the crouch walk reversed
+	memcpy(&animations[LEGS_IDLEPR], &animations[LEGS_IDLE], sizeof(animation_t));
+	memcpy(&animations[LEGS_CRAWL], &animations[LEGS_WALKCR], sizeof(animation_t));
+	memcpy(&animations[LEGS_CRAWLB], &animations[LEGS_WALKCR], sizeof(animation_t));
+	animations[LEGS_CRAWLB].reversed = qtrue;
 	// flag moving fast
 	animations[FLAG_RUN].firstFrame = 0;
 	animations[FLAG_RUN].numFrames = 16;
@@ -1369,6 +1376,19 @@ static void CG_AddPainTwitch( centity_t *cent, vec3_t torsoAngles ) {
 
 /*
 ===============
+CG_PlayerProne
+
+Whether a player is drawn lying down: alive with MW2's EF_PRONE, which their
+entity carries from the prone flag the box follows. A corpse plays its death
+anim standing (picture only; Peace has no prone death animation).
+===============
+*/
+static qboolean CG_PlayerProne( const centity_t *cent ) {
+	return ( cent->currentState.eFlags & EF_PRONE ) && !( cent->currentState.eFlags & EF_DEAD );
+}
+
+/*
+===============
 CG_PlayerAngles
 
 Handles separate torso motion
@@ -1482,6 +1502,24 @@ static void CG_PlayerAngles( centity_t *cent, vec3_t legs[3], vec3_t torso[3], v
 	// pain twitch
 	CG_AddPainTwitch( cent, torsoAngles );
 
+	// MW2's prone body, a placeholder until there is prone art (owner's
+	// decision): the legs lie face down along the body's yaw and the ground's
+	// pitch under it (origin2[0..1], MW2's proneDirection and
+	// proneDirectionPitch, which the prone hit volume turns by too), with no
+	// lean: pitched 90 degrees down about the yaw's right axis, so the model's
+	// up runs head first along the body. The torso is held to the legs; the
+	// head is pitched back to look ahead, with the view's pitch. CG_Player puts
+	// the body behind the origin.
+	if ( CG_PlayerProne( cent ) ) {
+		legsAngles[YAW] = cent->currentState.origin2[0];
+		legsAngles[PITCH] = 90 + cent->currentState.origin2[1];
+		legsAngles[ROLL] = 0;
+		VectorCopy( legsAngles, torsoAngles );
+		dest = headAngles[PITCH] > 180 ? headAngles[PITCH] - 360 : headAngles[PITCH];
+		VectorCopy( legsAngles, headAngles );
+		headAngles[PITCH] += dest - 90;
+	}
+
 	// pull the angles back out of the hierarchial chain
 	AnglesSubtract( headAngles, torsoAngles, headAngles );
 	AnglesSubtract( torsoAngles, legsAngles, torsoAngles );
@@ -1492,6 +1530,18 @@ static void CG_PlayerAngles( centity_t *cent, vec3_t legs[3], vec3_t torso[3], v
 
 
 //==========================================================================
+
+/*
+===============
+CG_PlayerModelZ
+
+A height above the origin on the Quake 3 placeholder model, as drawn: the
+picture is scaled about the feet (MINS_Z), so the feet stay on the floor.
+===============
+*/
+static float CG_PlayerModelZ( float z ) {
+	return MINS_Z + ( z - MINS_Z ) * CG_PLAYER_MODEL_SCALE;
+}
 
 /*
 ===============
@@ -1543,7 +1593,9 @@ static void CG_BreathPuffs( centity_t *cent, refEntity_t *head) {
 	vec3_t up, origin;
 	int contents;
 
-	ci = &cgs.clientinfo[ cent->currentState.number ];
+	// the client's info, not the entity's: a corpse or podium player's number
+	// is past MAX_CLIENTS
+	ci = &cgs.clientinfo[ cent->currentState.clientNum ];
 
 	if (!cg_enableBreath.integer) {
 		return;
@@ -1635,10 +1687,15 @@ static void CG_TrailItem( centity_t *cent, qhandle_t hModel ) {
 	AnglesToAxis( angles, axis );
 
 	memset( &ent, 0, sizeof( ent ) );
-	VectorMA( cent->lerpOrigin, -16, axis[0], ent.origin );
-	ent.origin[2] += 16;
+	// on the scaled body's back (CG_PLAYER_MODEL_SCALE), at its scale
+	VectorMA( cent->lerpOrigin, -16 * CG_PLAYER_MODEL_SCALE, axis[0], ent.origin );
+	ent.origin[2] += CG_PlayerModelZ( 16 );
 	angles[YAW] += 90;
 	AnglesToAxis( angles, ent.axis );
+	VectorScale( ent.axis[0], CG_PLAYER_MODEL_SCALE, ent.axis[0] );
+	VectorScale( ent.axis[1], CG_PLAYER_MODEL_SCALE, ent.axis[1] );
+	VectorScale( ent.axis[2], CG_PLAYER_MODEL_SCALE, ent.axis[2] );
+	ent.nonNormalizedAxes = qtrue;
 
 	ent.hModel = hModel;
 	trap_R_AddRefEntityToScene( &ent );
@@ -1654,7 +1711,7 @@ static void CG_PlayerFlag( centity_t *cent, qhandle_t hSkin, refEntity_t *torso 
 	clientInfo_t	*ci;
 	refEntity_t	pole;
 	refEntity_t	flag;
-	vec3_t		angles, dir;
+	vec3_t		angles, dir, poleAxis[3];
 	int			legsAnim, flagAnim, updateangles;
 	float		angle, d;
 
@@ -1666,6 +1723,11 @@ static void CG_PlayerFlag( centity_t *cent, qhandle_t hSkin, refEntity_t *torso 
 	pole.renderfx = torso->renderfx;
 	CG_PositionEntityOnTag( &pole, torso, torso->hModel, "tag_flag" );
 	trap_R_AddRefEntityToScene( &pole );
+	// the pole carries the body's scale (CG_ScalePlayerModel); the swing below
+	// measures directions, so it reads the pole's axes at unit length
+	VectorNormalize2( pole.axis[0], poleAxis[0] );
+	VectorNormalize2( pole.axis[1], poleAxis[1] );
+	VectorNormalize2( pole.axis[2], poleAxis[2] );
 
 	// show the flag model
 	memset( &flag, 0, sizeof(flag) );
@@ -1679,9 +1741,10 @@ static void CG_PlayerFlag( centity_t *cent, qhandle_t hSkin, refEntity_t *torso 
 
 	updateangles = qfalse;
 	legsAnim = cent->currentState.legsAnim & ~ANIM_TOGGLEBIT;
-	if( legsAnim == LEGS_IDLE || legsAnim == LEGS_IDLECR ) {
+	if( legsAnim == LEGS_IDLE || legsAnim == LEGS_IDLECR || legsAnim == LEGS_IDLEPR ) {
 		flagAnim = FLAG_STAND;
-	} else if ( legsAnim == LEGS_WALK || legsAnim == LEGS_WALKCR ) {
+	} else if ( legsAnim == LEGS_WALK || BG_LegsAnimStance( legsAnim ) != BG_STANCE_STAND ) {
+		// walking, or moving crouched or prone, either way
 		flagAnim = FLAG_STAND;
 		updateangles = qtrue;
 	} else {
@@ -1695,11 +1758,11 @@ static void CG_PlayerFlag( centity_t *cent, qhandle_t hSkin, refEntity_t *torso 
 		// add gravity
 		dir[2] += 100;
 		VectorNormalize( dir );
-		d = DotProduct(pole.axis[2], dir);
+		d = DotProduct(poleAxis[2], dir);
 		// if there is enough movement orthogonal to the flag pole
 		if (fabs(d) < 0.9) {
 			//
-			d = DotProduct(pole.axis[0], dir);
+			d = DotProduct(poleAxis[0], dir);
 			if (d > 1.0f) {
 				d = 1.0f;
 			}
@@ -1708,7 +1771,7 @@ static void CG_PlayerFlag( centity_t *cent, qhandle_t hSkin, refEntity_t *torso 
 			}
 			angle = acos(d);
 
-			d = DotProduct(pole.axis[1], dir);
+			d = DotProduct(poleAxis[1], dir);
 			if (d < 0) {
 				angles[YAW] = 360 - angle * 180 / M_PI;
 			}
@@ -1917,7 +1980,7 @@ static void CG_PlayerFloatSprite( centity_t *cent, qhandle_t shader ) {
 
 	memset( &ent, 0, sizeof( ent ) );
 	VectorCopy( cent->lerpOrigin, ent.origin );
-	ent.origin[2] += 48;
+	ent.origin[2] += CG_PlayerModelZ( 48 );	// over the scaled head
 	ent.reType = RT_SPRITE;
 	ent.customShader = shader;
 	ent.radius = 10;
@@ -2044,7 +2107,7 @@ static qboolean CG_PlayerShadow( centity_t *cent, float *shadowPlane ) {
 	// add the mark as a temporary, so it goes directly to the renderer
 	// without taking a spot in the cg_marks array
 	CG_ImpactMark( cgs.media.shadowMarkShader, trace.endpos, trace.plane.normal, 
-		cent->pe.legs.yawAngle, alpha,alpha,alpha,1, qfalse, 24, qtrue );
+		cent->pe.legs.yawAngle, alpha,alpha,alpha,1, qfalse, 24 * CG_PLAYER_MODEL_SCALE, qtrue );
 
 	return qtrue;
 }
@@ -2068,7 +2131,7 @@ static void CG_PlayerSplash( centity_t *cent ) {
 	}
 
 	VectorCopy( cent->lerpOrigin, end );
-	end[2] -= 24;
+	end[2] += MINS_Z;
 
 	// if the feet aren't in liquid, don't make a mark
 	// this won't handle moving water brushes, but they wouldn't draw right anyway...
@@ -2078,7 +2141,7 @@ static void CG_PlayerSplash( centity_t *cent ) {
 	}
 
 	VectorCopy( cent->lerpOrigin, start );
-	start[2] += 32;
+	start[2] += DEFAULT_HEIGHT;	// the top of the body, which the picture fills
 
 	// if the head isn't out of liquid, don't make a mark
 	contents = CG_PointContents( start, 0 );
@@ -2235,6 +2298,55 @@ int CG_LightVerts( vec3_t normal, int numVerts, polyVert_t *verts )
 
 /*
 ===============
+CG_ScalePlayerModel
+
+Scales the legs, the root of the tag chain, by CG_PLAYER_MODEL_SCALE about
+the feet, so the Quake 3 placeholder fills the standing box: x1.25 for MW2's
+70-unit player. Every rendered player goes through here: live players, the
+viewer's own body in a mirror, corpses and podium players. The torso,
+head, gun, barrel, flash and flag hang on tags, and CG_PositionEntityOnTag and
+CG_PositionRotatedEntityOnTag carry the scale down the chain: every tag's
+offset and every piece grows by the same factor, so nothing comes apart.
+The feet are the model's (0, 0, MINS_Z) along its own up axis. Picture only:
+the origin, box, lighting origin and every trace are untouched.
+===============
+*/
+static void CG_ScalePlayerModel( refEntity_t *legs ) {
+	vec3_t	feet;
+
+	VectorMA( legs->origin, MINS_Z, legs->axis[2], feet );
+	VectorScale( legs->axis[0], CG_PLAYER_MODEL_SCALE, legs->axis[0] );
+	VectorScale( legs->axis[1], CG_PLAYER_MODEL_SCALE, legs->axis[1] );
+	VectorScale( legs->axis[2], CG_PLAYER_MODEL_SCALE, legs->axis[2] );
+	VectorMA( feet, -MINS_Z, legs->axis[2], legs->origin );
+	legs->nonNormalizedAxes = qtrue;
+}
+
+/*
+===============
+CG_PlaceProneModel
+
+The lying placeholder's root (owner's decision: a prone player overhangs the
+box behind the origin, as MW2's prone body does). The model's eye, the
+standing eye's distance up from its feet, sits on the prone eye: over the
+origin, PRONE_VIEWHEIGHT along the lying body's up. So the head is at the
+origin and the body runs back along the yaw, where MW2's prone room check
+traces it. The root is put where CG_ScalePlayerModel's pivot, the model's
+feet along its own up axis, is that rotated feet point. Picture only: the
+origin, box, lighting origin and every trace are untouched.
+===============
+*/
+static void CG_PlaceProneModel( const centity_t *cent, refEntity_t *legs ) {
+	vec3_t	eye, feet;
+
+	// the lying body's up is the model's back: axis[0], its face, looks down
+	VectorMA( cent->lerpOrigin, -PRONE_VIEWHEIGHT, legs->axis[0], eye );
+	VectorMA( eye, -( DEFAULT_VIEWHEIGHT - MINS_Z ), legs->axis[2], feet );
+	VectorMA( feet, -MINS_Z, legs->axis[2], legs->origin );
+}
+
+/*
+===============
 CG_Player
 ===============
 */
@@ -2320,6 +2432,10 @@ void CG_Player( centity_t *cent ) {
 	legs.customSkin = ci->legsSkin;
 
 	VectorCopy( cent->lerpOrigin, legs.origin );
+	if ( CG_PlayerProne( cent ) ) {
+		CG_PlaceProneModel( cent, &legs );
+	}
+	CG_ScalePlayerModel( &legs );
 
 	VectorCopy( cent->lerpOrigin, legs.lightingOrigin );
 	legs.shadowPlane = shadowPlane;

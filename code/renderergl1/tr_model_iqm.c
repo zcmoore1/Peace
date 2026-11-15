@@ -1162,20 +1162,52 @@ void R_AddIQMSurfaces( trRefEntity_t *ent ) {
 }
 
 
+// The pose cgame blended for this entity (refEntity_t.pose), when its joint
+// count is this model's: one with another count (built for another model, or
+// filled badly by a QVM) would skin from the wrong joints, so the entity's
+// frames skin instead.
+static const iqmTransform_t *R_IQMEntityPose( const iqmData_t *data ) {
+	const modelPose_t *pose = backEnd.currentEntity->e.pose;
+
+	if ( pose && pose->numJoints == data->num_poses ) {
+		return (const iqmTransform_t *)pose->joints;
+	}
+	return NULL;
+}
+
+// Convert relative joint transforms to skinning matrices.
+// relativeJoints is an array of num_poses iqmTransform_t (same layout as modelJointTransform_t).
+static void RelativeJointsToMatrices( iqmData_t *data, const iqmTransform_t *relativeJoints, float *poseMats ) {
+	const iqmTransform_t *relativeJoint = relativeJoints;
+	const int *jointParent = data->jointParents;
+	const float *invBindMat = data->invBindJoints;
+	float *poseMat = poseMats;
+	int i;
+
+	for ( i = 0; i < data->num_poses; i++, relativeJoint++, jointParent++, invBindMat += 12, poseMat += 12 ) {
+		float mat1[12], mat2[12];
+
+		JointToMatrix( relativeJoint->rotate, relativeJoint->scale, relativeJoint->translate, mat1 );
+
+		if ( *jointParent >= 0 ) {
+			Matrix34Multiply( &data->bindJoints[(*jointParent)*12], mat1, mat2 );
+			Matrix34Multiply( mat2, invBindMat, mat1 );
+			Matrix34Multiply( &poseMats[(*jointParent)*12], mat1, poseMat );
+		} else {
+			Matrix34Multiply( mat1, invBindMat, poseMat );
+		}
+	}
+}
+
 static void ComputePoseMats( iqmData_t *data, int frame, int oldframe,
 			      float backlerp, float *poseMats ) {
 	iqmTransform_t relativeJoints[IQM_MAX_JOINTS];
-	iqmTransform_t *relativeJoint;
+	iqmTransform_t *relativeJoint = relativeJoints;
 	const iqmTransform_t *pose;
 	const iqmTransform_t *oldpose;
-	const int *jointParent;
-	const float *invBindMat;
-	float *poseMat, lerp;
+	float lerp;
 	int i;
 
-	relativeJoint = relativeJoints;
-
-	// copy or lerp animation frame pose
 	if ( oldframe == frame ) {
 		pose = &data->poses[frame * data->num_poses];
 		for ( i = 0; i < data->num_poses; i++, pose++, relativeJoint++ ) {
@@ -1200,24 +1232,7 @@ static void ComputePoseMats( iqmData_t *data, int frame, int oldframe,
 		}
 	}
 
-	// multiply by inverse of bind pose and parent 'pose mat' (bind pose transform matrix)
-	relativeJoint = relativeJoints;
-	jointParent = data->jointParents;
-	invBindMat = data->invBindJoints;
-	poseMat = poseMats;
-	for ( i = 0; i < data->num_poses; i++, relativeJoint++, jointParent++, invBindMat += 12, poseMat += 12 ) {
-		float mat1[12], mat2[12];
-
-		JointToMatrix( relativeJoint->rotate, relativeJoint->scale, relativeJoint->translate, mat1 );
-
-		if ( *jointParent >= 0 ) {
-			Matrix34Multiply( &data->bindJoints[(*jointParent)*12], mat1, mat2 );
-			Matrix34Multiply( mat2, invBindMat, mat1 );
-			Matrix34Multiply( &poseMats[(*jointParent)*12], mat1, poseMat );
-		} else {
-			Matrix34Multiply( mat1, invBindMat, poseMat );
-		}
-	}
+	RelativeJointsToMatrices( data, relativeJoints, poseMats );
 }
 
 static void ComputeJointMats( iqmData_t *data, int frame, int oldframe,
@@ -1293,8 +1308,15 @@ void RB_IQMSurfaceAnim( surfaceType_t *surface ) {
 	outColor = &tess.vertexColors[tess.numVertexes];
 
 	if ( data->num_poses > 0 ) {
-		// compute interpolated joint matrices
-		ComputePoseMats( data, frame, oldframe, backlerp, poseMats );
+		const iqmTransform_t *entityPose = R_IQMEntityPose( data );
+
+		// compute joint matrices: cgame's blended pose, or the
+		// interpolated frames
+		if ( entityPose ) {
+			RelativeJointsToMatrices( data, entityPose, poseMats );
+		} else {
+			ComputePoseMats( data, frame, oldframe, backlerp, poseMats );
+		}
 
 		// compute vertex blend influence matricies
 		for( i = 0; i < surf->num_influences; i++ ) {
@@ -1495,11 +1517,89 @@ int R_IQMLerpTag( orientation_t *tag, iqmData_t *data,
 }
 
 qboolean RE_BuildModelPose( qhandle_t hModel, int frame, int oldframe, float backlerp, modelPose_t *outPose ) {
-	(void)hModel; (void)frame; (void)oldframe; (void)backlerp; (void)outPose;
-	return qfalse;
+	model_t *model = R_GetModelByHandle( hModel );
+	iqmData_t *data;
+	const iqmTransform_t *pose, *oldpose;
+	modelJointTransform_t *outJoint;
+	float lerp;
+	int i;
+
+	if ( !model || model->type != MOD_IQM )
+		return qfalse;
+
+	data = model->modelData;
+	// no poses, or poses with no frame to read them from
+	if ( !data->num_poses || !data->num_frames )
+		return qfalse;
+
+	outPose->numJoints = data->num_poses;
+
+	// wrapped into the model's frames, either way past either end
+	frame    = frame    % data->num_frames;
+	oldframe = oldframe % data->num_frames;
+	if ( frame < 0 )
+		frame += data->num_frames;
+	if ( oldframe < 0 )
+		oldframe += data->num_frames;
+
+	outJoint = outPose->joints;
+
+	if ( oldframe == frame ) {
+		pose = &data->poses[frame * data->num_poses];
+		for ( i = 0; i < data->num_poses; i++, pose++, outJoint++ ) {
+			VectorCopy( pose->translate, outJoint->translate );
+			QuatCopy( pose->rotate, outJoint->rotate );
+			VectorCopy( pose->scale, outJoint->scale );
+		}
+	} else {
+		lerp = 1.0f - backlerp;
+		pose    = &data->poses[frame    * data->num_poses];
+		oldpose = &data->poses[oldframe * data->num_poses];
+		for ( i = 0; i < data->num_poses; i++, pose++, oldpose++, outJoint++ ) {
+			outJoint->translate[0] = oldpose->translate[0] * backlerp + pose->translate[0] * lerp;
+			outJoint->translate[1] = oldpose->translate[1] * backlerp + pose->translate[1] * lerp;
+			outJoint->translate[2] = oldpose->translate[2] * backlerp + pose->translate[2] * lerp;
+
+			outJoint->scale[0] = oldpose->scale[0] * backlerp + pose->scale[0] * lerp;
+			outJoint->scale[1] = oldpose->scale[1] * backlerp + pose->scale[1] * lerp;
+			outJoint->scale[2] = oldpose->scale[2] * backlerp + pose->scale[2] * lerp;
+
+			QuatSlerp( oldpose->rotate, pose->rotate, lerp, outJoint->rotate );
+		}
+	}
+
+	return qtrue;
 }
 
-void RE_BlendModelPoses( modelPose_t *out, const modelPose_t *a, float weightA, const modelPose_t *b, float weightB ) {
-	(void)out; (void)a; (void)weightA; (void)b; (void)weightB;
+void RE_BlendModelPoses( modelPose_t *out,
+                          const modelPose_t *a, float weightA,
+                          const modelPose_t *b, float weightB ) {
+	float total = weightA + weightB;
+	float t;
+	int i, numJoints;
+
+	if ( total <= 0.0f )
+		return;
+
+	t = weightB / total;
+	numJoints = a->numJoints < b->numJoints ? a->numJoints : b->numJoints;
+	// never past the pose's joints (a QVM's pose counts are its own)
+	if ( numJoints < 0 )
+		numJoints = 0;
+	if ( numJoints > MAX_MODEL_JOINTS )
+		numJoints = MAX_MODEL_JOINTS;
+	out->numJoints = numJoints;
+
+	for ( i = 0; i < numJoints; i++ ) {
+		out->joints[i].translate[0] = a->joints[i].translate[0] + (b->joints[i].translate[0] - a->joints[i].translate[0]) * t;
+		out->joints[i].translate[1] = a->joints[i].translate[1] + (b->joints[i].translate[1] - a->joints[i].translate[1]) * t;
+		out->joints[i].translate[2] = a->joints[i].translate[2] + (b->joints[i].translate[2] - a->joints[i].translate[2]) * t;
+
+		out->joints[i].scale[0] = a->joints[i].scale[0] + (b->joints[i].scale[0] - a->joints[i].scale[0]) * t;
+		out->joints[i].scale[1] = a->joints[i].scale[1] + (b->joints[i].scale[1] - a->joints[i].scale[1]) * t;
+		out->joints[i].scale[2] = a->joints[i].scale[2] + (b->joints[i].scale[2] - a->joints[i].scale[2]) * t;
+
+		QuatSlerp( a->joints[i].rotate, b->joints[i].rotate, t, out->joints[i].rotate );
+	}
 }
 

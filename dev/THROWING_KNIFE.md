@@ -194,7 +194,6 @@ The prepare (holdFireTime 0), fuse (fuseTime 30), launch speeds (1400 and 40
 up), holdButtonToThrow 0, offhandHoldIsCancelable 1 and cookOffHold 0 are
 throwingknife_mp's, from the IW4 dump's `weapons/mp` files. These are still
 placeholders:
-- `BG_THROWING_KNIFE_DAMAGE` (135, one hit);
 - `BG_THROWING_KNIFE_BOUNCE` (0.4);
 - the quick-action timings in the `MAX_WEAPONS` tables.
 

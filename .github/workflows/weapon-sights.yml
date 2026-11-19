@@ -1,7 +1,10 @@
 name: Movement and weapon checks
+# Every push to dev runs the whole list here, on GitHub's machines, and so does a
+# manual run from the Actions tab (workflow_dispatch) on any branch.
 on:
   push:
-    branches: [dev-3b-gpt, dev-gpt]
+    branches: [dev, dev-3b-gpt, dev-gpt]
+  workflow_dispatch:
   pull_request:
     paths:
       - 'code/cgame/**'
@@ -38,7 +41,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Check generated optic assets
@@ -117,3 +120,29 @@ jobs:
         run: |
           cmake -S . -B out/ci -DBUILD_CLIENT=OFF -DBUILD_SERVER=OFF -DBUILD_RENDERER_GL1=OFF -DBUILD_RENDERER_GL2=OFF -DBUILD_GAME_LIBRARIES=ON -DBUILD_GAME_QVMS=ON
           cmake --build out/ci --parallel 2
+
+  # The owner's own build: the x64 Native Tools environment, Ninja and Debug, as
+  # CMakeSettings.json's x64-Debug configures it. Linux GCC does not see MSVC's
+  # preprocessor or its linker, so this is where a Windows-only break shows
+  # before anyone pulls. It reports without failing the run until it has been
+  # seen green once.
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the client, server and modules with MSVC
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "VSROOT=%%i"
+          call "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
+          cmake -S . -B out\build\x64-Debug -G Ninja -DCMAKE_BUILD_TYPE=Debug || exit /b 1
+          cmake --build out\build\x64-Debug || exit /b 1
+      - name: Run the MSVC-built weapon tests
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "VSROOT=%%i"
+          call "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
+          call dev\tests\run-masterkey.cmd || exit /b 1
+          call dev\tests\run-shotgun-reload.cmd || exit /b 1

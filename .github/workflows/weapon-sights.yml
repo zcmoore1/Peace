@@ -39,99 +39,116 @@ on:
 permissions:
   contents: read
 jobs:
+  # The checks, in groups that run side by side: one long group used to hold
+  # the rest behind it (the fake-reload model alone is minutes per numbering).
   check:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: assets, rounds, sniper, Masterkey, ladders, stance, weapon state
+            run: |
+              node dev/tools/build_sight_assets.js
+              git diff --exit-code -- assets/baseq3
+              python3 dev/tools/build_ladder_map.py --check
+              python3 dev/tools/build_snd_assets.py --check
+              sh dev/tests/run-snd.sh
+              SND_TEST_DEFINES=-DMISSIONPACK sh dev/tests/run-snd.sh
+              sh dev/tests/run-replay.sh
+              REPLAY_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-replay.sh
+              python3 dev/tools/build_spas_sprint.py --check
+              python3 dev/tests/spas_asset_test.py
+              python3 dev/tools/build_m40a3.py --check
+              python3 dev/tests/m40a3_asset_test.py
+              sh dev/tests/run-sniper.sh
+              SNIPER_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-sniper.sh
+              python3 dev/tools/build_m16.py --check
+              python3 dev/tests/m16_asset_test.py
+              sh dev/tests/run-masterkey.sh
+              MASTERKEY_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-masterkey.sh
+              sh dev/tests/run-ladders.sh
+              LADDER_TEST_DEFINES=-DMISSIONPACK sh dev/tests/run-ladders.sh
+              sh dev/tests/run-stance.sh
+              STANCE_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-stance.sh
+              mkdir -p out/tests
+              cc -std=c99 -O0 -ffunction-sections -fdata-sections dev/tests/shotgun_reload_test.c code/game/bg_loadout.c code/game/bg_misc.c code/game/bg_slidemove.c code/qcommon/q_math.c code/qcommon/q_shared.c -Wl,--gc-sections -lm -o out/tests/weapon-test
+              out/tests/weapon-test
+              cc -std=c99 -O0 -DMISSIONPACK -ffunction-sections -fdata-sections dev/tests/shotgun_reload_test.c code/game/bg_loadout.c code/game/bg_misc.c code/game/bg_slidemove.c code/qcommon/q_math.c code/qcommon/q_shared.c -Wl,--gc-sections -lm -o out/tests/weapon-test-mp
+              out/tests/weapon-test-mp
+              cc -std=c99 -O0 -ffunction-sections -fdata-sections dev/tests/sights_test.c code/game/bg_pmove.c code/game/bg_loadout.c code/game/bg_misc.c code/game/bg_slidemove.c code/qcommon/q_math.c code/qcommon/q_shared.c -Wl,--gc-sections -lm -o out/tests/sights-test
+              out/tests/sights-test
+          - name: perks, classes, YY, quick actions, poses and network deltas
+            run: |
+              sh dev/tests/run-perks.sh
+              PERK_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-perks.sh
+              python3 dev/tools/build_semtex_assets.py --check
+              sh dev/tests/run-loadouts.sh
+          - name: classes, YY, quick actions, poses and network deltas (missionpack)
+            run: LOADOUT_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-loadouts.sh
+          - name: weapon pickups
+            run: |
+              sh dev/tests/run-pickups.sh
+              PICKUP_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-pickups.sh
+          - name: fake reload
+            run: sh dev/tests/run-fakereload.sh
+          - name: fake reload (missionpack)
+            run: FAKERELOAD_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-fakereload.sh
+          - name: view kick and the QVM boundary
+            run: |
+              sh dev/tests/run-kick.sh
+              KICK_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-kick.sh
+          - name: bullets and the silent shot
+            run: |
+              sh dev/tests/run-bullets.sh
+              BULLETS_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-bullets.sh
+              sh dev/tests/run-silentshot.sh
+          - name: silent shot (missionpack)
+            run: SILENTSHOT_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-silentshot.sh
+          - name: stance button, its cgame half, the view, pad aim and the skeletal pose
+            run: |
+              sh dev/tests/run-stanceinput.sh
+              STANCEINPUT_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-stanceinput.sh
+              sh dev/tests/run-stancecgame.sh
+              STANCECGAME_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-stancecgame.sh
+              sh dev/tests/run-stanceflow.sh
+              STANCEFLOW_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-stanceflow.sh
+              sh dev/tests/run-view.sh
+              sh dev/tests/run-gamepad-aim.sh
+              sh dev/tests/run-iqmpose.sh
+          - name: native and QVM game modules
+            run: |
+              cmake -S . -B out/ci -DBUILD_CLIENT=OFF -DBUILD_SERVER=OFF -DBUILD_RENDERER_GL1=OFF -DBUILD_RENDERER_GL2=OFF -DBUILD_GAME_LIBRARIES=ON -DBUILD_GAME_QVMS=ON
+              cmake --build out/ci --parallel 4
     steps:
       - uses: actions/checkout@v4
-      - name: Check generated optic assets
-        run: |
-          node dev/tools/build_sight_assets.js
-          git diff --exit-code -- assets/baseq3
-      - name: Check generated ladder map
-        run: python3 dev/tools/build_ladder_map.py --check
-      - name: Check Search and Destroy objectives and round rules
-        run: |
-          python3 dev/tools/build_snd_assets.py --check
-          sh dev/tests/run-snd.sh
-          SND_TEST_DEFINES=-DMISSIONPACK sh dev/tests/run-snd.sh
-          sh dev/tests/run-replay.sh
-          REPLAY_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-replay.sh
-      - name: Check SPAS mesh winding and clip metadata
-        run: |
-          python3 dev/tools/build_spas_sprint.py --check
-          python3 dev/tests/spas_asset_test.py
-      - name: Check scoped sniper assets and shared bolt/reload behavior
-        run: |
-          python3 dev/tools/build_m40a3.py --check
-          python3 dev/tests/m40a3_asset_test.py
-          sh dev/tests/run-sniper.sh
-          SNIPER_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-sniper.sh
-      - name: Check M16 and Masterkey assets, modes and inventory
-        run: |
-          python3 dev/tools/build_m16.py --check
-          python3 dev/tests/m16_asset_test.py
-          sh dev/tests/run-masterkey.sh
-          MASTERKEY_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-masterkey.sh
-      - name: Test ladders against the real BSP collision engine
-        run: |
-          sh dev/tests/run-ladders.sh
-          LADDER_TEST_DEFINES=-DMISSIONPACK sh dev/tests/run-ladders.sh
-      - name: Test MW2's stance and prone through the real Pmove and server
-        run: |
-          sh dev/tests/run-stance.sh
-          STANCE_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-stance.sh
-      - name: Test weapon state and sight presentation
-        run: |
-          mkdir -p out/tests
-          cc -std=c99 -O0 -ffunction-sections -fdata-sections dev/tests/shotgun_reload_test.c code/game/bg_loadout.c code/game/bg_misc.c code/game/bg_slidemove.c code/qcommon/q_math.c code/qcommon/q_shared.c -Wl,--gc-sections -lm -o out/tests/weapon-test
-          out/tests/weapon-test
-          cc -std=c99 -O0 -ffunction-sections -fdata-sections dev/tests/sights_test.c code/game/bg_pmove.c code/game/bg_loadout.c code/game/bg_misc.c code/game/bg_slidemove.c code/qcommon/q_math.c code/qcommon/q_shared.c -Wl,--gc-sections -lm -o out/tests/sights-test
-          out/tests/sights-test
-      - name: Test saved classes, YY, quick actions, poses and network deltas
-        run: |
-          sh dev/tests/run-perks.sh
-          PERK_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-perks.sh
-          python3 dev/tools/build_semtex_assets.py --check
-          sh dev/tests/run-loadouts.sh
-          LOADOUT_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-loadouts.sh
-          sh dev/tests/run-pickups.sh
-          PICKUP_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-pickups.sh
-          sh dev/tests/run-fakereload.sh
-          FAKERELOAD_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-fakereload.sh
-          sh dev/tests/run-kick.sh
-          KICK_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-kick.sh
-          sh dev/tests/run-bullets.sh
-          BULLETS_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-bullets.sh
-          sh dev/tests/run-silentshot.sh
-          SILENTSHOT_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-silentshot.sh
-      - name: Test MW2's stance button, its cgame half and the stance end to end
-        run: |
-          sh dev/tests/run-stanceinput.sh
-          STANCEINPUT_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-stanceinput.sh
-          sh dev/tests/run-stancecgame.sh
-          STANCECGAME_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-stancecgame.sh
-          sh dev/tests/run-stanceflow.sh
-          STANCEFLOW_TEST_FLAGS=-DMISSIONPACK sh dev/tests/run-stanceflow.sh
-      - name: Test the viewmodel's skeletal pose in both renderers
-        run: |
-          sh dev/tests/run-iqmpose.sh
-      - name: Build native and QVM game modules
-        run: |
-          cmake -S . -B out/ci -DBUILD_CLIENT=OFF -DBUILD_SERVER=OFF -DBUILD_RENDERER_GL1=OFF -DBUILD_RENDERER_GL2=OFF -DBUILD_GAME_LIBRARIES=ON -DBUILD_GAME_QVMS=ON
-          cmake --build out/ci --parallel 2
+      - name: ${{ matrix.name }}
+        run: ${{ matrix.run }}
 
   # The owner's own build: the x64 Native Tools environment, Ninja and Debug, as
   # CMakeSettings.json's x64-Debug configures it. Linux GCC does not see MSVC's
   # preprocessor or its linker, so this is where a Windows-only break shows
-  # before anyone pulls. It reports without failing the run until it has been
-  # seen green once.
+  # before anyone pulls. SDL's import libraries are not in the repository (the
+  # owner's tree has them), so they come from SDL's own release, the version of
+  # the headers in code/thirdparty. It reports without failing the run until it
+  # has been seen green once.
   windows:
+    name: Windows build with MSVC
     runs-on: windows-2022
     timeout-minutes: 60
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch SDL2's Visual C++ libraries
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'sdl2.zip'
+          Invoke-WebRequest -Uri 'https://github.com/libsdl-org/SDL/releases/download/release-2.32.8/SDL2-devel-2.32.8-VC.zip' -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath (Join-Path $env:RUNNER_TEMP 'sdl2')
+          New-Item -ItemType Directory -Force -Path code/thirdparty/libs/win64 | Out-Null
+          Copy-Item (Join-Path $env:RUNNER_TEMP 'sdl2/SDL2-2.32.8/lib/x64/*') code/thirdparty/libs/win64/
       - name: Build the client, server and modules with MSVC
         shell: cmd
         run: |

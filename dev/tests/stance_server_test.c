@@ -20,6 +20,7 @@ void trap_Cvar_Update(vmCvar_t *c) { (void)c; }
 void BotTestSolid(vec3_t o) { (void)o; }
 qboolean G_SNDClientThink(gentity_t *e,usercmd_t *c) { (void)e;(void)c; return qfalse; }
 qboolean G_SNDClientEndFrame(gentity_t *e) { (void)e; return qfalse; }
+qboolean G_SNDFrozen(gentity_t *e) { (void)e; return qfalse; }
 qboolean G_SNDCanRespawn(void) { return qtrue; }
 void Cmd_Kill_f(gentity_t *ent);	/* g_cmds.c's, which g_local.h does not declare */
 #define CHECK(x) do { checks++; if (!(x)) { fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x); exit(1); } } while(0)

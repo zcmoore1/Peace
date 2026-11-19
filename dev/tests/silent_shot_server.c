@@ -20,6 +20,7 @@ void trap_Cvar_Update(vmCvar_t *c) { (void)c; }
 void BotTestSolid(vec3_t o) { (void)o; }
 qboolean G_SNDClientThink(gentity_t *e,usercmd_t *c) { (void)e;(void)c; return qfalse; }
 qboolean G_SNDClientEndFrame(gentity_t *e) { (void)e; return qfalse; }
+qboolean G_SNDFrozen(gentity_t *e) { (void)e; return qfalse; }
 qboolean G_SNDCanRespawn(void) { return qtrue; }
 level_locals_t level;
 gentity_t g_entities[MAX_GENTITIES];

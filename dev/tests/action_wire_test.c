@@ -4,7 +4,8 @@
  * PMF_PRONE and PMF_PRONEMOVE_OVERRIDDEN, the float eye and its leg, the prone body, prevCmd,
  * and an ET_PLAYER's stance flags, eye and prone body (BG_PlayerStateToEntityState).
  * Protocol 89 also carries per-instance underbarrel pools, selected mode and pump debt.
- * Protocol 90 widens weaponDraw to the three kinds of draw (WDRAW_*). */
+ * Protocol 90 widens weaponDraw to the three kinds of draw (WDRAW_*).
+ * Protocol 91 widens pm_flags for MW2's PMF_FROZEN (bit 18). */
 #include "../../code/qcommon/q_shared.h"
 #include "../../code/qcommon/qcommon.h"
 #include "../../code/game/bg_public.h"
@@ -25,8 +26,8 @@ static playerState_t RoundTrip(playerState_t *from, playerState_t *to) {
  MSG_ReadDeltaPlayerstate(&msg,from,&decoded);
  return decoded;
 }
-/* Protocol 88 (GAME_VERSION -17): MW2's stance in the playerstate. pm_flags is 18 bits
- * (PMF_PRONE 16, PMF_PRONEMOVE_OVERRIDDEN 17); the eye is a float; the leg's target,
+/* Protocol 88 (GAME_VERSION -17): MW2's stance in the playerstate. pm_flags is 19 bits
+ * (PMF_PRONE 16, PMF_PRONEMOVE_OVERRIDDEN 17, and protocol 91's PMF_FROZEN 18); the eye is a float; the leg's target,
  * elapsed ms and direction, the prone body's three angles and prevCmd are new fields. */
 static void TestStanceWire(void) {
  playerState_t from,to,decoded; int i,j,k;
@@ -36,18 +37,18 @@ static void TestStanceWire(void) {
  const int legMs[]={ 0, 1, BG_PRONE_LERP_MS/2, BG_PRONE_LERP_MS-1, (1<<PS_EYE_LEG_BITS)-1 };
  const float angles[]={ 0.0f, -0.5f, 123.456f, 359.99f, -BG_PRONE_PITCH_CAP, BG_PRONE_YAW_CAP, 1e-3f };
  const int moves[]={ -128, -127, -1, 0, 1, 64, 127 };
- CHECK(PMF_PRONE==(1<<16) && PMF_PRONEMOVE_OVERRIDDEN==(1<<17));
+ CHECK(PMF_PRONE==(1<<16) && PMF_PRONEMOVE_OVERRIDDEN==(1<<17) && PMF_FROZEN==(1<<18));
  CHECK(PMF_PENDING_MAG==(1<<15));	/* the old top bit, so the two new ones are the next */
  CHECK(BG_PRONE_LERP_MS<(1<<PS_EYE_LEG_BITS));	/* a running leg's elapsed ms always fits */
  CHECK(BG_EYE_STAND<256 && BG_EYE_DEAD>0);	/* targets fit their 8 unsigned bits; 0 is MW2's "never set" */
  CHECK(BG_EYE_PRONE==PRONE_VIEWHEIGHT-(MINS_Z) && BG_EYE_CROUCH==CROUCH_VIEWHEIGHT-(MINS_Z));
  /* every pm_flags bit, alone and with all the others, set and cleared */
- for(i=0;i<18;i++) {
+ for(i=0;i<19;i++) {
   memset(&from,0,sizeof(from)); to=from; to.pm_flags=1<<i;
   decoded=RoundTrip(&from,&to); CHECK(decoded.pm_flags==(1<<i));
-  from.pm_flags=(1<<18)-1; to.pm_flags=((1<<18)-1)&~(1<<i);
+  from.pm_flags=(1<<19)-1; to.pm_flags=((1<<19)-1)&~(1<<i);
   decoded=RoundTrip(&from,&to); CHECK(decoded.pm_flags==to.pm_flags);
-  decoded=RoundTrip(&to,&from); CHECK(decoded.pm_flags==(1<<18)-1);
+  decoded=RoundTrip(&to,&from); CHECK(decoded.pm_flags==(1<<19)-1);
  }
  /* the float eye: Peace's eyes, MW2's never-set sentinel (MINS_Z), mid-leg fractions */
  for(i=0;i<ARRAY_LEN(eyes);i++) for(j=0;j<ARRAY_LEN(eyes);j++) {
@@ -212,7 +213,7 @@ int main(void) {
   * Tactical Insertion types, the top one included, each from every other.
   * Protocol 85 adds grenadeTimeLeft; protocol 87 adds moveClass, 88 stance,
   * and 89 the underbarrel inventory fields. */
- CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==90);
+ CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==91);
  CHECK(WDRAW_NORMAL==0 && WDRAW_FIRST==1 && WDRAW_ALT==2);
  /* moveClass is MW2's nine weapon classes in PS_MOVECLASS_BITS (4): every one,
   * the last included, from every other, and alone in a delta. */

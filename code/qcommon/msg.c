@@ -1095,7 +1095,7 @@ netField_t	playerStateFields[] =
 { PSF(events[1]), 8 },
 { PSF(events[2]), 8 },	// MW2's ring holds four (0x742170-0x7421a0)
 { PSF(events[3]), 8 },
-{ PSF(pm_flags), 18 },	// PMF_PRONE (bit 16) and PMF_PRONEMOVE_OVERRIDDEN (bit 17); MW2's is 23 bits
+{ PSF(pm_flags), 19 },	// PMF_PRONE (bit 16), PMF_PRONEMOVE_OVERRIDDEN (bit 17) and PMF_FROZEN (bit 18); MW2's is 23 bits
 { PSF(groundEntityNum), GENTITYNUM_BITS },
 { PSF(weaponstate), 4 },
 { PSF(eFlags), 16 },

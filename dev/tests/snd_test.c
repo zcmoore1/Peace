@@ -49,7 +49,15 @@ void G_FreeEntity(gentity_t *e) { e->inuse=qfalse; e->r.linked=qfalse; }
 void G_SetOrigin(gentity_t *e,vec3_t p) { VectorCopy(p,e->s.origin); VectorCopy(p,e->r.currentOrigin); }
 int G_ModelIndex(char *s) { (void)s; return 1; }
 void CalculateRanks(void) { }
-void PM_UpdateViewAngles(playerState_t *ps,const usercmd_t *cmd) { (void)ps; (void)cmd; }
+/* the bomb's blast: who it reaches and what it deals them */
+static int blastCount, blastBlocked;
+static struct { gentity_t *target, *attacker; int damage, flags, mod; } blast[MAX_CLIENTS];
+qboolean CanDamage(gentity_t *targ,vec3_t origin) { (void)targ; (void)origin; return !blastBlocked; }
+void G_Damage(gentity_t *targ,gentity_t *inflictor,gentity_t *attacker,vec3_t dir,vec3_t point,int damage,int dflags,int mod) {
+ (void)dir; (void)point; CHECK(!inflictor && blastCount<MAX_CLIENTS && G_SNDCanDamage(targ));
+ blast[blastCount].target=targ; blast[blastCount].attacker=attacker;
+ blast[blastCount].damage=damage; blast[blastCount].flags=dflags; blast[blastCount].mod=mod; blastCount++;
+}
 void LogExit(const char *s) { (void)s; exits++; level.intermissionQueued=level.time; }
 void CopyToBodyQue(gentity_t *e) { (void)e; copies++; }
 float *tv(float x,float y,float z) { static vec3_t v; VectorSet(v,x,y,z); return v; }
@@ -76,21 +84,24 @@ static void Reset(int players) {
  gentity_t *site;
  memset(&level,0,sizeof(level)); memset(g_entities,0,sizeof(g_entities)); memset(g_clients,0,sizeof(g_clients));
  memset(configs,0,sizeof(configs)); exits=blocked=contents=spawnSite=copies=0;
- replayStarts=replayResets=replayFail=replayDeadline=0;
+ replayStarts=replayResets=replayFail=replayDeadline=0; blastCount=blastBlocked=0;
  level.time=1000; level.maxclients=4; level.num_entities=MAX_CLIENTS; level.clients=g_clients;
  g_gametype.integer=GT_SND; g_cheats.integer=1;
  G_SNDInit(); sndCountdown.integer=1; sndRoundPause.integer=1;
+ sndGracePeriod.integer=0;	/* every other case is past MW2's grace period: TestGracePeriod */
  site=G_Spawn(); VectorSet(site->s.origin,0,0,8); SP_peace_bombsite(site); G_SNDMapReady();
  if(players>0) Player(0,TEAM_RED);
  if(players>1) Player(1,TEAM_BLUE);
  if(players>2) Player(2,TEAM_RED);
  if(players>3) Player(3,TEAM_BLUE);
 }
+/* The first round counts down with everyone frozen (MW2's prematch). */
 static void Live(void) {
  G_SNDRunFrame(); CHECK(snd.phase==SND_COUNTDOWN);
- CHECK(!G_SNDCanDamage(&g_entities[0]));
+ CHECK(!G_SNDCanDamage(&g_entities[0]) && G_SNDFrozen(&g_entities[0]));
+ level.time=snd.deadline-1; G_SNDRunFrame(); CHECK(snd.phase==SND_COUNTDOWN && G_SNDFrozen(&g_entities[0]));
  level.time=snd.deadline; G_SNDRunFrame(); CHECK(snd.phase==SND_LIVE);
- CHECK(!G_SNDCanRespawn());
+ CHECK(!G_SNDCanRespawn() && !G_SNDFrozen(&g_entities[0]));
 }
 static void MoveToSite(int n) { VectorSet(g_clients[n].ps.origin,0,0,24); }
 static void Hold(int n,int duration) {
@@ -130,7 +141,10 @@ static void TestPlantDefuse(void) {
  CHECK(!G_SNDCanDamage(&g_entities[1]) && !replayStarts);
  G_SNDRunFrame(); CHECK(level.teamScores[TEAM_BLUE]==1);
  level.time=snd.deadline; G_SNDRunFrame();
- CHECK(snd.phase==SND_COUNTDOWN && snd.round==2 && SND_Alive(0));
+ /* a round that follows another starts at once, with nobody frozen (MW2
+  * counts down only before the first) */
+ CHECK(snd.phase==SND_LIVE && snd.round==2 && SND_Alive(0) && snd.deadline==level.time+snd.roundMs);
+ CHECK(!G_SNDFrozen(&g_entities[0]) && !G_SNDFrozen(&g_entities[1]) && G_SNDCanDamage(&g_entities[0]));
  CHECK(g_clients[0].ps.ammo[WP_SHOTGUN]==8 && !snd.bomb->r.linked);
 }
 static void TestInterrupts(void) {
@@ -209,14 +223,18 @@ static void TestWinsAndSides(void) {
   CHECK(G_SNDSpawnTeam(snd.attacking)==TEAM_RED);
   Die(1); G_SNDRunFrame(); CHECK(level.teamScores[TEAM_RED]==round);
   if(round<4) {
-   level.time=snd.deadline; G_SNDRunFrame(); CHECK(snd.phase==SND_COUNTDOWN);
    level.time=snd.deadline; G_SNDRunFrame(); CHECK(snd.phase==SND_LIVE);
   }
  }
  CHECK(exits==1 && level.intermissionQueued);
  G_SNDRunFrame(); CHECK(exits==1);
+ /* both teams dead at once: MW2's onDeadEvent( "all" ) gives the round to the
+  * defenders before the plant and to the attackers after it; there is no draw */
  Reset(2); Live(); Die(0); Die(1); G_SNDRunFrame();
- CHECK(snd.result==SND_DRAW && level.teamScores[TEAM_RED]==0 && level.teamScores[TEAM_BLUE]==0);
+ CHECK(snd.result==SND_ELIMINATION && snd.winner==TEAM_BLUE);
+ CHECK(level.teamScores[TEAM_RED]==0 && level.teamScores[TEAM_BLUE]==1);
+ Reset(2); Live(); MoveToSite(0); Hold(0,snd.plantMs); Die(0); Die(1); G_SNDRunFrame();
+ CHECK(snd.result==SND_ELIMINATION && snd.winner==TEAM_RED && level.teamScores[TEAM_RED]==1);
  Reset(2); Live(); level.time=snd.deadline; G_SNDRunFrame();
  CHECK(snd.result==SND_TIME && snd.winner==TEAM_BLUE);
 }
@@ -268,7 +286,7 @@ static void TestRoundKillcam(void) {
  level.time=deadline-1; G_SNDRunFrame();
  CHECK(snd.phase==SND_ROUND_OVER && replayStarts==1 && replayResets==resets);
  level.time=deadline; G_SNDRunFrame();
- CHECK(snd.phase==SND_COUNTDOWN && snd.round==2 && replayResets==resets+1);
+ CHECK(snd.phase==SND_LIVE && snd.round==2 && replayResets==resets+1);
  CHECK(level.replayEndTime==0 && snd.lastDeath[TEAM_BLUE].killer==-1);
  /* Match-winning round reuses this exact replay; no second selection. Its
   * killcam comes after roundEndWait( 4, false ): 4.55s from the death. */
@@ -294,11 +312,12 @@ static void TestRoundKillcam(void) {
  /* Objective wins/draws never replay an unrelated kill. */
  Reset(3); Live(); Die(0); G_SNDRecordKill(&g_entities[0],&g_entities[1]);
  level.time=snd.deadline; G_SNDRunFrame(); CHECK(snd.result==SND_TIME && !replayStarts);
- /* A draw comes only from a frame that finds both teams emptied without a
-  * deciding death (disconnects, team changes), and replays nothing. */
+ /* A frame that finds both teams emptied without a deciding death
+  * (disconnects, team changes) is the defenders' round, and replays nothing. */
  Reset(4); Live(); Die(2); G_SNDRecordKill(&g_entities[2],&g_entities[1]);
  CHECK(snd.phase==SND_LIVE);
- Die(0); Die(1); Die(3); G_SNDRunFrame(); CHECK(snd.result==SND_DRAW && !replayStarts);
+ Die(0); Die(1); Die(3); G_SNDRunFrame();
+ CHECK(snd.result==SND_ELIMINATION && snd.winner==TEAM_BLUE && !replayStarts);
  /* Two last players: the first death decides; the second can no longer be
   * dealt (MW2's endGame is postgame before the rest of the frame). */
  Reset(2); Live(); Die(0); G_SNDRecordKill(&g_entities[0],&g_entities[1]);
@@ -341,14 +360,17 @@ static void TestRoundEndWindow(void) {
  CHECK(!G_SNDUsable(&g_entities[0]) && !G_SNDUse(&g_entities[0],&cmd)); /* the carrier at a site: no plant */
  for(; level.time<death+ROUNDEND_FREEZE_DELAY; level.time+=50) {
   cmd.serverTime=level.time;
-  /* both survivors' commands go to Pmove; the dead one still spectates */
+  /* both survivors' commands go to Pmove, unfrozen; the dead one still spectates */
   CHECK(!G_SNDClientThink(&g_entities[0],&cmd) && !G_SNDClientThink(&g_entities[2],&cmd));
-  CHECK(g_clients[0].ps.pm_type==PM_NORMAL && G_SNDClientThink(&g_entities[1],&cmd));
+  CHECK(!G_SNDFrozen(&g_entities[0]) && !G_SNDFrozen(&g_entities[2]) && G_SNDClientThink(&g_entities[1],&cmd));
   G_SNDRunFrame(); CHECK(snd.phase==SND_ROUND_OVER && !G_SNDCanDamage(&g_entities[0]));
  }
  cmd.serverTime=level.time;
- CHECK(G_SNDClientThink(&g_entities[0],&cmd) && g_clients[0].ps.pm_type==PM_FREEZE);
- CHECK(G_SNDClientThink(&g_entities[2],&cmd) && g_clients[0].ps.commandTime==cmd.serverTime);
+ /* from then on the living are frozen: MW2's PMF_FROZEN on their real command,
+  * which still goes to Pmove. The dead have nothing to freeze. */
+ CHECK(G_SNDFrozen(&g_entities[0]) && G_SNDFrozen(&g_entities[2]) && !G_SNDFrozen(&g_entities[1]));
+ CHECK(!G_SNDClientThink(&g_entities[0],&cmd) && !G_SNDClientThink(&g_entities[2],&cmd));
+ CHECK(G_SNDClientThink(&g_entities[1],&cmd) && g_clients[1].ps.commandTime==cmd.serverTime);
  /* an objective's round end: from the frame it ends in */
  Reset(2); Live(); level.time=snd.deadline; G_SNDRunFrame();
  CHECK(snd.result==SND_TIME && snd.freezeTime==level.time+ROUNDEND_FREEZE_DELAY);
@@ -359,6 +381,148 @@ static void TestRoundEndWindow(void) {
 /* sd.gsc: after a detonation (wait 3) or a defuse (wait 1.5) play goes on,
  * damage and all, but no elimination ends the round (onDeadEvent returns) and
  * none makes a killcam; then the objective's winner takes it. */
+/* A player's box as the server links it, for the blast's reach. */
+static void Box(int n) {
+ gentity_t *e=&g_entities[n]; vec3_t mins={-15,-15,-24}, maxs={15,15,32};
+ VectorCopy(g_clients[n].ps.origin,e->r.currentOrigin);
+ VectorAdd(e->r.currentOrigin,mins,e->r.absmin); VectorAdd(e->r.currentOrigin,maxs,e->r.absmax);
+}
+static float BoxDistance(int n,vec3_t point) {
+ gentity_t *e=&g_entities[n]; vec3_t v; int i;
+ for(i=0;i<3;i++) v[i]=point[i]<e->r.absmin[i] ? e->r.absmin[i]-point[i] : (point[i]>e->r.absmax[i] ? point[i]-e->r.absmax[i] : 0);
+ return VectorLength(v);
+}
+/* sd.gsc bombPlanted: radiusDamage( origin, 512, 200, 20, planter ). */
+static void TestBombBlast(void) {
+ float dist; int i;
+ CHECK(SND_BLAST_RADIUS==512 && SND_BLAST_DAMAGE==200 && SND_BLAST_MIN_DAMAGE==20);
+ Reset(4); Live(); MoveToSite(0); Hold(0,snd.plantMs); CHECK(snd.planter==0);
+ VectorSet(g_clients[1].ps.origin,280,80,24);	/* in reach */
+ VectorSet(g_clients[2].ps.origin,0,SND_BLAST_RADIUS+16,24);	/* a teammate, just out of it */
+ VectorSet(g_clients[3].ps.origin,-200,0,24);
+ for(i=0;i<4;i++) Box(i);
+ Die(3);	/* the dead are not in it */
+ level.time=snd.deadline; G_SNDRunFrame();
+ CHECK(snd.result==SND_EXPLODED && snd.phase==SND_PLANTED);
+ /* the planter stands on it and takes the most; the result was set first, so
+  * the stub's G_SNDCanDamage check held and no death in it decides the round */
+ CHECK(blastCount==2 && blast[0].target==&g_entities[0] && blast[0].attacker==&g_entities[0]);
+ CHECK(BoxDistance(0,snd.bombOrigin)==0 && blast[0].damage==SND_BLAST_DAMAGE);
+ dist=BoxDistance(1,snd.bombOrigin); CHECK(dist>0 && dist<SND_BLAST_RADIUS);
+ CHECK(blast[1].target==&g_entities[1] && blast[1].attacker==&g_entities[0]);
+ CHECK(blast[1].damage==(int)(SND_BLAST_DAMAGE-(SND_BLAST_DAMAGE-SND_BLAST_MIN_DAMAGE)*dist/SND_BLAST_RADIUS));
+ CHECK(blast[1].damage<SND_BLAST_DAMAGE && blast[1].damage>SND_BLAST_MIN_DAMAGE);
+ CHECK((blast[1].flags&DAMAGE_RADIUS) && BoxDistance(2,snd.bombOrigin)>=SND_BLAST_RADIUS);
+ /* it goes off once, and the round ends 3s later as before */
+ level.time+=50; G_SNDRunFrame(); CHECK(blastCount==2);
+ level.time=snd.deadline; G_SNDRunFrame(); CHECK(snd.phase==SND_ROUND_OVER && blastCount==2);
+ /* behind cover it reaches nobody; with the planter gone it is nobody's */
+ Reset(2); Live(); MoveToSite(0); Hold(0,snd.plantMs); Box(0); Box(1); blastBlocked=1;
+ level.time=snd.deadline; G_SNDRunFrame(); CHECK(snd.result==SND_EXPLODED && blastCount==0);
+ Reset(3); Live(); MoveToSite(0); Hold(0,snd.plantMs);
+ VectorSet(g_clients[1].ps.origin,100,0,24); VectorSet(g_clients[2].ps.origin,-100,0,24); Box(1); Box(2);
+ G_SNDClientDied(&g_entities[0]); g_clients[0].pers.connected=CON_DISCONNECTED;
+ level.time=snd.deadline; G_SNDRunFrame();
+ CHECK(snd.result==SND_EXPLODED && blastCount==2 && !blast[0].attacker && !blast[1].attacker);
+ /* nor is it the next player's to connect into the planter's slot */
+ Reset(3); Live(); MoveToSite(0); Hold(0,snd.plantMs);
+ VectorSet(g_clients[1].ps.origin,100,0,24); VectorSet(g_clients[2].ps.origin,-100,0,24); Box(1); Box(2);
+ G_SNDClientDied(&g_entities[0]); g_clients[0].pers.connected=CON_DISCONNECTED;
+ level.time+=50; G_SNDRunFrame(); CHECK(snd.planter==-1 && snd.phase==SND_PLANTED);
+ g_clients[0].pers.connected=CON_CONNECTED; g_clients[0].sess.sessionTeam=TEAM_BLUE;
+ level.time=snd.deadline; G_SNDRunFrame();
+ CHECK(snd.result==SND_EXPLODED && blastCount==2 && !blast[0].attacker && !blast[1].attacker);
+ /* the next round has no planter until someone plants */
+ Reset(2); Live(); MoveToSite(0); Hold(0,snd.plantMs); CHECK(snd.planter==0);
+ level.time=snd.deadline; G_SNDRunFrame(); level.time=snd.deadline; G_SNDRunFrame();
+ CHECK(snd.phase==SND_ROUND_OVER); level.time=snd.deadline; G_SNDRunFrame();
+ CHECK(snd.phase==SND_LIVE && snd.round==2 && snd.planter==-1);
+}
+/* MW2's grace period: a team wiped out in a round's first 15s has not lost
+ * until it is over (gracePeriod: fifteen 1s waits and a 0.05s one, counted
+ * from the end of the prematch). The round goes on meanwhile. */
+static void TestGracePeriod(void) {
+ int live, death, resets;
+ Reset(2); sndGracePeriod.integer=15; Live(); live=level.time;
+ CHECK(snd.graceEnd==live+15050);
+ level.time=live+3000; Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]); death=level.time;
+ /* nothing is decided: live, damage on, nobody frozen, no score */
+ CHECK(snd.phase==SND_LIVE && snd.result==SND_NONE && level.teamScores[TEAM_RED]==0);
+ CHECK(G_SNDCanDamage(&g_entities[0]) && !G_SNDFrozen(&g_entities[0]) && !level.replayEndTime);
+ /* the winning kill's clip is asked for now, while the replay holds it, to
+  * play when the round has ended */
+ CHECK(replayStarts==1 && replayKiller==0 && replayFrom==death-KILLCAM_REWIND && replayTo==death+KILLCAM_LINGER);
+ CHECK(replayBegin==live+15050+KILLCAM_ROUND_DELAY);
+ level.time=live+15000; G_SNDRunFrame();
+ CHECK(snd.phase==SND_LIVE && replayStarts==1 && G_SNDCanDamage(&g_entities[0]));
+ level.time=live+15050; G_SNDRunFrame();
+ CHECK(snd.phase==SND_ROUND_OVER && snd.result==SND_ELIMINATION && snd.winner==TEAM_RED);
+ CHECK(level.teamScores[TEAM_RED]==1 && snd.freezeTime==live+15050+ROUNDEND_FREEZE_DELAY);
+ CHECK(replayStarts==1 && level.replayEndTime==replayDeadline && snd.deadline==replayDeadline+SND_KILLCAM_RESTART);
+ CHECK(!G_SNDFrozen(&g_entities[0])); level.time=snd.freezeTime; CHECK(G_SNDFrozen(&g_entities[0]));
+ /* the next round has its own: it starts live, and its grace with it */
+ level.time=snd.deadline; G_SNDRunFrame();
+ CHECK(snd.phase==SND_LIVE && snd.round==2 && snd.graceEnd==level.time+15050 && !snd.graceClip);
+ /* a kill in the last frame inside it waits for the next; one after it decides at once */
+ Reset(2); sndGracePeriod.integer=15; Live(); live=level.time;
+ level.time=live+15000; G_SNDRunFrame(); Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]);
+ CHECK(snd.phase==SND_LIVE);
+ level.time=live+15050; G_SNDRunFrame();
+ CHECK(snd.phase==SND_ROUND_OVER && snd.freezeTime==live+15050+ROUNDEND_FREEZE_DELAY);
+ Reset(2); sndGracePeriod.integer=15; Live(); live=level.time;
+ level.time=live+15050; G_SNDRunFrame(); CHECK(snd.phase==SND_LIVE);
+ Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]);
+ CHECK(snd.phase==SND_ROUND_OVER && snd.freezeTime==live+15050+ROUNDEND_FREEZE_DELAY);
+ CHECK(replayStarts==1 && replayBegin==live+15050+KILLCAM_ROUND_DELAY);
+ /* the attackers plant inside it, then kill the last defender: still theirs
+  * only when it is over */
+ Reset(2); sndGracePeriod.integer=15; Live(); live=level.time;
+ MoveToSite(0); Hold(0,snd.plantMs); CHECK(snd.phase==SND_PLANTED && level.time==live+snd.plantMs);
+ level.time+=1000; Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]);
+ CHECK(snd.phase==SND_PLANTED && snd.result==SND_NONE && replayStarts==1);
+ level.time=live+15050; G_SNDRunFrame();
+ CHECK(snd.phase==SND_ROUND_OVER && snd.winner==TEAM_RED && snd.result==SND_ELIMINATION);
+ CHECK(level.replayEndTime==replayDeadline);
+ /* dead attackers with the bomb down have not lost, in it or after it */
+ Reset(2); sndGracePeriod.integer=15; Live(); live=level.time;
+ MoveToSite(0); Hold(0,snd.plantMs); level.time+=1000; Die(0); G_SNDRecordKill(&g_entities[0],&g_entities[1]);
+ level.time=live+15050; G_SNDRunFrame(); CHECK(snd.phase==SND_PLANTED && snd.result==SND_NONE && !replayStarts);
+ /* both teams wiped inside it, before a plant: the defenders' round when it
+  * is over. The clip held was of the attacker's kill, a result that did not
+  * come: it is dropped, and nothing is replayed. */
+ Reset(2); sndGracePeriod.integer=15; Live(); live=level.time;
+ level.time=live+2000; Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]); CHECK(replayStarts==1 && snd.graceClip);
+ level.time=live+4000; Die(0); G_SNDRunFrame(); CHECK(snd.phase==SND_LIVE);
+ resets=replayResets; level.time=live+15050; G_SNDRunFrame();
+ CHECK(snd.phase==SND_ROUND_OVER && snd.winner==TEAM_BLUE && snd.result==SND_ELIMINATION);
+ CHECK(replayStarts==1 && replayResets==resets+1 && !level.replayEndTime && !snd.graceClip);
+ CHECK(snd.freezeTime==live+15050+ROUNDEND_FREEZE_DELAY && snd.deadline==level.time+snd.pauseMs);
+ /* the same, but the last attacker falls to the dead defender's grenade: the
+  * defenders' round by that kill, not the one whose clip was held. The held
+  * clip is dropped and the round's own kill asked for (the real replay,
+  * stopped since the first clip, has none to give). */
+ Reset(2); sndGracePeriod.integer=15; Live(); live=level.time;
+ level.time=live+2000; Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]); CHECK(replayStarts==1 && replayKiller==0);
+ level.time=live+4000; Die(0); G_SNDRecordKill(&g_entities[0],&g_entities[1]); CHECK(snd.phase==SND_LIVE && replayStarts==1);
+ resets=replayResets; level.time=live+15050; G_SNDRunFrame();
+ CHECK(snd.phase==SND_ROUND_OVER && snd.winner==TEAM_BLUE && replayResets==resets+1);
+ CHECK(replayStarts==2 && replayKiller==1 && replayFrom==live+4000-KILLCAM_REWIND && replayBegin==live+15050+KILLCAM_ROUND_DELAY);
+ /* a clip the replay could not give is asked for once, not every frame */
+ Reset(2); sndGracePeriod.integer=15; Live(); live=level.time; replayFail=1;
+ level.time=live+2000; Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]); CHECK(replayStarts==1 && !snd.graceClip);
+ level.time+=50; G_SNDRunFrame(); level.time+=50; G_SNDRunFrame(); CHECK(replayStarts==1);
+ level.time=live+15050; G_SNDRunFrame();
+ CHECK(snd.phase==SND_ROUND_OVER && snd.winner==TEAM_RED && replayStarts==2 && !level.replayEndTime);
+ /* the match-winning kill inside it plays after the match's shorter wait */
+ Reset(2); sndGracePeriod.integer=15; sndWinLimit.integer=1; Live(); live=level.time;
+ level.time=live+1000; Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]);
+ CHECK(replayBegin==live+15050+KILLCAM_MATCH_DELAY && !exits);
+ level.time=live+15050; G_SNDRunFrame(); CHECK(exits==1 && level.replayEndTime==replayDeadline);
+ sndWinLimit.integer=4;
+ /* g_sndGracePeriod 0: every elimination is decided in the death */
+ Reset(2); Live(); CHECK(snd.graceEnd==level.time);
+ Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]); CHECK(snd.phase==SND_ROUND_OVER);
+}
 static void TestObjectiveWindows(void) {
  int boom, defused, bombDeadline, effects, n;
  Reset(2); Live(); MoveToSite(0); Hold(0,snd.plantMs);
@@ -401,9 +565,12 @@ static void TestInsertionReset(void) {
  gentity_t *ti,*grenade;
  Reset(2); Live(); ti=Missile(WP_TACTICAL_INSERTION);
  Die(1); G_SNDRunFrame(); CHECK(snd.phase==SND_ROUND_OVER && ti->inuse);
- level.time=snd.deadline; G_SNDRunFrame(); CHECK(snd.phase==SND_COUNTDOWN && snd.round==2 && !ti->inuse);
+ level.time=snd.deadline; G_SNDRunFrame(); CHECK(snd.phase==SND_LIVE && snd.round==2 && !ti->inuse);
  ti=Missile(WP_TACTICAL_INSERTION); grenade=Missile(WP_GRENADE_LAUNCHER);
+ /* a team emptied in a live round ends it; with nobody to play, waiting follows */
  g_clients[1].pers.connected=CON_DISCONNECTED; G_SNDRunFrame();
+ CHECK(snd.phase==SND_ROUND_OVER && ti->inuse);
+ level.time=snd.deadline; G_SNDRunFrame();
  CHECK(snd.phase==SND_WAITING && !ti->inuse && grenade->inuse);
  ti=Missile(WP_TACTICAL_INSERTION); Player(1,TEAM_BLUE); G_SNDRunFrame();
  CHECK(snd.phase==SND_COUNTDOWN && !ti->inuse && !grenade->inuse);
@@ -413,7 +580,7 @@ int main(void) {
  TestCountdownAndEmptyTeam();
  TestRoundKillcam();
  TestRoundEndWindow();
- TestObjectiveWindows();
+ TestObjectiveWindows(); TestBombBlast(); TestGracePeriod();
  TestInsertionReset();
  printf("PASS: %i S&D round, bomb, timing, spectating, late-join and side-switch checks\n",checks);
  return 0;

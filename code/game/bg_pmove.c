@@ -719,7 +719,9 @@ static void PM_WaterJumpMove( void ) {
 
 	PM_StepSlideMove( qtrue );
 
-	pm->ps->velocity[2] -= pm->ps->gravity * pml.frametime;
+	if ( !( pm->ps->pm_flags & PMF_FROZEN ) ) {
+		pm->ps->velocity[2] -= pm->ps->gravity * pml.frametime;
+	}
 	if (pm->ps->velocity[2] < 0) {
 		// cancel as soon as we are falling down again
 		pm->ps->pm_flags &= ~PMF_ALL_TIMES;
@@ -1244,7 +1246,9 @@ static void PM_WalkMove( void ) {
 	//Com_Printf("velocity = %1.1f %1.1f %1.1f\n", pm->ps->velocity[0], pm->ps->velocity[1], pm->ps->velocity[2]);
 	//Com_Printf("velocity1 = %1.1f\n", VectorLength(pm->ps->velocity));
 
-	if ( ( pml.groundTrace.surfaceFlags & SURF_SLICK ) || pm->ps->pm_flags & PMF_TIME_KNOCKBACK ) {
+	if ( pm->ps->pm_flags & PMF_FROZEN ) {
+		// no gravity for a frozen player (MW2's PmoveSingle 574efd)
+	} else if ( ( pml.groundTrace.surfaceFlags & SURF_SLICK ) || pm->ps->pm_flags & PMF_TIME_KNOCKBACK ) {
 		pm->ps->velocity[2] -= pm->ps->gravity * pml.frametime;
 	} else {
 		// don't reset the z velocity for slopes
@@ -2494,7 +2498,9 @@ static void PM_CheckDuck( void ) {
 		return;
 	}
 
-	if ( !( ps->pm_flags & PMF_RESPAWNED ) ) {
+	// MW2 reads no stance from a respawned or a frozen player (0x570C23); the
+	// eye below still runs, so a stance change under way finishes.
+	if ( !( ps->pm_flags & ( PMF_RESPAWNED | PMF_FROZEN ) ) ) {
 		// MW2's ladder strip (0x570C54-0x570C71) tests no held key
 		if ( ( ps->stats[STAT_LADDER] & LADDER_ATTACHED ) && ( stance & ( BUTTON_PRONE | BUTTON_CROUCH ) ) ) {
 			stance &= ~( BUTTON_PRONE | BUTTON_CROUCH );
@@ -5476,8 +5482,13 @@ static void PM_Weapon( void ) {
 		// sprint and ladder rules remain authoritative.
 	}
 
-	// 1. Weapon change ALWAYS stamps a real holster first.
-	if ( !ladderWeapon && PM_WeaponChangeOpen() ) {
+	// 1. Weapon change ALWAYS stamps a real holster first. MW2 begins none for
+	//    a frozen player with a gun in hand (CheckForChangeWeapon, 578cbf); a
+	//    swap already going down finishes, and so does a knife or grenade
+	//    already asked for, which are no weapon change in MW2.
+	if ( !ladderWeapon && PM_WeaponChangeOpen() &&
+	     !( ( pm->ps->pm_flags & PMF_FROZEN ) && pm->ps->weapon != WP_NONE &&
+	        !BG_IsActionWeapon( pm->ps->weapon ) && !( pm->ps->weaponAction & WA_TYPE_MASK ) ) ) {
 		int want = PM_DesiredWeapon();
 		if ( want != pm->ps->weapon || PM_DesiredSlot() != pm->ps->stats[STAT_ACTIVE_SLOT] ) {
 			PM_BeginWeaponChange( want );
@@ -6046,6 +6057,21 @@ void PmoveSingle (pmove_t *pmove) {
 	pm->watertype = 0;
 	pm->waterlevel = 0;
 
+	// MW2's PMF_FROZEN (PmoveSingle 57440d-57445d): the command keeps only its
+	// stance buttons, which PM_CheckDuck then does not read, and its moves and
+	// the player's velocity are zeroed. Everything else runs on: the eye, the
+	// aim and the sprint (which end, nothing asking for them), the weapon's
+	// timers, and a reload, a swap or a throw already under way. The talk
+	// button is Peace's own and only draws the balloon.
+	if ( pm->ps->pm_flags & PMF_FROZEN ) {
+		pm->cmd.buttons &= BUTTON_STANCE_MASK | BUTTON_TALK;
+		pm->cmd.forwardmove = 0;
+		pm->cmd.rightmove = 0;
+		pm->cmd.upmove = 0;
+		VectorClear( pm->ps->velocity );
+		pm->ps->weapFlags &= ~PWF_USE_RELOAD;
+	}
+
 	if ( pm->ps->stats[STAT_HEALTH] <= 0 ) {
 		pm->tracemask &= ~CONTENTS_BODY;	// corpses can fly through bodies
 	}
@@ -6159,8 +6185,9 @@ void PmoveSingle (pmove_t *pmove) {
 
 	// MW2's order (PmoveSingle 0x57448B-0x574782): the crawl rules, the view
 	// (with the prone turn and clamps), then a stopped crawl's zeroing, all
-	// on the stance the last think left. Peace's freeze and intermission move
-	// nothing at all (MW2's PMF_FROZEN still runs them).
+	// on the stance the last think left. A dead player waiting for a round
+	// (PM_FREEZE) and the intermission move nothing at all; MW2's frozen
+	// player (PMF_FROZEN) is PM_NORMAL and runs all of it.
 	if ( pm->ps->pm_type != PM_FREEZE && pm->ps->pm_type != PM_INTERMISSION &&
 	     pm->ps->pm_type != PM_SPINTERMISSION ) {
 		PM_ProneMoveOverride();

@@ -731,37 +731,30 @@ void BotTestSolid(vec3_t origin);
 
 /*
 ==============
-ClientGameEndFrozen
+ClientFrozen
 
-MW2's endGame freezes every player in every mode: its waitframe, then
-freezePlayerForRoundEnd( 1.0 ) (_gamelogic.gsc, before the round/game
-branch), ROUNDEND_FREEZE_DELAY after the game ended. Until then everyone keeps
-full control through Pmove, with damage already off (G_Damage refuses once the
-intermission is queued). S&D freezes its own round ends (G_SNDClientThink),
-and missionpack's single-player arena keeps its own queued-intermission path
-(in ClientThink_real). As in S&D's freeze, a frozen player's command runs no
-Pmove: only the view turns.
+MW2's freezeControls: its scripts freeze the players for the prematch
+countdown and 1.05s after a round or a game ends (endGame's waitframe and
+freezePlayerForRoundEnd( 1.0 ), before its round/game branch), and the
+client's end frame copies that into PMF_FROZEN every frame (5d7e33-5d7e4e).
+The dead and spectators have nothing to freeze.
 ==============
 */
-static qboolean ClientGameEndFrozen( gentity_t *ent, usercmd_t *ucmd ) {
+static qboolean ClientFrozen( gentity_t *ent ) {
 	gclient_t *client = ent->client;
+	if ( client->sess.sessionTeam == TEAM_SPECTATOR || ent->health <= 0 ) {
+		return qfalse;
+	}
+	if ( g_gametype.integer == GT_SND ) {
+		return G_SNDFrozen( ent );
+	}
 #ifdef MISSIONPACK
 	if ( g_singlePlayer.integer ) {
 		return qfalse;
 	}
 #endif
-	if ( g_gametype.integer == GT_SND || !level.intermissionQueued ||
-	     level.time < level.intermissionQueued + ROUNDEND_FREEZE_DELAY ||
-	     client->sess.sessionTeam == TEAM_SPECTATOR ) {
-		return qfalse;
-	}
-	client->ps.commandTime = ucmd->serverTime;
-	if ( client->ps.stats[STAT_HEALTH] > 0 ) {
-		client->ps.pm_type = PM_FREEZE;
-		PM_UpdateViewAngles( &client->ps, ucmd );
-	}
-	VectorClear( client->ps.velocity );
-	return qtrue;
+	return level.intermissionQueued &&
+		level.time >= level.intermissionQueued + ROUNDEND_FREEZE_DELAY;
 }
 
 /*
@@ -844,7 +837,6 @@ void ClientThink_real( gentity_t *ent ) {
 	}
 
 	if ( G_SNDClientThink( ent, ucmd ) ) return;
-	if ( ClientGameEndFrozen( ent, ucmd ) ) return;
 
 	// spectators don't do much
 	if ( client->sess.sessionTeam == TEAM_SPECTATOR ) {
@@ -858,6 +850,16 @@ void ClientThink_real( gentity_t *ent ) {
 	// check for inactivity timer, but never drop the local client of a non-dedicated server
 	if ( !ClientInactivityTimer( client ) ) {
 		return;
+	}
+
+	// MW2's PMF_FROZEN: Pmove reads only the stance from a frozen player's
+	// command, and so does everything the server does with it afterwards (the
+	// use code and its reload, a floor gun's pickup).
+	if ( client->ps.pm_flags & PMF_FROZEN ) {
+		ucmd->buttons &= BUTTON_STANCE_MASK | BUTTON_TALK;
+		ucmd->forwardmove = 0;
+		ucmd->rightmove = 0;
+		ucmd->upmove = 0;
 	}
 
 	// clear the rewards if time
@@ -1045,7 +1047,9 @@ void ClientThink_real( gentity_t *ent ) {
 
 	// check for respawning
 	if ( client->ps.stats[STAT_HEALTH] <= 0 ) {
-		if ( !G_SNDCanRespawn() ) return;
+		// nobody respawns into a round, nor once the game has ended (MW2's
+		// spawnClient returns when level.gameEnded)
+		if ( !G_SNDCanRespawn() || level.intermissionQueued ) return;
 		// wait for the attack button to be pressed
 		if ( level.time > client->respawnTime ) {
 			// forcerespawn is to prevent users from waiting out powerups
@@ -1199,6 +1203,14 @@ void ClientEndFrame( gentity_t *ent ) {
 		VectorClear( ent->client->ps.viewangles );
 	}
 #endif
+
+	// MW2's ClientEndFrame (5d7e33-5d7e4e): the freeze goes onto the player
+	// state here, so the snapshot of the frame that freezes already says so.
+	if ( ClientFrozen( ent ) ) {
+		ent->client->ps.pm_flags |= PMF_FROZEN;
+	} else {
+		ent->client->ps.pm_flags &= ~PMF_FROZEN;
+	}
 
 	//
 	// If the end of unit layout is displayed, don't give

@@ -33,7 +33,7 @@ static usercmd_t nextCmd;
 static char caseText[96] = "setup";
 level_locals_t level;
 gentity_t g_entities[MAX_GENTITIES];
-static gclient_t clients[3];
+static gclient_t clients[4];	/* three players, and a spectator's slot */
 vmCvar_t g_gametype, g_weaponRespawn, g_weaponTeamRespawn, g_smoothClients, g_friendlyFire, g_debugDamage,
  g_knockback, g_inactivity, g_quadfactor, g_forcerespawn, g_teamForceBalance, g_maxGameClients, g_dmflags,
  g_blood, g_cheats, g_teamAutoJoin, g_singlePlayer, g_doWarmup, g_warmup, g_motd, g_synchronousClients,
@@ -63,6 +63,7 @@ int trap_ReplayStart(int killer,int from,int to,int begin) {
 }
 void LogExit(const char *s) { (void)s; exits++; level.intermissionQueued=level.time; }
 static int spawnSite;
+static int graceSeconds;	/* g_sndGracePeriod for the next match: 0 but in GracePeriod's case */
 qboolean G_SpawnInt(const char *key,const char *initial,int *out) { (void)key; (void)initial; *out=spawnSite; return qtrue; }
 qboolean G_SpawnFloat(const char *key,const char *initial,float *out) { (void)key; *out=atof(initial); return qtrue; }
 
@@ -203,7 +204,7 @@ static const vec3_t atVictim={10,90,0};	/* level, down the line at the victim's 
 static const vec3_t atMate={0,0,0};		/* along +x at the teammate */
 static const vec3_t away={0,180,0};		/* along -x, where nobody stands */
 static int now;		/* the real clock: frames on FRAME boundaries, commands between them */
-static int shooterButtons, shooterForward, victimButtons;
+static int shooterButtons, shooterForward, shooterUp, shooterWeapon, victimButtons;
 static const float *shooterView;
 
 /* G_RunFrame's order (g_main.c): every entity, then S&D, then the end frames */
@@ -237,7 +238,8 @@ static void ServerFrame(int levelTime) {
 static void Command(int n,int buttons,const float *view,int forward) {
  int i;
  memset(&nextCmd,0,sizeof(nextCmd));
- nextCmd.serverTime=now; nextCmd.buttons=buttons; nextCmd.weapon=WP_SHOTGUN; nextCmd.forwardmove=forward;
+ nextCmd.serverTime=now; nextCmd.buttons=buttons; nextCmd.forwardmove=forward;
+ nextCmd.weapon=n==SHOOTER ? shooterWeapon : WP_SHOTGUN; nextCmd.upmove=n==SHOOTER ? shooterUp : 0;
  for(i=0;i<3;i++) nextCmd.angles[i]=ANGLE2SHORT(view[i])-clients[n].ps.delta_angles[i];
  ClientThink(n);
 }
@@ -273,11 +275,17 @@ static int Knives(int *restNum) {
  return n;
 }
 
+/* MW2's freeze: a flag on a living player who is otherwise as ever (PM_NORMAL,
+ * his command going to Pmove), never a pm_type. */
+static qboolean Frozen(int n) {
+ return (clients[n].ps.pm_flags&PMF_FROZEN) && clients[n].ps.pm_type==PM_NORMAL && g_entities[n].health>0;
+}
+
 /* A fresh S&D match on a one-site map, the round live and every gun drawn:
  * the shooter (red) at the origin, the last defender 200 down +y, and the
  * shooter's teammate 200 along +x. Friendly fire is on, so only the round's
  * end can keep the knife from hurting the teammate. */
-static void Reset(void) {
+static void ResetMatch(void) {
  int i;
  gentity_t *site;
  memset(&level,0,sizeof(level)); memset(g_entities,0,sizeof(g_entities)); memset(clients,0,sizeof(clients));
@@ -287,7 +295,7 @@ static void Reset(void) {
  g_gametype.integer=GT_SND; g_knockback.integer=0; g_speed.value=320; g_gravity.value=DEFAULT_GRAVITY;
  g_friendlyFire.integer=1; pmove_msec.integer=8; pmove_fixed.integer=0;
  replayStarts=exits=0;
- G_SNDInit(); sndCountdown.integer=1;
+ G_SNDInit(); sndCountdown.integer=1; sndGracePeriod.integer=graceSeconds;
  site=G_Spawn(); VectorSet(site->s.origin,-400,-400,8); spawnSite=0; SP_peace_bombsite(site); G_SNDMapReady();
  InitBodyQue();
  for(i=0;i<3;i++) {
@@ -299,7 +307,14 @@ static void Reset(void) {
   clients[i].pers.connected=CON_CONNECTED; clients[i].pers.selectedLoadout=c;
   clients[i].sess.sessionTeam=i==VICTIM ? TEAM_BLUE : TEAM_RED;
  }
- shooterButtons=shooterForward=victimButtons=0; shooterView=atVictim;
+ shooterButtons=shooterForward=shooterUp=victimButtons=0; shooterView=atVictim; shooterWeapon=WP_SHOTGUN;
+ /* the spawn's own think reads the client's last command (trap_GetUsercmd):
+  * none yet, not one left over from another case's clock */
+ memset(&nextCmd,0,sizeof(nextCmd)); nextCmd.serverTime=now;
+}
+static void Reset(void) {
+ int i;
+ ResetMatch();
  /* the round starts on the next frame (SND_StartRound spawns everyone through
   * the real ClientSpawn), counts down, and goes live */
  for(i=0;snd.phase!=SND_LIVE;i++) { Run(1); CHECK(i<5000); }
@@ -360,9 +375,9 @@ static int KnifeAfterWinningShot(int phase,int pressAfter,qboolean fromDeath) {
   CHECK(clients[SHOOTER].ps.ammo[WP_THROWING_KNIFE]==0 && Knives(NULL)==1);
   CHECK(clients[SHOOTER].ps.pm_type==PM_NORMAL);
  } else if(pressLevel>=death+ROUNDEND_FREEZE_DELAY) {
-  /* frozen: no command reaches Pmove, so nothing is pulled */
+  /* frozen: Pmove reads only the stance from the command, so nothing is pulled */
   CHECK(clients[SHOOTER].ps.ammo[WP_THROWING_KNIFE]==1 && !Knives(NULL));
-  CHECK(clients[SHOOTER].ps.weapon==WP_SHOTGUN && clients[SHOOTER].ps.pm_type==PM_FREEZE);
+  CHECK(clients[SHOOTER].ps.weapon==WP_SHOTGUN && Frozen(SHOOTER));
  }
  /* the knife's flight, into the teammate: it sticks, and hurts nobody */
  Run(600);
@@ -379,12 +394,14 @@ static int KnifeAfterWinningShot(int phase,int pressAfter,qboolean fromDeath) {
  /* everyone frozen by now; the next round comes after the killcam */
  if(level.time<death+ROUNDEND_FREEZE_DELAY) Run(death+ROUNDEND_FREEZE_DELAY-level.time+FRAME);
  for(t=0;t<CMD_MSEC*2;t++) Tick();
- CHECK(clients[SHOOTER].ps.pm_type==PM_FREEZE && clients[MATE].ps.pm_type==PM_FREEZE);
+ CHECK(Frozen(SHOOTER) && Frozen(MATE));
  end=level.replayEndTime;
  while(snd.phase==SND_ROUND_OVER) Run(FRAME);
- CHECK(snd.phase==SND_COUNTDOWN && snd.round==2 && !level.replayEndTime);
+ /* the next round starts live, with nobody frozen (MW2 counts down only once) */
+ CHECK(snd.phase==SND_LIVE && snd.round==2 && !level.replayEndTime);
  CHECK(level.time==end+SND_KILLCAM_RESTART);	/* a frame boundary: D is one */
  CHECK(SND_Alive(VICTIM) && clients[SHOOTER].ps.ammo[WP_THROWING_KNIFE]==1);
+ CHECK(!(clients[SHOOTER].ps.pm_flags&PMF_FROZEN) && !(clients[MATE].ps.pm_flags&PMF_FROZEN) && !(clients[VICTIM].ps.pm_flags&PMF_FROZEN));
  return thrown;
 }
 
@@ -419,11 +436,226 @@ static void ControlWindow(void) {
  CHECK(level.time==death+ROUNDEND_FREEZE_DELAY-FRAME);
  CHECK(clients[SHOOTER].ps.origin[0]<before[0]-50 && clients[SHOOTER].ps.pm_type==PM_NORMAL);	/* ran */
  Run(1+CMD_MSEC);	/* the freeze's frame, then a command */
- CHECK(level.time==death+ROUNDEND_FREEZE_DELAY && clients[SHOOTER].ps.pm_type==PM_FREEZE);
+ CHECK(level.time==death+ROUNDEND_FREEZE_DELAY && Frozen(SHOOTER));
  VectorCopy(clients[SHOOTER].ps.origin,before);
  shooterButtons=BUTTON_LETHAL; Run(500);
  CHECK(VectorCompare(clients[SHOOTER].ps.origin,before) && clients[SHOOTER].ps.ammo[WP_THROWING_KNIFE]==1);
  CHECK(clients[SHOOTER].ps.commandTime==now-now%CMD_MSEC);	/* the command was taken, and did nothing */
+}
+
+/* On to the freeze's frame, whose own end already says so (MW2's
+ * ClientEndFrame: the snapshot of that frame carries it), then to the first
+ * command taken frozen. */
+static void ToFreeze(int death) {
+ while(level.time<death+ROUNDEND_FREEZE_DELAY) {
+  CHECK(!(clients[SHOOTER].ps.pm_flags&PMF_FROZEN));
+  Run(1);
+ }
+ CHECK(level.time==death+ROUNDEND_FREEZE_DELAY && Frozen(SHOOTER) && Frozen(MATE));
+ if(now%CMD_MSEC) CHECK(clients[SHOOTER].ps.commandTime<now);	/* no command has run on it yet */
+ CHECK(!(clients[VICTIM].ps.pm_flags&PMF_FROZEN));	/* the dead have nothing to freeze */
+ ToCommand(); Run(1);
+ CHECK(clients[SHOOTER].ps.commandTime==now && Frozen(SHOOTER));
+}
+/* On to the last frame before the freeze, a command about to run. */
+static void ToLastFreeFrame(int death) {
+ while(level.time<death+ROUNDEND_FREEZE_DELAY-FRAME) Run(1);
+ ToCommand();
+ CHECK(level.time==death+ROUNDEND_FREEZE_DELAY-FRAME);
+}
+/* MW2's freeze is a flag on a living player whose Pmove runs on, reading only
+ * the stance from the command and zeroing its moves and his velocity
+ * (PmoveSingle 57440d-57445d): what was under way finishes, and nothing new
+ * starts. Each case arranges one thing before the freeze at D + 1050 and
+ * watches it through the real ClientThink and Pmove. */
+static void FrozenRunsOn(void) {
+ playerState_t *ps=&clients[SHOOTER].ps;
+ vec3_t at; int death, ammo, t; float eye;
+
+ Com_sprintf(caseText,sizeof(caseText),"frozen: the aim comes down");
+ Reset(); death=WinningShot(24);
+ while(level.time<death+BG_WeaponFireLength(WP_SHOTGUN)+FRAME) Run(1);
+ shooterButtons=BUTTON_ADS; ToLastFreeFrame(death);
+ CHECK(ps->pm_flags&PMF_ADS);
+ ToFreeze(death);
+ CHECK(!(ps->pm_flags&PMF_ADS));	/* with the button still held */
+ Run(300); CHECK(!(ps->pm_flags&PMF_ADS) && Frozen(SHOOTER));
+
+ Com_sprintf(caseText,sizeof(caseText),"frozen: the sprint ends and the legs stop");
+ Reset(); death=WinningShot(24);
+ while(level.time<death+BG_WeaponFireLength(WP_SHOTGUN)+FRAME) Run(1);
+ shooterView=away; shooterForward=127; ToCommand();
+ shooterButtons=BUTTON_SPRINT; Run(CMD_MSEC*2); shooterButtons=0;
+ ToLastFreeFrame(death);
+ CHECK((ps->pm_flags&PMF_SPRINTING) && VectorLength(ps->velocity)>g_speed.value);
+ CHECK(ps->weaponstate==WEAPON_SPRINT_IN || ps->weaponstate==WEAPON_SPRINTING);
+ CHECK((ps->legsAnim&~ANIM_TOGGLEBIT)!=LEGS_IDLE);
+ ToFreeze(death);
+ CHECK(VectorLength(ps->velocity)==0);	/* stopped dead, the stick still pushed */
+ VectorCopy(ps->origin,at);
+ Run(CMD_MSEC);
+ CHECK(!(ps->pm_flags&PMF_SPRINTING));
+ Run(BG_WeaponSprintInTime(WP_SHOTGUN)+BG_WeaponSprintOutTime(WP_SHOTGUN)+FRAME);
+ CHECK(ps->weaponstate==WEAPON_READY && (ps->legsAnim&~ANIM_TOGGLEBIT)==LEGS_IDLE);
+ CHECK(VectorCompare(ps->origin,at) && VectorLength(ps->velocity)==0);
+ CHECK((g_entities[SHOOTER].s.legsAnim&~ANIM_TOGGLEBIT)==LEGS_IDLE);	/* what the others see */
+
+ Com_sprintf(caseText,sizeof(caseText),"frozen: a reload under way finishes");
+ Reset(); death=WinningShot(24);
+ while(level.time<death+BG_WeaponFireLength(WP_SHOTGUN)+FRAME) Run(1);
+ CHECK(ps->weaponstate==WEAPON_READY && ps->ammo[WP_SHOTGUN]==BG_WeaponMagSize(WP_SHOTGUN)-1);
+ ToLastFreeFrame(death);
+ shooterButtons=BUTTON_RELOAD; Run(CMD_MSEC); shooterButtons=0;
+ CHECK(ps->weaponstate==WEAPON_RELOADING && ps->ammo[WP_SHOTGUN]==BG_WeaponMagSize(WP_SHOTGUN)-1);
+ ToFreeze(death);
+ CHECK(ps->weaponstate==WEAPON_RELOADING);
+ Run(BG_WeaponReloadTime(WP_SHOTGUN)+FRAME);
+ CHECK(ps->weaponstate==WEAPON_READY && ps->ammo[WP_SHOTGUN]==BG_WeaponMagSize(WP_SHOTGUN));
+
+ Com_sprintf(caseText,sizeof(caseText),"frozen: a swap under way finishes and no new one begins");
+ Reset(); death=WinningShot(24);
+ while(level.time<death+BG_WeaponFireLength(WP_SHOTGUN)+FRAME) Run(1);
+ ToLastFreeFrame(death);
+ shooterWeapon=WP_MACHINEGUN; Run(CMD_MSEC);
+ CHECK(ps->weapon==WP_SHOTGUN && ps->weaponstate==WEAPON_DROPPING);
+ ToFreeze(death);
+ CHECK(ps->weapon==WP_SHOTGUN && ps->weaponstate==WEAPON_DROPPING);
+ for(t=0;t<5000 && !(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_READY);t++) Run(1);
+ CHECK(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_READY && Frozen(SHOOTER));
+ CHECK(t>=BG_WeaponDropTime(WP_SHOTGUN)-FRAME-CMD_MSEC);	/* the whole of it ran, frozen */
+ shooterWeapon=WP_SHOTGUN; Run(BG_WeaponDropTime(WP_MACHINEGUN)+FRAME);
+ CHECK(ps->weapon==WP_MACHINEGUN && ps->weaponstate==WEAPON_READY);	/* asked for frozen: refused */
+
+ Com_sprintf(caseText,sizeof(caseText),"frozen: a knife held at the freeze is thrown");
+ Reset(); death=WinningShot(24);
+ while(level.time<death+BG_WeaponFireLength(WP_SHOTGUN)+FRAME) Run(1);
+ shooterView=atMate; ToLastFreeFrame(death);
+ shooterButtons=BUTTON_LETHAL;	/* pressed in the last free frame, and held on */
+ while(level.time<death+ROUNDEND_FREEZE_DELAY) {
+  Run(1);
+  CHECK(!Knives(NULL) && ps->ammo[WP_THROWING_KNIFE]==1);
+ }
+ CHECK(ps->weapon==WP_THROWING_KNIFE && Frozen(SHOOTER));
+ ToCommand(); Run(1+CMD_MSEC);	/* frozen, the hold reads as let go */
+ CHECK(Knives(NULL)==1 && ps->ammo[WP_THROWING_KNIFE]==0);
+ Run(600); CHECK(g_entities[MATE].health==100);	/* and hurts nobody: the round is over */
+ for(t=0;t<3000 && !(ps->weapon==WP_SHOTGUN && ps->weaponstate==WEAPON_READY);t++) Run(1);
+ CHECK(ps->weapon==WP_SHOTGUN && ps->weaponstate==WEAPON_READY && !(ps->weaponAction&WA_TYPE_MASK));	/* the gun came back */
+
+ Com_sprintf(caseText,sizeof(caseText),"frozen: no shot, reload, knife or use");
+ Reset(); death=WinningShot(24);
+ ToLastFreeFrame(death); ToFreeze(death);
+ ammo=ps->ammo[WP_SHOTGUN]; CHECK(ammo<BG_WeaponMagSize(WP_SHOTGUN) && ps->weaponstate==WEAPON_READY);
+ shooterView=atMate;
+ shooterButtons=BUTTON_ATTACK|BUTTON_RELOAD|BUTTON_USE_RELOAD|BUTTON_MELEE|BUTTON_LETHAL|BUTTON_TACTICAL|BUTTON_ADS|BUTTON_SPRINT;
+ shooterForward=127; shooterUp=127;
+ for(t=0;t<700;t++) {
+  Run(1);
+  CHECK(ps->ammo[WP_SHOTGUN]==ammo && ps->weapon==WP_SHOTGUN && ps->weaponstate==WEAPON_READY);
+  CHECK(!(ps->weaponAction&WA_TYPE_MASK) && !(ps->weapFlags&PWF_USE_RELOAD));
+  CHECK(!(ps->pm_flags&(PMF_ADS|PMF_SPRINTING)) && ps->groundEntityNum!=ENTITYNUM_NONE && !(ps->eFlags&EF_FIRING));
+ }
+ CHECK(!Knives(NULL) && ps->ammo[WP_THROWING_KNIFE]==1 && g_entities[MATE].health==100);
+
+ Com_sprintf(caseText,sizeof(caseText),"frozen in the air: hangs there");
+ Reset(); death=WinningShot(24);
+ ToLastFreeFrame(death);
+ shooterUp=127; Run(CMD_MSEC*2); shooterUp=0;
+ CHECK(ps->groundEntityNum==ENTITYNUM_NONE && ps->velocity[2]>0);
+ ToFreeze(death);
+ VectorCopy(ps->origin,at);
+ CHECK(at[2]>25 && ps->groundEntityNum==ENTITYNUM_NONE && VectorLength(ps->velocity)==0);
+ Run(500);
+ CHECK(VectorCompare(ps->origin,at) && ps->groundEntityNum==ENTITYNUM_NONE && VectorLength(ps->velocity)==0);
+
+ Com_sprintf(caseText,sizeof(caseText),"frozen: a stance change under way finishes, and no stance is read");
+ Reset(); death=WinningShot(24);
+ ToLastFreeFrame(death);
+ shooterButtons=BUTTON_CROUCH; Run(CMD_MSEC);
+ CHECK(ps->viewHeightTarget==BG_EYE_CROUCH);
+ ToFreeze(death);
+ eye=ps->viewheight; CHECK(ps->viewHeightTarget==BG_EYE_CROUCH);
+ Run(500);
+ CHECK(ps->viewheight<eye && (ps->pm_flags&PMF_DUCKED));	/* the eye went on down */
+ eye=ps->viewheight; shooterButtons=0; Run(500);
+ CHECK(ps->viewheight==eye && (ps->pm_flags&PMF_DUCKED) && ps->viewHeightTarget==BG_EYE_CROUCH);	/* letting go is not read */
+ Reset(); death=WinningShot(24);
+ ToLastFreeFrame(death); ToFreeze(death);
+ eye=ps->viewheight; shooterButtons=BUTTON_CROUCH; Run(500);
+ CHECK(ps->viewheight==eye && !(ps->pm_flags&PMF_DUCKED) && ps->viewHeightTarget==BG_EYE_STAND);	/* nor is a new one */
+ shooterButtons=BUTTON_PRONE; Run(500);
+ CHECK(ps->viewheight==eye && !(ps->pm_flags&(PMF_DUCKED|PMF_PRONE)));
+}
+/* A spectator's state is a copy of the player he follows, that player's
+ * freeze included. When he stops following it is his own again: a free
+ * camera has nothing to freeze, and flies while the players stand frozen. */
+static void SpectatorLeavesTheFrozen(void) {
+ gentity_t *s=&g_entities[3]; gclient_t *c=&clients[3]; vec3_t was; int death, i;
+ Com_sprintf(caseText,sizeof(caseText),"a spectator stops following a frozen player");
+ Reset(); death=WinningShot(24); ToFreeze(death);
+ level.maxclients=4;
+ s->client=c; s->inuse=qtrue; s->s.number=3; s->r.ownerNum=ENTITYNUM_NONE;
+ c->pers.connected=CON_CONNECTED; c->sess.sessionTeam=TEAM_SPECTATOR;
+ c->sess.spectatorState=SPECTATOR_FOLLOW; c->sess.spectatorClient=SHOOTER;
+ ClientEndFrame(s);
+ CHECK((c->ps.pm_flags&PMF_FOLLOW) && (c->ps.pm_flags&PMF_FROZEN) && c->ps.clientNum==SHOOTER);
+ StopFollowing(s);
+ CHECK(c->sess.spectatorState==SPECTATOR_FREE && !(c->ps.pm_flags&(PMF_FOLLOW|PMF_FROZEN)));
+ VectorCopy(c->ps.origin,was);
+ for(i=0;i<8;i++) { Run(CMD_MSEC); Command(3,0,atMate,127); }
+ CHECK(c->ps.pm_type==PM_SPECTATOR && !(c->ps.pm_flags&PMF_FROZEN) && c->ps.origin[0]>was[0]+1);
+ CHECK(Frozen(SHOOTER) && Frozen(MATE));
+}
+/* MW2's grace period through the real server: the round's first kill, about
+ * 3s after it went live, decides nothing until 15.05s. Everyone keeps full
+ * control and damage stays on; then the round ends as any other does, the
+ * freeze 1.05s later and the kill's replay after the round's wait. */
+static void GracePeriod(void) {
+ playerState_t *ps=&clients[SHOOTER].ps;
+ vec3_t was; int end, death;
+ Com_sprintf(caseText,sizeof(caseText),"the grace period");
+ graceSeconds=15; Reset(); graceSeconds=0;
+ end=snd.graceEnd; CHECK(end-level.time>10000 && end%FRAME==0);
+ ToCommand(); shooterButtons=BUTTON_ATTACK; Run(1); shooterButtons=0;
+ CHECK(g_entities[VICTIM].health<=0 && !SND_Alive(VICTIM)); death=level.time;
+ CHECK(snd.phase==SND_LIVE && snd.result==SND_NONE && level.teamScores[TEAM_RED]==0);
+ CHECK(replayStarts==1 && replayKiller==SHOOTER && replayFrom==death-KILLCAM_REWIND && replayBegin==end+KILLCAM_ROUND_DELAY);
+ /* well past where a round's freeze would have come: he still runs, and
+  * could still be hurt */
+ Run(3000); VectorCopy(ps->origin,was); shooterView=away; shooterForward=127; Run(1000); shooterForward=0;
+ CHECK(!(ps->pm_flags&PMF_FROZEN) && ps->origin[0]<was[0]-100 && G_SNDCanDamage(&g_entities[SHOOTER]));
+ while(level.time<end-FRAME) Run(1);
+ CHECK(snd.phase==SND_LIVE && !(ps->pm_flags&PMF_FROZEN));
+ while(level.time<end) Run(1);
+ CHECK(snd.phase==SND_ROUND_OVER && snd.winner==TEAM_RED && snd.result==SND_ELIMINATION);
+ CHECK(snd.freezeTime==end+ROUNDEND_FREEZE_DELAY && !G_SNDCanDamage(&g_entities[SHOOTER]) && replayStarts==1);
+ CHECK(!(ps->pm_flags&PMF_FROZEN));
+ ToFreeze(end);
+}
+/* MW2's prematch: the first round counts down with everyone frozen by the
+ * same flag. The gun's first raise runs under it (the frozen command has no
+ * trigger, so the respawned flag clears on it), and the round goes live with
+ * nobody frozen. */
+static void Prematch(void) {
+ playerState_t *ps=&clients[SHOOTER].ps;
+ vec3_t at; int i, raise, live;
+ Com_sprintf(caseText,sizeof(caseText),"prematch countdown");
+ ResetMatch();
+ for(i=0;snd.phase!=SND_COUNTDOWN;i++) { Run(1); CHECK(i<5000); }
+ live=snd.deadline;
+ CHECK(level.time<live && Frozen(SHOOTER) && Frozen(VICTIM) && Frozen(MATE));	/* from the frame they spawn in */
+ Place(SHOOTER,0,0);
+ shooterButtons=BUTTON_ATTACK; shooterForward=127; shooterView=away;
+ ToCommand(); Run(1);
+ raise=ps->weaponTime; VectorCopy(ps->origin,at);
+ CHECK(!(ps->pm_flags&PMF_RESPAWNED) && ps->weaponstate==WEAPON_RAISING && raise>0);
+ Run(300);
+ CHECK(ps->weaponstate==WEAPON_RAISING && ps->weaponTime<raise-200);	/* the raise runs under the freeze */
+ CHECK(VectorCompare(ps->origin,at) && ps->ammo[WP_SHOTGUN]==BG_WeaponMagSize(WP_SHOTGUN));
+ while(level.time<live) { CHECK(Frozen(SHOOTER) && snd.phase==SND_COUNTDOWN); Run(1); }
+ CHECK(snd.phase==SND_LIVE && !(ps->pm_flags&PMF_FROZEN) && !(clients[VICTIM].ps.pm_flags&PMF_FROZEN));
+ shooterButtons=0; Run(300);
+ CHECK(!VectorCompare(ps->origin,at));	/* free */
 }
 
 /* The last defender throws his knife at the shooter, and the shooter's
@@ -506,8 +738,9 @@ static void GameEndWindow(int end) {
  while(level.time<end+ROUNDEND_FREEZE_DELAY-FRAME) Run(1);
  CHECK(clients[SHOOTER].ps.origin[0]<before[0]-50 && clients[SHOOTER].ps.pm_type==PM_NORMAL);
  Run(FRAME+CMD_MSEC);
- CHECK(level.time==end+ROUNDEND_FREEZE_DELAY && clients[SHOOTER].ps.pm_type==PM_FREEZE);
- CHECK(clients[MATE].ps.pm_type==PM_FREEZE && g_entities[VICTIM].health<=0 && clients[VICTIM].ps.pm_type==PM_DEAD);
+ CHECK(level.time==end+ROUNDEND_FREEZE_DELAY && Frozen(SHOOTER));
+ CHECK(Frozen(MATE) && g_entities[VICTIM].health<=0 && clients[VICTIM].ps.pm_type==PM_DEAD);
+ CHECK(!(clients[VICTIM].ps.pm_flags&PMF_FROZEN));	/* the dead have nothing to freeze */
  VectorCopy(clients[SHOOTER].ps.origin,before); ammo=clients[SHOOTER].ps.ammo[WP_SHOTGUN];
  shooterButtons=BUTTON_ATTACK; victimButtons=BUTTON_ATTACK; Run(500);
  CHECK(VectorCompare(clients[SHOOTER].ps.origin,before) && clients[SHOOTER].ps.ammo[WP_SHOTGUN]==ammo);
@@ -524,6 +757,9 @@ static void TeamScoreLimit(void) {
  CHECK(replayStarts==1 && replayKiller==SHOOTER);
  CHECK(replayFrom==death-KILLCAM_REWIND && replayTo==death+KILLCAM_LINGER && replayBegin==death+KILLCAM_GAME_DELAY);
  CHECK(level.replayEndTime==replayBegin+KILLCAM_REWIND+KILLCAM_LINGER);
+ /* MW2's displayGameEnd begins with the end; the scoreboard waits for the killcam */
+ CHECK(G_GameEndTime()==death && G_IntermissionTime()==level.replayEndTime);
+ CHECK(level.replayEndTime>death+KILLCAM_GAME_DELAY);
  GameEndWindow(death);
  CHECK(replayStarts==1);
 }
@@ -536,8 +772,30 @@ static void TeamTimeLimit(void) {
  /* time runs out 1.5s after it: CheckExitRules' time limit, on a frame */
  while(level.time<death+1500) Run(1);
  LogExit("Timelimit hit."); end=level.time;
+ /* with no killcam the scoreboard still waits out VICTORY / DEFEAT, long after
+  * the freeze: it used to come a second after the end, before anyone froze */
+ CHECK(G_GameEndTime()==end && G_IntermissionTime()==end+KILLCAM_GAME_DELAY);
+ CHECK(KILLCAM_GAME_DELAY>ROUNDEND_FREEZE_DELAY && GAME_END_DELAY+50==KILLCAM_GAME_DELAY);
  GameEndWindow(end);
  CHECK(!replayStarts && !level.replayEndTime);	/* MW2 shows no final killcam on a time limit */
+}
+/* S&D's match-winning round: the round's end first, frozen as any round, then
+ * its killcam, and only then VICTORY / DEFEAT before the scoreboard. */
+static void MatchWinningRound(void) {
+ int death;
+ Com_sprintf(caseText,sizeof(caseText),"match-winning round");
+ Reset(); snd.winLimit=1;
+ death=WinningShot(24);
+ CHECK(exits==1 && level.intermissionQueued==death && replayStarts==1);
+ CHECK(replayBegin==death+KILLCAM_MATCH_DELAY && level.replayEndTime==replayBegin+KILLCAM_REWIND+KILLCAM_LINGER);
+ CHECK(G_GameEndTime()==level.replayEndTime && G_IntermissionTime()==level.replayEndTime+GAME_END_DELAY);
+ ToLastFreeFrame(death);
+ CHECK(clients[SHOOTER].ps.pm_type==PM_NORMAL && !(clients[SHOOTER].ps.pm_flags&PMF_FROZEN));	/* still free */
+ ToFreeze(death);
+ Run(2000); CHECK(Frozen(SHOOTER) && Frozen(MATE) && snd.phase==SND_ROUND_OVER);
+ /* won without a kill to replay (a defuse, the clock): the same screens, no killcam */
+ level.replayEndTime=0;
+ CHECK(G_GameEndTime()==death+KILLCAM_MATCH_DELAY && G_IntermissionTime()==death+KILLCAM_MATCH_DELAY+GAME_END_DELAY);
 }
 
 int main(void) {
@@ -549,6 +807,11 @@ int main(void) {
  KnifeInLivePlay();
  ControlWindow();
  KnifeInFlightAfterDecisiveDeath();
+ FrozenRunsOn();
+ SpectatorLeavesTheFrozen();
+ GracePeriod();
+ Prematch();
+ MatchWinningRound();
  TeamScoreLimit();
  TeamTimeLimit();
  for(p=0;p<FRAME;p+=CMD_MSEC) for(n=0;n<(int)ARRAY_LEN(presses);n++) {
@@ -562,7 +825,7 @@ int main(void) {
   CHECK(!KnifeAfterWinningShot(p,ROUNDEND_FREEZE_DELAY,qtrue)); frozen++;
  }
  printf("PASS: %d S&D round-end checks: after the round-winning shot the knife is thrown through Pmove in all %d cases "
-  "up to level time D+1000 and hurts nobody, nothing is pulled once frozen at D+1050 (%d cases), and MW2's killcam "
-  "window and the next round follow\n", checks,thrown,frozen);
+  "up to level time D+1000 and hurts nobody, nothing is pulled once frozen at D+1050 (%d cases), a frozen player's "
+  "weapon, aim, sprint and stance run on as MW2's, and MW2's killcam window and the next round follow\n", checks,thrown,frozen);
  return 0;
 }

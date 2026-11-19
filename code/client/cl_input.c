@@ -1065,6 +1065,14 @@ usercmd_t CL_CreateCmd( void ) {
 	// get basic movement from joystick
 	CL_JoystickMove( &cmd );
 
+	// MW2 takes no look input for a frozen player: its mouse, keyboard and
+	// pad turns all return when the last snapshot says PMF_FROZEN (CL_MouseMove
+	// 5a626b, the keyboard turn 5a5d92, IW4x's pad view). The view stays where
+	// it was, so nothing winds up to be let go when the freeze lifts.
+	if ( cl.snap.ps.pm_flags & PMF_FROZEN ) {
+		VectorCopy( oldAngles, cl.viewangles );
+	}
+
 	// check to make sure the angles haven't wrapped
 	if ( cl.viewangles[PITCH] - oldAngles[PITCH] > 90 ) {
 		cl.viewangles[PITCH] = oldAngles[PITCH] + 90;

@@ -419,6 +419,7 @@ typedef struct {
 	int			lastVictimNum;			// client number of the most recent victim
 	int			lastKillTime;			// level.time of the most recent kill
 	int			replayEndTime;			// shared lobby replay deadline, 0 when absent
+	qboolean	gameEndShown;			// VICTORY / DEFEAT has been sent for the queued intermission
 
 	// intermission state
 	int			intermissionQueued;		// intermission was qualified, but
@@ -456,6 +457,9 @@ void G_SNDClientSpawned( gentity_t *ent );
 void G_SNDClientDied( gentity_t *ent );
 void G_SNDRecordKill( gentity_t *victim, gentity_t *attacker );
 qboolean G_SNDClientThink( gentity_t *ent, usercmd_t *cmd );
+qboolean G_SNDFrozen( gentity_t *ent );
+int G_GameEndTime( void );
+int G_IntermissionTime( void );
 qboolean G_SNDClientEndFrame( gentity_t *ent );
 qboolean G_SNDUse( gentity_t *ent, usercmd_t *cmd );
 qboolean G_SNDUsable( gentity_t *ent );

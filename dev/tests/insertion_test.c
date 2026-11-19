@@ -169,6 +169,7 @@ void G_RunThink(gentity_t *e) {
 }
 void G_RunClient(gentity_t *e) { (void)e; }
 qboolean G_SNDClientEndFrame(gentity_t *e) { (void)e; return qfalse; }
+qboolean G_SNDFrozen(gentity_t *e) { (void)e; return qfalse; }
 
 /* ---- the fixture ---- */
 static void Link(gentity_t *e) {

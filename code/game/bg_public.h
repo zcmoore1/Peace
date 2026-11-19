@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-19"
+#define	GAME_VERSION		BASEGAME "-20"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			(-40)
@@ -90,10 +90,20 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define KILLCAM_ROUND_DELAY		5050
 #define KILLCAM_MATCH_DELAY		4550
 #define KILLCAM_GAME_DELAY		6050
+// How long MW2 shows VICTORY or DEFEAT before the scoreboard: displayGameEnd's
+// roundEndWait( postRoundTime 5, true ), 0.5 + 5 + 0.5. The splash itself comes
+// up 0.5s in (teamOutcomeNotify's wait).
+#define GAME_END_DELAY			6000
+#define GAME_END_SPLASH_DELAY	500
 // sd.gsc: a detonation ends the round 3s later (bombPlanted's wait 3), a
 // defuse 1.5s later (bombDefused's wait 1.5); play goes on meanwhile.
 #define SND_DETONATION_DELAY	3000
 #define SND_DEFUSE_DELAY		1500
+// sd.gsc bombPlanted: radiusDamage( origin, 512, 200, 20, planter ), the most
+// at the bomb falling to the least at the radius, credited to the planter.
+#define SND_BLAST_RADIUS		512
+#define SND_BLAST_DAMAGE		200
+#define SND_BLAST_MIN_DAMAGE	20
 
 // config strings are a general means of communicating variable length strings
 // from the server to all connected clients.
@@ -391,6 +401,11 @@ typedef struct {
 #define PMF_PENDING_MAG		32768	// WNOTE_MAG_IN fired and the clip fill is queued for later this think. If a holster finishes first the fill never happens - that is the NAC. bit 15
 #define PMF_PRONE			(1<<16)	// MW2's PMF_PRONE (0x1): lying down; follows viewHeightTarget, as PMF_DUCKED does
 #define PMF_PRONEMOVE_OVERRIDDEN (1<<17)	// MW2's 0x200: a weapon action stopped the crawl until a new stick push
+// MW2's PMF_FROZEN (0x800), which its script's freezeControls sets through the
+// client's end frame: the round-end and game-end freeze and the prematch
+// countdown. It is a flag, not a pm_type: Pmove runs on, reading only the
+// stance from the command (PmoveSingle), and the client stops turning the view.
+#define PMF_FROZEN			(1<<18)
 
 #define	PMF_ALL_TIMES	(PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK)
 

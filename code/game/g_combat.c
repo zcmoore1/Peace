@@ -486,6 +486,40 @@ void G_GrenadeSuicide( gentity_t *ent, int weapon ) {
 
 /*
 ==================
+G_GameEndTime, G_IntermissionTime
+
+MW2's endGame holds the scoreboard back for its screens, from the frame the
+game ended (level.intermissionQueued). A game without rounds goes straight to
+displayGameEnd: VICTORY or DEFEAT for roundEndWait( postRoundTime 5, true ),
+which is also how long its final killcam waits (KILLCAM_GAME_DELAY), then the
+killcam, then the scoreboard. S&D's match-winning round shows the round's end
+first (roundEndWait( 4, false ): KILLCAM_MATCH_DELAY), then its killcam, and
+only then VICTORY or DEFEAT for GAME_END_DELAY.
+
+G_GameEndTime is when displayGameEnd begins, G_IntermissionTime when the
+scoreboard may come.
+==================
+*/
+int G_GameEndTime( void ) {
+	int at;
+	if ( g_gametype.integer != GT_SND ) {
+		return level.intermissionQueued;
+	}
+	at = level.intermissionQueued + KILLCAM_MATCH_DELAY;
+	return level.replayEndTime > at ? level.replayEndTime : at;
+}
+
+int G_IntermissionTime( void ) {
+	int at;
+	if ( g_gametype.integer == GT_SND ) {
+		return G_GameEndTime() + GAME_END_DELAY;
+	}
+	at = level.intermissionQueued + KILLCAM_GAME_DELAY;
+	return level.replayEndTime > at ? level.replayEndTime : at;
+}
+
+/*
+==================
 player_die
 ==================
 */

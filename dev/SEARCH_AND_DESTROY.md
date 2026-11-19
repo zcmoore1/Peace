@@ -56,18 +56,29 @@ side.
   every survivor keeps full control - moving, shooting, reloading, a knife or
   grenade thrown - for endGame's waitframe and `freezePlayerForRoundEnd( 1.0 )`:
   1.05 s (`ROUNDEND_FREEZE_DELAY`). Then they freeze. So a throwing knife pressed
-  right after the round-winning shot comes out (and hurts nobody). Peace's
-  freeze stops the player's Pmove whole; MW2's `PMF_FROZEN` keeps only stance
-  and still runs the weapon, so a knife or grenade held at the freeze is still
-  thrown there and here stays in hand (not modelled yet).
+  right after the round-winning shot comes out (and hurts nobody).
+- **The freeze is MW2's `PMF_FROZEN`.** A frozen player cannot move, look, fire,
+  aim, sprint, jump, reload, throw, switch weapons or change stance, but his
+  Pmove runs on: the sights come down, a sprint ends and the legs idle, and a
+  reload, a swap or a stance change already under way finishes. A knife or
+  grenade still held is thrown (the held button reads as let go). Frozen in the
+  air he hangs there. The view is locked on the client, as MW2 locks it. The
+  first round's countdown is the same freeze.
 - **An elimination is decided in the death itself**, as MW2's is
   (`PlayerKilled` -> `removeFromAliveCount` -> `onDeadEvent` -> endGame,
   postgame before anything else). So nothing later in the same frame - a
   knife or rocket still in the air, a grenade the dying defender dropped, the
   rest of the same blast - can hurt anyone or change the result: the first
-  decisive death wins the round, and its killer gets the killcam. A draw comes
-  only from both teams emptying without a deciding death (disconnects, team
-  changes), which the frame's own check catches.
+  decisive death wins the round, and its killer gets the killcam. Both teams
+  dead at once is the defenders' round before the plant and the attackers'
+  after it (MW2's `onDeadEvent( "all" )`); there is no draw.
+- **The grace period.** For a round's first 15 seconds (`g_sndGracePeriod`;
+  MW2's `level.gracePeriod`) a team wiped out has not lost yet. The round goes
+  on, with damage and the bomb, and is decided 15.05 s after it went live:
+  the survivors freeze 1.05 s after that, and the winning kill's killcam
+  follows the usual wait. So after an early round-winning kill the winner
+  runs free for the rest of those 15 seconds. MW2 also lets a late comer
+  spawn in that time and drops no weapon for a death in it; Peace does not.
 - A decisive enemy elimination plays **ROUND WINNING KILLCAM** for the entire
   lobby, including the victim, surviving players and spectators. It is MW2's
   final killcam: 4 s before the death to 1.95 s after it (`KILLCAM_REWIND`,
@@ -82,12 +93,17 @@ side.
   the replay. The next round follows 0.1 s after it (doFinalKillcam's wait 0.1,
   then `map_restart`); the match-winning round finishes its replay before the
   scoreboard.
-- Bomb, timer and draw results, suicides and disconnect eliminations have no
+- Bomb and timer results, suicides and disconnect eliminations have no
   unrelated kill replay. If there is too little history, the normal pause applies.
 
 Default round time is 2:30; after planting, a separate 45-second bomb timer runs.
-There is a five-second deployment countdown and five-second round-result pause
-(MW2's 0.05 + `roundEndWait( 4, true )`) when there is no killcam.
+There is a five-second deployment countdown before a match's first round only
+(MW2's prematch: a round that follows another starts at once, with nobody
+frozen), and a five-second round-result pause (MW2's 0.05 +
+`roundEndWait( 4, true )`) when there is no killcam. The match-winning round
+shows its round end, then its killcam, then VICTORY or DEFEAT for six seconds
+before the scoreboard. The bomb's blast deals MW2's 200 at the bomb falling to
+20 at 512 units, credited to the planter.
 Detonation currently
 uses an existing impact effect; dedicated planting/defusing hand animations,
 announcer audio and a cinematic explosion are not included.
@@ -114,8 +130,9 @@ objectives; the S&D host menu defaults to open human slots rather than bots.
 | `g_sndDefuseTime` | 5 | Continuous defuse hold, seconds (1–30) |
 | `g_sndWinLimit` | 4 | Round wins needed (1–99) |
 | `g_sndSwitchRounds` | 3 | Rounds between side changes (1–99) |
-| `g_sndCountdown` | 5 | Deployment countdown, seconds (1–30) |
+| `g_sndCountdown` | 5 | First round's deployment countdown, seconds (1–30) |
 | `g_sndRoundPause` | 5 | Result pause, seconds (1–30) |
+| `g_sndGracePeriod` | 15 | Seconds of a round in which a wiped-out team has not lost yet (0–60; 0 decides every elimination at once) |
 | `g_sndPractice` | 0 | Cheat-only solo mode; not archived |
 
 Settings are snapshotted at round start. Ordinary frag/capture/map time limits
@@ -195,7 +212,7 @@ next frame and does nothing: the attackers win (deciding at the end of that
 frame let the knife kill the shooter first, a draw). A team game ends the same
 way: the kill that reaches the score limit gets MW2's final killcam 6.05 s
 later, a time limit's end gets none, and both freeze everyone 1.05 s after the
-end.
+end and hold the scoreboard back 6.05 s for VICTORY or DEFEAT.
 
 `sh dev/tests/run-replay.sh` also drives the actual engine recorder and snapshot
 builder: disjoint visibility areas, all lobby recipients, early kills, different

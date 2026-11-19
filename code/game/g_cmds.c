@@ -478,6 +478,12 @@ void Cmd_Kill_f( gentity_t *ent ) {
 	if (ent->health <= 0) {
 		return;
 	}
+	// A player nothing can hurt (a round or a game that has ended, a round
+	// not live yet) cannot die by this either: player_die would refuse the
+	// death and leave a living player with no health.
+	if ( !G_SNDCanDamage( ent ) || level.intermissionQueued ) {
+		return;
+	}
 	ent->flags &= ~FL_GODMODE;
 	ent->client->ps.stats[STAT_HEALTH] = ent->health = -999;
 	player_die (ent, ent, ent, 100000, MOD_SUICIDE);
@@ -665,7 +671,9 @@ void StopFollowing( gentity_t *ent ) {
 	ent->client->ps.persistant[ PERS_TEAM ] = TEAM_SPECTATOR;	
 	ent->client->sess.sessionTeam = TEAM_SPECTATOR;	
 	ent->client->sess.spectatorState = SPECTATOR_FREE;
-	ent->client->ps.pm_flags &= ~PMF_FOLLOW;
+	// the state was a copy of the followed player's, that player's freeze
+	// included; a free camera has nothing to freeze
+	ent->client->ps.pm_flags &= ~( PMF_FOLLOW | PMF_FROZEN );
 	ent->r.svFlags &= ~SVF_BOT;
 	ent->client->ps.clientNum = ent - g_entities;
 

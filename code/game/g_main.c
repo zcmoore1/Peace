@@ -1155,6 +1155,7 @@ void LogExit( const char *string ) {
 	G_LogPrintf( "Exit: %s\n", string );
 
 	level.intermissionQueued = level.time;
+	level.gameEndShown = qfalse;
 
 	// No killcam is chosen here. S&D has already selected its round-winning
 	// kill and the match-winning round reuses that playback; elsewhere the
@@ -1337,6 +1338,36 @@ qboolean ScoreIsTied( void ) {
 
 /*
 =================
+G_ShowGameEnd
+
+MW2's displayGameEnd: VICTORY or DEFEAT to each player. A team game's winner
+is the higher score, anyone else's the top of the ranks; a tie is a draw.
+=================
+*/
+static void G_ShowGameEnd( void ) {
+	int			i;
+	gclient_t	*cl;
+	qboolean	tied = ScoreIsTied();
+	for ( i = 0 ; i < level.maxclients ; i++ ) {
+		const char *text;
+		cl = &level.clients[i];
+		if ( cl->pers.connected != CON_CONNECTED || cl->sess.sessionTeam == TEAM_SPECTATOR ) {
+			continue;
+		}
+		if ( tied ) {
+			text = "Draw";
+		} else if ( g_gametype.integer >= GT_TEAM ) {
+			team_t winner = level.teamScores[TEAM_RED] > level.teamScores[TEAM_BLUE] ? TEAM_RED : TEAM_BLUE;
+			text = cl->sess.sessionTeam == winner ? "Victory" : "Defeat";
+		} else {
+			text = level.numPlayingClients > 0 && level.sortedClients[0] == i ? "Victory" : "Defeat";
+		}
+		trap_SendServerCommand( i, va( "cp \"%s\"", text ) );
+	}
+}
+
+/*
+=================
 CheckExitRules
 
 There will be a delay between the time the exit is qualified for
@@ -1355,15 +1386,21 @@ void CheckExitRules( void ) {
 	}
 
 	if ( level.intermissionQueued ) {
-		// A final killcam holds off the intermission long enough for the replay
-		// to finish; otherwise use the normal short "watch the last frag" delay.
-		int delay = INTERMISSION_DELAY_TIME;
+		// MW2's endGame holds the scoreboard back for its screens and its
+		// final killcam (G_IntermissionTime), with VICTORY or DEFEAT shown
+		// when displayGameEnd begins. Until the scoreboard everyone alive is
+		// frozen where they stand from ROUNDEND_FREEZE_DELAY on (ClientEndFrame).
+		int at = G_IntermissionTime();
 #ifdef MISSIONPACK
 		if (g_singlePlayer.integer && !level.replayEndTime) {
-			delay = SP_INTERMISSION_DELAY_TIME;
+			at = level.intermissionQueued + SP_INTERMISSION_DELAY_TIME;
 		}
 #endif
-		if ( level.time - level.intermissionQueued >= delay && level.time >= level.replayEndTime ) {
+		if ( !level.gameEndShown && level.time >= G_GameEndTime() + GAME_END_SPLASH_DELAY ) {
+			level.gameEndShown = qtrue;
+			G_ShowGameEnd();
+		}
+		if ( level.time >= at ) {
 			level.intermissionQueued = 0;
 			level.replayEndTime = 0;
 			BeginIntermission();

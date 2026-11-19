@@ -81,8 +81,9 @@ store explicit choices, so changing `cg_sight` will not overwrite them. The acti
 perk mask is a predicted/replayed playerstate field. The current build (MW2's
 event rings: four playerstate events and every entity's own ring, with the
 view kick's cgame import and client-side bullets, MW2's spawn class speed and
-stance, the M16's per-instance underbarrel ammunition, and MW2's mode switch)
-uses protocol **90**, game **-19**. Protocol 89 / game -18 added the underbarrel
+stance, the M16's per-instance underbarrel ammunition, MW2's mode switch and
+its frozen flag) uses protocol **91**, game **-20**. Protocol 90 / game -19
+added the mode switch, protocol 89 / game -18 the underbarrel
 fields, protocol 88 / game -17 added stance, protocol 87 / game -16 added
 `moveClass`, protocol 86 / game -15 added the event rings, protocol 85 / game -14
 added MW2's `grenadeTimeLeft` playerstate field,

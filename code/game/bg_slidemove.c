@@ -62,6 +62,12 @@ qboolean	PM_SlideMove( qboolean gravity ) {
 
 	VectorCopy (pm->ps->velocity, primal_velocity);
 
+	// MW2 skips gravity for a frozen player (PmoveSingle 574efd): one frozen
+	// in the air hangs there.
+	if ( pm->ps->pm_flags & PMF_FROZEN ) {
+		gravity = qfalse;
+	}
+
 	if ( gravity ) {
 		VectorCopy( pm->ps->velocity, endVelocity );
 		endVelocity[2] -= pm->ps->gravity * pml.frametime;

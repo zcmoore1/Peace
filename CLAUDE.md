@@ -930,9 +930,10 @@ source for MW2 behaviour; the owner rejects it.
 
 ## Capacity limits
 
-- `pm_flags` — **full.** All 18 networked bits used: protocol 88 widened the
+- `pm_flags` — **full.** All 19 networked bits used: protocol 88 widened the
   field from 16 for MW2's `PMF_PRONE` (bit 16) and `PMF_PRONEMOVE_OVERRIDDEN`
-  (bit 17). A 19th needs `msg.c` widened again (MW2's is 23 bits).
+  (bit 17), protocol 91 to 19 for MW2's `PMF_FROZEN` (bit 18). A 20th needs
+  `msg.c` widened again (MW2's is 23 bits).
 - `STAT_WEAPONS` — full 32-bit wire mask at `PS_STAT_WEAPONS`. `MAX_WEAPONS`
   is 24; the M300 is 15, the throwing knife 16 and the Tactical Insertion 17
   in baseq3 (18, 19 and 20 in missionpack). M16/Masterkey append 18/19
@@ -945,7 +946,7 @@ source for MW2 behaviour; the owner rejects it.
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 10-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 90 (GAME_VERSION -19) requires client, server
+  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 91 (GAME_VERSION -20) requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
 - `weaponDraw` — 2 bits, three of four values used (`WDRAW_NORMAL`,
   `WDRAW_FIRST`, `WDRAW_ALT`): the kind of draw, and for a mode change the kind
@@ -1365,7 +1366,8 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
 
 - `g_gametype 8` (`GT_SND`) uses server-owned `g_snd.c`, configstrings 28/29,
   and the existing Use stats. Do not use weapon states or playerState bits
-  for bomb ownership or round membership. `bg_pmove.c` remains unchanged.
+  for bomb ownership or round membership. `bg_pmove.c` knows nothing of S&D
+  (the freeze below is MW2's general `PMF_FROZEN`, every mode's).
 - `peace_ladder` has Site A on the platform. `peace_sd` is a generated
   two-site arena (`dev/tools/build_sd_map.py`, `--check`; its collision test
   is in `run-snd`). Normal rounds need both teams;
@@ -1388,20 +1390,54 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   `G_SNDRecordKill` -> `SND_CheckElimination`): from that moment nothing later
   in the same frame - a missile landing, a grenade going off, the rest of a
   blast - deals damage or changes the result, so the first decisive death
-  decides. `G_SNDRunFrame` only catches teams emptied without a death
-  (disconnects, team changes); that is the only draw. A detonation or defuse
+  decides. `G_SNDRunFrame` catches teams emptied without a death
+  (disconnects, team changes) and the end of the grace period (below). Both
+  teams dead at once is the defenders' round before the plant and the
+  attackers' after it (`SND_Eliminated`: sd.gsc's onDeadEvent "all"); MW2's
+  S&D has no draw. A detonation or defuse
   first waits out sd.gsc's delay (`SND_DETONATION_DELAY` 3000,
   `SND_DEFUSE_DELAY` 1500) with phase still `SND_PLANTED` and `snd.result`
   set: play and damage go on, eliminations are ignored, nothing more can be
-  used. Timeouts end at once. The freeze is still `PM_FREEZE` (MW2's
-  `PMF_FROZEN` would keep running the weapon; that needs the owner's OK and a
-  protocol bump).
+  used. Timeouts end at once. The detonation's blast is sd.gsc's
+  `radiusDamage( origin, 512, 200, 20, planter )` (`SND_BombBlast`), dealt
+  after the result is set, so no death in it decides the round.
+- **The freeze is MW2's `PMF_FROZEN` (owner's rule: do what MW2 does).** It is
+  a flag on a living player who stays `PM_NORMAL`, never a pm_type and never a
+  skipped Pmove. `ClientEndFrame` sets it (`ClientFrozen`: S&D's prematch
+  countdown and round ends, every other mode `ROUNDEND_FREEZE_DELAY` after the
+  game ends), as MW2's end frame copies `freezeControls` (0x5d7e33), so the
+  snapshot of the frame that freezes already carries it. `PmoveSingle` then
+  keeps only the command's stance buttons, zeroes its moves and the velocity
+  (0x57440d-0x57445d) and skips gravity; `PM_CheckDuck` reads no stance;
+  `PM_Weapon` begins no weapon change. Everything else runs on, so what was
+  under way finishes (a reload, a swap, a stance change, a knife or grenade in
+  hand, which is thrown) and nothing new starts; the aim and the sprint end and
+  the legs idle. The server masks the same command before its use code. The
+  client takes no look input while its last snapshot says frozen
+  (`CL_CreateCmd`; MW2's mouse, keyboard and pad turns all return). `PM_FREEZE`
+  is only S&D's dead waiting for a round. Never freeze by returning before
+  Pmove: the gun, the aim and the legs stop where they are and the view still
+  turns.
+- **S&D counts down only before a first round.** MW2's prematch period is 0
+  once the game has started, so a round that follows another starts live with
+  nobody frozen (`SND_StartRound( qfalse )` -> `SND_GoLive`); only a round that
+  starts from waiting for players counts down (`g_sndCountdown`), frozen.
+- **MW2's grace period (`g_sndGracePeriod`, 15).** For a round's first 15.05s
+  (`snd.graceEnd`, set by `SND_GoLive`: gracePeriod's fifteen 1s waits and a
+  0.05s one) a team wiped out has not lost: `SND_CheckElimination` returns,
+  the round goes on with damage and the bomb, and the frame at `graceEnd`
+  decides it, with the freeze 1.05s after that frame, not after the death.
+  Never end a round on a kill inside it. The winning kill's clip is asked
+  for at the kill (`SND_HoldGraceClip`), because the replay holds only 6.5s,
+  and plays from `graceEnd` plus the round's wait; `SND_EndRound` drops a
+  clip held for a result that did not come. MW2 also lets late comers spawn
+  and drops no weapon in that time; Peace does neither yet.
 - Round-winning killcams use a bounded engine snapshot history in
   `sv_snapshot.c`, including the killer's player state and original visibility.
   The window is MW2's final killcam: `KILLCAM_REWIND` 4000 before the death to
   `KILLCAM_LINGER` 1950 after it. `trap_ReplayStart( killer, from, to, begin )`
   records on to `to`, pins the clip, and plays it from `begin` at a constant
-  offset: S&D passes the death plus `KILLCAM_ROUND_DELAY` (5050, roundEndWait(
+  offset: S&D passes the deciding moment plus `KILLCAM_ROUND_DELAY` (5050, roundEndWait(
   4, true )) or, on the match-winning round, `KILLCAM_MATCH_DELAY` (4550).
   Elsewhere only the kill whose score ended the match gets one (MW2's
   `finalKill`, _gamescore.gsc): `player_die` asks for it with the kill plus
@@ -1410,8 +1446,13 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   returns the shared playback deadline; S&D starts the next round
   `SND_KILLCAM_RESTART` (100) after it, and the intermission waits for it.
   Every mode freezes its survivors `ROUNDEND_FREEZE_DELAY` after the game
-  ends (MW2's endGame freezes before its round/game branch):
-  `ClientGameEndFrozen` in `ClientThink_real`, with `PM_FREEZE` as in S&D.
+  ends (MW2's endGame freezes before its round/game branch): `ClientFrozen`,
+  with `PMF_FROZEN` as in S&D. Nobody respawns once the game has ended. The
+  scoreboard waits for MW2's screens (`G_IntermissionTime`, g_combat.c): a game
+  without rounds shows VICTORY or DEFEAT for `KILLCAM_GAME_DELAY`, then its
+  final killcam; S&D's match-winning round shows the round's end
+  (`KILLCAM_MATCH_DELAY`), its killcam, then VICTORY or DEFEAT for
+  `GAME_END_DELAY`. It used to come 1s after the end, before anyone froze.
   `SV_ReplayStart` refuses a window longer than the history
   (`REPLAY_HISTORY_MSEC` 6500), one ending more than `KILLCAM_LINGER` ahead, or a
   `begin` before the last sample. This changed the game/server syscall, not the

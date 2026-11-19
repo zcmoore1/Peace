@@ -6,17 +6,17 @@ This is a snapshot: work after `3a99c10` may close items. In that case update th
 
 ## Summary
 
-194 differences are listed. 62 now match MW2. 132 are open.
+195 differences are listed. 63 now match MW2. 132 are open.
 
 | Kind | Open | Unsettled (in open) | Now matches MW2 |
 |---|---:|---:|---:|
 | Not modelled: MW2 does it, Peace does not | 53 | 0 | 44 |
 | Placeholder: Peace's values or art, not MW2's | 40 | 0 | 11 |
-| Peace-only: Peace has it, MW2 does not | 14 | 0 | 0 |
+| Peace-only: Peace has it, MW2 does not | 14 | 0 | 1 |
 | Owner choice: a deliberate departure | 14 | 2 | 3 |
 | Unverified: MW2's side not fully read | 11 | 10 | 2 |
 | Bug | 0 | 0 | 2 |
-| **Total** | **132** | **12** | **62** |
+| **Total** | **132** | **12** | **63** |
 
 "Unsettled" means MW2's behaviour, or whether Peace matches it, has not been traced to the end. Those items are marked *(unsettled)*.
 
@@ -24,7 +24,7 @@ This is a snapshot: work after `3a99c10` may close items. In that case update th
 |---|---:|---:|
 | Movement and camera | 12 | 18 |
 | Weapons and gunplay | 41 | 11 |
-| Equipment | 18 | 13 |
+| Equipment | 18 | 14 |
 | Use and pickups | 8 | 2 |
 | Netcode and killcam | 9 | 8 |
 | Presentation, art and input | 20 | 2 |
@@ -206,6 +206,7 @@ The two bugs found are fixed: the knife did 100 instead of 135, and an empty let
 
 ### Recently made to match MW2
 
+- **A player's own damage** (wf21). MW2 deals a player's own blast to him whole: its damage callback sends self-inflicted damage down the enemy's path, and CoD4's `G_Damage` has no scale for it (IW4's own was not disassembled). Peace kept Quake 3's half, so a frag at one's own feet or a rocket into the floor did half, and the planter beside his own bomb took half its blast. It is whole now. MW2: _damage.gsc:1112-1113. Peace: `code/game/g_combat.c` (`G_Damage`); `dev/tests/snd_roundend_test.c` (`OwnDamage`).
 - **Counts** (`b2a44a6`, `86f1580`). Fixed by weapon data: frag, Semtex, throwing knife and TI 1 each, flash 2. Validation refuses others and old saved counts convert. Peace: `code/game/bg_loadout.c:307-314, 326-328`.
 - **Quick drop and quick raise** (`93d606f`, `3a58cca`, `be4eb1a`). The gun goes away on quickDropTime 250ms (100 with no gun) and returns on quickRaiseTime (750 rifles, shotguns, launchers; 250 pistols and the Intervention); a grenade pressed during a holster keeps that drop. Before, frag/flash used the gun's holster and recovery used the normal draw. Peace: `code/game/bg_pmove.c:2189-2223, 2311-2333`.
 - **Equipment out of the gun's return** (`9c870b5`, `f9e2e5e`). `OffHandInit` stamps quickDropTime out of OFFHAND_END; only with no use hint (0x7FF) does equipment come straight out (the sea lion). Peace: `code/game/bg_pmove.c:3534-3549`.

@@ -1088,11 +1088,10 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		attacker->client->ps.persistant[PERS_ATTACKEE_ARMOR] = (targ->health<<8)|(client->ps.stats[STAT_ARMOR]);
 	}
 
-	// always give half damage if hurting self
-	// calculated after knockback, so rocket jumping works
-	if ( targ == attacker) {
-		damage *= 0.5;
-	}
+	// A player's own damage is dealt to him whole, as MW2's is: its damage
+	// callback sends it down the enemy's path (_damage.gsc:1112, a teammate
+	// hit needs victim != eAttacker) and CoD4's G_Damage has no scale for
+	// it. Quake 3 halved it here.
 
 	if ( damage < 1 ) {
 		damage = 1;

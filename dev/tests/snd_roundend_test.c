@@ -632,6 +632,17 @@ static void GracePeriod(void) {
  CHECK(!(ps->pm_flags&PMF_FROZEN));
  ToFreeze(end);
 }
+/* A player's own blast costs him what an enemy's does (MW2; Quake 3 halved
+ * it): the planter beside his bomb, a frag at one's own feet. */
+static void OwnDamage(void) {
+ vec3_t dir={0,0,1};
+ Com_sprintf(caseText,sizeof(caseText),"a player's own blast");
+ Reset();
+ G_Damage(&g_entities[SHOOTER],NULL,&g_entities[SHOOTER],dir,clients[SHOOTER].ps.origin,60,DAMAGE_RADIUS,MOD_GRENADE_SPLASH);
+ G_Damage(&g_entities[MATE],NULL,&g_entities[VICTIM],dir,clients[MATE].ps.origin,60,DAMAGE_RADIUS,MOD_GRENADE_SPLASH);
+ CHECK(g_entities[MATE].health<100 && g_entities[SHOOTER].health==g_entities[MATE].health);
+ CHECK(clients[SHOOTER].ps.stats[STAT_HEALTH]==g_entities[SHOOTER].health);
+}
 /* MW2's prematch: the first round counts down with everyone frozen by the
  * same flag. The gun's first raise runs under it (the frozen command has no
  * trigger, so the respawned flag clears on it), and the round goes live with
@@ -810,6 +821,7 @@ int main(void) {
  FrozenRunsOn();
  SpectatorLeavesTheFrozen();
  GracePeriod();
+ OwnDamage();
  Prematch();
  MatchWinningRound();
  TeamScoreLimit();

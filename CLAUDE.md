@@ -1400,7 +1400,10 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   set: play and damage go on, eliminations are ignored, nothing more can be
   used. Timeouts end at once. The detonation's blast is sd.gsc's
   `radiusDamage( origin, 512, 200, 20, planter )` (`SND_BombBlast`), dealt
-  after the result is set, so no death in it decides the round.
+  after the result is set, so no death in it decides the round. A player's
+  own damage is dealt whole (`G_Damage`: MW2 has no scale for it; Quake 3
+  halved it), so the planter beside his bomb takes all of its blast, and a
+  frag at one's own feet costs what an enemy's would.
 - **The freeze is MW2's `PMF_FROZEN` (owner's rule: do what MW2 does).** It is
   a flag on a living player who stays `PM_NORMAL`, never a pm_type and never a
   skipped Pmove. `ClientEndFrame` sets it (`ClientFrozen`: S&D's prematch

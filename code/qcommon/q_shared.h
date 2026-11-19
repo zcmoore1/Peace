@@ -1178,6 +1178,8 @@ typedef struct playerState_s {
 	int			clientNum;		// ranges from 0 to MAX_CLIENTS-1
 	int			weapon;			// copied to entityState_t->weapon
 	int			weaponstate;
+	int			weapAnim;		// first-person weapon animation chosen by the weapon
+								// state machine, mask off WEAPANIM_TOGGLEBIT
 
 	vec3_t		viewangles;		// for fixed views
 	int			viewheight;
@@ -1230,6 +1232,8 @@ typedef struct playerState_s {
 #define BUTTON_FOLLOWME		1024
 
 #define	BUTTON_ANY			2048			// any key whatsoever
+
+#define	BUTTON_SPRINT		4096			// +sprint (same bit as +button12)
 
 #define	MOVE_RUN			120			// if forwardmove or rightmove are >= MOVE_RUN,
 										// then BUTTON_WALKING should be set

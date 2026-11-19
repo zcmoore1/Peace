@@ -260,6 +260,9 @@ void IN_Button11Down(void) {IN_KeyDown(&in_buttons[11]);}
 void IN_Button11Up(void) {IN_KeyUp(&in_buttons[11]);}
 void IN_Button12Down(void) {IN_KeyDown(&in_buttons[12]);}
 void IN_Button12Up(void) {IN_KeyUp(&in_buttons[12]);}
+// +sprint is button 12 (BUTTON_SPRINT) under a readable name
+void IN_SprintDown(void) {IN_KeyDown(&in_buttons[12]);}
+void IN_SprintUp(void) {IN_KeyUp(&in_buttons[12]);}
 void IN_Button13Down(void) {IN_KeyDown(&in_buttons[13]);}
 void IN_Button13Up(void) {IN_KeyUp(&in_buttons[13]);}
 void IN_Button14Down(void) {IN_KeyDown(&in_buttons[14]);}
@@ -984,6 +987,8 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-button10", IN_Button10Up);
 	Cmd_AddCommand ("+button11", IN_Button11Down);
 	Cmd_AddCommand ("-button11", IN_Button11Up);
+	Cmd_AddCommand ("+sprint", IN_SprintDown);
+	Cmd_AddCommand ("-sprint", IN_SprintUp);
 	Cmd_AddCommand ("+button12", IN_Button12Down);
 	Cmd_AddCommand ("-button12", IN_Button12Up);
 	Cmd_AddCommand ("+button13", IN_Button13Down);
@@ -1061,6 +1066,8 @@ void CL_ShutdownInput(void)
 	Cmd_RemoveCommand("-button10");
 	Cmd_RemoveCommand("+button11");
 	Cmd_RemoveCommand("-button11");
+	Cmd_RemoveCommand("+sprint");
+	Cmd_RemoveCommand("-sprint");
 	Cmd_RemoveCommand("+button12");
 	Cmd_RemoveCommand("-button12");
 	Cmd_RemoveCommand("+button13");

@@ -45,6 +45,12 @@ float	pm_waterfriction = 1.0f;
 float	pm_flightfriction = 3.0f;
 float	pm_spectatorfriction = 5.0f;
 
+// Sprint tuning. These are the values the matching Modern Warfare 2 settings
+// are commonly documented with. They have not been measured here.
+#define	PM_SPRINT_SPEED_SCALE	1.5f	// ground speed multiplier while sprinting
+#define	PM_SPRINT_STRAFE_SCALE	0.667f	// sideways input multiplier while sprinting
+#define	PM_SPRINT_FORWARD_MIN	105		// forwardmove (out of 127) needed to sprint
+
 int		c_pmove = 0;
 
 
@@ -721,6 +727,11 @@ static void PM_WalkMove( void ) {
 	fmove = pm->cmd.forwardmove;
 	smove = pm->cmd.rightmove;
 
+	// sprinting commits the player to moving forward
+	if ( pm->ps->pm_flags & PMF_SPRINTING ) {
+		smove *= PM_SPRINT_STRAFE_SCALE;
+	}
+
 	cmd = pm->cmd;
 	scale = PM_CmdScale( &cmd );
 
@@ -747,6 +758,10 @@ static void PM_WalkMove( void ) {
 	VectorCopy (wishvel, wishdir);
 	wishspeed = VectorNormalize(wishdir);
 	wishspeed *= scale;
+
+	if ( pm->ps->pm_flags & PMF_SPRINTING ) {
+		wishspeed *= PM_SPRINT_SPEED_SCALE;
+	}
 
 	// clamp the speed lower if ducking
 	if ( pm->ps->pm_flags & PMF_DUCKED ) {
@@ -1462,10 +1477,43 @@ static void PM_WaterEvents( void ) {		// FIXME?
 
 /*
 ===============
+PM_StartWeaponAnim
+
+Selects the first-person weapon animation. The toggle bit flips on every
+call, so restarting the animation that is already selected is still a change
+the client can see.
+===============
+*/
+static void PM_StartWeaponAnim( int anim ) {
+	pm->ps->weapAnim = ( ( pm->ps->weapAnim & WEAPANIM_TOGGLEBIT ) ^ WEAPANIM_TOGGLEBIT )
+		| anim;
+}
+
+/*
+===============
+PM_ContinueWeaponAnim
+===============
+*/
+static void PM_ContinueWeaponAnim( int anim ) {
+	if ( ( pm->ps->weapAnim & ~WEAPANIM_TOGGLEBIT ) == anim ) {
+		return;
+	}
+	PM_StartWeaponAnim( anim );
+}
+
+/*
+===============
 PM_BeginWeaponChange
+
+A drop that has started can not be cancelled. The weapon to bring up is read
+from the command again when the drop finishes (PM_FinishWeaponChange), so a
+second request during the drop only changes what comes up next. Asking for
+the weapon that is being dropped brings that same weapon back up.
 ===============
 */
 static void PM_BeginWeaponChange( int weapon ) {
+	const bgWeaponDef_t	*def;
+
 	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
 		return;
 	}
@@ -1474,13 +1522,25 @@ static void PM_BeginWeaponChange( int weapon ) {
 		return;
 	}
 	
-	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
+	if ( pm->ps->weaponstate == WEAPON_DROPPING
+		|| pm->ps->weaponstate == WEAPON_DROPPING_QUICK ) {
 		return;
 	}
 
+	def = BG_WeaponDef( pm->ps->weapon );
+
 	PM_AddEvent( EV_CHANGE_WEAPON );
-	pm->ps->weaponstate = WEAPON_DROPPING;
-	pm->ps->weaponTime += 200;
+	if ( pm->ps->weaponstate == WEAPON_RAISING
+		|| pm->ps->weaponstate == WEAPON_RAISING_QUICK ) {
+		// the weapon never finished coming up, so it goes away quickly
+		pm->ps->weaponstate = WEAPON_DROPPING_QUICK;
+		pm->ps->weaponTime = def->quickDropTime;
+		PM_StartWeaponAnim( WANIM_QUICK_DROP );
+	} else {
+		pm->ps->weaponstate = WEAPON_DROPPING;
+		pm->ps->weaponTime = def->dropTime;
+		PM_StartWeaponAnim( WANIM_DROP );
+	}
 	PM_StartTorsoAnim( TORSO_DROP );
 }
 
@@ -1491,6 +1551,7 @@ PM_FinishWeaponChange
 ===============
 */
 static void PM_FinishWeaponChange( void ) {
+	const bgWeaponDef_t	*def;
 	int		weapon;
 
 	weapon = pm->cmd.weapon;
@@ -1502,10 +1563,102 @@ static void PM_FinishWeaponChange( void ) {
 		weapon = WP_NONE;
 	}
 
+	def = BG_WeaponDef( weapon );
+
+	if ( pm->ps->weaponstate == WEAPON_DROPPING_QUICK ) {
+		pm->ps->weaponstate = WEAPON_RAISING_QUICK;
+		pm->ps->weaponTime = def->quickRaiseTime;
+		PM_StartWeaponAnim( WANIM_QUICK_RAISE );
+	} else {
+		pm->ps->weaponstate = WEAPON_RAISING;
+		pm->ps->weaponTime = def->raiseTime;
+		PM_StartWeaponAnim( WANIM_RAISE );
+	}
 	pm->ps->weapon = weapon;
-	pm->ps->weaponstate = WEAPON_RAISING;
-	pm->ps->weaponTime += 250;
 	PM_StartTorsoAnim( TORSO_RAISE );
+}
+
+
+/*
+===============
+PM_UpdateSprint
+
+Decides whether the player is sprinting during this slice. This only sets
+the movement flag. What the weapon does about it is decided in
+PM_WeaponSprint.
+===============
+*/
+static void PM_UpdateSprint( void ) {
+	qboolean	sprint;
+
+	sprint = qtrue;
+
+	if ( !( pm->cmd.buttons & BUTTON_SPRINT ) ) {
+		sprint = qfalse;
+	} else if ( pm->cmd.buttons & BUTTON_ATTACK ) {
+		// the trigger always wins
+		sprint = qfalse;
+	} else if ( pm->cmd.forwardmove < PM_SPRINT_FORWARD_MIN ) {
+		sprint = qfalse;
+	} else if ( !pml.walking ) {
+		sprint = qfalse;
+	} else if ( pm->ps->pm_flags & PMF_DUCKED ) {
+		sprint = qfalse;
+	} else if ( pm->waterlevel > 1 ) {
+		sprint = qfalse;
+	} else if ( pm->ps->pm_type != PM_NORMAL ) {
+		sprint = qfalse;
+	}
+
+	if ( sprint ) {
+		pm->ps->pm_flags |= PMF_SPRINTING;
+	} else {
+		pm->ps->pm_flags &= ~PMF_SPRINTING;
+	}
+}
+
+
+/*
+===============
+PM_WeaponSprint
+
+Moves the weapon into and out of the sprint states.
+
+Starting to sprint takes over an idle weapon and also a weapon that is still
+being raised, cutting the raise short. It never takes over a drop, so a
+weapon change that has started always completes.
+===============
+*/
+static void PM_WeaponSprint( void ) {
+	const bgWeaponDef_t	*def;
+
+	def = BG_WeaponDef( pm->ps->weapon );
+
+	if ( pm->ps->pm_flags & PMF_SPRINTING ) {
+		switch ( pm->ps->weaponstate ) {
+		case WEAPON_READY:
+		case WEAPON_RAISING:
+		case WEAPON_RAISING_QUICK:
+		case WEAPON_SPRINT_DROP:
+			pm->ps->weaponstate = WEAPON_SPRINT_RAISE;
+			pm->ps->weaponTime = def->sprintInTime;
+			PM_StartWeaponAnim( WANIM_SPRINT_IN );
+			break;
+		default:
+			break;
+		}
+	} else {
+		switch ( pm->ps->weaponstate ) {
+		case WEAPON_SPRINT_RAISE:
+		case WEAPON_SPRINT_LOOP:
+			pm->ps->weaponstate = WEAPON_SPRINT_DROP;
+			pm->ps->weaponTime = def->sprintOutTime;
+			PM_StartWeaponAnim( WANIM_SPRINT_OUT );
+			break;
+		default:
+			break;
+		}
+	}
 }
 
 
@@ -1572,9 +1725,20 @@ static void PM_Weapon( void ) {
 
 
 	// make weapon function
+	// The timer stops at zero instead of carrying the overshoot into the next
+	// state, so every timed state lasts a whole number of client frames.
 	if ( pm->ps->weaponTime > 0 ) {
 		pm->ps->weaponTime -= pml.msec;
+		if ( pm->ps->weaponTime < 0 ) {
+			pm->ps->weaponTime = 0;
+		}
 	}
+
+	// The order of the next three steps is what the weapon handling feels
+	// like, so it is spelled out:
+	//   1. a weapon change request is looked at first
+	//   2. then sprint may take the weapon over, or give it back
+	//   3. then, if the timer has run out, the current state finishes
 
 	// check for weapon change
 	// can't change if weapon is firing, but can change
@@ -1585,23 +1749,45 @@ static void PM_Weapon( void ) {
 		}
 	}
 
+	// check for sprint
+	PM_WeaponSprint();
+
 	if ( pm->ps->weaponTime > 0 ) {
 		return;
 	}
 
 	// change weapon if time
-	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
+	if ( pm->ps->weaponstate == WEAPON_DROPPING
+		|| pm->ps->weaponstate == WEAPON_DROPPING_QUICK ) {
 		PM_FinishWeaponChange();
 		return;
 	}
 
-	if ( pm->ps->weaponstate == WEAPON_RAISING ) {
+	if ( pm->ps->weaponstate == WEAPON_RAISING
+		|| pm->ps->weaponstate == WEAPON_RAISING_QUICK ) {
 		pm->ps->weaponstate = WEAPON_READY;
 		if ( pm->ps->weapon == WP_GAUNTLET ) {
 			PM_StartTorsoAnim( TORSO_STAND2 );
 		} else {
 			PM_StartTorsoAnim( TORSO_STAND );
 		}
+		PM_StartWeaponAnim( WANIM_IDLE );
+		return;
+	}
+
+	if ( pm->ps->weaponstate == WEAPON_SPRINT_RAISE ) {
+		pm->ps->weaponstate = WEAPON_SPRINT_LOOP;
+		PM_StartWeaponAnim( WANIM_SPRINT_LOOP );
+		return;
+	}
+
+	if ( pm->ps->weaponstate == WEAPON_SPRINT_LOOP ) {
+		return;
+	}
+
+	if ( pm->ps->weaponstate == WEAPON_SPRINT_DROP ) {
+		pm->ps->weaponstate = WEAPON_READY;
+		PM_StartWeaponAnim( WANIM_IDLE );
 		return;
 	}
 
@@ -1609,6 +1795,7 @@ static void PM_Weapon( void ) {
 	if ( ! (pm->cmd.buttons & BUTTON_ATTACK) ) {
 		pm->ps->weaponTime = 0;
 		pm->ps->weaponstate = WEAPON_READY;
+		PM_ContinueWeaponAnim( WANIM_IDLE );
 		return;
 	}
 
@@ -1641,6 +1828,7 @@ static void PM_Weapon( void ) {
 
 	// fire weapon
 	PM_AddEvent( EV_FIRE_WEAPON );
+	PM_StartWeaponAnim( WANIM_FIRE );
 
 	switch( pm->ps->weapon ) {
 	default:
@@ -1930,6 +2118,11 @@ void PmoveSingle (pmove_t *pmove) {
 		pm->cmd.upmove = 0;
 	}
 
+	// the movement types that return early below never sprint
+	if ( pm->ps->pm_type != PM_NORMAL ) {
+		pm->ps->pm_flags &= ~PMF_SPRINTING;
+	}
+
 	if ( pm->ps->pm_type == PM_SPECTATOR ) {
 		PM_CheckDuck ();
 		PM_FlyMove ();
@@ -1964,6 +2157,9 @@ void PmoveSingle (pmove_t *pmove) {
 	if ( pm->ps->pm_type == PM_DEAD ) {
 		PM_DeadMove ();
 	}
+
+	// decide if this slice is sprinted, before anything moves
+	PM_UpdateSprint();
 
 	PM_DropTimers();
 

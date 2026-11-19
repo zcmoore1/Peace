@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // bg_public.h -- definitions shared by both the server game and client game modules
 
+#include "bg_weapons.h"
+
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
@@ -137,11 +139,17 @@ typedef enum {
 	PM_SPINTERMISSION	// no movement or status bar
 } pmtype_t;
 
+// playerState_t.weaponstate is sent in 4 bits, so there is room for 16 of these
 typedef enum {
 	WEAPON_READY, 
 	WEAPON_RAISING,
 	WEAPON_DROPPING,
-	WEAPON_FIRING
+	WEAPON_FIRING,
+	WEAPON_RAISING_QUICK,	// raise that follows a quick drop
+	WEAPON_DROPPING_QUICK,	// drop requested while the weapon was still coming up
+	WEAPON_SPRINT_RAISE,	// moving the weapon into the sprint pose
+	WEAPON_SPRINT_LOOP,		// sprinting
+	WEAPON_SPRINT_DROP		// bringing the weapon back from the sprint pose
 } weaponstate_t;
 
 // pmove->pm_flags
@@ -158,6 +166,7 @@ typedef enum {
 #define PMF_FOLLOW			4096	// spectate following another player
 #define PMF_SCOREBOARD		8192	// spectate as a scoreboard
 #define PMF_INVULEXPAND		16384	// invulnerability sphere set to full size
+#define PMF_SPRINTING		32768	// sprinting this frame, see PM_UpdateSprint
 
 #define	PMF_ALL_TIMES	(PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK)
 

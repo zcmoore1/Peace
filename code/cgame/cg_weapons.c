@@ -22,6 +22,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // cg_weapons.c -- events and effects dealing with weapons
 #include "cg_local.h"
+#include "cg_viewanim.h"
+
+// blend state of the first-person weapon animations
+static viewAnimator_t	cg_viewAnimator;
 
 /*
 ==========================
@@ -879,7 +883,9 @@ CG_MapTorsoToWeaponFrame
 static int CG_MapTorsoToWeaponFrame( clientInfo_t *ci, int frame ) {
 
 	// change weapon
-	if ( frame >= ci->animations[TORSO_DROP].firstFrame 
+	// (the view animator does the raising and lowering when it is running)
+	if ( !cg_viewAnim.integer
+		&& frame >= ci->animations[TORSO_DROP].firstFrame 
 		&& frame < ci->animations[TORSO_DROP].firstFrame + 9 ) {
 		return frame - ci->animations[TORSO_DROP].firstFrame + 6;
 	}
@@ -1348,6 +1354,48 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 
 /*
 ==============
+CG_ApplyViewAnim
+
+Poses the first-person weapon with the blended weapon animations.
+
+The weapon state machine only publishes which animation it wants in
+ps->weapAnim. Everything about how one animation gives way to the next is
+decided by the blend weights in cg_viewanim.c.
+==============
+*/
+static void CG_ApplyViewAnim( playerState_t *ps, refEntity_t *hand ) {
+	const viewAnimSet_t	*set;
+	viewAnimPose_t		pose;
+	vec3_t				poseAxis[3];
+	vec3_t				axis[3];
+	int					i;
+
+	ViewAnim_Update( &cg_viewAnimator, ps->weapon, ps->weapAnim, cg.time );
+	ViewAnim_Pose( &cg_viewAnimator, &pose );
+
+	set = ViewAnim_SetForWeapon( ps->weapon );
+
+	ViewAnim_QuatToAxis( pose.rot, poseAxis );
+	MatrixMultiply( poseAxis, hand->axis, axis );
+
+	// rotate about a point on the weapon instead of about the eye
+	for ( i = 0 ; i < 3 ; i++ ) {
+		VectorMA( hand->origin, set->pivot[i], hand->axis[i], hand->origin );
+	}
+	for ( i = 0 ; i < 3 ; i++ ) {
+		VectorMA( hand->origin, -set->pivot[i], axis[i], hand->origin );
+	}
+
+	// the animated offset is in view space
+	for ( i = 0 ; i < 3 ; i++ ) {
+		VectorMA( hand->origin, pose.origin[i], hand->axis[i], hand->origin );
+	}
+
+	AxisCopy( axis, hand->axis );
+}
+
+/*
+==============
 CG_AddViewWeapon
 
 Add the weapon, and flash for the player's view
@@ -1415,6 +1463,10 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	VectorMA( hand.origin, (cg_gun_z.value+fovOffset), cg.refdef.viewaxis[2], hand.origin );
 
 	AnglesToAxis( angles, hand.axis );
+
+	if ( cg_viewAnim.integer ) {
+		CG_ApplyViewAnim( ps, &hand );
+	}
 
 	// map torso animations to weapon animations
 	if ( cg_gun_frame.integer ) {
@@ -1538,6 +1590,20 @@ static qboolean CG_WeaponSelectable( int i ) {
 
 /*
 ===============
+CG_SendWeaponSelect
+
+Hands the selected weapon to the client right away. Without this the new
+selection would only be picked up when the next frame is drawn, so a weapon
+switch would reach the server one command later than a button pressed in the
+same frame.
+===============
+*/
+static void CG_SendWeaponSelect( void ) {
+	trap_SetUserCmdValue( cg.weaponSelect, cg.zoomSensitivity );
+}
+
+/*
+===============
 CG_NextWeapon_f
 ===============
 */
@@ -1570,6 +1636,8 @@ void CG_NextWeapon_f( void ) {
 	if ( i == MAX_WEAPONS ) {
 		cg.weaponSelect = original;
 	}
+
+	CG_SendWeaponSelect();
 }
 
 /*
@@ -1606,6 +1674,8 @@ void CG_PrevWeapon_f( void ) {
 	if ( i == MAX_WEAPONS ) {
 		cg.weaponSelect = original;
 	}
+
+	CG_SendWeaponSelect();
 }
 
 /*
@@ -1636,6 +1706,8 @@ void CG_Weapon_f( void ) {
 	}
 
 	cg.weaponSelect = num;
+
+	CG_SendWeaponSelect();
 }
 
 /*

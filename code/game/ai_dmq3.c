@@ -1562,7 +1562,9 @@ void BotChooseWeapon(bot_state_t *bs) {
 	int newweaponnum;
 
 	if (bs->cur_ps.weaponstate == WEAPON_RAISING ||
-			bs->cur_ps.weaponstate == WEAPON_DROPPING) {
+			bs->cur_ps.weaponstate == WEAPON_DROPPING ||
+			bs->cur_ps.weaponstate == WEAPON_RAISING_QUICK ||
+			bs->cur_ps.weaponstate == WEAPON_DROPPING_QUICK) {
 		trap_EA_SelectWeapon(bs->client, bs->weaponnum);
 	}
 	else {

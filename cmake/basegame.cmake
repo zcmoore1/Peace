@@ -10,6 +10,7 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/game/bg_misc.c
     ${SOURCE_DIR}/game/bg_pmove.c
     ${SOURCE_DIR}/game/bg_slidemove.c
+    ${SOURCE_DIR}/game/bg_weapons.c
     ${SOURCE_DIR}/game/bg_lib.c
     ${SOURCE_DIR}/cgame/cg_consolecmds.c
     ${SOURCE_DIR}/cgame/cg_draw.c
@@ -28,6 +29,7 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_servercmds.c
     ${SOURCE_DIR}/cgame/cg_snapshot.c
     ${SOURCE_DIR}/cgame/cg_view.c
+    ${SOURCE_DIR}/cgame/cg_viewanim.c
     ${SOURCE_DIR}/cgame/cg_weapons.c
 )
 
@@ -46,6 +48,7 @@ set(GAME_SOURCES
     ${SOURCE_DIR}/game/bg_misc.c
     ${SOURCE_DIR}/game/bg_pmove.c
     ${SOURCE_DIR}/game/bg_slidemove.c
+    ${SOURCE_DIR}/game/bg_weapons.c
     ${SOURCE_DIR}/game/bg_lib.c
     ${SOURCE_DIR}/game/g_active.c
     ${SOURCE_DIR}/game/g_arenas.c

@@ -88,7 +88,8 @@ void TossClientItems( gentity_t *self ) {
 	// can pick up a weapon, be killed, and not drop the weapon because
 	// their weapon change hasn't completed yet and they are still holding the MG.
 	if ( weapon == WP_MACHINEGUN || weapon == WP_GRAPPLING_HOOK ) {
-		if ( self->client->ps.weaponstate == WEAPON_DROPPING ) {
+		if ( self->client->ps.weaponstate == WEAPON_DROPPING
+			|| self->client->ps.weaponstate == WEAPON_DROPPING_QUICK ) {
 			weapon = self->client->pers.cmd.weapon;
 		}
 		if ( !( self->client->ps.stats[STAT_WEAPONS] & ( 1 << weapon ) ) ) {

@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-18"
+#define	GAME_VERSION		BASEGAME "-19"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			(-40)
@@ -451,6 +451,17 @@ int  BG_WeaponRaiseTime( int weapon );		// deploy length, never 0 for a gun; an 
 int  BG_WeaponQuickDropTime( int weapon );	// MW2's quickDropTime: going away for a grenade
 int  BG_WeaponQuickRaiseTime( int weapon );	// MW2's quickRaiseTime: back after a knife or a grenade
 int  BG_WeaponDrawTime( const playerState_t *ps );
+// playerState_t.weaponDraw: the kind of draw the gun in hand is making. MW2's
+// mode switch (the same gun changing firing mode) is two weapon states of its
+// own, DROPPING_ALT 5 and RAISING_ALTSWITCH 2, which its code treats as a drop
+// and a raise everywhere but in their times and in the alt toggle's gate. Here
+// they are WEAPON_DROPPING and WEAPON_RAISING with WDRAW_ALT beside them, so
+// every rule for a drop or a raise holds for them without being asked.
+#define WDRAW_NORMAL 0
+#define WDRAW_FIRST  1	// the instance's first deployment
+#define WDRAW_ALT    2	// MW2's alt switch, from its drop to the end of its raise
+int  BG_WeaponAltDropTime( int weapon );	// MW2's altDropTime: 0 in every MP weapon file
+int  BG_WeaponAltRaiseTime( int weapon );	// MW2's altRaiseTime
 int  BG_WeaponFirstRaiseTime( int weapon );
 int  BG_WeaponSprintInTime( int weapon );	// lower-into-sprint length
 int  BG_WeaponSprintOutTime( int weapon );	// raise-out-of-sprint length

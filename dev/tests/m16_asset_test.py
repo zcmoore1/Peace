@@ -53,7 +53,8 @@ def validate_model(variant):
         if fields:
             name, first, count, fps, loop = fields
             clips[name] = (int(first), int(count), float(fps), int(loop))
-    assert {'idle', 'raise', 'drop', 'fire', 'reload_loop', 'sprint_in', 'sprint_loop', 'sprint_out'} <= clips.keys()
+    assert {'idle', 'raise', 'drop', 'fire', 'reload_loop', 'sprint_in', 'sprint_loop', 'sprint_out',
+            'alt_raise'} <= clips.keys()
     for i in range(h[17]):
         name, first, count, fps, loop = struct.unpack_from('<3IfI', data, h[18]+20*i)
         expected = clips[label(name)]
@@ -115,11 +116,24 @@ def validate_model(variant):
         assert nodes[names.index('tag_flash')][4] < 0, 'Wrong barrel muzzle'
     else:
         assert nodes[names.index('tag_flash')][4] > 0
+    # The mode switch's raise ends at rest, and the trigger hand travels in it.
+    switch = clip('alt_raise'); trigger = names.index('right_hand')
+    assert difference(switch[-1], idle) < .001, 'Mode switch must settle to ready'
+    assert max(abs(a-b) for a, b in zip(switch[0][trigger][:3], idle[trigger][:3])) > 5
     print(f'PASS: {variant}: {h[10]} triangles, {h[19]} poses, rig, winding and transition continuity')
+    return names, idle, switch
 
 
-validate_model('view')
-validate_model('masterkey')
+rifle = validate_model('view')
+shotgun = validate_model('masterkey')
+# The mode switch flows: each mode's switch clip starts on the other mode's rest
+# pose, joint for joint (the two variants name their muzzle tags differently).
+for (names, idle, switch), (other_names, other_idle, _) in [(rifle, shotgun), (shotgun, rifle)]:
+    for index, name in enumerate(names):
+        if name.startswith('tag_'): continue
+        there = other_idle[other_names.index(name)]
+        assert max(abs(a-b) for a, b in zip(switch[0][index], there)) < .001, 'Mode switch pops at its start: '+name
+print('PASS: each mode switch starts on the other mode\'s rest pose')
 
 world = (MODEL / 'world.md3').read_bytes()
 assert world[:4] == b'IDP3' and struct.unpack_from('<i', world, 104)[0] == len(world)

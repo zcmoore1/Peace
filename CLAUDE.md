@@ -89,7 +89,9 @@ source for MW2 behaviour; the owner rejects it.
   ALWAYS stamps a real time from `BG_HolsterTime`, `WNOTE_MAG_IN` zeroes `weaponTime`, and a
   transition whose lock is already spent finishes that think and `return`s —
   before the queued clip fill. Never add `if (nac)`, a NAC-named function, a
-  special state, or a zero drop time.
+  special state, or a zero drop time. (One gun changing firing mode is not a
+  holster: its times are MW2's `altDropTime` and `altRaiseTime`, and MW2's
+  data makes that drop 0. See the M16 entry under "Adding a weapon".)
 - **Two clocks, kept separate.** `weaponAnimTime` counts UP and is what notes
   fire off; `weaponTime` counts DOWN and is only a busy lock. Never derive note
   times from `weaponTime`.
@@ -191,6 +193,22 @@ source for MW2 behaviour; the owner rejects it.
   ready gun with no pump — the Fayde; YY before it pumps again; an ordinary
   reload gains nothing. Never add a state test or a placed time to this. (The M
   NAC, a return with the pump still workable, is future work.)
+  A gun whose bolt is 1ms into its action (MW2's `rechamberBoltTime` 0, which
+  MW2 never arms as 0: the Masterkey, and CoD4's W1200) settles on the reload's
+  first think. A swap already waiting when that reload starts therefore always
+  meets it, on any timing: shoot, Y, Y, X on the Masterkey is MW2's Moni, and
+  the SPAS (449 of its 467 in MW2, 283 here) cannot do it. Nothing names it;
+  `dev/tests/moni_test.c` only presses the buttons.
+- **A swap asked for during the shot begins on the shot's last think (owner's
+  rule: do what MW2 does).** MW2's change check refuses FIRING only while the
+  shot has time left (0x578C0A-0x578C31), and its rechamber starts only from
+  READY, on a later think (0x575B77): the change takes the gun first and the
+  action stays owed. Here the shot ends on the think its clock reaches
+  `WNOTE_BOLT_OPEN`: `PM_WeaponChangeOpen` opens there (`PM_ShotOver`), as step
+  1b's sprint does, and the shot's clock stops at that note until the gun is in
+  the action, so the close note can never land on the shot's last think. Never
+  let the fire clock run from the shot into the action: a gun whose bolt is 1ms
+  in would pay its pump on the very think a waiting swap begins, and swap free.
 - **Clip frame ranges are data.** They live in the `.cfg` beside the model and
   are read by `CG_WeapAnim_RegisterClips`. Re-exporting a model must never mean
   editing C, and no weapon may be named in that loader.
@@ -356,8 +374,15 @@ source for MW2 behaviour; the owner rejects it.
   prone come out of these rules: never name one in code, and never write the
   command (a stopped crawl zeroes this think's copies). See `dev/STANCE.md`.
   MW2's landing stun, mantle and dive are not ported.
-- **Selection is a slot toggle.** `weapnext` advances the latest requested slot
-  modulo `SLOT_COUNT`, not the server's last acknowledged active slot. If an
+- **Selection is MW2's cycle (owner's rule).** `weapnext` and `weapprev` run
+  MW2's `CycleWeapPrimary` (0x59ED40) from the latest requested selection, not
+  the server's last acknowledged gun: from an underbarrel they select the gun
+  that carries it, from any other gun the next slot, and the cycle brings a gun
+  back in its own mode, never the underbarrel (MW2's `altModeSameWeapon` is 0
+  in every multiplayer weapon file). So the Masterkey is two presses from the
+  next gun. `weapalt` is MW2's alt toggle (+actionslot 3): refused while a gun
+  goes down and during a mode change's own raise, and from a gun with no other
+  mode it selects the next gun's underbarrel as one ordinary change. If an
   unfinished ordinary holster's destination returns to the gun still held,
   shared pmove cancels the drop and reaches the normal fire gates that think.
   There is no YY timing window or extra delay. Initial drops still stamp their
@@ -920,8 +945,11 @@ source for MW2 behaviour; the owner rejects it.
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
 - `weaponAction` — a separate 10-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 89 (GAME_VERSION -18) requires client, server
+  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 90 (GAME_VERSION -19) requires client, server
   and all modules rebuilt together. Older builds/demos are incompatible.
+- `weaponDraw` — 2 bits, three of four values used (`WDRAW_NORMAL`,
+  `WDRAW_FIRST`, `WDRAW_ALT`): the kind of draw, and for a mode change the kind
+  of drop before it (MW2's RAISING_ALTSWITCH and DROPPING_ALT states).
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
   `weapFlags` (MW2's name; 2 bits) carries `PWF_USE_RELOAD`, the
@@ -1401,16 +1429,29 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
 ## Adding a weapon — touches TWO lists
 
 - M16 / Masterkey (`WP_M16` / `WP_MASTERKEY`, 18/19 base or 21/22 missionpack)
-  are one inventory instance with two firing modes. `weapalt` toggles the mode
-  (keyboard B, D-pad down). Slot commands carry mode separately from pickup
-  generation; both ammo pools and pump debt survive drops and pickups. Its
-  original prototype geometry, animation and timing data come from
-  `assets/source/m16/weapon.json` via `dev/tools/build_m16.py`; the rifle is
-  currently automatic, with no claim of retail MW2 burst/timing/recoil accuracy.
-  It uses ordinary note/holster/raise rules. Never add a special NAC for it.
-  Protocol 89 / game -18 adds the alternate ammo fields after stance's 88/-17.
-  The sight files use `zoomfov` in degrees. Run `run-masterkey`,
-  `m16_asset_test.py` and `test-masterkey.ps1`; see `dev/M16.md`.
+  are one inventory instance with two firing modes. `weapalt` is MW2's alt
+  toggle (keyboard B, D-pad down), and Y from the Masterkey is the rifle (see
+  "Selection is MW2's cycle"). The mode change is MW2's alt switch:
+  `PM_BeginWeaponChange` marks the drop `WDRAW_ALT` (MW2's DROPPING_ALT),
+  `BG_HolsterTime` gives it the gun's `altDropTime` (0 in MW2's data, so step 3
+  finishes it on that think) and its raise is the new mode's `altRaiseTime`
+  (730, MW2's RAISING_ALTSWITCH); a sprinting player gets the ordinary drop and
+  raise, as in MW2. Slot commands carry mode separately from pickup
+  generation; both ammo pools and pump debt survive drops and pickups. The
+  geometry and animation are original. `assets/source/m16/weapon.json` holds
+  the timing and `dev/tools/build_m16.py` generates the models, clips and
+  `bg_m16_data.h` from it, the same bytes on every platform. The swap times,
+  the mode switch and the Masterkey's shot (330), pump (430, its bolt 1ms in)
+  and reload (a 1000 start that feeds a shell at 600, 750 a shell, a 1350 end)
+  are MW2's `m16_shotgun_mp` and `m16_shotgun_attach_mp`. The rifle's fire,
+  reload, sprint and aim times are still provisional (it is automatic, not
+  MW2's burst), and so are both modes' damage, ammo counts and the Masterkey's
+  sights (MW2's has none). It uses ordinary note/holster/raise rules. Never add
+  a special NAC for it: MW2's Moni comes out of its data. Protocol 89 / game
+  -18 added the alternate ammo fields; protocol 90 / game -19 widened
+  `weaponDraw` for the alt switch. The sight files use `zoomfov` in degrees.
+  Run `run-masterkey` (which includes `moni_test.c`), `m16_asset_test.py` and
+  `test-masterkey.ps1`; see `dev/M16.md`.
 - M300 Praetorian (`WP_M40A3`) is a separate, appended weapon (15 basegame / 18 missionpack). The
   Sniper preset occupies the former Scout index; custom-class indices and
   existing serialized weapon IDs are unchanged. Railgun remains selectable.

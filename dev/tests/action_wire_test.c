@@ -3,7 +3,8 @@
  * corrections. Protocol 88: MW2's stance on the wire - the usercmd's stance bits, pm_flags'
  * PMF_PRONE and PMF_PRONEMOVE_OVERRIDDEN, the float eye and its leg, the prone body, prevCmd,
  * and an ET_PLAYER's stance flags, eye and prone body (BG_PlayerStateToEntityState).
- * Protocol 89 also carries per-instance underbarrel pools, selected mode and pump debt. */
+ * Protocol 89 also carries per-instance underbarrel pools, selected mode and pump debt.
+ * Protocol 90 widens weaponDraw to the three kinds of draw (WDRAW_*). */
 #include "../../code/qcommon/q_shared.h"
 #include "../../code/qcommon/qcommon.h"
 #include "../../code/game/bg_public.h"
@@ -162,7 +163,7 @@ int main(void) {
   to.stats[PS_STAT_UNCHAMBERED]=(1<<15)|(1<<18)|(1<<(MAX_WEAPONS-1));
   to.ammo[17]=2; to.ammo[MAX_WEAPONS-1]=3; to.ammoReserve[MAX_WEAPONS-1]=99;
   to.weapon=3; to.weaponstate=2; to.weaponTime=37;
-  to.weaponDraw=j&1; to.slotAmmo[0]=7; to.slotAmmo[1]=2;
+  to.weaponDraw=j%3; to.slotAmmo[0]=7; to.slotAmmo[1]=2;
   to.slotReserve[0]=29; to.slotReserve[1]=40;
   to.slotAttachments[0]=i&1; to.slotAttachments[1]=j&1;
   to.slotFlags[0]=i&31; to.slotFlags[1]=j&31; /* generation, mode and both chamber debts */
@@ -211,7 +212,8 @@ int main(void) {
   * Tactical Insertion types, the top one included, each from every other.
   * Protocol 85 adds grenadeTimeLeft; protocol 87 adds moveClass, 88 stance,
   * and 89 the underbarrel inventory fields. */
- CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==89);
+ CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==90);
+ CHECK(WDRAW_NORMAL==0 && WDRAW_FIRST==1 && WDRAW_ALT==2);
  /* moveClass is MW2's nine weapon classes in PS_MOVECLASS_BITS (4): every one,
   * the last included, from every other, and alone in a delta. */
  CHECK(MOVECLASS_COUNT==9 && MOVECLASS_COUNT<=(1<<PS_MOVECLASS_BITS));

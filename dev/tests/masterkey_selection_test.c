@@ -1,5 +1,7 @@
 /* Actual client selection handlers, snapshot validation and weapon thinks.
- * A delayed snapshot must never undo a more recent mode press or Y. */
+ * A delayed snapshot must never undo a more recent mode press or Y. The cycle
+ * is MW2's: an underbarrel's Y is its rifle, the rifle's Y is the next gun,
+ * and the cycle brings a gun back in its own mode. */
 #include "../../code/cgame/cg_weapons.c"
 #include "masterkey_selection_stubs.h"
 
@@ -89,49 +91,92 @@ static void TestRapidModeInput(void) {
 	CG_AltWeapon_f();
 	ExpectIntent(0,WP_M16);
 	CHECK(!swapPresses);
-	/* An actual transition begins and can be reversed before a snapshot. */
+	/* An actual mode change is there on its first think (MW2's altDropTime),
+	 * and MW2's toggle is refused all through its raise: no way back, no shot. */
 	CG_AltWeapon_f(); Step(1,0);
-	CHECK(cg.predictedPlayerState.weaponstate==WEAPON_DROPPING);
-	CHECK(cg.predictedPlayerState.weaponTime==BG_WeaponDropTime(WP_M16));
-	CG_AltWeapon_f(); Step(1,BUTTON_ATTACK);
-	CHECK(cg.predictedPlayerState.weapon==WP_M16);
-	CHECK(cg.predictedPlayerState.weaponstate==WEAPON_FIRING);
-	CHECK(cg.predictedPlayerState.ammo[WP_M16]==BG_WeaponMagSize(WP_M16)-1);
+	CHECK(cg.predictedPlayerState.weapon==WP_MASTERKEY);
+	CHECK(cg.predictedPlayerState.weaponstate==WEAPON_RAISING && cg.predictedPlayerState.weaponDraw==WDRAW_ALT);
+	CHECK(cg.predictedPlayerState.weaponTime==BG_WeaponAltRaiseTime(WP_MASTERKEY));
+	CG_AltWeapon_f(); ExpectIntent(0,WP_MASTERKEY);
+	Step(1,BUTTON_ATTACK);
+	CHECK(cg.predictedPlayerState.weapon==WP_MASTERKEY);
+	CHECK(cg.predictedPlayerState.weaponstate==WEAPON_RAISING);
+	CHECK(cg.predictedPlayerState.ammo[WP_M16]==BG_WeaponMagSize(WP_M16));
 	CHECK(cg.predictedPlayerState.ammo[WP_MASTERKEY]==BG_WeaponMagSize(WP_MASTERKEY));
+	Settle();
+	/* refused while a gun goes down as well */
+	CG_NextWeapon_f(); ExpectIntent(0,WP_M16); Settle();
+	CG_NextWeapon_f(); ExpectIntent(1,WP_SHOTGUN); Step(1,0);
+	CHECK(cg.predictedPlayerState.weaponstate==WEAPON_DROPPING);
+	CG_AltWeapon_f(); ExpectIntent(1,WP_SHOTGUN);
+	CHECK(!swapPresses || swapPresses==2);
 }
 
-static void TestModeSurvivesY(void) {
-	int shells;
+static void TestCycle(void) {
+	int rounds;
 	Setup(WP_M16,WP_SHOTGUN,qfalse);
 	CG_AltWeapon_f(); Settle();
 	CHECK(cg.predictedPlayerState.weapon==WP_MASTERKEY);
 	CHECK(!(snapshot.ps.slotFlags[0]&BG_GUN_ALTERNATE)); /* server still behind */
+	/* The underbarrel's Y is its rifle: the mode change, there on its think. */
+	CG_NextWeapon_f(); ExpectIntent(0,WP_M16); Step(1,0);
+	CHECK(cg.predictedPlayerState.weapon==WP_M16);
+	CHECK(cg.predictedPlayerState.weaponstate==WEAPON_RAISING && cg.predictedPlayerState.weaponDraw==WDRAW_ALT);
+	/* The rifle's Y is the next gun, taken out of that raise as the rifle's own drop. */
 	CG_NextWeapon_f(); ExpectIntent(1,WP_SHOTGUN); Step(1,0);
-	CHECK(cg.predictedPlayerState.weaponstate==WEAPON_DROPPING);
-	CG_NextWeapon_f(); ExpectIntent(0,WP_MASTERKEY);
-	shells=cg.predictedPlayerState.ammo[WP_MASTERKEY];
+	CHECK(cg.predictedPlayerState.weapon==WP_M16 && cg.predictedPlayerState.weaponstate==WEAPON_DROPPING);
+	CHECK(cg.predictedPlayerState.weaponTime==BG_WeaponDropTime(WP_M16));
+	/* A third is back on the rifle still in hand: ready on that think, and it fires. */
+	CG_NextWeapon_f(); ExpectIntent(0,WP_M16);
+	rounds=cg.predictedPlayerState.ammo[WP_M16];
 	Step(1,BUTTON_ATTACK);
-	CHECK(cg.predictedPlayerState.weapon==WP_MASTERKEY);
+	CHECK(cg.predictedPlayerState.weapon==WP_M16);
 	CHECK(cg.predictedPlayerState.weaponstate==WEAPON_FIRING);
-	CHECK(cg.predictedPlayerState.ammo[WP_MASTERKEY]==shells-1);
-	CHECK(swapPresses==2);
-	/* A late acknowledgement of rifle mode does not replace current intent. */
-	ExpectIntent(0,WP_MASTERKEY);
+	CHECK(cg.predictedPlayerState.ammo[WP_M16]==rounds-1);
+	CHECK(swapPresses==3);
+	/* A late acknowledgement of the underbarrel does not replace current intent. */
+	snapshot.ps.slotFlags[0]|=BG_GUN_ALTERNATE;
+	ExpectIntent(0,WP_M16);
+	snapshot.ps.slotFlags[0]&=~BG_GUN_ALTERNATE;
 	Settle();
 	CG_NextWeapon_f(); Settle();
 	CHECK(cg.predictedPlayerState.weapon==WP_SHOTGUN);
-	CG_PrevWeapon_f(); Settle();
+	CG_PrevWeapon_f(); ExpectIntent(0,WP_M16); Settle();
+	CHECK(cg.predictedPlayerState.weapon==WP_M16);
+	/* weapprev leaves the underbarrel for its rifle as well. */
+	CG_AltWeapon_f(); Settle();
 	CHECK(cg.predictedPlayerState.weapon==WP_MASTERKEY);
+	CG_PrevWeapon_f(); ExpectIntent(0,WP_M16); Settle();
+	/* Put away as the underbarrel (two presses the server hears as one change),
+	 * the gun still comes back as the rifle: the cycle never selects the underbarrel. */
+	CG_AltWeapon_f(); Settle();
+	CG_NextWeapon_f(); ExpectIntent(0,WP_M16);
+	CG_NextWeapon_f(); ExpectIntent(1,WP_SHOTGUN); Step(1,0);
+	CHECK(cg.predictedPlayerState.weapon==WP_MASTERKEY && cg.predictedPlayerState.weaponstate==WEAPON_DROPPING);
+	CHECK(cg.predictedPlayerState.weaponTime==BG_WeaponDropTime(WP_MASTERKEY));
+	Settle();
+	CHECK(cg.predictedPlayerState.weapon==WP_SHOTGUN);
+	CHECK(cg.predictedPlayerState.slotFlags[0]&BG_GUN_ALTERNATE);
+	CG_NextWeapon_f(); ExpectIntent(0,WP_M16); Settle();
+	CHECK(cg.predictedPlayerState.weapon==WP_M16);
+	CHECK(!(cg.predictedPlayerState.slotFlags[0]&BG_GUN_ALTERNATE));
 }
 
 static void TestDuplicateGuns(void) {
+	/* Each copy's underbarrel returns to its own rifle, and the cycle moves
+	 * between the copies as rifles. */
 	Setup(WP_M16,WP_M16,qtrue);
 	ExpectIntent(0,WP_MASTERKEY);
+	CG_NextWeapon_f(); ExpectIntent(0,WP_M16); Settle();
 	CG_NextWeapon_f(); ExpectIntent(1,WP_M16); Settle();
+	CHECK(cg.predictedPlayerState.stats[STAT_ACTIVE_SLOT]==1);
 	CG_AltWeapon_f(); ExpectIntent(1,WP_MASTERKEY); Settle();
-	CG_NextWeapon_f(); ExpectIntent(0,WP_MASTERKEY); Settle();
-	CG_AltWeapon_f(); ExpectIntent(0,WP_M16); Settle();
-	CG_NextWeapon_f(); ExpectIntent(1,WP_MASTERKEY);
+	CG_NextWeapon_f(); ExpectIntent(1,WP_M16); Settle();
+	CHECK(cg.predictedPlayerState.stats[STAT_ACTIVE_SLOT]==1);
+	CG_NextWeapon_f(); ExpectIntent(0,WP_M16); Settle();
+	CHECK(cg.predictedPlayerState.stats[STAT_ACTIVE_SLOT]==0);
+	CG_AltWeapon_f(); ExpectIntent(0,WP_MASTERKEY); Settle();
+	CG_NextWeapon_f(); ExpectIntent(0,WP_M16);
 }
 
 static void TestPickupAndRespawn(void) {
@@ -146,6 +191,7 @@ static void TestPickupAndRespawn(void) {
 	cg.predictedPlayerState=snapshot.ps;
 	ExpectIntent(0,WP_M16);
 	CG_AltWeapon_f(); ExpectIntent(0,WP_MASTERKEY);
+	CG_NextWeapon_f(); ExpectIntent(0,WP_M16);
 	CG_NextWeapon_f(); ExpectIntent(1,WP_SHOTGUN);
 	BG_SetSlotWeapon(&snapshot.ps,0,WP_M16);
 	snapshot.ps.slotFlags[0]^=BG_GUN_GENERATION;
@@ -166,7 +212,10 @@ static void TestDirectSelectionAndGuards(void) {
 	Com_sprintf(weaponArgument,sizeof(weaponArgument),"%i",WP_M16);
 	CG_Weapon_f(); ExpectIntent(0,WP_M16);
 	CG_NextWeapon_f(); ExpectIntent(1,WP_SHOTGUN);
-	CG_AltWeapon_f(); ExpectIntent(1,WP_SHOTGUN);
+	/* MW2's toggle from a gun with no other mode: the next gun that has one, in that mode. */
+	CG_AltWeapon_f(); ExpectIntent(0,WP_MASTERKEY);
+	CG_NextWeapon_f(); ExpectIntent(0,WP_M16);
+	CG_NextWeapon_f(); ExpectIntent(1,WP_SHOTGUN);
 	snapshot.ps.pm_flags|=PMF_FOLLOW;
 	CG_AltWeapon_f(); CG_NextWeapon_f(); CG_Weapon_f();
 	ExpectIntent(1,WP_SHOTGUN);
@@ -179,11 +228,18 @@ static void TestDirectSelectionAndGuards(void) {
 	cg.snap=NULL;
 	CG_AltWeapon_f(); CG_NextWeapon_f(); CG_Weapon_f(); CG_ValidateWeaponSelect();
 	CHECK(cg.weaponSelect==WP_M16);
+	/* With no gun that has another mode the toggle does nothing. */
+	Setup(WP_SHOTGUN,WP_MACHINEGUN,qfalse);
+	ExpectIntent(0,WP_SHOTGUN);
+	CG_AltWeapon_f(); ExpectIntent(0,WP_SHOTGUN);
+	CG_NextWeapon_f(); ExpectIntent(1,WP_MACHINEGUN);
+	CG_AltWeapon_f(); ExpectIntent(1,WP_MACHINEGUN);
+	CG_NextWeapon_f(); ExpectIntent(0,WP_SHOTGUN);
 }
 
 int main(void) {
-	TestRapidModeInput(); TestModeSurvivesY(); TestDuplicateGuns();
+	TestRapidModeInput(); TestCycle(); TestDuplicateGuns();
 	TestPickupAndRespawn(); TestDirectSelectionAndGuards();
-	printf("PASS: %i client mode input, YY, snapshot, pickup and respawn checks\n",checks);
+	printf("PASS: %i client mode input, cycle, snapshot, pickup and respawn checks\n",checks);
 	return 0;
 }

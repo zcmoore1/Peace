@@ -727,15 +727,21 @@ static void ShootGun( int weapon ) {
 	CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) );
 	testMove.cmd.buttons = 0;
 }
-/* Reload on the very next think: it starts at once, the action still owed. */
+/* Reload on the very next think: it starts at once, the action still owed -
+   unless the action's own close note falls on that think, which settles it
+   first (a gun whose bolt is 1ms into its action, as MW2's Masterkey). */
 static void ReloadAtOnce( void ) {
+	int close = GunNote( bg_weaponFire[fireGun].notes, WNOTE_BOLT_CLOSED );
+	qboolean owed = ( testPs.stats[STAT_UNCHAMBERED] & (1 << fireGun) ) &&
+		!( testPs.weaponstate == WEAPON_BOLTING && testPs.weaponAnimSeq == ASEQ_FIRE &&
+		   testPs.weaponAnimTime < close && testPs.weaponAnimTime + 1 >= close );
 	testMove.cmd.buttons = BUTTON_RELOAD;
 	Step( 1 );
 	testMove.cmd.buttons = 0;
 	CHECK( testPs.weaponstate == WEAPON_RELOADING && testPs.weaponAnimSeq == RSEQ_START );
 	CHECK( testPs.weaponAnimTime == 0 );
 	CHECK( testPs.ammo[fireGun] == BG_WeaponMagSize( fireGun ) - 1 );
-	CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << fireGun) );
+	CHECK( !!( testPs.stats[STAT_UNCHAMBERED] & (1 << fireGun) ) == owed );
 }
 static int WeaponsWithAnAction( int *list ) {
 	int w, n = 0;
@@ -782,12 +788,17 @@ static void TestShootReload( int step ) {
 			testMove.cmd.buttons = 0;
 		}
 
-		/* One think earlier it is an ordinary swap: the window is a window. */
-		ShootGun( w ); ReloadAtOnce();
-		RunFor( reset - 2, 1 );
-		testMove.cmd.weapon = otherGun; Step( 1 );
-		CHECK( testPs.weapon == w && testPs.weaponstate == WEAPON_DROPPING );
-		CHECK( testPs.weaponTime == BG_WeaponDropTime( w ) );
+		/* One think earlier it is an ordinary swap: the window is a window.
+		   (A reset on the reload's first think has no earlier think: a swap
+		   already waiting when the reload starts always meets it. That is the
+		   whole of MW2's Moni, and dev/tests/moni_test.c presses it.) */
+		if ( reset > 1 ) {
+			ShootGun( w ); ReloadAtOnce();
+			RunFor( reset - 2, 1 );
+			testMove.cmd.weapon = otherGun; Step( 1 );
+			CHECK( testPs.weapon == w && testPs.weaponstate == WEAPON_DROPPING );
+			CHECK( testPs.weaponTime == BG_WeaponDropTime( w ) );
+		}
 
 		/* The Fayde: one think late, YY - the gun is ready, no pump owed, and
 		   it fires long before the pump or bolt would have let it. */
@@ -803,16 +814,19 @@ static void TestShootReload( int step ) {
 
 		/* YY before the reset: the reload is gone and the action still owed,
 		   so the whole pump or bolt plays again from the top. */
-		ShootGun( w ); ReloadAtOnce();
-		RunFor( reset - 3, 1 );
-		testMove.cmd.weapon = otherGun; Step( 1 );
-		testMove.cmd.weapon = w; Step( 1 );
-		CHECK( testPs.weaponstate == WEAPON_BOLTING && testPs.weaponAnimTime == 0 );
-		shots = 0; testMove.cmd.buttons = BUTTON_ATTACK;
-		RunFor( BG_WeaponFireLength( w ) - 1, 1 );
-		CHECK( shots == 0 );
-		Step( 1 );
-		CHECK( shots == 1 );
+		if ( reset > 2 ) {
+			ShootGun( w ); ReloadAtOnce();
+			RunFor( reset - 3, 1 );
+			testMove.cmd.weapon = otherGun; Step( 1 );
+			testMove.cmd.weapon = w; Step( 1 );
+			CHECK( testPs.weaponstate == WEAPON_BOLTING && testPs.weaponAnimTime == 0 );
+			shots = 0; testMove.cmd.buttons = BUTTON_ATTACK;
+			RunFor( BG_WeaponFireLength( w ) - 1, 1 );
+			CHECK( shots == 0 );
+			Step( 1 );
+			CHECK( shots == 1 );
+			testMove.cmd.buttons = 0;
+		}
 
 		/* Wait out the reset, then YY late: still ready, still no pump. */
 		ShootGun( w ); ReloadAtOnce();
@@ -925,6 +939,13 @@ static void SprintOutAndFire( int weapon, int full, int step, int owed ) {
 	CHECK( testPs.ammo[weapon] == BG_WeaponMagSize( weapon ) - 2 );
 	testMove.cmd.buttons = 0;
 }
+/* The fire clip's clock a think later. The shot's clock stops at the open
+   note (the action is not the shot's to start: MW2's rechamber begins on a
+   later think), and the action's runs on from there. */
+static int CycleClock( int clock, int open, int step ) {
+	if ( clock < open ) return clock + step < open ? clock + step : open;
+	return clock + step;
+}
 static void TestSprintOverTheCycle( int weapon, int point, int step, int full ) {
 	int open = GunNote( bg_weaponFire[weapon].notes, WNOTE_BOLT_OPEN );
 	int close = GunNote( bg_weaponFire[weapon].notes, WNOTE_BOLT_CLOSED );
@@ -932,8 +953,11 @@ static void TestSprintOverTheCycle( int weapon, int point, int step, int full ) 
 	int lowersAtShotEnd = point == SP_SHOT || point == SP_SHOT_END;
 	/* the anim time the press think carries the clock up to */
 	int target[SP_COUNT];
-	int elapsed, thinks = 0, t;
+	int before, elapsed, thinks = 0, t;
 	CHECK( 0 < open && open < close && close < length );
+	/* A bolt that closes on the action's first think (MW2's Masterkey, 1ms in)
+	   leaves no think inside the action before it. */
+	if ( close - open <= step && ( point == SP_ACTION || point == SP_BEFORE_CLOSE ) ) return;
 	target[SP_SHOT] = open / 2;
 	target[SP_SHOT_END] = open;
 	target[SP_AFTER_OPEN] = open + step;
@@ -952,18 +976,19 @@ static void TestSprintOverTheCycle( int weapon, int point, int step, int full ) 
 		testPs.groundEntityNum = ENTITYNUM_NONE;	/* MW2's sprint starts in the air too */
 		testMove.cmd.forwardmove = 127;
 	}
-	while ( testPs.weaponAnimTime + step < target[point] ) CycleThink( full, step );
+	while ( CycleClock( testPs.weaponAnimTime, open, step ) < target[point] ) CycleThink( full, step );
 
 	/* The press think is the one that carries the clock across its target. */
-	elapsed = testPs.weaponAnimTime + step;
+	before = testPs.weaponAnimTime;
+	elapsed = CycleClock( before, open, step );
 	switch ( point ) {
 	case SP_SHOT:         CHECK( elapsed < open ); break;
-	case SP_SHOT_END:     CHECK( elapsed - step < open && elapsed >= open ); break;
-	case SP_AFTER_OPEN:   CHECK( elapsed - step >= open && elapsed - 2 * step < open ); break;
-	case SP_ACTION:       CHECK( elapsed - step >= open && elapsed < close ); break;
-	case SP_BEFORE_CLOSE: CHECK( elapsed < close && elapsed + step >= close ); break;
-	case SP_ON_CLOSE:     CHECK( elapsed - step < close && elapsed >= close ); break;
-	case SP_AFTER_CLOSE:  CHECK( elapsed - step >= close ); break;
+	case SP_SHOT_END:     CHECK( before < open && elapsed == open ); break;
+	case SP_AFTER_OPEN:   CHECK( before == open ); break;
+	case SP_ACTION:       CHECK( before >= open && elapsed < close ); break;
+	case SP_BEFORE_CLOSE: CHECK( before >= open && elapsed < close && elapsed + step >= close ); break;
+	case SP_ON_CLOSE:     CHECK( before >= open && before < close && elapsed >= close ); break;
+	case SP_AFTER_CLOSE:  CHECK( before >= close ); break;
 	}
 	CHECK( elapsed < length );
 	if ( full ) testMove.cmd.buttons = BUTTON_SPRINT;	/* a tap: the sprint latches */
@@ -984,7 +1009,7 @@ static void TestSprintOverTheCycle( int weapon, int point, int step, int full ) 
 		CHECK( testPs.weaponstate == ( elapsed < open ? WEAPON_FIRING : WEAPON_BOLTING ) );
 		CHECK( testPs.weaponAnimTime == elapsed );
 		CHECK( !!( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) ) == ( elapsed < close ) );
-		elapsed += step;
+		elapsed = CycleClock( elapsed, open, step );
 	}
 	if ( lowersAtShotEnd ) {
 		/* The think the shot ends lowers the gun with the gun's whole sprint

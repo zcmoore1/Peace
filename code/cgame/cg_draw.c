@@ -2487,8 +2487,10 @@ static void CG_DrawLoadoutHud( void ) {
 			bg_weaponInstance_t gun;
 			qboolean alternate;
 			BG_GetSlot(ps, i, &gun);
-			alternate = BG_AlternateWeapon(slotWpn) && (cg.weaponSelectSlot == i ?
-				cg.weaponSelectAlternate : (gun.flags & BG_GUN_ALTERNATE) != 0);
+			// A stowed gun is shown as the cycle will bring it: in its own
+			// mode, whichever it was put away in.
+			alternate = BG_AlternateWeapon(slotWpn) && cg.weaponSelectSlot == i &&
+				cg.weaponSelectAlternate;
 			Com_sprintf( line, sizeof( line ), "%s%s  %i / %i",
 				( i == SLOT_PRIMARY ) ? "1" : "2",
 				alternate ? " MK" : "",

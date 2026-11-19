@@ -38,7 +38,8 @@ Each layer has:
 #define WANIM_SPRINT_LOOP   8
 #define WANIM_SPRINT_OUT    9
 #define WANIM_FIRST_RAISE    10
-#define WANIM_COUNT          11
+#define WANIM_ALT_RAISE      11      // MW2's alt switch: the raise that ends a mode change
+#define WANIM_COUNT          12
 
 #define ANIM_LAYER_COUNT    4
 #define LAYER_BASE          0
@@ -113,7 +114,8 @@ static void CG_WeapAnim_ResetReturn(void) {
 }
 
 static int CG_WeapAnim_DrawClip(const weapAnimDef_t *def, const playerState_t *ps) {
-	return ps->weaponDraw && def->clips[WANIM_FIRST_RAISE].numFrames > 0 ? WANIM_FIRST_RAISE : WANIM_RAISE;
+	if (ps->weaponDraw == WDRAW_ALT && def->clips[WANIM_ALT_RAISE].numFrames > 0) return WANIM_ALT_RAISE;
+	return ps->weaponDraw == WDRAW_FIRST && def->clips[WANIM_FIRST_RAISE].numFrames > 0 ? WANIM_FIRST_RAISE : WANIM_RAISE;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +242,7 @@ static qboolean CG_WeapAnim_Retainable(int clip) {
 }
 
 static qboolean CG_WeapAnim_IsDrawClip(int clip) {
-	return clip == WANIM_RAISE || clip == WANIM_FIRST_RAISE;
+	return clip == WANIM_RAISE || clip == WANIM_FIRST_RAISE || clip == WANIM_ALT_RAISE;
 }
 
 // A holster starts from the pose on screen, never from a clip's first frame.
@@ -434,6 +436,7 @@ static void CG_WeapAnim_UpdateRetention(const weapAnimDef_t *def, const playerSt
 			switch (retained->clip) {
 			case WANIM_RAISE: duration = BG_WeaponRaiseTime(ps->weapon); break;
 			case WANIM_FIRST_RAISE: duration = BG_WeaponFirstRaiseTime(ps->weapon); break;
+			case WANIM_ALT_RAISE: duration = BG_WeaponAltRaiseTime(ps->weapon); break;
 			case WANIM_DROP: duration = BG_WeaponDropTime(ps->weapon); break;
 			case WANIM_FIRE: duration = BG_WeaponFireLength(ps->weapon); break;
 			case WANIM_SPRINT_IN:
@@ -959,7 +962,7 @@ void CG_WeapAnim_RegisterClips( int weapon, qhandle_t hModel, const char *cfgPat
 	static const char *names[WANIM_COUNT] = {
 		"idle", "fire", "raise", "drop",
 		"reload_start", "reload_loop", "reload_end",
-		"sprint_in", "sprint_loop", "sprint_out", "first_raise"
+		"sprint_in", "sprint_loop", "sprint_out", "first_raise", "alt_raise"
 	};
 	weapAnimDef_t *def;
 	fileHandle_t   file;

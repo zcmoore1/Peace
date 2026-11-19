@@ -99,9 +99,20 @@ static void TestModes(void) {
  CHECK(fired[WP_M16]==1 && ps.ammo[WP_M16]==29 && ps.ammo[WP_MASTERKEY]==4);
  CHECK(!(ps.stats[STAT_UNCHAMBERED]&(1<<WP_M16)));
  Run(M16_FIRE_MS);
+ /* MW2's alt switch. Its drop is the gun's altDropTime, which MW2's data makes
+  * 0: the mode changes on the think it is asked for, and the new mode's
+  * altRaiseTime is the whole cost. */
+ CHECK(BG_WeaponAltDropTime(WP_M16)==M16_ALT_DROP_MS && BG_WeaponAltDropTime(WP_MASTERKEY)==MASTERKEY_ALT_DROP_MS);
+ CHECK(BG_WeaponAltRaiseTime(WP_M16)==M16_ALT_RAISE_MS && BG_WeaponAltRaiseTime(WP_MASTERKEY)==MASTERKEY_ALT_RAISE_MS);
+ CHECK(M16_ALT_DROP_MS==0 && MASTERKEY_ALT_DROP_MS==0 && M16_ALT_RAISE_MS>0 && MASTERKEY_ALT_RAISE_MS>0);
+ for(i=0;i<MAX_WEAPONS;i++) if(i!=WP_M16 && i!=WP_MASTERKEY)
+  CHECK(BG_WeaponAltDropTime(i)==0 && BG_WeaponAltRaiseTime(i)==0);
  move.cmd.weapon=BG_WeaponCommand(&ps,0,qtrue); Step(1);
- CHECK(ps.weapon==WP_M16 && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==M16_DROP_MS);
- FinishSelection();
+ CHECK(ps.weapon==WP_MASTERKEY && ps.weaponstate==WEAPON_RAISING && ps.weaponDraw==WDRAW_ALT);
+ CHECK(ps.weaponTime==MASTERKEY_ALT_RAISE_MS && BG_WeaponDrawTime(&ps)==MASTERKEY_ALT_RAISE_MS);
+ CHECK(ps.slotFlags[0]&BG_GUN_ALTERNATE);
+ Run(MASTERKEY_ALT_RAISE_MS-1); CHECK(ps.weaponstate==WEAPON_RAISING);
+ Step(1); CHECK(ps.weaponstate==WEAPON_READY);
  CHECK(ps.weapon==WP_MASTERKEY && BG_ActiveSlotWeapon(&ps)==WP_MASTERKEY);
  CHECK(ps.stats[STAT_SLOT_PRIMARY]==WP_M16 && ps.stats[STAT_SLOT_SECONDARY]==WP_SHOTGUN);
  move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0;
@@ -109,18 +120,45 @@ static void TestModes(void) {
  CHECK(ps.stats[STAT_UNCHAMBERED]&(1<<WP_MASTERKEY));
  Run(MASTERKEY_FIRE_MS);
  CHECK(!(ps.stats[STAT_UNCHAMBERED]&(1<<WP_MASTERKEY)));
- /* A melee returns to the mode left in hand; Y still changes inventory slots. */
+ /* A melee returns to the mode left in hand. A slot command carries a mode:
+  * the other slot and back in the underbarrel's mode is two ordinary changes
+  * (the alt toggle from a gun with no other mode asks for exactly that). */
  move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
  FinishSelection(); CHECK(ps.weapon==WP_MASTERKEY);
  move.cmd.weapon=BG_SlotCommand(&ps,1); FinishSelection();
  CHECK(ps.weapon==WP_SHOTGUN);
  move.cmd.weapon=BG_SlotCommand(&ps,0); FinishSelection();
  CHECK(ps.weapon==WP_MASTERKEY && ps.ammo[WP_MASTERKEY]==3 && ps.ammo[WP_M16]==29);
- /* Two mode presses cancel an unfinished drop through ordinary YY handling. */
+ /* The change to the other slot out of the underbarrel is its own drop. */
+ move.cmd.weapon=BG_WeaponCommand(&ps,1,qfalse); Step(1);
+ CHECK(ps.weapon==WP_MASTERKEY && ps.weaponstate==WEAPON_DROPPING && ps.weaponDraw!=WDRAW_ALT);
+ CHECK(ps.weaponTime==MASTERKEY_DROP_MS && BG_HolsterTime(&ps)==MASTERKEY_DROP_MS);
+ move.cmd.weapon=BG_WeaponCommand(&ps,0,qtrue); Step(1);
+ CHECK(ps.weapon==WP_MASTERKEY && ps.weaponstate==WEAPON_READY);	/* and YY cancels it as any */
+ /* The other mode asked for again during the mode change's own raise is one
+  * more alt switch (MW2 takes a change in RAISING_ALTSWITCH); nothing is
+  * cancelled and the trigger gets no shot out of it. */
  move.cmd.weapon=BG_WeaponCommand(&ps,0,qfalse); Step(1);
- CHECK(ps.weaponstate==WEAPON_DROPPING);
- move.cmd.weapon=BG_WeaponCommand(&ps,0,qtrue); move.cmd.buttons=BUTTON_ATTACK; Step(1);
- CHECK(fired[WP_MASTERKEY]==2 && ps.weaponstate==WEAPON_FIRING);
+ CHECK(ps.weapon==WP_M16 && ps.weaponstate==WEAPON_RAISING && ps.weaponDraw==WDRAW_ALT);
+ CHECK(ps.weaponTime==M16_ALT_RAISE_MS);
+ move.cmd.weapon=BG_WeaponCommand(&ps,0,qtrue); move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0;
+ CHECK(ps.weapon==WP_MASTERKEY && ps.weaponstate==WEAPON_RAISING && ps.weaponDraw==WDRAW_ALT);
+ CHECK(ps.weaponTime==MASTERKEY_ALT_RAISE_MS && fired[WP_MASTERKEY]==1);
+ /* A knife pressed on the command that asks for the other mode is lost, as
+  * with any change beginning on that command (MW2's change runs first). */
+ ModeReady(qtrue);
+ move.cmd.weapon=BG_WeaponCommand(&ps,0,qfalse); move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
+ CHECK(ps.weapon==WP_M16 && ps.weaponstate==WEAPON_RAISING && !(ps.weaponAction&WA_TYPE_MASK));
+ /* MW2 makes no alt switch of a sprinting player's mode change: it is the
+  * gun's ordinary drop and the new mode's ordinary raise. */
+ ModeReady(qfalse); ps.slotFlags[0]&=~BG_GUN_FIRST_DRAW;
+ ps.pm_flags|=PMF_SPRINTING; ps.weaponstate=WEAPON_SPRINTING;
+ move.cmd.weapon=BG_WeaponCommand(&ps,0,qtrue); Step(1);
+ CHECK(ps.weapon==WP_M16 && ps.weaponstate==WEAPON_DROPPING && ps.weaponDraw!=WDRAW_ALT);
+ CHECK(ps.weaponTime==M16_DROP_MS);
+ Run(M16_DROP_MS);
+ CHECK(ps.weapon==WP_MASTERKEY && ps.weaponstate==WEAPON_RAISING && ps.weaponDraw==WDRAW_NORMAL);
+ CHECK(ps.weaponTime==MASTERKEY_RAISE_MS);
 }
 
 static void TestDuplicateInstances(void) {
@@ -148,14 +186,34 @@ static void TestDuplicateInstances(void) {
 }
 
 static void TestNoteTransitions(void) {
- int offset;
- for(offset=-1;offset<=1;offset++) {
+ int offset,mode;
+ /* MW2's m16_shotgun_attach_mp, as the tables carry it: the shot is fireTime
+  * long, the action rechamberTime after it, and the bolt is 1ms into the
+  * action (rechamberBoltTime 0, which MW2 never arms as 0). */
+ CHECK(Note(WP_MASTERKEY,ASEQ_FIRE,WNOTE_BOLT_OPEN)==MASTERKEY_BOLT_OPEN_MS);
+ CHECK(Note(WP_MASTERKEY,ASEQ_FIRE,WNOTE_BOLT_CLOSED)==MASTERKEY_BOLT_CLOSE_MS);
+ CHECK(MASTERKEY_BOLT_CLOSE_MS==MASTERKEY_BOLT_OPEN_MS+1 && MASTERKEY_FIRE_MS>MASTERKEY_BOLT_CLOSE_MS);
+ CHECK(Note(WP_MASTERKEY,RSEQ_START,WNOTE_MAG_IN)==MASTERKEY_RELOAD_START_ADD_MS);
+ CHECK(Note(WP_MASTERKEY,RSEQ_LOOP,WNOTE_MAG_IN)==MASTERKEY_ROUND_IN_MS);
+ CHECK(Note(WP_MASTERKEY,RSEQ_END,WNOTE_BOLT_CLOSED)<0 && Note(WP_MASTERKEY,RSEQ_END,WNOTE_MAG_IN)<0);
+ /* A change on, before and after the pump's bolt think. To the gun's other mode
+  * it is the mode change whenever it comes; to the other slot it is instant only
+  * on that one think. Either way the pump is owed unless the bolt's think came
+  * first, and one asked for before the shot is over waits for its last think. */
+ for(mode=0;mode<2;mode++) for(offset=-2;offset<=1;offset++) {
   ModeReady(qtrue);
   move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0;
   Run(MASTERKEY_BOLT_CLOSE_MS+offset-1);
-  move.cmd.weapon=BG_WeaponCommand(&ps,0,qfalse); Step(1);
+  CHECK(ps.weaponstate==(offset<0?WEAPON_FIRING:WEAPON_BOLTING));
+  move.cmd.weapon=mode?BG_WeaponCommand(&ps,0,qfalse):BG_WeaponCommand(&ps,1,qfalse); Step(1);
   CHECK(ps.ammo[WP_MASTERKEY]==3 && ps.ammo[WP_M16]==30);
-  if(offset==0) CHECK(ps.weapon==WP_M16 && ps.weaponstate==WEAPON_RAISING);
+  if(offset==-2) {
+   /* still in the shot: held */
+   CHECK(ps.weapon==WP_MASTERKEY && ps.weaponstate==WEAPON_FIRING);
+   Step(1);
+  }
+  if(mode) CHECK(ps.weapon==WP_M16 && ps.weaponstate==WEAPON_RAISING && ps.weaponDraw==WDRAW_ALT && ps.weaponTime==M16_ALT_RAISE_MS);
+  else if(offset==0) CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);
   else CHECK(ps.weapon==WP_MASTERKEY && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==MASTERKEY_DROP_MS);
   CHECK(!!(ps.stats[STAT_UNCHAMBERED]&(1<<WP_MASTERKEY))==(offset<=0));
   FinishSelection();
@@ -163,28 +221,64 @@ static void TestNoteTransitions(void) {
   if(offset<=0) CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==0);
   else CHECK(ps.weaponstate==WEAPON_READY);
  }
- for(offset=-1;offset<=1;offset++) {
+ /* The same on a shell's note, in the start (MW2's reloadStartAddTime) and in
+  * the loop: the shell is in only if its think came first. */
+ for(mode=0;mode<2;mode++) for(offset=-1;offset<=1;offset++) {
   ModeReady(qtrue); ps.ammo[WP_MASTERKEY]=1;
   move.cmd.buttons=BUTTON_RELOAD; Step(1); move.cmd.buttons=0;
-  Run(MASTERKEY_RELOAD_START_MS+MASTERKEY_ROUND_IN_MS+offset-1);
-  move.cmd.weapon=BG_WeaponCommand(&ps,0,qfalse); Step(1);
-  if(offset==0) CHECK(ps.weapon==WP_M16 && ps.weaponstate==WEAPON_RAISING);
-  else CHECK(ps.weapon==WP_MASTERKEY && ps.weaponstate==WEAPON_DROPPING);
+  Run(MASTERKEY_RELOAD_START_ADD_MS+offset-1);
+  move.cmd.weapon=mode?BG_WeaponCommand(&ps,0,qfalse):BG_WeaponCommand(&ps,1,qfalse); Step(1);
+  if(mode) CHECK(ps.weapon==WP_M16 && ps.weaponstate==WEAPON_RAISING && ps.weaponDraw==WDRAW_ALT);
+  else if(offset==0) CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);
+  else CHECK(ps.weapon==WP_MASTERKEY && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==MASTERKEY_DROP_MS);
   CHECK(ps.ammo[WP_MASTERKEY]==(offset>0?2:1));
   CHECK(ps.ammoReserve[WP_MASTERKEY]==(offset>0?15:16));
   CHECK(ps.ammo[WP_M16]==30 && ps.ammoReserve[WP_M16]==120);
+
+  ModeReady(qtrue); ps.ammo[WP_MASTERKEY]=1;
+  move.cmd.buttons=BUTTON_RELOAD; Step(1); move.cmd.buttons=0;
+  Run(MASTERKEY_RELOAD_START_MS+MASTERKEY_ROUND_IN_MS+offset-1);
+  CHECK(ps.weaponstate==WEAPON_RELOADING && ps.weaponAnimSeq==RSEQ_LOOP && ps.ammo[WP_MASTERKEY]==(offset>0?3:2));
+  move.cmd.weapon=mode?BG_WeaponCommand(&ps,0,qfalse):BG_WeaponCommand(&ps,1,qfalse); Step(1);
+  if(mode) CHECK(ps.weapon==WP_M16 && ps.weaponstate==WEAPON_RAISING && ps.weaponDraw==WDRAW_ALT);
+  else if(offset==0) CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);
+  else CHECK(ps.weapon==WP_MASTERKEY && ps.weaponstate==WEAPON_DROPPING);
+  CHECK(ps.ammo[WP_MASTERKEY]==(offset>0?3:2));
+  CHECK(ps.ammoReserve[WP_MASTERKEY]==(offset>0?14:15));
  }
- /* Rifle magazine has exactly the same early/exact/late ordering into the
-  * attached mode; no special logic detects either transition. */
+ /* A start that fills the gun goes to its end with no empty pass of the loop,
+  * and the whole reload is the three MW2 lengths. */
+ ModeReady(qtrue); ps.ammo[WP_MASTERKEY]=3;
+ move.cmd.buttons=BUTTON_RELOAD; Step(1); move.cmd.buttons=0;
+ Run(MASTERKEY_RELOAD_START_MS-1);
+ CHECK(ps.weaponstate==WEAPON_RELOADING && ps.weaponAnimSeq==RSEQ_START && ps.ammo[WP_MASTERKEY]==4);
+ Step(1);
+ CHECK(ps.weaponstate==WEAPON_RELOADING && ps.weaponAnimSeq==RSEQ_END && ps.ammo[WP_MASTERKEY]==4);
+ Run(MASTERKEY_RELOAD_END_MS-1); CHECK(ps.weaponstate==WEAPON_RELOADING);
+ Step(1); CHECK(ps.weaponstate==WEAPON_READY && ps.ammoReserve[WP_MASTERKEY]==15);
+ ModeReady(qtrue); ps.ammo[WP_MASTERKEY]=0;
+ Step(1); CHECK(ps.weaponstate==WEAPON_RELOADING && ps.weaponAnimSeq==RSEQ_START);
+ Run(MASTERKEY_RELOAD_START_MS+3*MASTERKEY_RELOAD_LOOP_MS+MASTERKEY_RELOAD_END_MS-1);
+ CHECK(ps.weaponstate==WEAPON_RELOADING && ps.ammo[WP_MASTERKEY]==4);
+ Step(1); CHECK(ps.weaponstate==WEAPON_READY && ps.ammoReserve[WP_MASTERKEY]==12);
+ /* Rifle magazine: the mode change is there whenever it is asked for, and the
+  * magazine is in only if its note's think came first. */
  for(offset=-1;offset<=1;offset++) {
   ModeReady(qfalse); ps.ammo[WP_M16]=7;
   move.cmd.buttons=BUTTON_RELOAD; Step(1); move.cmd.buttons=0;
   Run(M16_MAG_IN_MS+offset-1);
   move.cmd.weapon=BG_WeaponCommand(&ps,0,qtrue); Step(1);
-  if(offset==0) CHECK(ps.weapon==WP_MASTERKEY && ps.weaponstate==WEAPON_RAISING);
-  else CHECK(ps.weapon==WP_M16 && ps.weaponstate==WEAPON_DROPPING);
+  CHECK(ps.weapon==WP_MASTERKEY && ps.weaponstate==WEAPON_RAISING && ps.weaponDraw==WDRAW_ALT);
   CHECK(ps.ammo[WP_M16]==(offset>0?30:7));
   CHECK(ps.ammo[WP_MASTERKEY]==4 && ps.ammoReserve[WP_MASTERKEY]==16);
+  /* and to the other slot, the ordinary note ordering */
+  ModeReady(qfalse); ps.ammo[WP_M16]=7;
+  move.cmd.buttons=BUTTON_RELOAD; Step(1); move.cmd.buttons=0;
+  Run(M16_MAG_IN_MS+offset-1);
+  move.cmd.weapon=BG_WeaponCommand(&ps,1,qfalse); Step(1);
+  if(offset==0) CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);
+  else CHECK(ps.weapon==WP_M16 && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==M16_DROP_MS);
+  CHECK(ps.ammo[WP_M16]==(offset>0?30:7));
  }
  /* Fire interrupts shell loading through END, never immediately. A tap is
   * not queued, while a held trigger shoots after the close completes. */
@@ -206,7 +300,7 @@ static void TestWireAndReplay(void) {
  ps.slotFlags[1]=BG_GUN_GENERATION|BG_GUN_ALTERNATE|BG_GUN_ALT_UNCHAMBERED;
  ps.slotAltAmmo[1]=2; ps.slotAltReserve[1]=7;
  move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0;
- Run(MASTERKEY_BOLT_CLOSE_MS-1); from=ps;
+ Run(MASTERKEY_BOLT_CLOSE_MS-1); from=ps;	/* in the action, on the think before its bolt */
  MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,NULL,&from);
  CHECK(!msg.overflowed); MSG_BeginReading(&msg); MSG_ReadDeltaPlayerstate(&msg,NULL,&decoded);
  CHECK(decoded.slotFlags[1]==ps.slotFlags[1] && decoded.slotAltAmmo[1]==2 && decoded.slotAltReserve[1]==7);
@@ -215,6 +309,12 @@ static void TestWireAndReplay(void) {
  ps=decoded; Step(1);
  CHECK(!memcmp(&predicted,&ps,sizeof(ps)));
  CHECK(ps.weapon==WP_M16 && (ps.stats[STAT_UNCHAMBERED]&(1<<WP_MASTERKEY)));
+ /* the kind of draw travels with the state: a mode change's raise is one on both ends */
+ CHECK(ps.weaponstate==WEAPON_RAISING && ps.weaponDraw==WDRAW_ALT);
+ MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,NULL,&ps);
+ CHECK(!msg.overflowed); MSG_BeginReading(&msg); MSG_ReadDeltaPlayerstate(&msg,NULL,&decoded);
+ CHECK(decoded.weaponDraw==WDRAW_ALT && decoded.weaponTime==M16_ALT_RAISE_MS);
+ CHECK(BG_WeaponDrawTime(&decoded)==M16_ALT_RAISE_MS);
  for(i=0;i<32;i++) {
   memset(&drop,0,sizeof(drop)); drop.number=MAX_CLIENTS+1; drop.eType=ET_ITEM;
   drop.modelindex=BG_FindItemForWeapon(WP_M16)-bg_itemlist; drop.modelindex2=1;

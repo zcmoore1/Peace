@@ -16,6 +16,10 @@ cl %flags% /Feout\build\masterkey-tests\masterkey-selection.exe dev\tests\master
 if errorlevel 1 goto fail
 out\build\masterkey-tests\masterkey-selection.exe
 if errorlevel 1 goto fail
+cl %flags% /Feout\build\masterkey-tests\moni.exe dev\tests\moni_test.c code\cgame\cg_playerstate.c dev\tests\pickup_pmove_driver.c %game% %common% /link /OPT:REF
+if errorlevel 1 goto fail
+out\build\masterkey-tests\moni.exe
+if errorlevel 1 goto fail
 popd
 exit /b 0
 :fail

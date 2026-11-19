@@ -3160,7 +3160,12 @@ static const bg_weaponNote_t bgnotes_m40_end[] = {
 	{ M40_RELOAD_CLOSE_MS, WNOTE_BOLT_CLOSED, 0 }, { 0, WNOTE_NONE, 0 }
 };
 
-// Original prototype data, authored with the models; no retail MW2 timing claim.
+// The rifle's reload is prototype data with no retail MW2 timing claim. The
+// Masterkey's rows are MW2's m16_shotgun_attach_mp: fireTime 330 then
+// rechamberTime 430 in one clip, with the bolt MW2's 1ms into the rechamber
+// (rechamberBoltTime 0); a start of 1000 that feeds its own shell at 600
+// (reloadStartAdd 1), 750 a shell after that with the shell at 550, and an end
+// of 1350 with no delayed action in it.
 static const bg_weaponNote_t bgnotes_m16_reload[] = {
 	{ M16_MAG_OUT_MS, WNOTE_MAG_OUT, 0 },
 	{ M16_MAG_IN_MS, WNOTE_MAG_IN, 0 }, { 0, WNOTE_NONE, 0 }
@@ -3169,11 +3174,11 @@ static const bg_weaponNote_t bgnotes_masterkey_fire[] = {
 	{ MASTERKEY_BOLT_OPEN_MS, WNOTE_BOLT_OPEN, 0 },
 	{ MASTERKEY_BOLT_CLOSE_MS, WNOTE_BOLT_CLOSED, 0 }, { 0, WNOTE_NONE, 0 }
 };
+static const bg_weaponNote_t bgnotes_masterkey_start[] = {
+	{ MASTERKEY_RELOAD_START_ADD_MS, WNOTE_MAG_IN, 1 }, { 0, WNOTE_NONE, 0 }
+};
 static const bg_weaponNote_t bgnotes_masterkey_loop[] = {
 	{ MASTERKEY_ROUND_IN_MS, WNOTE_MAG_IN, 1 }, { 0, WNOTE_NONE, 0 }
-};
-static const bg_weaponNote_t bgnotes_masterkey_end[] = {
-	{ MASTERKEY_RELOAD_CLOSE_MS, WNOTE_BOLT_CLOSED, 0 }, { 0, WNOTE_NONE, 0 }
 };
 
 /* Length is the refire, so this and the addTime in PM_Weapon are one number.
@@ -3239,13 +3244,15 @@ static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
 	/* WP_THROWING_KNIFE  */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 	/* WP_TACTICAL_INSERTION */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
 	/* WP_M16             */ { { SEG_NONE, { M16_RELOAD_MS, bgnotes_m16_reload }, SEG_NONE } },
-	/* WP_MASTERKEY       */ { { { MASTERKEY_RELOAD_START_MS, bgnotes_none },
+	/* WP_MASTERKEY       */ { { { MASTERKEY_RELOAD_START_MS, bgnotes_masterkey_start },
 	                             { MASTERKEY_RELOAD_LOOP_MS, bgnotes_masterkey_loop },
-	                             { MASTERKEY_RELOAD_END_MS, bgnotes_masterkey_end } }, qtrue },
+	                             { MASTERKEY_RELOAD_END_MS, bgnotes_none } }, qtrue },
 };
 
 // Holster / deploy lengths. Always stamped on a weapon change - never 0, so a
 // switch always costs real time unless something else clears the lock first.
+// (A mode change of one gun is not a holster: MW2's alt switch has its own
+// times, below.)
 #define WEAPON_MIN_SWAP_TIME	50
 
 static const int bg_weaponDropTime[MAX_WEAPONS] = {
@@ -3270,7 +3277,7 @@ static const int bg_weaponDropTime[MAX_WEAPONS] = {
 	M40_DROP_MS,
 	BG_RAPID_DROP_TIME,	// WP_THROWING_KNIFE
 	BG_RAPID_DROP_TIME,	// WP_TACTICAL_INSERTION
-	M16_DROP_MS, MASTERKEY_DROP_MS,
+	M16_DROP_MS, MASTERKEY_DROP_MS,	// MW2's m16_shotgun_mp 449, m16_shotgun_attach_mp 829
 };
 
 static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
@@ -3297,7 +3304,7 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 	M40_RAISE_MS,
 	BG_THROWING_KNIFE_PULL_MS,	// WP_THROWING_KNIFE: throwingknife_mp holdFireTime 0, in hand on the press
 	BG_INSERTION_IGNITE_MS,	// WP_TACTICAL_INSERTION: flare_mp's holdFireTime, the ignite
-	M16_RAISE_MS, MASTERKEY_RAISE_MS,
+	M16_RAISE_MS, MASTERKEY_RAISE_MS,	// MW2's m16_shotgun_mp 750, m16_shotgun_attach_mp 829
 };
 
 // MW2's quickDropTime and quickRaiseTime (its weapon files): the gun going
@@ -3315,7 +3322,7 @@ static const int bg_weaponQuickDropTime[MAX_WEAPONS] = {
 	M40_QUICK_DROP_MS,
 	250,	// WP_THROWING_KNIFE
 	250,	// WP_TACTICAL_INSERTION
-	250, 250, // prototype M16 / Masterkey
+	250, 250, // M16 / Masterkey (MW2's m16_shotgun_mp, m16_shotgun_attach_mp)
 };
 static const int bg_weaponQuickRaiseTime[MAX_WEAPONS] = {
 	250,	// WP_NONE
@@ -3336,7 +3343,35 @@ static const int bg_weaponQuickRaiseTime[MAX_WEAPONS] = {
 	M40_QUICK_RAISE_MS,	// MW2's Intervention
 	250,	// WP_THROWING_KNIFE
 	250,	// WP_TACTICAL_INSERTION
-	750, 750, // prototype M16 / Masterkey
+	750, 750, // M16 / Masterkey (MW2's m16_shotgun_mp, m16_shotgun_attach_mp)
+};
+
+// MW2's altDropTime and altRaiseTime (its weapon files): one gun changing firing
+// mode. altDropTime is 0 in every MW2 multiplayer weapon file, so the mode
+// changes on the think the change begins and only the raise takes time (730
+// both ways for a rifle and its Masterkey). A gun with no other mode never
+// reads its row.
+static const int bg_weaponAltDropTime[MAX_WEAPONS] = {
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+#ifdef MISSIONPACK
+	0, 0, 0,
+#endif
+	0, 0, 0, 0,	// WP_KNIFE, WP_FRAG, WP_FLASH, WP_SEMTEX
+	0,	// WP_M40A3
+	0,	// WP_THROWING_KNIFE
+	0,	// WP_TACTICAL_INSERTION
+	M16_ALT_DROP_MS, MASTERKEY_ALT_DROP_MS,
+};
+static const int bg_weaponAltRaiseTime[MAX_WEAPONS] = {
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+#ifdef MISSIONPACK
+	0, 0, 0,
+#endif
+	0, 0, 0, 0,	// WP_KNIFE, WP_FRAG, WP_FLASH, WP_SEMTEX
+	0,	// WP_M40A3
+	0,	// WP_THROWING_KNIFE
+	0,	// WP_TACTICAL_INSERTION
+	M16_ALT_RAISE_MS, MASTERKEY_ALT_RAISE_MS,
 };
 
 int BG_WeaponMagSize( int weapon ) {
@@ -3420,11 +3455,13 @@ drop clip, so the picture can never disagree with the timer.
   equipment   - the gun (or the knife it cuts) going away for a grenade not
                 yet thrown: the gun's quickDropTime, as MW2's OffHandInit
   recovery    - thrown equipment going away: the universal BG_RAPID_DROP_TIME
+  mode change - the gun's own BG_WeaponAltDropTime (MW2's DROPPING_ALT)
   otherwise   - the weapon's own BG_WeaponDropTime
 
 The knife has no line here: nothing is put down for it or after it (MW2's
 MeleeInit and MeleeEnd write over the gun's state, BG_QuickActionInPlace).
-Every answer is a real, nonzero time, so the NAC is untouched.
+Every holster's answer is a real, nonzero time, so the NAC is untouched. A mode
+change is no holster: its time is MW2's altDropTime, which its data makes 0.
 ==============
 */
 int BG_HolsterTime( const playerState_t *ps ) {
@@ -3448,7 +3485,22 @@ int BG_HolsterTime( const playerState_t *ps ) {
 	if ( BG_IsActionWeapon(ps->weapon) ) {
 		return BG_RAPID_DROP_TIME;
 	}
+	if ( ps->weaponDraw == WDRAW_ALT ) {
+		return BG_WeaponAltDropTime( ps->weapon );
+	}
 	return BG_WeaponDropTime( ps->weapon );
+}
+
+// MW2's alt switch times. They are its data and are never raised to the swap
+// floor: a mode change puts no gun down.
+int BG_WeaponAltDropTime( int weapon ) {
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
+	return bg_weaponAltDropTime[weapon];
+}
+
+int BG_WeaponAltRaiseTime( int weapon ) {
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
+	return bg_weaponAltRaiseTime[weapon];
 }
 
 int BG_WeaponRaiseTime( int weapon ) {
@@ -3525,11 +3577,14 @@ draw and by cgame when it fits the raise clip. A first deployment has its
 authored cycle; the gun coming back after a knife or a grenade - a Semtex
 cancel's return included, which latches as fired - is MW2's quick raise
 (MeleeEnd, OffHandEnd);
-anything else is the gun's own raise.
+anything else is the gun's own raise. The raise that ends a mode change is
+MW2's RAISING_ALTSWITCH: the gun's altRaiseTime, before any other kind
+(MW2's FinishWeaponChange, 5765a8).
 ==============
 */
 int BG_WeaponDrawTime(const playerState_t *ps) {
-	if ( ps->weaponDraw ) return BG_WeaponFirstRaiseTime( ps->weapon );
+	if ( ps->weaponDraw == WDRAW_ALT ) return BG_WeaponAltRaiseTime( ps->weapon );
+	if ( ps->weaponDraw == WDRAW_FIRST ) return BG_WeaponFirstRaiseTime( ps->weapon );
 	if ( ( ps->weaponAction & WA_TYPE_MASK ) && ( ps->weaponAction & WA_FIRED ) &&
 	     !BG_IsActionWeapon( ps->weapon ) ) {
 		return BG_WeaponQuickRaiseTime( ps->weapon );
@@ -3629,8 +3684,8 @@ void BG_SelectSlot(playerState_t *ps, int slot) {
 
 void BG_BeginWeaponDraw(playerState_t *ps) {
 	int slot = ps->stats[STAT_ACTIVE_SLOT];
-	ps->weaponDraw = !BG_IsActionWeapon(ps->weapon) &&
-		(ps->slotFlags[slot] & BG_GUN_FIRST_DRAW) != 0;
+	ps->weaponDraw = ( !BG_IsActionWeapon(ps->weapon) &&
+		(ps->slotFlags[slot] & BG_GUN_FIRST_DRAW) != 0 ) ? WDRAW_FIRST : WDRAW_NORMAL;
 	// Deployment is consumed when it STARTS, not when its animation ends.
 	// Holster/YY/sprint may interrupt it without replaying it on every return.
 	if (ps->weaponDraw) ps->slotFlags[slot] &= ~BG_GUN_FIRST_DRAW;
@@ -4313,19 +4368,30 @@ follows). Read from the gun's table; a gun with no open note shoots until its
 lock runs out, so its shot is never over here.
 ===============
 */
-static qboolean PM_ShotOver( void ) {
+// Where the shot ends on a gun's fire clip: its open note, or -1 with none.
+static int PM_ShotLength( int weapon ) {
 	const bg_weaponNote_t *n;
+
+	if ( weapon < 0 || weapon >= MAX_WEAPONS || !bg_weaponFire[weapon].notes ) {
+		return -1;
+	}
+	for ( n = bg_weaponFire[weapon].notes; n->note != WNOTE_NONE; n++ ) {
+		if ( n->note == WNOTE_BOLT_OPEN ) {
+			return n->time;
+		}
+	}
+	return -1;
+}
+
+static qboolean PM_ShotOver( void ) {
+	int length;
 
 	if ( pm->ps->weaponstate != WEAPON_FIRING || pm->ps->weaponAnimSeq != ASEQ_FIRE ||
 	     pm->ps->weaponAnimTime < 0 ) {
 		return qfalse;
 	}
-	for ( n = bg_weaponFire[pm->ps->weapon].notes; n->note != WNOTE_NONE; n++ ) {
-		if ( n->note == WNOTE_BOLT_OPEN ) {
-			return pm->ps->weaponAnimTime >= n->time;
-		}
-	}
-	return qfalse;
+	length = PM_ShotLength( pm->ps->weapon );
+	return length >= 0 && pm->ps->weaponAnimTime >= length;
 }
 
 /*
@@ -4476,7 +4542,10 @@ static void PM_AdvanceReloadSegments( void ) {
 
 		switch ( pm->ps->weaponAnimSeq ) {
 		case RSEQ_START:
-			pm->ps->weaponAnimSeq = RSEQ_LOOP;
+			// A start that fed its own round may have filled the gun: MW2's
+			// FinishReloadStart goes to the end unless there is still room and
+			// stock (578403-578475). A start that feeds nothing always has both.
+			pm->ps->weaponAnimSeq = PM_ReloadWantsMore() ? RSEQ_LOOP : RSEQ_END;
 			break;
 
 		case RSEQ_LOOP:
@@ -4551,8 +4620,13 @@ static void PM_OffhandEnd( void ) {
 // holds a swap (MW2's CheckForChangeWeapon refuses FIRING), but not a knife or
 // grenade still to come: MW2's melee and offhand checks take FIRING, and its
 // offhand check MELEE_FIRE, the knife's hold after its hit, as well.
+// MW2 refuses only while the shot has time left (578c0a-578c31): a change
+// asked for during the shot begins on the shot's last think, before the
+// rechamber can start (575b77: only from READY), and leaves the action owed.
+// On a gun with a fire clip that think is the one its clock reaches the open
+// note (PM_ShotOver), as for the sprint in step 1b.
 static qboolean PM_WeaponChangeOpen( void ) {
-	return pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ||
+	return pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING || PM_ShotOver() ||
 		( ( BG_IsActionWeapon( pm->ps->weapon ) || ( pm->ps->weaponAction & WA_TYPE_MASK ) ) &&
 		  !( pm->ps->weaponAction & WA_FIRED ) );
 }
@@ -4613,21 +4687,35 @@ static qboolean PM_UpdateGrenadeThrow( void ) {
 // Latch a press through holster/deploy. Releasing the button cannot lose a tap,
 // and holding it cannot turn a quick action into a permanently selected weapon.
 static void PM_FinishWeaponChange( void );
+
+// The command asks for the other firing mode of the gun in hand: MW2's
+// BG_IsAltSwitch (479b80), which here is one inventory instance, so the slot
+// asked for is the one in hand as well.
+static qboolean PM_OtherModeRequested( void ) {
+	int want = BG_RequestedWeapon( pm->ps, pm->cmd.weapon );
+	return want != WP_NONE && pm->ps->weapon != WP_NONE && want != pm->ps->weapon &&
+		BG_BaseWeapon( want ) == BG_BaseWeapon( pm->ps->weapon ) &&
+		BG_RequestedSlot( pm->ps, pm->cmd.weapon ) == pm->ps->stats[STAT_ACTIVE_SLOT];
+}
+
 static void PM_UpdateWeaponAction( void ) {
 	// MW2's knife check refuses every raise and drop, a quick action's return
 	// and the command it ends on included. A drop the requested slot has come
 	// back from is not refused: YY readies the gun in this same think (below),
 	// as MW2's weapon change runs before its knife. For the same reason a swap
-	// step 1 begins on this very command is a drop already.
+	// step 1 begins on this very command is a drop already. The gun's other
+	// mode is another weapon to MW2: asking for it is a change, not a return.
+	qboolean otherMode = PM_OtherModeRequested();
 	qboolean yyReturn = pm->ps->weaponstate == WEAPON_DROPPING &&
 		!BG_IsActionWeapon( pm->ps->weapon ) &&
-		pm->ps->weapon == BG_ActiveSlotWeapon( pm->ps ) &&
+		pm->ps->weapon == BG_ActiveSlotWeapon( pm->ps ) && !otherMode &&
 		BG_RequestedSlot( pm->ps, pm->cmd.weapon ) == pm->ps->stats[STAT_ACTIVE_SLOT];
 	qboolean swapping = pm->ps->weaponstate == WEAPON_RAISING ||
 		( pm->ps->weaponstate == WEAPON_DROPPING && !yyReturn ) ||
 		( pm->ps->weaponstate != WEAPON_DROPPING && PM_WeaponChangeOpen() &&
 		  !( pm->ps->weaponAction & ( WA_RETURNING | WA_RECOVERING ) ) &&
-		  BG_RequestedSlot( pm->ps, pm->cmd.weapon ) != pm->ps->stats[STAT_ACTIVE_SLOT] );
+		  ( otherMode ||
+		    BG_RequestedSlot( pm->ps, pm->cmd.weapon ) != pm->ps->stats[STAT_ACTIVE_SLOT] ) );
 	int held = PM_HeldActionButtons();
 	int heldBefore = (pm->ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT;
 	int pressed = held & ~heldBefore;
@@ -4897,9 +4985,17 @@ PM_BeginWeaponChange
 Always stamps the real shared holster time. Changing to a faster destination
 may shorten a drop already in progress; it never skips the drop. If a note
 clears the lock in the same think, the drop finishes early on its own.
+
+A change between the two firing modes of the gun in hand is MW2's alt switch
+(PM_BeginWeaponChange 5760b2-576104, BG_IsAltSwitch 479b80): its drop is the
+gun's altDropTime and its raise the new mode's altRaiseTime, and a sprinting
+player gets the ordinary drop and raise instead. Nothing here knows the times:
+MW2's data makes the drop 0, so step 3 finishes it on this think.
 ===============
 */
 static void PM_BeginWeaponChange( int weapon ) {
+	qboolean alt;
+
 	// Only a quick action that left an empty hand is put down to none (MW2's
 	// OffHandEnd with weapon 0); a gun is never lowered toward no gun, so an
 	// unowned selection changes nothing (MW2's CheckForChangeWeapon).
@@ -4939,6 +5035,16 @@ static void PM_BeginWeaponChange( int weapon ) {
 	if ( !BG_OffhandHeldToThrow( weapon ) ) {
 		PM_AddEvent( EV_CHANGE_WEAPON );
 	}
+	// The kind of drop goes with it to its finish, which takes the kind of
+	// raise from it. Another kind of draw's mark is left as it was.
+	alt = !( pm->ps->pm_flags & PMF_SPRINTING ) && !BG_IsActionWeapon( weapon ) &&
+		weapon != pm->ps->weapon && BG_BaseWeapon( weapon ) == BG_BaseWeapon( pm->ps->weapon ) &&
+		PM_DesiredSlot() == pm->ps->stats[STAT_ACTIVE_SLOT];
+	if ( alt ) {
+		pm->ps->weaponDraw = WDRAW_ALT;
+	} else if ( pm->ps->weaponDraw == WDRAW_ALT ) {
+		pm->ps->weaponDraw = WDRAW_NORMAL;
+	}
 	// Read before the state flips: a raise's lock is not a drop to keep.
 	pm->ps->weaponTime  = BG_HolsterTime( pm->ps );
 	pm->ps->weaponstate = WEAPON_DROPPING;
@@ -4954,6 +5060,10 @@ PM_FinishWeaponChange
 */
 static void PM_FinishWeaponChange( void ) {
 	int		weapon;
+	// MW2's FinishWeaponChange takes the kind of raise from the kind of drop
+	// that ended (5765a8), not from the guns: an alt drop ends in the alt raise.
+	qboolean alt = pm->ps->weaponstate == WEAPON_DROPPING && pm->ps->weaponDraw == WDRAW_ALT &&
+		!( pm->ps->stats[STAT_LADDER] & LADDER_HOLSTER );
 
 	weapon = PM_DesiredWeapon();
 	if ( weapon < WP_NONE || weapon >= WP_NUM_WEAPONS ) {
@@ -4985,6 +5095,10 @@ static void PM_FinishWeaponChange( void ) {
 		return;
 	}
 	BG_BeginWeaponDraw(pm->ps);
+	if ( alt && !BG_IsActionWeapon( weapon ) ) {
+		pm->ps->weaponDraw = WDRAW_ALT;
+		pm->ps->weaponTime = BG_WeaponDrawTime( pm->ps );
+	}
 	// MW2's raise and OffHandPrepare stop a prone crawl (0x57627D, 0x577865):
 	// a gun's raise only until the next think (it is quiet), a knife or an
 	// offhand through its quick raise
@@ -5314,6 +5428,18 @@ static void PM_Weapon( void ) {
 	       pm->ps->weaponstate == WEAPON_BOLTING ) &&
 	     pm->ps->weaponAnimTime >= 0 ) {
 		pm->ps->weaponAnimTime += pml.msec;		// no clamp - overshoot carries
+		// ...but not from the shot into the action. MW2's rechamber and its
+		// bolt delay start only from READY, on a think after the shot's last
+		// (PM_Weapon_CheckForRechamber, 575b77), so nothing of the action can
+		// happen on that last think, whatever takes the gun there. The action
+		// here is the rest of the fire clip: the shot's clock stops at the open
+		// note, and runs on from it once the gun is in the action.
+		if ( pm->ps->weaponstate == WEAPON_FIRING && pm->ps->weaponAnimSeq == ASEQ_FIRE ) {
+			int shot = PM_ShotLength( pm->ps->weapon );
+			if ( shot >= 0 && pm->ps->weaponAnimTime > shot ) {
+				pm->ps->weaponAnimTime = shot;
+			}
+		}
 	}
 	if ( pm->ps->weaponTime > 0 ) {
 		pm->ps->weaponTime -= pml.msec;

@@ -1962,13 +1962,18 @@ static void TestActionOutOfShot(void) {
   CHECK(fired[gun]==1 && ps.weaponstate==WEAPON_FIRING && ps.weaponTime>1);
   CHECK(!!(ps.stats[STAT_UNCHAMBERED]&(1<<gun))==owed);
   if(!buttons[b]) {
+   /* The shot of a gun with a worked action is over at its open note (MW2's
+    * fireTime), and the swap begins on that think, before the action can. */
+   int shot=Note(gun,ASEQ_FIRE,WNOTE_BOLT_OPEN);
    Toggle();
    for(t=0;t<12000 && ps.weaponstate!=WEAPON_DROPPING;t++) {
-    locked=ps.weaponstate==WEAPON_FIRING && ps.weaponTime>1;
+    locked=ps.weaponstate==WEAPON_FIRING && (shot>=0 ? ps.weaponAnimTime+1<shot : ps.weaponTime>1);
     Step(1);
     CHECK(!locked || ps.weaponstate!=WEAPON_DROPPING);
+    CHECK(locked || ps.weaponstate==WEAPON_DROPPING);
    }
    CHECK(t>1 && ps.weapon==gun && ps.weaponTime==BG_WeaponDropTime(gun));
+   CHECK(shot<0 || (ps.weaponAnimTime==shot && (ps.stats[STAT_UNCHAMBERED]&(1<<gun))));
    continue;
   }
   move.cmd.buttons=buttons[b]; Step(1); move.cmd.buttons=0;

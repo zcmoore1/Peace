@@ -81,8 +81,9 @@ store explicit choices, so changing `cg_sight` will not overwrite them. The acti
 perk mask is a predicted/replayed playerstate field. The current build (MW2's
 event rings: four playerstate events and every entity's own ring, with the
 view kick's cgame import and client-side bullets, MW2's spawn class speed and
-stance, plus the M16's per-instance underbarrel ammunition) uses protocol **89**,
-game **-18**. Protocol 88 / game -17 added stance, protocol 87 / game -16 added
+stance, the M16's per-instance underbarrel ammunition, and MW2's mode switch)
+uses protocol **90**, game **-19**. Protocol 89 / game -18 added the underbarrel
+fields, protocol 88 / game -17 added stance, protocol 87 / game -16 added
 `moveClass`, protocol 86 / game -15 added the event rings, protocol 85 / game -14
 added MW2's `grenadeTimeLeft` playerstate field,
 and protocol 84 / game -13 the Tactical Insertion's 3-bit use hint type.
@@ -105,8 +106,8 @@ in archived cvars; this is local persistence, not cloud account synchronization.
 | Choose/menu navigation | Arrow keys, Enter, Escape | D-pad/left stick, A, B |
 | Edit highlighted custom class | E | X |
 | Name entry | Keyboard | Keep the default name or use a keyboard |
-| Toggle weapon slots | `weapnext` / `weapprev` | Y |
-| M16 / Masterkey mode | `weapalt` (keyboard B) | D-pad down |
+| Next weapon (MW2's cycle) | `weapnext` / `weapprev` | Y |
+| M16 / Masterkey mode (MW2's alt toggle) | `weapalt` (keyboard B) | D-pad down |
 | Melee | `+melee` | B |
 | Lethal (frag, Semtex, knife, Tactical Insertion) / tactical | `+lethal` / `+tactical` | Existing shoulder bindings |
 
@@ -120,11 +121,14 @@ class. The new loadout arrives on the next spawn (next round in S&D), not instan
 
 ## YY behavior
 
-The slot selection is `(requestedSlot + 1) % SLOT_COUNT`. Gun IDs are looked up
-through the two slots, so any pair works; the gun IDs themselves are not treated
-as contiguous slot numbers. The previous code toggled from an acknowledged
-active slot, causing two rapid presses to request the same destination before
-the first swap had completed.
+The selection is MW2's cycle (`CycleWeapPrimary`): from an underbarrel, Y is
+the gun that carries it; from any other gun, Y is `(requestedSlot + 1) %
+SLOT_COUNT`, and that gun comes up in its own mode, never as its underbarrel.
+So from the Masterkey it is two presses to the next gun, and Y never selects
+the Masterkey. Gun IDs are looked up through the two slots, so any pair works;
+the gun IDs themselves are not treated as contiguous slot numbers. The cycle
+runs from the latest request, not from an acknowledged active slot, so rapid
+presses each count before the first swap has completed.
 
 When the request returns to the gun still held during an unfinished ordinary
 drop, shared pmove makes it READY with no remaining drop timer. The normal firing
@@ -168,7 +172,7 @@ sprint entry from rest. A sprint therefore never cuts the pump or bolt, and
 the close note never meets a sprint lock. A reload is still lowered at once
 (MW2's sprint raise is taken out of its reload states).
 
-Sprint + Y and sprint + YY use the ordinary slot-toggle/drop-cancellation path.
+Sprint + Y and sprint + YY use the ordinary cycle/drop-cancellation path.
 On cancellation a retained draw/drop or sprint transition returns along its
 visible clip. A swap does not end a sprint (a sprint latches, as in MW2), so
 its entry resumes without jumping back to frame zero. Sprint, Y, end the

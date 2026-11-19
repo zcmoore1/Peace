@@ -4,3 +4,9 @@
 void PickupWeaponStep(pmove_t *move, int msec) {
  pm=move; memset(&pml,0,sizeof(pml)); pml.msec=msec; PM_Weapon();
 }
+/* Where a note sits on a gun's clip, read from the game's own table. */
+int PickupNoteTime(int weapon, int seq, int kind) {
+ const bg_weaponNote_t *note=PM_SegNotes(weapon,seq);
+ for(;note->note!=WNOTE_NONE;note++) if(note->note==kind) return note->time;
+ return -1;
+}

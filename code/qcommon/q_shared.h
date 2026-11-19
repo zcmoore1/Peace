@@ -1199,7 +1199,7 @@ typedef struct playerState_s {
 	int			weaponAnimTime;	// ms ELAPSED into the current anim SEGMENT (counts UP). -1 = no anim playing. Notes fire on crossings of this; never derived from weaponTime.
 	int			weaponAction;	// action, button history, cancel acknowledgement, recovery (9 bits)
 	int			weaponAnimSeq;	// which reload segment is playing (reloadSeq_t)
-	int             weaponDraw;     // 0 ordinary raise, 1 first deployment
+	int             weaponDraw;     // WDRAW_*: the kind of raise, and of the drop before a mode change
 	int             weapFlags;      // PWF_* (MW2's name): PWF_USE_RELOAD is the server's use/reload request
 	int             perks;          // spawn-owned perk mask, predicted and replayed
 	int             moveClass;      // spawn-owned: MW2's class speed, from the class's primary (moveClass_t); never rebased

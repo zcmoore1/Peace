@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build Peace's original basic M16 and mounted Masterkey game assets.
 
-Deterministic, stdlib only; --check compares without writing. The geometry is
+Deterministic on every platform, stdlib only; --check compares without writing. The geometry is
 stylized game art, not a mechanical drawing. No external game assets are used.
 The IQM/MD3 layout follows the existing build_m40a3.py exporter.
 """
@@ -12,6 +12,16 @@ from pathlib import Path
 import struct
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def clean(x):
+    """A float as written: within 1e-9 of zero is exactly 0.0 (no -0.0).
+    Windows and Linux libm round some sin/cos results differently in the
+    last bit, which only shows where the true value is zero; snapping those
+    makes the output the same bytes on both."""
+    return 0.0 if isinstance(x,float) and abs(x)<1e-9 else x
+
+
 PREFIX = 'models/weapons2/m16/'
 ORIGIN = (12.0, -4.8, -6.0)
 NODES = [('Base', -1, ORIGIN), ('magazine', 0, (1.6, 0, -2.5)),
@@ -254,6 +264,16 @@ def pose(name,t,data,sprint):
         deploy=ease(t if name!='drop' else 1-t)
         root=add(root,(2*(1-deploy),-1.5*(1-deploy),-15*(1-deploy)))
         angle=[8*(1-deploy),24*(1-deploy),-8*(1-deploy)]
+    if name=='alt_raise':
+        # MW2's mode switch: the gun stays up while the trigger hand changes
+        # grips. The hand starts on the other mode's grip, drops clear of the
+        # guards as it travels, and the gun dips with it.
+        shift=ease(t); dip=math.sin(math.pi*t)
+        rifle=NODES[2][2]; shotgun=add(NODES[2][2],(11.2,0,-.8))
+        start,end=(rifle,shotgun) if underbarrel else (shotgun,rifle)
+        hand=tuple(a+(b-a)*shift for a,b in zip(start,end))
+        result[2]=channels(add(hand,(0,0,-1.5*dip)))
+        root=add(root,(-.4*dip,0,-1.0*dip)); angle=[2.5*dip,5*dip,0]
     if name in ('fire','cycle'):
         ms=t*data['fire_ms']
         kick=math.sin(math.pi*min(ms/140,1)) if underbarrel else math.sin(math.pi*t)*(1-t*.55)
@@ -261,7 +281,10 @@ def pose(name,t,data,sprint):
         root[0]-=(1.3 if underbarrel else .62)*kick
         angle[1]-=(3.2 if underbarrel else 1.35)*kick
         if underbarrel:
-            pump=window(ms,data['bolt_open_ms'],360)-window(ms,430,data['bolt_close_ms'])
+            # The pump works inside the rechamber, after the shot's own time.
+            opened=data['bolt_open_ms']; work=data['fire_ms']-opened
+            pump=(window(ms,opened,opened+.35*work)-
+                  window(ms,opened+.50*work,opened+.85*work))
             result[4]=channels(add(NODES[4][2],(-3.7*pump,0,0)))
             result[3]=channels(add(NODES[3][2],(-3.7*pump,0,0)))
             angle[0]=-2*pump
@@ -276,15 +299,27 @@ def pose(name,t,data,sprint):
         reach=window(ms,50,250)-window(ms,1080,1340)
         result[3]=channels(add(NODES[3][2],(-14.2*reach,-1.0*reach,-1.5*reach-5*travel)),(0,0,15*reach))
     if name.startswith('reload_') and underbarrel:
-        reach=ease(t) if name=='reload_start' else (1-ease(t) if name=='reload_end' else 1)
-        root=add(root,(-.5*reach,.5*reach,-.6*reach));angle=[-18*reach,-3*reach,0]
+        # The start reaches for the port and feeds its own shell (MW2's
+        # reloadStartAddTime); each loop feeds one more; the end brings the
+        # hand back to the pump and works it.
+        length=data[name+'_ms']; ms=t*length; pump=0; fed=None
+        if name=='reload_start':
+            fed=data['reload_start_add_ms']; reach=window(ms,0,.55*fed)
+        elif name=='reload_loop':
+            fed=data['round_in_ms']; reach=1
+        else:
+            reach=1-window(ms,0,.40*length)
+            pump=window(ms,.50*length,.66*length)-window(ms,.72*length,.90*length)
+        root=add(root,(-.5*reach,.5*reach,-.6*reach));angle=[-18*reach-2*pump,-3*reach,0]
         travel=0
-        if name=='reload_loop':
-            ms=t*data['reload_loop_ms']
-            travel=window(ms,0,100)-window(ms,100,data['round_in_ms'])
-            visible=window(ms,30,60)-window(ms,data['round_in_ms']-30,data['round_in_ms'])
+        if fed is not None:
+            # The shell comes up in the hand, then is pushed home by 'fed'.
+            lift=(max(0,fed-450),max(100,fed-350))
+            travel=window(ms,*lift)-window(ms,lift[1],fed)
+            visible=window(ms,lift[0]+30,lift[0]+60)-window(ms,fed-30,fed)
             result[8]=channels(add(NODES[8][2],(0,0,-4*travel)),s=max(.0001,visible))
-        result[3]=channels(add(NODES[3][2],(-8*reach,0,-1.2*reach-4*travel)),(0,0,12*reach))
+        result[3]=channels(add(NODES[3][2],(-8*reach-3.7*pump,0,-1.2*reach-4*travel)),(0,0,12*reach))
+        if pump: result[4]=channels(add(NODES[4][2],(-3.7*pump,0,0)))
     if name.startswith('sprint_'):
         carry=ease(t) if name=='sprint_in' else (1-ease(t) if name=='sprint_out' else 1)
         wave=math.sin(math.tau*t) if name=='sprint_loop' else 0
@@ -299,7 +334,8 @@ def clips(data,sprint):
     durations={'idle':1600,'raise':data['raise_ms'],'drop':data['drop_ms'],
                'fire':data['fire_ms'],'reload_loop':data['reload_loop_ms'],
                'sprint_in':data['sprint_in_ms'],'sprint_loop':data['sprint_loop_ms'],
-               'sprint_out':data['sprint_out_ms'],'first_raise':data['raise_ms']}
+               'sprint_out':data['sprint_out_ms'],'first_raise':data['raise_ms'],
+               'alt_raise':data['alt_raise_ms']}
     if data.get('underbarrel'):
         durations['reload_start']=data['reload_start_ms']
         durations['reload_end']=data['reload_end_ms']
@@ -353,7 +389,7 @@ def iqm(mesh,animations,underbarrel=False):
     for name,poses,fps,loop in animations:
         anims.append((label(name),len(frames),len(poses),fps,int(loop)))
         cfg.append(f'{name} {len(frames)} {len(poses)} {fps:.8g} {int(loop)}')
-        frames.extend(poses)
+        frames.extend([[tuple(map(clean,c)) for c in pose] for pose in poses])
     offsets=[];scales=[];masks=[]
     for j in range(len(NODES)):
         lo=[min(f[j][k] for f in frames) for k in range(10)]
@@ -368,9 +404,9 @@ def iqm(mesh,animations,underbarrel=False):
     blob=bytearray(124)
     def append(data):
         blob.extend(b'\0'*(-len(blob)%4));pos=len(blob);blob.extend(data);return pos
-    def rows(fmt,values):return b''.join(struct.pack(fmt,*v) for v in values)
+    def rows(fmt,values):return b''.join(struct.pack(fmt,*map(clean,v)) for v in values)
     ot=append(text);om=append(rows('<6I',meshes))
-    tangents=[(*norm(cross(v[1],(0,0,1) if abs(v[1][2])<.9 else (0,1,0))),1.) for v in vertices]
+    tangents=[(*norm(cross(tuple(map(clean,v[1])),(0,0,1) if abs(v[1][2])<.9 else (0,1,0))),1.) for v in vertices]
     arrays=[]
     for kind,fmt,size,values in [(0,'3f',3,[v[0] for v in vertices]),(1,'2f',2,[v[2] for v in vertices]),
         (2,'3f',3,[v[1] for v in vertices]),(3,'4f',4,tangents),
@@ -384,7 +420,7 @@ def iqm(mesh,animations,underbarrel=False):
     h=(2,len(blob),0,len(text),ot,len(meshes),om,6,len(vertices),oa,len(triangles),otr,0,
        len(NODES),oj,len(NODES),op,len(anims),oan,len(frames),sum(m.bit_count() for m in masks),of,ob,0,0,0,0)
     blob[:124]=struct.pack('<16s27I',b'INTERQUAKEMODEL\0',*h)
-    return bytes(blob),('// Generated by build_m16.py; provisional animation timing.\n'+'\n'.join(cfg)+'\n').encode()
+    return bytes(blob),('// Generated by build_m16.py from assets/source/m16/weapon.json.\n'+'\n'.join(cfg)+'\n').encode()
 
 
 def md3(mesh,underbarrel=False):
@@ -397,7 +433,7 @@ def md3(mesh,underbarrel=False):
         data+=struct.pack('<64si',('peace/m16_'+mat).encode(),0)
         data+=b''.join(struct.pack('<2f',*v[2]) for v in vertices)
         for p,vertex in zip(pts,vertices):
-            n=vertex[1];polar=round(math.acos(max(-1,min(1,n[2])))*255/math.tau)&255
+            n=tuple(map(clean,vertex[1]));polar=round(math.acos(max(-1,min(1,n[2])))*255/math.tau)&255
             azimuth=round(math.atan2(n[1],n[0])*255/math.tau)&255
             data+=struct.pack('<3hH',*(round(v*64) for v in p),(azimuth<<8)|polar)
         assert len(data)==size;surfaces.append(data)
@@ -444,6 +480,15 @@ def build():
     sprint=json.loads((ROOT/'assets/source/m16/sprint.json').read_text())
     mesh=geometry();model,cfg=iqm(mesh,clips(data,sprint));world=geometry(False)
     shotgun=dict(data['masterkey'],fps=data['fps'],underbarrel=True)
+    # One fire clip: MW2's fireTime, then its rechamberTime. The shot is over at
+    # the open note; the close note is MW2's bolt delay into the rechamber:
+    # rechamberBoltTime, or 1ms when that is 0 or not less than the rechamber
+    # (PM_Weapon_CheckForRechamber, iw4x.exe 0x575BD8-0x575C03).
+    bolt=shotgun['rechamber_bolt_ms']
+    if not 0<bolt<shotgun['rechamber_ms']: bolt=1
+    shotgun.update(fire_ms=shotgun['fire_time_ms']+shotgun['rechamber_ms'],
+                   bolt_open_ms=shotgun['fire_time_ms'],
+                   bolt_close_ms=shotgun['fire_time_ms']+bolt)
     altmodel,altcfg=iqm(mesh,clips(shotgun,sprint),True)
     shaders='// Original basic M16 + Masterkey materials.\n'
     for mat in MATERIALS:
@@ -471,11 +516,13 @@ def build():
     header=['/* Generated by dev/tools/build_m16.py from assets/source/m16/weapon.json. */',
             '#ifndef BG_M16_DATA_H','#define BG_M16_DATA_H']
     names={'MAG_SIZE':'mag_size','RESERVE':'reserve','FIRE_MS':'fire_ms','DROP_MS':'drop_ms',
-           'RAISE_MS':'raise_ms','SPRINT_IN_MS':'sprint_in_ms','SPRINT_OUT_MS':'sprint_out_ms'}
+           'RAISE_MS':'raise_ms','ALT_DROP_MS':'alt_drop_ms','ALT_RAISE_MS':'alt_raise_ms',
+           'SPRINT_IN_MS':'sprint_in_ms','SPRINT_OUT_MS':'sprint_out_ms'}
     for prefix,source,extra in [('M16',data,{'RELOAD_MS':'reload_loop_ms','MAG_OUT_MS':'mag_out_ms','MAG_IN_MS':'mag_in_ms'}),
         ('MASTERKEY',shotgun,{'BOLT_OPEN_MS':'bolt_open_ms','BOLT_CLOSE_MS':'bolt_close_ms',
-         'RELOAD_START_MS':'reload_start_ms','RELOAD_LOOP_MS':'reload_loop_ms','RELOAD_END_MS':'reload_end_ms',
-         'ROUND_IN_MS':'round_in_ms','RELOAD_CLOSE_MS':'reload_close_ms'})]:
+         'RELOAD_START_MS':'reload_start_ms','RELOAD_START_ADD_MS':'reload_start_add_ms',
+         'RELOAD_LOOP_MS':'reload_loop_ms','RELOAD_END_MS':'reload_end_ms',
+         'ROUND_IN_MS':'round_in_ms'})]:
         for macro,key in dict(names,**extra).items():header.append(f'#define {prefix}_{macro} {source[key]}')
     header+=['#endif','']
     return {'assets/baseq3/'+PREFIX+'view.iqm':model,'assets/baseq3/'+PREFIX+'view.cfg':cfg,

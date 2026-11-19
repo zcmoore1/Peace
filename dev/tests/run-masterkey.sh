@@ -11,3 +11,5 @@ ${CC:-cc} $flags -DMASTERKEY_SERVER_TEST dev/tests/masterkey_test.c dev/tests/pi
 out/tests/masterkey-server-test
 ${CC:-cc} $flags dev/tests/masterkey_selection_test.c code/cgame/cg_playerstate.c dev/tests/pickup_pmove_driver.c $game $common -Wl,--gc-sections -lm -o out/tests/masterkey-selection-test
 out/tests/masterkey-selection-test
+${CC:-cc} $flags dev/tests/moni_test.c code/cgame/cg_playerstate.c dev/tests/pickup_pmove_driver.c $game $common -Wl,--gc-sections -lm -o out/tests/moni-test
+out/tests/moni-test

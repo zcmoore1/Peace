@@ -1304,6 +1304,54 @@ static void TestKnifePullPicture(void) {
    CHECK(def->clips[WANIM_FIRE].numFrames>0 ? drawn && entity.oldframe==def->clips[WANIM_FIRE].firstFrame : !drawn); }
 }
 
+/* MW2's mode switch: its raise is a clip of its own, fitted to the alt raise's
+ * lock like any draw, and the clip tables are the gameplay timers. A gun with
+ * no such clip falls back to its ordinary raise. */
+static void TestModeSwitchPicture(void) {
+ static const struct { int weapon; const char *cfg; } modes[]={
+  {WP_M16,"assets/baseq3/models/weapons2/m16/view.cfg"},
+  {WP_MASTERKEY,"assets/baseq3/models/weapons2/m16/masterkey.cfg"}};
+ playerState_t ps; refEntity_t sample; weapAnimDef_t *def; int i;
+ for(i=0;i<ARRAY_LEN(modes);i++) {
+  int gun=modes[i].weapon, lock=BG_WeaponAltRaiseTime(gun);
+  const weapAnimClip_t *clip;
+  CG_WeapAnim_RegisterClips(gun,3,modes[i].cfg);
+  def=&bg_weapAnimDefs[gun]; clip=&def->clips[WANIM_ALT_RAISE];
+  CHECK(lock>0 && fabs(CG_WeapAnim_ClipLength(def,WANIM_ALT_RAISE)-lock)<.5f);
+  CHECK(fabs(CG_WeapAnim_ClipLength(def,WANIM_RAISE)-BG_WeaponRaiseTime(gun))<.5f);
+  CHECK(fabs(CG_WeapAnim_ClipLength(def,WANIM_DROP)-BG_WeaponDropTime(gun))<.5f);
+  if(BG_WeaponFireLength(gun)>0)
+   CHECK(fabs(CG_WeapAnim_ClipLength(def,WANIM_FIRE)-BG_WeaponFireLength(gun))<.5f);
+  Ready(&ps,gun);
+  ps.weaponstate=WEAPON_RAISING; ps.weaponDraw=WDRAW_ALT; ps.weaponTime=lock;
+  CHECK(BG_WeaponDrawTime(&ps)==lock);
+  Update(def,&ps,1);
+  CHECK(cg_weapLayers[LAYER_MOVE].clip==WANIM_ALT_RAISE && cg_weapLayers[LAYER_MOVE].time==0);
+  CHECK(CG_WeapAnim_SampleFrame(def,&cg_weapLayers[LAYER_MOVE],&sample));
+  CHECK(sample.oldframe==clip->firstFrame);
+  ps.weaponTime=lock/2; Update(def,&ps,lock/2);
+  CHECK(fabs(cg_weapLayers[LAYER_MOVE].time-
+   CG_WeapAnim_ClipLength(def,WANIM_ALT_RAISE)*(1.0f-(float)(lock/2)/lock))<1);
+  ps.weaponTime=0; Update(def,&ps,lock/2);
+  CHECK(CG_WeapAnim_SampleFrame(def,&cg_weapLayers[LAYER_MOVE],&sample));
+  CHECK(sample.frame==clip->firstFrame+clip->numFrames-1);
+  /* cancelled, it comes home along its own clip like any draw */
+  Ready(&ps,gun); ps.weaponstate=WEAPON_RAISING; ps.weaponDraw=WDRAW_ALT; ps.weaponTime=lock/2;
+  Update(def,&ps,1);
+  ps.weaponstate=WEAPON_READY; ps.weaponTime=0; Update(def,&ps,1);
+  CHECK(cg_weapLayers[LAYER_MOVE].clip==WANIM_ALT_RAISE && cg_weapLayers[LAYER_MOVE].fit==MOVE_FIT_RETURN);
+  /* an ordinary raise of the same gun is its own clip */
+  Ready(&ps,gun); ps.weaponstate=WEAPON_RAISING; ps.weaponDraw=WDRAW_NORMAL;
+  ps.weaponTime=BG_WeaponDrawTime(&ps);
+  CHECK(ps.weaponTime==BG_WeaponRaiseTime(gun));
+  Update(def,&ps,1); CHECK(cg_weapLayers[LAYER_MOVE].clip==WANIM_RAISE);
+  CG_WeapAnim_RegisterClips(gun,0,NULL);
+ }
+ def=&bg_weapAnimDefs[WP_SHOTGUN];
+ Ready(&ps,WP_SHOTGUN); ps.weaponstate=WEAPON_RAISING; ps.weaponDraw=WDRAW_ALT;
+ Update(def,&ps,1); CHECK(cg_weapLayers[LAYER_MOVE].clip==WANIM_RAISE);
+}
+
 int main(void) {
  playerState_t ps;
  const int states[]={WEAPON_READY,WEAPON_FIRING,WEAPON_BOLTING};
@@ -1354,5 +1402,6 @@ int main(void) {
  TestPictureContinuity(def,WP_M40A3,"assets/baseq3/models/weapons2/m40a3/view.iqm");
  TestActionHandoff(WP_M40A3);
  TestSprintAfterTheCycle(WP_M40A3);
+ TestModeSwitchPicture();
  printf("PASS: %d weapon presentation ownership checks\n",checks); return 0;
 }

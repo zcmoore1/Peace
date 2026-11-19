@@ -1832,15 +1832,41 @@ static qboolean CG_WeaponSelectable( int i ) {
 	return qtrue;
 }
 
-// A newly requested slot starts in that instance's saved mode. Mode toggles
-// themselves keep local intent, just as Y keeps its requested slot, so two
-// presses before the next snapshot still reverse each other.
-static void CG_SelectWeaponSlot( const playerState_t *ps, int slot ) {
+// Select a slot's gun in one of its firing modes. The selection is local
+// intent, as MW2's cg.weaponSelect is: a press counts at once, so two presses
+// before the next snapshot are still two presses.
+static void CG_SelectWeaponSlotMode( const playerState_t *ps, int slot, qboolean alternate ) {
 	if (slot < 0 || slot >= SLOT_COUNT) slot = SLOT_PRIMARY;
 	cg.weaponSelectSlot = slot;
-	cg.weaponSelectAlternate = !!(ps->slotFlags[slot] & BG_GUN_ALTERNATE);
+	cg.weaponSelectAlternate = alternate &&
+		BG_AlternateWeapon(ps->stats[STAT_SLOT_PRIMARY + slot]) != WP_NONE;
 	cg.weaponSelectGeneration = cg.snap->ps.slotFlags[slot] & BG_GUN_GENERATION;
 	cg.weaponSelect = BG_RequestedWeapon(ps, BG_WeaponCommand(ps, slot, cg.weaponSelectAlternate));
+}
+
+// The slot as the server has it: the mode that instance was last raised in.
+// For following what is in hand (a cancelled offhand, a pickup's new gun),
+// never for the cycle.
+static void CG_SelectWeaponSlot( const playerState_t *ps, int slot ) {
+	if (slot < 0 || slot >= SLOT_COUNT) slot = SLOT_PRIMARY;
+	CG_SelectWeaponSlotMode( ps, slot, (ps->slotFlags[slot] & BG_GUN_ALTERNATE) != 0 );
+}
+
+// MW2's CycleWeapPrimary (59ed40), which weapnext and weapprev both run. From
+// an underbarrel (an altmode weapon) it selects the gun that carries it,
+// whichever way the cycle runs (59ed8c-59edce). From any other gun it selects
+// the next one, and that gun comes up in its own mode: the cycle lands on an
+// alternate only where the weapon file says altModeSameWeapon (59eee3-59ef09),
+// and no MW2 multiplayer weapon does. So it is two presses from the Masterkey
+// to the next gun, and the cycle never selects the Masterkey. It starts from
+// the latest selection, not from the gun in hand (cg.weaponSelect, 59ed68).
+static void CG_CycleWeapon( const playerState_t *ps ) {
+	if ( cg.weaponSelectAlternate && cg.weaponSelectSlot >= 0 && cg.weaponSelectSlot < SLOT_COUNT &&
+	     BG_AlternateWeapon( ps->stats[STAT_SLOT_PRIMARY + cg.weaponSelectSlot] ) != WP_NONE ) {
+		CG_SelectWeaponSlotMode( ps, cg.weaponSelectSlot, qfalse );
+	} else {
+		CG_SelectWeaponSlotMode( ps, (cg.weaponSelectSlot + 1) % SLOT_COUNT, qfalse );
+	}
 }
 
 /*
@@ -1872,12 +1898,11 @@ void CG_NextWeapon_f( void ) {
 		return;
 	}
 
-	// Two slots: weapnext is a toggle between them. Melee and equipment
-	// are NOT slots - they are temporary actions that return
-	// here, so the toggle is always primary <-> secondary.
-	// Toggle the requested selection, not the last acknowledged active slot.
-	// A second press must reverse the first even before a server snapshot lands.
-	CG_SelectWeaponSlot(ps, (cg.weaponSelectSlot + 1) % SLOT_COUNT);
+	// Two slots: melee and equipment are NOT slots - they are temporary
+	// actions that return here. The cycle runs from the requested selection,
+	// not the last acknowledged active slot: a second press counts even before
+	// a server snapshot lands.
+	CG_CycleWeapon( ps );
 	want = cg.weaponSelect;
 
 	if ( want <= WP_NONE || want >= WP_NUM_WEAPONS ) {
@@ -1897,23 +1922,41 @@ CG_PrevWeapon_f
 ===============
 */
 void CG_PrevWeapon_f( void ) {
-	// With 2 slots prev and next are the same toggle.
+	// With 2 slots prev and next are the same step, and MW2's cycle leaves an
+	// underbarrel for its gun in either direction.
 	CG_NextWeapon_f();
 }
 
-/* The underbarrel is a mode of the selected inventory instance. All timing,
- * reversal and readiness still belong to the ordinary shared weapon code. */
+/* The underbarrel is a mode of the selected inventory instance. All timing and
+ * readiness belong to the shared weapon code. This is MW2's alt toggle
+ * (+actionslot 3: CG_ActionSlotDown_f 59f090, ToggleWeaponAltMode 59f030,
+ * CG_AltWeaponToggleIndex 59ef70). It is refused while a gun is going down
+ * (59d6f9) and while a mode change's own raise runs (59f030); an ordinary
+ * raise takes it. From either mode it selects the other. From a gun with no
+ * other mode it selects the next gun that has one, in that mode, and that is
+ * one ordinary change (59f002-59f00f). */
 void CG_AltWeapon_f( void ) {
 	playerState_t *ps;
-	int base;
+	int slot, i;
 	if (!cg.snap || (cg.snap->ps.pm_flags & PMF_FOLLOW)) return;
 	CG_ValidateWeaponSelect();
 	ps = &cg.predictedPlayerState;
-	base = ps->stats[STAT_SLOT_PRIMARY + cg.weaponSelectSlot];
-	if (BG_AlternateWeapon(base) == WP_NONE) return;
-	cg.weaponSelectAlternate = !cg.weaponSelectAlternate;
-	cg.weaponSelect = BG_RequestedWeapon(ps,
-		BG_WeaponCommand(ps, cg.weaponSelectSlot, cg.weaponSelectAlternate));
+	if ( ps->weaponstate == WEAPON_DROPPING ||
+	     ( ps->weaponstate == WEAPON_RAISING && ps->weaponDraw == WDRAW_ALT ) ) return;
+	slot = cg.weaponSelectSlot;
+	if ( BG_AlternateWeapon( ps->stats[STAT_SLOT_PRIMARY + slot] ) != WP_NONE ) {
+		CG_SelectWeaponSlotMode( ps, slot, !cg.weaponSelectAlternate );
+	} else {
+		for ( i = 1; i < SLOT_COUNT; i++ ) {
+			int gun;
+			slot = ( cg.weaponSelectSlot + i ) % SLOT_COUNT;
+			gun = ps->stats[STAT_SLOT_PRIMARY + slot];
+			if ( gun > WP_NONE && gun < WP_NUM_WEAPONS && BG_AlternateWeapon( gun ) != WP_NONE &&
+			     ( ps->stats[STAT_WEAPONS] & ( 1 << gun ) ) ) break;
+		}
+		if ( i == SLOT_COUNT ) return;
+		CG_SelectWeaponSlotMode( ps, slot, qtrue );
+	}
 	cg.weaponSelectTime = cg.time;
 }
 
@@ -1979,7 +2022,8 @@ void CG_OutOfAmmoChange( void ) {
 
 	if ( other > WP_NONE && other < WP_NUM_WEAPONS &&
 	     ( ps->stats[STAT_WEAPONS] & ( 1 << other ) ) ) {
-		CG_SelectWeaponSlot(ps, (ps->stats[STAT_ACTIVE_SLOT] + 1) % SLOT_COUNT);
+		// the cycle's step: the other gun in its own mode
+		CG_SelectWeaponSlotMode(ps, (ps->stats[STAT_ACTIVE_SLOT] + 1) % SLOT_COUNT, qfalse);
 	}
 }
 

@@ -237,9 +237,26 @@ static void TestDirectSelectionAndGuards(void) {
 	CG_NextWeapon_f(); ExpectIntent(0,WP_SHOTGUN);
 }
 
+/* MW2's WeaponCycleAllowed (59d590) and ActionSlotUsageAllowed (59d6f0)
+ * refuse a frozen player: Y, the alt toggle and a weapon number during the
+ * countdown ask for nothing, so nothing is waiting to begin when it lifts. */
+static void TestFrozenSelection(void) {
+	int select, slot, alternate;
+	Setup(WP_M16,WP_SHOTGUN,qfalse);
+	snapshot.ps.pm_flags|=PMF_FROZEN; cg.predictedPlayerState.pm_flags|=PMF_FROZEN;
+	select=cg.weaponSelect; slot=cg.weaponSelectSlot; alternate=cg.weaponSelectAlternate;
+	CG_NextWeapon_f(); CG_PrevWeapon_f(); CG_AltWeapon_f();
+	Com_sprintf(weaponArgument,sizeof(weaponArgument),"%i",WP_SHOTGUN); CG_Weapon_f();
+	CHECK(cg.weaponSelect==select && cg.weaponSelectSlot==slot && cg.weaponSelectAlternate==alternate);
+	CHECK(swapPresses==0);	/* not even the swap button: there is no Y */
+	/* unfrozen, the same presses select */
+	snapshot.ps.pm_flags&=~PMF_FROZEN; cg.predictedPlayerState.pm_flags&=~PMF_FROZEN;
+	CG_NextWeapon_f(); ExpectIntent(1,WP_SHOTGUN);
+	CG_AltWeapon_f(); ExpectIntent(0,WP_MASTERKEY);
+}
 int main(void) {
 	TestRapidModeInput(); TestCycle(); TestDuplicateGuns();
-	TestPickupAndRespawn(); TestDirectSelectionAndGuards();
+	TestPickupAndRespawn(); TestDirectSelectionAndGuards(); TestFrozenSelection();
 	printf("PASS: %i client mode input, cycle, snapshot, pickup and respawn checks\n",checks);
 	return 0;
 }

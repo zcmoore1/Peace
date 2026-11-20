@@ -64,6 +64,7 @@ int trap_ReplayStart(int killer,int from,int to,int begin) {
 void LogExit(const char *s) { (void)s; exits++; level.intermissionQueued=level.time; }
 static int spawnSite;
 static int graceSeconds;	/* g_sndGracePeriod for the next match: 0 but in GracePeriod's case */
+static int victimPrimary=WP_SHOTGUN;	/* the gun the victim drops: another than the shooter's for a swap */
 qboolean G_SpawnInt(const char *key,const char *initial,int *out) { (void)key; (void)initial; *out=spawnSite; return qtrue; }
 qboolean G_SpawnFloat(const char *key,const char *initial,float *out) { (void)key; *out=atof(initial); return qtrue; }
 
@@ -239,7 +240,7 @@ static void Command(int n,int buttons,const float *view,int forward) {
  int i;
  memset(&nextCmd,0,sizeof(nextCmd));
  nextCmd.serverTime=now; nextCmd.buttons=buttons; nextCmd.forwardmove=forward;
- nextCmd.weapon=n==SHOOTER ? shooterWeapon : WP_SHOTGUN; nextCmd.upmove=n==SHOOTER ? shooterUp : 0;
+ nextCmd.weapon=n==SHOOTER ? shooterWeapon : n==VICTIM ? victimPrimary : WP_SHOTGUN; nextCmd.upmove=n==SHOOTER ? shooterUp : 0;
  for(i=0;i<3;i++) nextCmd.angles[i]=ANGLE2SHORT(view[i])-clients[n].ps.delta_angles[i];
  ClientThink(n);
 }
@@ -300,7 +301,7 @@ static void ResetMatch(void) {
  InitBodyQue();
  for(i=0;i<3;i++) {
   gentity_t *e=&g_entities[i]; bg_class_t c=*BG_Class(0);
-  c.slot[0]=WP_SHOTGUN; c.slot[1]=WP_MACHINEGUN;
+  c.slot[0]=i==VICTIM ? victimPrimary : WP_SHOTGUN; c.slot[1]=WP_MACHINEGUN;
   c.lethal=WP_THROWING_KNIFE; c.lethalCount=BG_ClassEquipmentCount(WP_THROWING_KNIFE);
   CHECK(BG_ValidateClass(&c));
   e->client=&clients[i]; e->inuse=qtrue; e->s.number=i; e->r.ownerNum=ENTITYNUM_NONE;
@@ -552,10 +553,37 @@ static void FrozenRunsOn(void) {
  for(t=0;t<700;t++) {
   Run(1);
   CHECK(ps->ammo[WP_SHOTGUN]==ammo && ps->weapon==WP_SHOTGUN && ps->weaponstate==WEAPON_READY);
-  CHECK(!(ps->weaponAction&WA_TYPE_MASK) && !(ps->weapFlags&PWF_USE_RELOAD));
+  /* the server reads the command as it came, as MW2's does, so a use/reload
+   * press may ask for a reload; the frozen Pmove drops the request
+   * (MW2's PmoveSingle 574420), and nothing starts */
+  CHECK(!(ps->weaponAction&WA_TYPE_MASK));
   CHECK(!(ps->pm_flags&(PMF_ADS|PMF_SPRINTING)) && ps->groundEntityNum!=ENTITYNUM_NONE && !(ps->eFlags&EF_FIRING));
  }
  CHECK(!Knives(NULL) && ps->ammo[WP_THROWING_KNIFE]==1 && g_entities[MATE].health==100);
+
+ Com_sprintf(caseText,sizeof(caseText),"frozen: a reload held over a floor gun neither reloads nor takes it");
+ {
+  gentity_t *item=NULL; int i, slot;
+  victimPrimary=WP_M40A3; Reset(); victimPrimary=WP_SHOTGUN; death=WinningShot(24);
+  Run(500);	/* the victim's gun lands */
+  for(i=MAX_CLIENTS;i<level.num_entities;i++) if(g_entities[i].inuse && g_entities[i].s.eType==ET_ITEM) item=&g_entities[i];
+  CHECK(item!=NULL);
+  Place(SHOOTER,item->r.currentOrigin[0]+40,item->r.currentOrigin[1]);
+  ToLastFreeFrame(death);
+  ammo=ps->ammo[WP_SHOTGUN]; slot=ps->stats[STAT_SLOT_PRIMARY];
+  CHECK(ammo<BG_WeaponMagSize(WP_SHOTGUN) && ps->weaponstate==WEAPON_READY);
+  shooterButtons=BUTTON_RELOAD; Run(1);
+  CHECK(ps->pickupHeld==1);	/* in reach: the press is held for the gun */
+  ToFreeze(death);
+  for(t=0;t<BG_USE_RELOAD_HOLD_TIME+500;t++) {
+   Run(1);
+   CHECK(ps->weaponstate!=WEAPON_RELOADING && ps->ammo[WP_SHOTGUN]==ammo);
+   CHECK(ps->stats[STAT_SLOT_PRIMARY]==slot && item->inuse && Frozen(SHOOTER));
+  }
+  shooterButtons=0;	/* let go in the freeze: no reload tap either */
+  for(t=0;t<300;t++) { Run(1); CHECK(ps->weaponstate!=WEAPON_RELOADING && ps->ammo[WP_SHOTGUN]==ammo); }
+  CHECK(ps->pickupHeld==0);
+ }
 
  Com_sprintf(caseText,sizeof(caseText),"frozen in the air: hangs there");
  Reset(); death=WinningShot(24);
@@ -642,6 +670,30 @@ static void OwnDamage(void) {
  G_Damage(&g_entities[MATE],NULL,&g_entities[VICTIM],dir,clients[MATE].ps.origin,60,DAMAGE_RADIUS,MOD_GRENADE_SPLASH);
  CHECK(g_entities[MATE].health<100 && g_entities[SHOOTER].health==g_entities[MATE].health);
  CHECK(clients[SHOOTER].ps.stats[STAT_HEALTH]==g_entities[SHOOTER].health);
+}
+/* What is held when a freeze lifts is no new press: MW2 masks only the
+ * command, never the one before it (oldcmd), so a knife, sprint or jump held
+ * through the countdown's end waits for a fresh press. */
+static void PrematchHolds(void) {
+ playerState_t *ps=&clients[SHOOTER].ps; int i, live;
+ Com_sprintf(caseText,sizeof(caseText),"knife, sprint and jump held through the countdown's end");
+ ResetMatch(); sndCountdown.integer=4;	/* long enough for the gun's first raise */
+ for(i=0;snd.phase!=SND_COUNTDOWN;i++) { Run(1); CHECK(i<5000); }
+ live=snd.deadline; Place(SHOOTER,0,0);
+ shooterView=away; shooterForward=127; shooterUp=127; shooterButtons=BUTTON_MELEE|BUTTON_SPRINT;
+ while(level.time<live) { CHECK(Frozen(SHOOTER)); Run(1); }
+ CHECK(snd.phase==SND_LIVE && !(ps->pm_flags&PMF_FROZEN));
+ CHECK(ps->weaponstate==WEAPON_READY);	/* so a press would take the knife */
+ for(i=0;i<400;i++) {
+  Run(1);
+  CHECK(!(ps->weaponAction&WA_TYPE_MASK) && !(ps->pm_flags&PMF_SPRINTING) && ps->groundEntityNum!=ENTITYNUM_NONE);
+ }
+ /* let go, and each comes on a fresh press */
+ shooterButtons=0; shooterUp=0; Run(CMD_MSEC*2);
+ shooterButtons=BUTTON_SPRINT; Run(CMD_MSEC*2); CHECK(ps->pm_flags&PMF_SPRINTING);
+ shooterButtons=0; Run(CMD_MSEC*2); shooterButtons=BUTTON_MELEE; Run(CMD_MSEC*2);
+ CHECK((ps->weaponAction&WA_TYPE_MASK)==WA_MELEE);
+ shooterButtons=shooterForward=shooterUp=0;
 }
 /* MW2's prematch: the first round counts down with everyone frozen by the
  * same flag. The gun's first raise runs under it (the frozen command has no
@@ -773,6 +825,21 @@ static void TeamScoreLimit(void) {
  CHECK(level.replayEndTime>death+KILLCAM_GAME_DELAY);
  GameEndWindow(death);
  CHECK(replayStarts==1);
+ /* MW2's postgame team change: the switcher dies where he stands, scoring
+  * nothing (PlayerKilled returns, _damage.gsc:459), and stays dead
+  * (spawnClient returns): the 1-0 win stays a win. */
+ Com_sprintf(caseText,sizeof(caseText),"a team change after the game has ended");
+ {
+  int score=clients[MATE].ps.persistant[PERS_SCORE];
+  CHECK(g_entities[MATE].health>0 && level.teamScores[TEAM_RED]==1 && level.teamScores[TEAM_BLUE]==0);
+  SetTeam(&g_entities[MATE],"blue");
+  CHECK(level.teamScores[TEAM_RED]==1 && level.teamScores[TEAM_BLUE]==0);
+  CHECK(clients[MATE].ps.persistant[PERS_SCORE]==score);
+  CHECK(clients[MATE].sess.sessionTeam==TEAM_BLUE && clients[MATE].ps.persistant[PERS_TEAM]==TEAM_BLUE);
+  CHECK(g_entities[MATE].health<=0 && clients[MATE].ps.pm_type==PM_DEAD);
+  Run(3000);
+  CHECK(g_entities[MATE].health<=0 && clients[MATE].ps.pm_type==PM_DEAD && !(clients[MATE].ps.pm_flags&PMF_FROZEN));
+ }
 }
 static void TeamTimeLimit(void) {
  int death, end;
@@ -823,6 +890,7 @@ int main(void) {
  GracePeriod();
  OwnDamage();
  Prematch();
+ PrematchHolds();
  MatchWinningRound();
  TeamScoreLimit();
  TeamTimeLimit();

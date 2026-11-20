@@ -1884,6 +1884,11 @@ void CG_NextWeapon_f( void ) {
 	if ( cg.snap->ps.pm_flags & PMF_FOLLOW ) {
 		return;
 	}
+	// MW2's WeaponCycleAllowed (59d590) and ActionSlotUsageAllowed (59d6f0)
+	// refuse a frozen player: a Y in the countdown is not kept for after it.
+	if ( cg.predictedPlayerState.pm_flags & PMF_FROZEN ) {
+		return;
+	}
 
 	ps = &cg.predictedPlayerState;
 	trap_SendConsoleCommand("_peaceWeaponSwap\n");
@@ -1939,6 +1944,11 @@ void CG_AltWeapon_f( void ) {
 	playerState_t *ps;
 	int slot, i;
 	if (!cg.snap || (cg.snap->ps.pm_flags & PMF_FOLLOW)) return;
+	// MW2's WeaponCycleAllowed (59d590) and ActionSlotUsageAllowed (59d6f0)
+	// refuse a frozen player: a Y in the countdown is not kept for after it.
+	if ( cg.predictedPlayerState.pm_flags & PMF_FROZEN ) {
+		return;
+	}
 	CG_ValidateWeaponSelect();
 	ps = &cg.predictedPlayerState;
 	if ( ps->weaponstate == WEAPON_DROPPING ||
@@ -1972,6 +1982,11 @@ void CG_Weapon_f( void ) {
 		return;
 	}
 	if ( cg.snap->ps.pm_flags & PMF_FOLLOW ) {
+		return;
+	}
+	// MW2's WeaponCycleAllowed (59d590) and ActionSlotUsageAllowed (59d6f0)
+	// refuse a frozen player: a Y in the countdown is not kept for after it.
+	if ( cg.predictedPlayerState.pm_flags & PMF_FROZEN ) {
 		return;
 	}
 

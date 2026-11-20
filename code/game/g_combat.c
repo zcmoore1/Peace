@@ -609,7 +609,11 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 	self->client->ps.persistant[PERS_KILLED]++;
 
-	if (attacker && attacker->client) {
+	if ( level.intermissionQueued ) {
+		// MW2's PlayerKilled returns here once the game is postgame
+		// (_damage.gsc:459): a death after the end - a team change, a frag
+		// cooked off in its holder's hand - scores nothing for anyone.
+	} else if (attacker && attacker->client) {
 		attacker->client->lastkilled_client = self->s.number;
 
 		if ( attacker == self || OnSameTeam (self, attacker ) ) {
@@ -664,7 +668,9 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	}
 
 	// Add team bonuses
-	Team_FragBonuses(self, inflictor, attacker);
+	if ( !level.intermissionQueued ) {
+		Team_FragBonuses(self, inflictor, attacker);
+	}
 
 	// if I committed suicide, the flag does not fall, it returns.
 	if (meansOfDeath == MOD_SUICIDE) {

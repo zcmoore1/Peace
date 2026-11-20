@@ -656,6 +656,16 @@ void SetTeam( gentity_t *ent, const char *s ) {
 
 	BroadcastTeamChange( client, oldTeam );
 
+	// Once the game has ended nobody spawns (MW2's spawnClient returns when
+	// level.gameEnded): a player who changes team stays where he fell, dead,
+	// and joins his new team at the next game. S&D parks him through
+	// ClientSpawn (G_SNDWaitForRound).
+	if ( level.intermissionQueued && g_gametype.integer != GT_SND &&
+	     oldTeam != TEAM_SPECTATOR && team != TEAM_SPECTATOR ) {
+		client->ps.persistant[PERS_TEAM] = team;
+		return;
+	}
+
 	ClientBegin( clientNum );
 }
 

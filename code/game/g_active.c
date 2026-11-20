@@ -852,16 +852,6 @@ void ClientThink_real( gentity_t *ent ) {
 		return;
 	}
 
-	// MW2's PMF_FROZEN: Pmove reads only the stance from a frozen player's
-	// command, and so does everything the server does with it afterwards (the
-	// use code and its reload, a floor gun's pickup).
-	if ( client->ps.pm_flags & PMF_FROZEN ) {
-		ucmd->buttons &= BUTTON_STANCE_MASK | BUTTON_TALK;
-		ucmd->forwardmove = 0;
-		ucmd->rightmove = 0;
-		ucmd->upmove = 0;
-	}
-
 	// clear the rewards if time
 	if ( level.time > client->rewardTime ) {
 		client->ps.eFlags &= ~(EF_AWARD_IMPRESSIVE | EF_AWARD_EXCELLENT | EF_AWARD_GAUNTLET | EF_AWARD_ASSIST | EF_AWARD_DEFEND | EF_AWARD_CAP );

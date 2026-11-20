@@ -32,6 +32,14 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 pmove_t		*pm;
 pml_t		pml;
 
+// The command as the player sent it, for Pmove's frozen thinks: PMF_FROZEN
+// masks pm->cmd in place, and MW2 masks only its cmd, never its oldcmd
+// (PmoveSingle 574419; CoD4's ClientThink_real copies the raw command into
+// oldcmd). So what a frozen player holds is still held when the freeze
+// lifts, and is no new press (PM_KeepHeldThroughFreeze).
+static int		pm_rawButtons;
+static int		pm_rawUpmove;
+
 // movement parameters
 float	pm_stopspeed = 100.0f;	// MW2's stopspeed (0x7A9F9C)
 float	pm_swimScale = 0.50f;
@@ -5382,7 +5390,18 @@ static void PM_Weapon( void ) {
 		pm->ps->weapon = WP_NONE;
 		return;
 	}
-	reload = BG_UpdateWeaponPickup(pm->ps, &pm->cmd, pm->pickupItem, pml.msec);
+	if ( pm->ps->pm_flags & PMF_FROZEN ) {
+		// A frozen command holds nothing and reloads nothing: a hold neither
+		// counts nor, its button let go, reloads (the mask would read a held
+		// button as one let go, and a reload tap). A hold let go is over.
+		if ( !( pm_rawButtons & ( BUTTON_RELOAD | BUTTON_USE_RELOAD | BUTTON_USE ) ) ) {
+			pm->ps->pickupHeld = 0;
+			pm->ps->pickupTime = 0;
+		}
+		reload = qfalse;
+	} else {
+		reload = BG_UpdateWeaponPickup(pm->ps, &pm->cmd, pm->pickupItem, pml.msec);
+	}
 	// The server's use/reload request is a reload press (BG_UpdateActivate).
 	// Like MW2's reload check, a quick action does not read it at all, from the
 	// press to the end of the recovery draw; everywhere else it is taken now,
@@ -6063,6 +6082,7 @@ void PmoveSingle (pmove_t *pmove) {
 	// aim and the sprint (which end, nothing asking for them), the weapon's
 	// timers, and a reload, a swap or a throw already under way. The talk
 	// button is Peace's own and only draws the balloon.
+	// What is still held stays held across it (PM_KeepHeldThroughFreeze).
 	if ( pm->ps->pm_flags & PMF_FROZEN ) {
 		pm->cmd.buttons &= BUTTON_STANCE_MASK | BUTTON_TALK;
 		pm->cmd.forwardmove = 0;
@@ -6313,6 +6333,32 @@ void PmoveSingle (pmove_t *pmove) {
 
 /*
 ================
+PM_KeepHeldThroughFreeze
+
+MW2's oldcmd is the command as it came, frozen or not: a button held through
+a freeze was down on the last command, so when the freeze lifts it is no new
+press. Peace keeps that record in the player state, written from the command
+each think; a frozen think wrote it from the mask, which reads every held
+button as let go. So after a frozen command the record is written again from
+the command as it came: the knife and equipment buttons and Y (weaponAction),
+jump (PMF_JUMP_HELD) and sprint (PWF_SPRINT_RELEASE). A knife, grenade, jump
+or sprint held through the countdown waits for a fresh press, as MW2's does.
+================
+*/
+static void PM_KeepHeldThroughFreeze( playerState_t *ps ) {
+	ps->weaponAction = ( ps->weaponAction & ~( WA_HELD_MASK | WA_SWAP_HELD ) ) |
+		( ( ( pm_rawButtons >> 15 ) & 7 ) << WA_HELD_SHIFT ) |
+		( ( pm_rawButtons & BUTTON_WEAPON_SWAP ) ? WA_SWAP_HELD : 0 );
+	if ( pm_rawUpmove >= 10 ) {
+		ps->pm_flags |= PMF_JUMP_HELD;
+	}
+	if ( pm_rawButtons & BUTTON_SPRINT ) {
+		ps->weapFlags |= PWF_SPRINT_RELEASE;
+	}
+}
+
+/*
+================
 Pmove
 
 Can be called by either the server or the client
@@ -6326,6 +6372,8 @@ void Pmove (pmove_t *pmove) {
 	int			prevCmd = BG_PrevCmdPack( &pmove->cmd );
 	qboolean	stepped = qfalse;
 
+	pm_rawButtons = pmove->cmd.buttons;
+	pm_rawUpmove = pmove->cmd.upmove;
 	finalTime = pmove->cmd.serverTime;
 
 	if ( finalTime < pmove->ps->commandTime ) {
@@ -6365,6 +6413,9 @@ void Pmove (pmove_t *pmove) {
 	}
 	if ( stepped ) {
 		pmove->ps->prevCmd = prevCmd;
+		if ( pmove->ps->pm_flags & PMF_FROZEN ) {
+			PM_KeepHeldThroughFreeze( pmove->ps );
+		}
 	}
 
 	//PM_CheckStuck();

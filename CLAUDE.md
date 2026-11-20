@@ -1415,8 +1415,19 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   `PM_Weapon` begins no weapon change. Everything else runs on, so what was
   under way finishes (a reload, a swap, a stance change, a knife or grenade in
   hand, which is thrown) and nothing new starts; the aim and the sprint end and
-  the legs idle. The server masks the same command before its use code. The
-  client takes no look input while its last snapshot says frozen
+  the legs idle. MW2 masks only that command, never the one before it
+  (oldcmd), so what is held stays held: after a frozen Pmove the player
+  state's button records (weaponAction's held bits and Y, `PMF_JUMP_HELD`,
+  `PWF_SPRINT_RELEASE`) are written again from the command as it came
+  (`PM_KeepHeldThroughFreeze`), and a knife, grenade, jump or sprint held
+  through the countdown waits for a fresh press. Never update a button
+  record from the masked command alone. A floor gun's hold neither counts
+  nor, let go, reloads while frozen. The server reads the command as it came,
+  as MW2's does (no frozen test; its use code reads the raw buttons): the
+  frozen Pmove drops any use/reload request. The client asks for no Y, alt
+  toggle or weapon number while frozen (MW2's `WeaponCycleAllowed` 0x59D590,
+  `ActionSlotUsageAllowed` 0x59D6F0), so nothing waits to begin when it lifts.
+  The client takes no look input while its last snapshot says frozen
   (`CL_CreateCmd`; MW2's mouse, keyboard and pad turns all return). `PM_FREEZE`
   is only S&D's dead waiting for a round. Never freeze by returning before
   Pmove: the gun, the aim and the legs stop where they are and the view still
@@ -1450,7 +1461,10 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   `SND_KILLCAM_RESTART` (100) after it, and the intermission waits for it.
   Every mode freezes its survivors `ROUNDEND_FREEZE_DELAY` after the game
   ends (MW2's endGame freezes before its round/game branch): `ClientFrozen`,
-  with `PMF_FROZEN` as in S&D. Nobody respawns once the game has ended. The
+  with `PMF_FROZEN` as in S&D. Nobody respawns once the game has ended. A
+  death after it scores nothing (`player_die`: MW2's `PlayerKilled` returns
+  in postgame, _damage.gsc:459), and outside S&D a team change then leaves
+  the switcher dead where he fell (`SetTeam` skips `ClientBegin`). The
   scoreboard waits for MW2's screens (`G_IntermissionTime`, g_combat.c): a game
   without rounds shows VICTORY or DEFEAT for `KILLCAM_GAME_DELAY`, then its
   final killcam; S&D's match-winning round shows the round's end

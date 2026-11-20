@@ -2648,12 +2648,115 @@ static void TestAirSprintSwap(void) {
  }
  move.cmd.forwardmove=0;
 }
+/* MW2's PMF_FROZEN in Pmove alone, as the client predicts it (PmoveSingle
+ * 57440d-57445d): the server's end frame sets the flag, and Pmove does the rest
+ * with no help from the server. Nothing the command asks for starts, what was
+ * under way finishes, gravity waits, and what is held stays held: when the
+ * freeze lifts it is no new press (MW2 masks cmd, never oldcmd). */
+static void FreezeMove(qboolean frozen, int forward, int up, int buttons) {
+ if(frozen) ps.pm_flags|=PMF_FROZEN; else ps.pm_flags&=~PMF_FROZEN;
+ /* Pmove masks its own command in place, as MW2's PmoveSingle does
+  * (the server and the client each hand it a copy) */
+ move.cmd.forwardmove=forward; move.cmd.rightmove=0; move.cmd.upmove=up; move.cmd.buttons=buttons;
+ move.cmd.serverTime=ps.commandTime+8; Pmove(&move);
+}
+static void FrozenMove(int forward, int up, int buttons) { FreezeMove(qtrue,forward,up,buttons); }
+static void LiveMove(int forward, int up, int buttons) { FreezeMove(qfalse,forward,up,buttons); }
+static void TestFrozen(void) {
+ const int presses[]={BUTTON_ATTACK,BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL,BUTTON_RELOAD,
+  BUTTON_USE_RELOAD,BUTTON_ADS,BUTTON_SPRINT,BUTTON_WEAPON_SWAP,BUTTON_ATTACK|BUTTON_ADS|BUTTON_SPRINT};
+ const int held[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL};
+ const int actions[]={WA_MELEE,WA_LETHAL,WA_TACTICAL};
+ vec3_t at; int i,t,ammo,frags;
+ /* Nothing starts: each button with the stick and jump held, then Y. */
+ for(i=0;i<ARRAY_LEN(presses);i++) {
+  FlatReady(WP_MACHINEGUN,WP_SHOTGUN); ps.ammo[WP_MACHINEGUN]-=5;
+  ammo=ps.ammo[WP_MACHINEGUN]; frags=ps.ammo[WP_FRAG]; VectorCopy(ps.origin,at);
+  for(t=0;t<60;t++) {
+   FrozenMove(127,127,presses[i]);
+   CHECK(VectorCompare(ps.origin,at) && VectorLength(ps.velocity)==0 && ps.groundEntityNum==ENTITYNUM_WORLD);
+   CHECK(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_READY && ps.ammo[WP_MACHINEGUN]==ammo);
+   CHECK(!(ps.weaponAction&WA_TYPE_MASK) && ps.ammo[WP_FRAG]==frags && !(ps.eFlags&EF_FIRING));
+   CHECK(!(ps.pm_flags&(PMF_ADS|PMF_SPRINTING)));
+  }
+ }
+ FlatReady(WP_MACHINEGUN,WP_SHOTGUN); move.cmd.weapon=BG_SLOT_COMMAND+SLOT_SECONDARY;
+ for(t=0;t<60;t++) { FrozenMove(0,0,0); CHECK(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_READY); }
+ /* the Y asked for in the freeze is taken once it lifts (the client refuses
+  * to ask while frozen: CG_NextWeapon_f) */
+ LiveMove(0,0,0); CHECK(ps.weaponstate==WEAPON_DROPPING);
+ /* The talk balloon still shows. */
+ FlatReady(WP_MACHINEGUN,WP_SHOTGUN); FrozenMove(0,0,BUTTON_TALK); CHECK(ps.eFlags&EF_TALK);
+
+ /* Held through the lift: the knife and equipment buttons, sprint and jump
+  * wait for a fresh press, as before a freeze. */
+ for(i=0;i<ARRAY_LEN(held);i++) {
+  FlatReady(WP_MACHINEGUN,WP_SHOTGUN);
+  for(t=0;t<5;t++) FrozenMove(0,0,held[i]);
+  CHECK((ps.weaponAction&WA_HELD_MASK)>>WA_HELD_SHIFT==((held[i]>>15)&7));
+  for(t=0;t<40;t++) { LiveMove(0,0,held[i]); CHECK(!(ps.weaponAction&WA_TYPE_MASK)); }
+  LiveMove(0,0,0); LiveMove(0,0,held[i]); CHECK((ps.weaponAction&WA_TYPE_MASK)==actions[i]);
+ }
+ FlatReady(WP_MACHINEGUN,WP_SHOTGUN);
+ for(t=0;t<5;t++) FrozenMove(127,0,BUTTON_SPRINT);
+ CHECK(ps.weapFlags&PWF_SPRINT_RELEASE);
+ for(t=0;t<40;t++) { LiveMove(127,0,BUTTON_SPRINT); CHECK(!(ps.pm_flags&PMF_SPRINTING)); }
+ LiveMove(127,0,0); LiveMove(127,0,BUTTON_SPRINT); CHECK(ps.pm_flags&PMF_SPRINTING);
+ FlatReady(WP_MACHINEGUN,WP_SHOTGUN);
+ for(t=0;t<5;t++) FrozenMove(0,127,0);
+ CHECK(ps.pm_flags&PMF_JUMP_HELD);
+ for(t=0;t<40;t++) { LiveMove(0,127,0); CHECK(ps.groundEntityNum==ENTITYNUM_WORLD && ps.velocity[2]==0); }
+ LiveMove(0,0,0); LiveMove(0,127,0); CHECK(ps.groundEntityNum==ENTITYNUM_NONE && ps.velocity[2]>0);
+ /* and Y held across it is no press for a cancel either */
+ FlatReady(WP_MACHINEGUN,WP_SHOTGUN); FrozenMove(0,0,BUTTON_WEAPON_SWAP); CHECK(ps.weaponAction&WA_SWAP_HELD);
+
+ /* Under way finishes: a knife, and equipment asked for before the freeze,
+  * come out and the gun comes back; a held grenade is thrown (its button
+  * reads as let go). An empty hand draws the gun asked for (MW2 refuses a
+  * change only with a gun in hand, CheckForChangeWeapon 578cbf). */
+ FlatReady(WP_MACHINEGUN,WP_SHOTGUN); LiveMove(0,0,BUTTON_MELEE);
+ CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_MELEE);
+ for(t=0;t<200 && !(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_READY && !(ps.weaponAction&WA_TYPE_MASK));t++) FrozenMove(0,0,BUTTON_MELEE);
+ CHECK(t<200 && t*8>=BG_MELEE_TIME);
+ FlatReady(WP_MACHINEGUN,WP_SHOTGUN); frags=ps.ammo[WP_FRAG]; LiveMove(0,0,BUTTON_LETHAL);
+ CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_LETHAL);
+ for(t=0;t<500 && !(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_READY && !(ps.weaponAction&WA_TYPE_MASK));t++) FrozenMove(0,0,BUTTON_LETHAL);
+ CHECK(t<500 && ps.ammo[WP_FRAG]==frags-1);
+ /* equipment pressed during a shot waits for it, and the freeze lands first:
+  * it still comes out once the shot is over */
+ FlatReady(WP_SHOTGUN,WP_MACHINEGUN); frags=ps.ammo[WP_FRAG];
+ LiveMove(0,0,BUTTON_ATTACK); CHECK(ps.weaponstate==WEAPON_FIRING && ps.weaponTime>16);
+ LiveMove(0,0,BUTTON_LETHAL); CHECK((ps.weaponAction&WA_TYPE_MASK)==WA_LETHAL && ps.weapon==WP_SHOTGUN);
+ for(t=0;t<500 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_READY && !(ps.weaponAction&WA_TYPE_MASK));t++) FrozenMove(0,0,0);
+ CHECK(t<500 && ps.ammo[WP_FRAG]==frags-1);
+ FlatReady(WP_MACHINEGUN,WP_SHOTGUN); ps.weapon=WP_NONE; ps.weaponstate=WEAPON_READY; ps.weaponTime=0;
+ move.cmd.weapon=BG_SLOT_COMMAND+SLOT_PRIMARY;
+ for(t=0;t<300 && !(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_READY);t++) FrozenMove(0,0,0);
+ CHECK(t<300 && ps.weapon==WP_MACHINEGUN);
+
+ /* The server's use/reload request (BG_UpdateActivate, after Pmove) is
+  * dropped, as MW2's PmoveSingle drops weapFlags 1 (574420); live, it reloads. */
+ FlatReady(WP_MACHINEGUN,WP_SHOTGUN); ps.ammo[WP_MACHINEGUN]-=5; ps.weapFlags|=PWF_USE_RELOAD;
+ FrozenMove(0,0,0); CHECK(!(ps.weapFlags&PWF_USE_RELOAD) && ps.weaponstate==WEAPON_READY);
+ ps.weapFlags|=PWF_USE_RELOAD; LiveMove(0,0,0); CHECK(ps.weaponstate==WEAPON_RELOADING);
+
+ /* Gravity waits: frozen in the air it hangs there, and a water jump under
+  * way is not ended by its fall (PM_WaterJumpMove). */
+ Ready(WP_MACHINEGUN,WP_SHOTGUN);
+ move.trace=RespawnTrace; move.pointcontents=RespawnContents; move.tracemask=MASK_PLAYERSOLID;
+ ps.speed=BG_PLAYER_SPEED; ps.gravity=800; ps.pm_type=PM_NORMAL; ps.origin[2]=2048;
+ ps.groundEntityNum=ENTITYNUM_NONE; ps.velocity[2]=-300; VectorCopy(ps.origin,at);
+ for(t=0;t<60;t++) { FrozenMove(127,0,0); CHECK(VectorCompare(ps.origin,at) && VectorLength(ps.velocity)==0); }
+ ps.pm_flags|=PMF_TIME_WATERJUMP; ps.pm_time=2000; ps.velocity[2]=350;
+ FrozenMove(0,0,0); CHECK((ps.pm_flags&PMF_TIME_WATERJUMP) && VectorCompare(ps.origin,at));
+ LiveMove(0,0,0); CHECK(!(ps.pm_flags&PMF_TIME_WATERJUMP));	/* live, the fall ends it */
+}
 static void TestHeldThroughRespawn(void) {
  const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL,BUTTON_LETHAL};
  const int specials[]={WP_KNIFE,WP_FRAG,WP_FLASH,WP_SEMTEX};
  const int actions[]={WA_MELEE,WA_LETHAL,WA_TACTICAL,WA_LETHAL};
  int i,mode,t,count,holdMs;
- for(i=0;i<ARRAY_LEN(buttons);i++) for(mode=0;mode<3;mode++) {
+ for(i=0;i<ARRAY_LEN(buttons);i++) for(mode=0;mode<4;mode++) {
   Ready(WP_MACHINEGUN,WP_SHOTGUN);
   if(specials[i]==WP_SEMTEX) {
    bg_class_t cl=*BG_Class(0);
@@ -2665,6 +2768,14 @@ static void TestHeldThroughRespawn(void) {
   ps.pm_flags|=PMF_RESPAWNED; count=ps.ammo[specials[i]];
   /* Ordinary spawn, frozen countdown, and attack delaying the spawn gate. */
   if(mode==1) RespawnMove(buttons[i],PM_FREEZE);
+  /* MW2's countdown: PMF_FROZEN on a PM_NORMAL player, then live. The mask
+   * reads the held button as let go, but the held record is the command as
+   * it came (MW2's oldcmd), so it is no press when the countdown ends. */
+  if(mode==3) {
+   for(t=0;t<40;t+=8) { ps.pm_flags|=PMF_FROZEN; RespawnMove(buttons[i],PM_NORMAL); }
+   CHECK(!(ps.pm_flags&PMF_RESPAWNED));	/* the mask let the respawned flag go */
+   ps.pm_flags&=~PMF_FROZEN;
+  }
   if(mode==2) {
    RespawnMove(buttons[i]|BUTTON_ATTACK,PM_NORMAL);
    CHECK(ps.pm_flags&PMF_RESPAWNED);
@@ -2686,7 +2797,7 @@ static void TestHeldThroughRespawn(void) {
 int main(void) {
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
  TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestNoSwapInQuickAction(); TestSemtexCancelKeepsLock(); TestThrowingKnife(); TestTacticalInsertion(); TestHoldThrowsBeforeCancel(); TestFragCook(); TestSeaLion(); TestLethalFromEmptyHand(); TestKnifeOutOfReload(); TestKnifeOutOfReloadSettle(); TestKnifeOutOfAction(); TestKnifeInKnife(); TestMeleeNoDrop(); TestKnifeTimeline(); TestRecovery();
- TestMovementScale(); TestWalkMatchesMW2(); TestClassSpeeds(); TestSprintStrafe(); TestPitchClamp(); TestBodyHeights(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestAirSprintSwap(); TestHeldThroughRespawn();
+ TestMovementScale(); TestWalkMatchesMW2(); TestClassSpeeds(); TestSprintStrafe(); TestPitchClamp(); TestBodyHeights(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestAirSprintSwap(); TestHeldThroughRespawn(); TestFrozen();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;
 }

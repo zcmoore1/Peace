@@ -63,7 +63,9 @@ side.
   reload, a swap or a stance change already under way finishes. A knife or
   grenade still held is thrown (the held button reads as let go). Frozen in the
   air he hangs there. The view is locked on the client, as MW2 locks it. The
-  first round's countdown is the same freeze.
+  first round's countdown is the same freeze. Whatever is held when it lifts
+  is no new press: a knife, grenade, jump or sprint held through the
+  countdown waits to be pressed again, and Y pressed during it does nothing.
 - **An elimination is decided in the death itself**, as MW2's is
   (`PlayerKilled` -> `removeFromAliveCount` -> `onDeadEvent` -> endGame,
   postgame before anything else). So nothing later in the same frame - a

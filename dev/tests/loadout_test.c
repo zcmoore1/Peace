@@ -2750,6 +2750,14 @@ static void TestFrozen(void) {
  ps.pm_flags|=PMF_TIME_WATERJUMP; ps.pm_time=2000; ps.velocity[2]=350;
  FrozenMove(0,0,0); CHECK((ps.pm_flags&PMF_TIME_WATERJUMP) && VectorCompare(ps.origin,at));
  LiveMove(0,0,0); CHECK(!(ps.pm_flags&PMF_TIME_WATERJUMP));	/* live, the fall ends it */
+ /* nor does a frozen swimmer sink (Quake 3's swim, which MW2 has not) */
+ Ready(WP_MACHINEGUN,WP_SHOTGUN);
+ move.trace=RespawnTrace; move.pointcontents=AllWater; move.tracemask=MASK_PLAYERSOLID;
+ ps.speed=BG_PLAYER_SPEED; ps.gravity=800; ps.pm_type=PM_NORMAL; ps.origin[2]=500; ps.groundEntityNum=ENTITYNUM_NONE;
+ VectorCopy(ps.origin,at);
+ for(t=0;t<100;t++) { FrozenMove(0,0,0); CHECK(VectorCompare(ps.origin,at)); }
+ for(t=0;t<100;t++) LiveMove(0,0,0);
+ CHECK(ps.origin[2]<at[2]-1);	/* live, it sinks */
 }
 static void TestHeldThroughRespawn(void) {
  const int buttons[]={BUTTON_MELEE,BUTTON_LETHAL,BUTTON_TACTICAL,BUTTON_LETHAL};

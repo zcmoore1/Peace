@@ -431,6 +431,32 @@ static void TestConsoleMidHold( void ) {
 	}
 }
 
+/* MW2 takes no look input for a frozen player (CL_MouseMove 5a626b, the
+ * keyboard turn 5a5d92): the view stays put, and through a killcam too, whose
+ * replayed state is the killer's and says nothing of the viewer's freeze. */
+static void TestFrozenLook( void ) {
+	static cvar_t sensitivity, yaw;
+	cvar_t *oldSensitivity = cl_sensitivity, *oldYaw = m_yaw;
+	int mode;
+	float before;
+	sensitivity.value = 5; yaw.value = 0.022f;
+	cl_sensitivity = &sensitivity; m_yaw = &yaw;
+	for ( mode = 0; mode < 3; mode++ ) {
+		Reset( 8 ); cl.cgameSensitivity = 1;
+		if ( mode == 1 ) cl.snap.ps.pm_flags |= PMF_FROZEN;
+		if ( mode == 2 ) cl.snap.snapFlags |= SNAPFLAG_REPLAY;
+		Frame();
+		before = cl.viewangles[YAW];
+		Begin(); CL_MouseEvent( 40, 0, com_frameTime ); End();
+		if ( mode ) {
+			CHECK( cl.viewangles[YAW] == before && lastCmd.angles[YAW] == ( ANGLE2SHORT( before ) & 65535 ) );
+		} else {
+			CHECK( cl.viewangles[YAW] < before - 1 );	/* live, the mouse turns it */
+		}
+	}
+	cl_sensitivity = oldSensitivity; m_yaw = oldYaw;
+}
+
 int main( void ) {
 	extern cvar_t *cl_run, *cl_yawspeed, *cl_pitchspeed, *cl_anglespeedkey;
 	Cbuf_Init();
@@ -447,6 +473,7 @@ int main( void ) {
 	TestSetStance();
 	TestKeyPath();
 	TestConsoleMidHold();
+	TestFrozenLook();
 	printf( "PASS: MW2's stance input through the real client (%d checks)\n", checks );
 	return 0;
 }

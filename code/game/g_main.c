@@ -1315,58 +1315,6 @@ void CheckIntermissionExit( void ) {
 }
 
 /*
-=============
-ScoreIsTied
-=============
-*/
-qboolean ScoreIsTied( void ) {
-	int		a, b;
-
-	if ( level.numPlayingClients < 2 ) {
-		return qfalse;
-	}
-	
-	if ( g_gametype.integer >= GT_TEAM ) {
-		return level.teamScores[TEAM_RED] == level.teamScores[TEAM_BLUE];
-	}
-
-	a = level.clients[level.sortedClients[0]].ps.persistant[PERS_SCORE];
-	b = level.clients[level.sortedClients[1]].ps.persistant[PERS_SCORE];
-
-	return a == b;
-}
-
-/*
-=================
-G_ShowGameEnd
-
-MW2's displayGameEnd: VICTORY or DEFEAT to each player. A team game's winner
-is the higher score, anyone else's the top of the ranks; a tie is a draw.
-=================
-*/
-static void G_ShowGameEnd( void ) {
-	int			i;
-	gclient_t	*cl;
-	qboolean	tied = ScoreIsTied();
-	for ( i = 0 ; i < level.maxclients ; i++ ) {
-		const char *text;
-		cl = &level.clients[i];
-		if ( cl->pers.connected != CON_CONNECTED || cl->sess.sessionTeam == TEAM_SPECTATOR ) {
-			continue;
-		}
-		if ( tied ) {
-			text = "Draw";
-		} else if ( g_gametype.integer >= GT_TEAM ) {
-			team_t winner = level.teamScores[TEAM_RED] > level.teamScores[TEAM_BLUE] ? TEAM_RED : TEAM_BLUE;
-			text = cl->sess.sessionTeam == winner ? "Victory" : "Defeat";
-		} else {
-			text = level.numPlayingClients > 0 && level.sortedClients[0] == i ? "Victory" : "Defeat";
-		}
-		trap_SendServerCommand( i, va( "cp \"%s\"", text ) );
-	}
-}
-
-/*
 =================
 CheckExitRules
 
@@ -1390,17 +1338,7 @@ void CheckExitRules( void ) {
 		// final killcam (G_IntermissionTime), with VICTORY or DEFEAT shown
 		// when displayGameEnd begins. Until the scoreboard everyone alive is
 		// frozen where they stand from ROUNDEND_FREEZE_DELAY on (ClientEndFrame).
-		int at = G_IntermissionTime();
-#ifdef MISSIONPACK
-		if (g_singlePlayer.integer && !level.replayEndTime) {
-			at = level.intermissionQueued + SP_INTERMISSION_DELAY_TIME;
-		}
-#endif
-		if ( !level.gameEndShown && level.time >= G_GameEndTime() + GAME_END_SPLASH_DELAY ) {
-			level.gameEndShown = qtrue;
-			G_ShowGameEnd();
-		}
-		if ( level.time >= at ) {
+		if ( G_GameEndDue() ) {
 			level.intermissionQueued = 0;
 			level.replayEndTime = 0;
 			BeginIntermission();

@@ -1428,23 +1428,30 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   toggle or weapon number while frozen (MW2's `WeaponCycleAllowed` 0x59D590,
   `ActionSlotUsageAllowed` 0x59D6F0), so nothing waits to begin when it lifts.
   The client takes no look input while its last snapshot says frozen
-  (`CL_CreateCmd`; MW2's mouse, keyboard and pad turns all return). `PM_FREEZE`
+  (`CL_CreateCmd`; MW2's mouse, keyboard and pad turns all return), nor
+  through a killcam, whose snapshots carry the killer's state. A spawn is
+  put down onto the floor below its Quake 3 lift (`ClientSpawn`; MW2's spawns
+  stand on it), or a frozen countdown would leave it hanging; a frozen
+  swimmer does not sink. `PM_FREEZE`
   is only S&D's dead waiting for a round. Never freeze by returning before
   Pmove: the gun, the aim and the legs stop where they are and the view still
   turns.
 - **S&D counts down only before a first round.** MW2's prematch period is 0
   once the game has started, so a round that follows another starts live with
-  nobody frozen (`SND_StartRound( qfalse )` -> `SND_GoLive`); only a round that
-  starts from waiting for players counts down (`g_sndCountdown`), frozen.
-- **MW2's grace period (`g_sndGracePeriod`, 15).** For a round's first 15.05s
-  (`snd.graceEnd`, set by `SND_GoLive`: gracePeriod's fifteen 1s waits and a
-  0.05s one) a team wiped out has not lost: `SND_CheckElimination` returns,
-  the round goes on with damage and the bomb, and the frame at `graceEnd`
-  decides it, with the freeze 1.05s after that frame, not after the death.
-  Never end a round on a kill inside it. The winning kill's clip is asked
-  for at the kill (`SND_HoldGraceClip`), because the replay holds only 6.5s,
-  and plays from `graceEnd` plus the round's wait; `SND_EndRound` drops a
-  clip held for a result that did not come. MW2 also lets late comers spawn
+  nobody frozen (`SND_StartRound( qfalse )` -> `SND_GoLive`); only the match's
+  first round counts down (`g_sndCountdown`), frozen, also when a team
+  emptied mid-match and the game waited for players.
+- **MW2's grace period (`g_sndGracePeriod`, 15).** Before `snd.graceEnd`
+  (set by `SND_GoLive`: gracePeriod's fifteen 1s waits) a team wiped out has
+  not lost: `SND_CheckElimination` returns, the round goes on with damage and
+  the bomb, and gracePeriod's own check `SND_GRACE_CHECK_DELAY` (0.05s) after
+  `graceEnd` decides it, with the freeze 1.05s after that frame, not after
+  the death. A death from `graceEnd` on decides in the death, as any other.
+  Never end a round on a kill inside it. Such a round has no killcam: MW2's
+  final kill is the death that made the game postgame (`onNormalDeath`,
+  sd.gsc:347, runs after `removeFromAliveCount` may have ended it), so
+  `SND_EndRound` asks for one only for a deciding kill past `graceEnd`
+  (`SND_DecidingKill`), and the round's pause follows. MW2 also lets late comers spawn
   and drops no weapon in that time; Peace does neither yet.
 - Round-winning killcams use a bounded engine snapshot history in
   `sv_snapshot.c`, including the killer's player state and original visibility.
@@ -1465,7 +1472,8 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   death after it scores nothing (`player_die`: MW2's `PlayerKilled` returns
   in postgame, _damage.gsc:459), and outside S&D a team change then leaves
   the switcher dead where he fell (`SetTeam` skips `ClientBegin`). The
-  scoreboard waits for MW2's screens (`G_IntermissionTime`, g_combat.c): a game
+  scoreboard waits for MW2's screens (`G_GameEndDue`, `G_IntermissionTime`,
+  g_combat.c, which CheckExitRules asks each frame): a game
   without rounds shows VICTORY or DEFEAT for `KILLCAM_GAME_DELAY`, then its
   final killcam; S&D's match-winning round shows the round's end
   (`KILLCAM_MATCH_DELAY`), its killcam, then VICTORY or DEFEAT for

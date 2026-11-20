@@ -136,7 +136,21 @@ void trap_GetUserinfo(int n,char *b,int s) { (void)n; if(s>0) b[0]=0; }
 void trap_SetUserinfo(int n,const char *b) { (void)n;(void)b; }
 void trap_SetConfigstring(int n,const char *s) { (void)n;(void)s; }
 void trap_GetConfigstring(int n,char *b,int s) { (void)n; if(s>0) b[0]=0; }
-void trap_SendServerCommand(int n,const char *s) { (void)n;(void)s; }
+/* What the server sends, for the end screens: who, the level time, the text */
+static struct { int client, time; char text[64]; } sent[64];
+static int sentCount, intermissionAt;
+void trap_SendServerCommand(int n,const char *s) {
+ if(sentCount<(int)ARRAY_LEN(sent)) {
+  sent[sentCount].client=n; sent[sentCount].time=level.time;
+  Q_strncpyz(sent[sentCount].text,s,sizeof(sent[sentCount].text)); sentCount++;
+ }
+}
+/* The level time client n was sent text, or -1 */
+static int SentAt(int n,const char *text) {
+ int i;
+ for(i=0;i<sentCount;i++) if(sent[i].client==n && !strcmp(sent[i].text,text)) return sent[i].time;
+ return -1;
+}
 void trap_LocateGameData(gentity_t *g,int n,int s,playerState_t *c,int cs) { (void)g;(void)n;(void)s;(void)c;(void)cs; }
 void trap_SnapVector(float *v) { v[0]=rintf(v[0]); v[1]=rintf(v[1]); v[2]=rintf(v[2]); }
 void trap_DropClient(int n,const char *r) { (void)n;(void)r; }
@@ -155,7 +169,11 @@ qboolean OnSameTeam(gentity_t *a,gentity_t *b) {
 }
 /* a spot per side; each round the test puts everyone where it wants them */
 gentity_t *SelectCTFSpawnPoint(team_t team,int state,vec3_t origin,vec3_t angles,qboolean bot) {
- (void)state;(void)bot; VectorSet(origin,team==TEAM_RED ? -600 : 600,600,24); VectorSet(angles,0,0,0); return NULL;
+ /* lifted 9 units clear of its resting height, as g_team.c's is; one
+  * spot a player, as a map's are */
+ static int spots;
+ (void)state;(void)bot;
+ VectorSet(origin,(team==TEAM_RED ? -600 : 600)+100*(spots++%4),600,24+9); VectorSet(angles,0,0,0); return NULL;
 }
 void MoveClientToIntermission(gentity_t *e) { (void)e; }
 void FindIntermissionPoint(void) { }
@@ -233,6 +251,10 @@ static void ServerFrame(int levelTime) {
  }
  G_SNDRunFrame();
  for(i=0,ent=g_entities;i<level.maxclients;i++,ent++) if(ent->inuse) ClientEndFrame(ent);
+ /* then CheckExitRules' queued intermission: MW2's end screens, then the scoreboard */
+ if(level.intermissionQueued && !intermissionAt && G_GameEndDue()) {
+  intermissionAt=level.time; level.intermissionQueued=0; level.replayEndTime=0;
+ }
 }
 /* A command as SV_ClientThink hands it to the game, between frames: level.time
  * is the last frame's. The aim is the command's own (delta_angles cleared). */
@@ -295,7 +317,7 @@ static void ResetMatch(void) {
  level.clients=clients; level.gentities=g_entities;
  g_gametype.integer=GT_SND; g_knockback.integer=0; g_speed.value=320; g_gravity.value=DEFAULT_GRAVITY;
  g_friendlyFire.integer=1; pmove_msec.integer=8; pmove_fixed.integer=0;
- replayStarts=exits=0;
+ replayStarts=exits=0; sentCount=intermissionAt=0;
  G_SNDInit(); sndCountdown.integer=1; sndGracePeriod.integer=graceSeconds;
  site=G_Spawn(); VectorSet(site->s.origin,-400,-400,8); spawnSite=0; SP_peace_bombsite(site); G_SNDMapReady();
  InitBodyQue();
@@ -636,18 +658,20 @@ static void SpectatorLeavesTheFrozen(void) {
 }
 /* MW2's grace period through the real server: the round's first kill, about
  * 3s after it went live, decides nothing until 15.05s. Everyone keeps full
- * control and damage stays on; then the round ends as any other does, the
- * freeze 1.05s later and the kill's replay after the round's wait. */
+ * control and damage stays on; then the round ends, the freeze 1.05s later,
+ * with no killcam: the kill decided nothing when it was made. */
 static void GracePeriod(void) {
  playerState_t *ps=&clients[SHOOTER].ps;
  vec3_t was; int end, death;
  Com_sprintf(caseText,sizeof(caseText),"the grace period");
  graceSeconds=15; Reset(); graceSeconds=0;
- end=snd.graceEnd; CHECK(end-level.time>10000 && end%FRAME==0);
+ /* the gate opens at the fifteenth second; a team wiped before it loses at
+  * gracePeriod's own check 0.05s later */
+ end=snd.graceEnd+SND_GRACE_CHECK_DELAY; CHECK(end-level.time>10000 && end%FRAME==0);
  ToCommand(); shooterButtons=BUTTON_ATTACK; Run(1); shooterButtons=0;
  CHECK(g_entities[VICTIM].health<=0 && !SND_Alive(VICTIM)); death=level.time;
  CHECK(snd.phase==SND_LIVE && snd.result==SND_NONE && level.teamScores[TEAM_RED]==0);
- CHECK(replayStarts==1 && replayKiller==SHOOTER && replayFrom==death-KILLCAM_REWIND && replayBegin==end+KILLCAM_ROUND_DELAY);
+ CHECK(!replayStarts && death<end);
  /* well past where a round's freeze would have come: he still runs, and
   * could still be hurt */
  Run(3000); VectorCopy(ps->origin,was); shooterView=away; shooterForward=127; Run(1000); shooterForward=0;
@@ -656,7 +680,8 @@ static void GracePeriod(void) {
  CHECK(snd.phase==SND_LIVE && !(ps->pm_flags&PMF_FROZEN));
  while(level.time<end) Run(1);
  CHECK(snd.phase==SND_ROUND_OVER && snd.winner==TEAM_RED && snd.result==SND_ELIMINATION);
- CHECK(snd.freezeTime==end+ROUNDEND_FREEZE_DELAY && !G_SNDCanDamage(&g_entities[SHOOTER]) && replayStarts==1);
+ CHECK(snd.freezeTime==end+ROUNDEND_FREEZE_DELAY && !G_SNDCanDamage(&g_entities[SHOOTER]) && !replayStarts);
+ CHECK(!level.replayEndTime && snd.deadline==end+snd.pauseMs);
  CHECK(!(ps->pm_flags&PMF_FROZEN));
  ToFreeze(end);
 }
@@ -695,6 +720,35 @@ static void PrematchHolds(void) {
  CHECK((ps->weaponAction&WA_TYPE_MASK)==WA_MELEE);
  shooterButtons=shooterForward=shooterUp=0;
 }
+/* sd.gsc sets level.bombExploded before its blast (bombPlanted 736-747) and
+ * onDeadEvent returns once it is set, so a death in the blast decides
+ * nothing. Through the real G_Damage and player_die: the last defender dies
+ * beside the bomb, and the round is still the detonation's, 3s later, with
+ * no killcam. */
+static void BlastDecidesNothing(void) {
+ int boom, t;
+ Com_sprintf(caseText,sizeof(caseText),"a death in the bomb's blast decides nothing");
+ Reset();
+ snd.carrier=SHOOTER; snd.plantMs=1000; snd.bombMs=5000;
+ Place(SHOOTER,-400,-400); Place(VICTIM,600,600); Place(MATE,600,0);
+ shooterButtons=BUTTON_USE;
+ for(t=0;t<3000 && snd.phase!=SND_PLANTED;t++) Run(1);
+ shooterButtons=0;
+ CHECK(snd.phase==SND_PLANTED && snd.planter==SHOOTER);
+ /* the planter runs; the last defender comes to the bomb, hurt */
+ Place(SHOOTER,700,-700); Place(VICTIM,-340,-400);
+ g_entities[VICTIM].health=clients[VICTIM].ps.stats[STAT_HEALTH]=10;
+ boom=snd.deadline;
+ while(level.time<boom) { CHECK(SND_Alive(VICTIM) && snd.result==SND_NONE); Run(1); }
+ CHECK(g_entities[VICTIM].health<=0 && !SND_Alive(VICTIM));	/* the blast killed him */
+ CHECK(snd.lastDeath[TEAM_BLUE].killer==SHOOTER);	/* credited to the planter */
+ CHECK(snd.phase==SND_PLANTED && snd.result==SND_EXPLODED && snd.deadline==boom+SND_DETONATION_DELAY);
+ CHECK(!replayStarts && level.teamScores[TEAM_RED]==0);
+ CHECK(g_entities[SHOOTER].health==100 && g_entities[MATE].health==100);	/* out of its reach */
+ while(level.time<boom+SND_DETONATION_DELAY) Run(1);
+ CHECK(snd.phase==SND_ROUND_OVER && snd.result==SND_EXPLODED && snd.winner==TEAM_RED);
+ CHECK(!replayStarts && level.teamScores[TEAM_RED]==1);
+}
 /* MW2's prematch: the first round counts down with everyone frozen by the
  * same flag. The gun's first raise runs under it (the frozen command has no
  * trigger, so the respawned flag clears on it), and the round goes live with
@@ -707,6 +761,10 @@ static void Prematch(void) {
  for(i=0;snd.phase!=SND_COUNTDOWN;i++) { Run(1); CHECK(i<5000); }
  live=snd.deadline;
  CHECK(level.time<live && Frozen(SHOOTER) && Frozen(VICTIM) && Frozen(MATE));	/* from the frame they spawn in */
+ /* on the floor through the countdown, as MW2's spawns are, not hanging
+  * where the lift left them (the frozen thinks run no gravity) */
+ Run(500); for(i=0;i<3;i++) CHECK(clients[i].ps.groundEntityNum!=ENTITYNUM_NONE && clients[i].ps.origin[2]<24.5f && Frozen(i));
+ live=snd.deadline;
  Place(SHOOTER,0,0);
  shooterButtons=BUTTON_ATTACK; shooterForward=127; shooterView=away;
  ToCommand(); Run(1);
@@ -840,6 +898,19 @@ static void TeamScoreLimit(void) {
   Run(3000);
   CHECK(g_entities[MATE].health<=0 && clients[MATE].ps.pm_type==PM_DEAD && !(clients[MATE].ps.pm_flags&PMF_FROZEN));
  }
+ /* MW2's displayGameEnd: VICTORY to the winners and DEFEAT to the losers,
+  * half a second in, and the scoreboard once the final killcam is over */
+ Com_sprintf(caseText,sizeof(caseText),"the game's end screens after a kill");
+ {
+  int at=G_IntermissionTime(), splash=G_GameEndTime()+GAME_END_SPLASH_DELAY;
+  CHECK(at==level.replayEndTime && splash==death+GAME_END_SPLASH_DELAY);
+  while(!intermissionAt) { CHECK(level.time<at+FRAME); Run(1); }
+  CHECK(intermissionAt>=at && intermissionAt<at+FRAME);
+  CHECK(SentAt(SHOOTER,"cp \"Victory\"")>=splash && SentAt(SHOOTER,"cp \"Victory\"")<splash+FRAME);
+  CHECK(SentAt(MATE,"cp \"Victory\"")==SentAt(SHOOTER,"cp \"Victory\""));	/* still red then */
+  CHECK(SentAt(VICTIM,"cp \"Defeat\"")==SentAt(SHOOTER,"cp \"Victory\""));
+  CHECK(SentAt(SHOOTER,"cp \"Defeat\"")<0 && SentAt(VICTIM,"cp \"Victory\"")<0);
+ }
 }
 static void TeamTimeLimit(void) {
  int death, end;
@@ -856,6 +927,17 @@ static void TeamTimeLimit(void) {
  CHECK(KILLCAM_GAME_DELAY>ROUNDEND_FREEZE_DELAY && GAME_END_DELAY+50==KILLCAM_GAME_DELAY);
  GameEndWindow(end);
  CHECK(!replayStarts && !level.replayEndTime);	/* MW2 shows no final killcam on a time limit */
+ while(!intermissionAt) { CHECK(level.time<end+KILLCAM_GAME_DELAY+FRAME); Run(1); }
+ CHECK(intermissionAt>=end+KILLCAM_GAME_DELAY && intermissionAt<end+KILLCAM_GAME_DELAY+FRAME);
+ CHECK(SentAt(SHOOTER,"cp \"Victory\"")>=end+GAME_END_SPLASH_DELAY && SentAt(VICTIM,"cp \"Defeat\"")>=0);
+ /* a tie is a draw for everyone */
+ Com_sprintf(caseText,sizeof(caseText),"a game that ends tied");
+ TeamGame(0); level.numPlayingClients=3;
+ level.teamScores[TEAM_RED]=level.teamScores[TEAM_BLUE]=2;
+ LogExit("Timelimit hit."); end=level.time;
+ while(!intermissionAt) { CHECK(level.time<end+KILLCAM_GAME_DELAY+FRAME); Run(1); }
+ CHECK(SentAt(SHOOTER,"cp \"Draw\"")>=end+GAME_END_SPLASH_DELAY && SentAt(VICTIM,"cp \"Draw\"")>=0 && SentAt(MATE,"cp \"Draw\"")>=0);
+ CHECK(SentAt(SHOOTER,"cp \"Victory\"")<0 && SentAt(VICTIM,"cp \"Defeat\"")<0);
 }
 /* S&D's match-winning round: the round's end first, frozen as any round, then
  * its killcam, and only then VICTORY / DEFEAT before the scoreboard. */
@@ -871,6 +953,14 @@ static void MatchWinningRound(void) {
  CHECK(clients[SHOOTER].ps.pm_type==PM_NORMAL && !(clients[SHOOTER].ps.pm_flags&PMF_FROZEN));	/* still free */
  ToFreeze(death);
  Run(2000); CHECK(Frozen(SHOOTER) && Frozen(MATE) && snd.phase==SND_ROUND_OVER);
+ {
+  int queued=level.intermissionQueued, at=G_IntermissionTime(), splash=G_GameEndTime()+GAME_END_SPLASH_DELAY;
+  while(!intermissionAt) { CHECK(level.time<at+FRAME); Run(1); }
+  CHECK(intermissionAt>=at && intermissionAt<at+FRAME);
+  CHECK(SentAt(SHOOTER,"cp \"Victory\"")>=splash && SentAt(SHOOTER,"cp \"Victory\"")<splash+FRAME);
+  CHECK(SentAt(MATE,"cp \"Victory\"")>=splash && SentAt(VICTIM,"cp \"Defeat\"")>=splash);
+  level.intermissionQueued=queued;
+ }
  /* won without a kill to replay (a defuse, the clock): the same screens, no killcam */
  level.replayEndTime=0;
  CHECK(G_GameEndTime()==death+KILLCAM_MATCH_DELAY && G_IntermissionTime()==death+KILLCAM_MATCH_DELAY+GAME_END_DELAY);
@@ -891,6 +981,7 @@ int main(void) {
  OwnDamage();
  Prematch();
  PrematchHolds();
+ BlastDecidesNothing();
  MatchWinningRound();
  TeamScoreLimit();
  TeamTimeLimit();

@@ -785,7 +785,9 @@ static void PM_WaterMove( void ) {
 	if ( !scale ) {
 		wishvel[0] = 0;
 		wishvel[1] = 0;
-		wishvel[2] = -60;		// sink towards bottom
+		// sink towards bottom; a frozen swimmer stays where he is, as a frozen
+		// player in the air does (MW2 has no swimming to say otherwise)
+		wishvel[2] = ( pm->ps->pm_flags & PMF_FROZEN ) ? 0 : -60;
 	} else {
 		for (i=0 ; i<3 ; i++)
 			wishvel[i] = scale * pml.forward[i]*pm->cmd.forwardmove + scale * pml.right[i]*pm->cmd.rightmove;

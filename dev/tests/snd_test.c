@@ -261,7 +261,9 @@ static void TestCountdownAndEmptyTeam(void) {
  CHECK(snd.phase==SND_WAITING && G_SNDCanRespawn());
  CHECK(SND_Alive(2) && g_clients[2].ps.pm_type==PM_NORMAL);
  CHECK(!(g_clients[2].ps.pm_flags&PMF_FOLLOW) && !snd.bomb->r.linked);
- Player(1,TEAM_BLUE); G_SNDRunFrame(); CHECK(snd.phase==SND_COUNTDOWN && snd.round==2);
+ /* MW2 counts down once a match: round 2 goes live at once, nobody frozen */
+ Player(1,TEAM_BLUE); G_SNDRunFrame(); CHECK(snd.phase==SND_LIVE && snd.round==2);
+ CHECK(!G_SNDFrozen(&g_entities[1]) && !G_SNDFrozen(&g_entities[2]));
 }
 static void TestRoundKillcam(void) {
  int deadline, resets, death;
@@ -442,86 +444,69 @@ static void TestBombBlast(void) {
  * until it is over (gracePeriod: fifteen 1s waits and a 0.05s one, counted
  * from the end of the prematch). The round goes on meanwhile. */
 static void TestGracePeriod(void) {
- int live, death, resets;
+ int live;
  Reset(2); sndGracePeriod.integer=15; Live(); live=level.time;
- CHECK(snd.graceEnd==live+15050);
- level.time=live+3000; Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]); death=level.time;
- /* nothing is decided: live, damage on, nobody frozen, no score */
+ CHECK(snd.graceEnd==live+15000);
+ level.time=live+3000; Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]);
+ /* nothing is decided: live, damage on, nobody frozen, no score, no killcam */
  CHECK(snd.phase==SND_LIVE && snd.result==SND_NONE && level.teamScores[TEAM_RED]==0);
- CHECK(G_SNDCanDamage(&g_entities[0]) && !G_SNDFrozen(&g_entities[0]) && !level.replayEndTime);
- /* the winning kill's clip is asked for now, while the replay holds it, to
-  * play when the round has ended */
- CHECK(replayStarts==1 && replayKiller==0 && replayFrom==death-KILLCAM_REWIND && replayTo==death+KILLCAM_LINGER);
- CHECK(replayBegin==live+15050+KILLCAM_ROUND_DELAY);
+ CHECK(G_SNDCanDamage(&g_entities[0]) && !G_SNDFrozen(&g_entities[0]) && !replayStarts);
  level.time=live+15000; G_SNDRunFrame();
- CHECK(snd.phase==SND_LIVE && replayStarts==1 && G_SNDCanDamage(&g_entities[0]));
+ CHECK(snd.phase==SND_LIVE && G_SNDCanDamage(&g_entities[0]));	/* the gate is open; the check comes 0.05s later */
+ /* the grace period's own check decides it; that kill was no final kill (MW2's
+  * onNormalDeath marks one only if the death has made the game postgame,
+  * sd.gsc:347), so there is no killcam and the round's pause follows */
  level.time=live+15050; G_SNDRunFrame();
  CHECK(snd.phase==SND_ROUND_OVER && snd.result==SND_ELIMINATION && snd.winner==TEAM_RED);
  CHECK(level.teamScores[TEAM_RED]==1 && snd.freezeTime==live+15050+ROUNDEND_FREEZE_DELAY);
- CHECK(replayStarts==1 && level.replayEndTime==replayDeadline && snd.deadline==replayDeadline+SND_KILLCAM_RESTART);
+ CHECK(!replayStarts && !level.replayEndTime && snd.deadline==level.time+snd.pauseMs);
  CHECK(!G_SNDFrozen(&g_entities[0])); level.time=snd.freezeTime; CHECK(G_SNDFrozen(&g_entities[0]));
  /* the next round has its own: it starts live, and its grace with it */
  level.time=snd.deadline; G_SNDRunFrame();
- CHECK(snd.phase==SND_LIVE && snd.round==2 && snd.graceEnd==level.time+15050 && !snd.graceClip);
- /* a kill in the last frame inside it waits for the next; one after it decides at once */
+ CHECK(snd.phase==SND_LIVE && snd.round==2 && snd.graceEnd==level.time+15000);
+ /* a kill in the last frame inside it waits for the check; one from the
+  * fifteenth second on decides at once (the count is 0: the gate is open),
+  * with its killcam */
  Reset(2); sndGracePeriod.integer=15; Live(); live=level.time;
- level.time=live+15000; G_SNDRunFrame(); Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]);
- CHECK(snd.phase==SND_LIVE);
+ level.time=live+14950; G_SNDRunFrame(); Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]);
+ level.time=live+15000; G_SNDRunFrame(); CHECK(snd.phase==SND_LIVE);
  level.time=live+15050; G_SNDRunFrame();
- CHECK(snd.phase==SND_ROUND_OVER && snd.freezeTime==live+15050+ROUNDEND_FREEZE_DELAY);
+ CHECK(snd.phase==SND_ROUND_OVER && snd.freezeTime==live+15050+ROUNDEND_FREEZE_DELAY && !replayStarts);
  Reset(2); sndGracePeriod.integer=15; Live(); live=level.time;
- level.time=live+15050; G_SNDRunFrame(); CHECK(snd.phase==SND_LIVE);
+ level.time=live+15000; G_SNDRunFrame(); CHECK(snd.phase==SND_LIVE);
  Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]);
- CHECK(snd.phase==SND_ROUND_OVER && snd.freezeTime==live+15050+ROUNDEND_FREEZE_DELAY);
- CHECK(replayStarts==1 && replayBegin==live+15050+KILLCAM_ROUND_DELAY);
- /* the attackers plant inside it, then kill the last defender: still theirs
-  * only when it is over */
+ CHECK(snd.phase==SND_ROUND_OVER && snd.freezeTime==live+15000+ROUNDEND_FREEZE_DELAY);
+ CHECK(replayStarts==1 && replayKiller==0 && replayBegin==live+15000+KILLCAM_ROUND_DELAY);
+ CHECK(level.replayEndTime==replayDeadline && snd.deadline==replayDeadline+SND_KILLCAM_RESTART);
+ /* the attackers plant inside it, then kill the last defender: theirs only
+  * when it is over, and without a killcam */
  Reset(2); sndGracePeriod.integer=15; Live(); live=level.time;
  MoveToSite(0); Hold(0,snd.plantMs); CHECK(snd.phase==SND_PLANTED && level.time==live+snd.plantMs);
  level.time+=1000; Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]);
- CHECK(snd.phase==SND_PLANTED && snd.result==SND_NONE && replayStarts==1);
+ CHECK(snd.phase==SND_PLANTED && snd.result==SND_NONE);
  level.time=live+15050; G_SNDRunFrame();
- CHECK(snd.phase==SND_ROUND_OVER && snd.winner==TEAM_RED && snd.result==SND_ELIMINATION);
- CHECK(level.replayEndTime==replayDeadline);
+ CHECK(snd.phase==SND_ROUND_OVER && snd.winner==TEAM_RED && snd.result==SND_ELIMINATION && !replayStarts);
  /* dead attackers with the bomb down have not lost, in it or after it */
  Reset(2); sndGracePeriod.integer=15; Live(); live=level.time;
  MoveToSite(0); Hold(0,snd.plantMs); level.time+=1000; Die(0); G_SNDRecordKill(&g_entities[0],&g_entities[1]);
  level.time=live+15050; G_SNDRunFrame(); CHECK(snd.phase==SND_PLANTED && snd.result==SND_NONE && !replayStarts);
  /* both teams wiped inside it, before a plant: the defenders' round when it
-  * is over. The clip held was of the attacker's kill, a result that did not
-  * come: it is dropped, and nothing is replayed. */
+  * is over, with no killcam */
  Reset(2); sndGracePeriod.integer=15; Live(); live=level.time;
- level.time=live+2000; Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]); CHECK(replayStarts==1 && snd.graceClip);
- level.time=live+4000; Die(0); G_SNDRunFrame(); CHECK(snd.phase==SND_LIVE);
- resets=replayResets; level.time=live+15050; G_SNDRunFrame();
- CHECK(snd.phase==SND_ROUND_OVER && snd.winner==TEAM_BLUE && snd.result==SND_ELIMINATION);
- CHECK(replayStarts==1 && replayResets==resets+1 && !level.replayEndTime && !snd.graceClip);
- CHECK(snd.freezeTime==live+15050+ROUNDEND_FREEZE_DELAY && snd.deadline==level.time+snd.pauseMs);
- /* the same, but the last attacker falls to the dead defender's grenade: the
-  * defenders' round by that kill, not the one whose clip was held. The held
-  * clip is dropped and the round's own kill asked for (the real replay,
-  * stopped since the first clip, has none to give). */
- Reset(2); sndGracePeriod.integer=15; Live(); live=level.time;
- level.time=live+2000; Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]); CHECK(replayStarts==1 && replayKiller==0);
- level.time=live+4000; Die(0); G_SNDRecordKill(&g_entities[0],&g_entities[1]); CHECK(snd.phase==SND_LIVE && replayStarts==1);
- resets=replayResets; level.time=live+15050; G_SNDRunFrame();
- CHECK(snd.phase==SND_ROUND_OVER && snd.winner==TEAM_BLUE && replayResets==resets+1);
- CHECK(replayStarts==2 && replayKiller==1 && replayFrom==live+4000-KILLCAM_REWIND && replayBegin==live+15050+KILLCAM_ROUND_DELAY);
- /* a clip the replay could not give is asked for once, not every frame */
- Reset(2); sndGracePeriod.integer=15; Live(); live=level.time; replayFail=1;
- level.time=live+2000; Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]); CHECK(replayStarts==1 && !snd.graceClip);
- level.time+=50; G_SNDRunFrame(); level.time+=50; G_SNDRunFrame(); CHECK(replayStarts==1);
+ level.time=live+2000; Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]);
+ level.time=live+4000; Die(0); G_SNDRecordKill(&g_entities[0],&g_entities[1]); CHECK(snd.phase==SND_LIVE);
  level.time=live+15050; G_SNDRunFrame();
- CHECK(snd.phase==SND_ROUND_OVER && snd.winner==TEAM_RED && replayStarts==2 && !level.replayEndTime);
- /* the match-winning kill inside it plays after the match's shorter wait */
+ CHECK(snd.phase==SND_ROUND_OVER && snd.winner==TEAM_BLUE && snd.result==SND_ELIMINATION);
+ CHECK(!replayStarts && !level.replayEndTime && snd.deadline==level.time+snd.pauseMs);
+ CHECK(snd.freezeTime==live+15050+ROUNDEND_FREEZE_DELAY);
+ /* a match won inside it ends the game at its end, with no final killcam */
  Reset(2); sndGracePeriod.integer=15; sndWinLimit.integer=1; Live(); live=level.time;
- level.time=live+1000; Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]);
- CHECK(replayBegin==live+15050+KILLCAM_MATCH_DELAY && !exits);
- level.time=live+15050; G_SNDRunFrame(); CHECK(exits==1 && level.replayEndTime==replayDeadline);
+ level.time=live+1000; Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]); CHECK(!exits);
+ level.time=live+15050; G_SNDRunFrame(); CHECK(exits==1 && !replayStarts && !level.replayEndTime);
  sndWinLimit.integer=4;
  /* g_sndGracePeriod 0: every elimination is decided in the death */
  Reset(2); Live(); CHECK(snd.graceEnd==level.time);
- Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]); CHECK(snd.phase==SND_ROUND_OVER);
+ Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]); CHECK(snd.phase==SND_ROUND_OVER && replayStarts==1);
 }
 static void TestObjectiveWindows(void) {
  int boom, defused, bombDeadline, effects, n;
@@ -573,7 +558,7 @@ static void TestInsertionReset(void) {
  level.time=snd.deadline; G_SNDRunFrame();
  CHECK(snd.phase==SND_WAITING && !ti->inuse && grenade->inuse);
  ti=Missile(WP_TACTICAL_INSERTION); Player(1,TEAM_BLUE); G_SNDRunFrame();
- CHECK(snd.phase==SND_COUNTDOWN && !ti->inuse && !grenade->inuse);
+ CHECK(snd.phase==SND_LIVE && !ti->inuse && !grenade->inuse);	/* the match counted down once */
 }
 int main(void) {
  TestPlantDefuse(); TestInterrupts(); TestCarrierSpectateJoin(); TestWinsAndSides(); TestWaitingPracticeAndMode();

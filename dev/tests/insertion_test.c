@@ -422,7 +422,8 @@ static void TestSpawn(void) {
  CHECK(!ti->inuse && VectorCompare(cl[0].ps.origin,spot));
  /* S&D: planted, never spawned on; it stays for the round (g_snd.c frees it) */
  Reset(GT_SND); ti=Planted(0,100,50); Stand(0,-300,300,24); Die(0); ClientSpawn(&g_entities[0]);
- CHECK(ti->inuse && VectorCompare(cl[0].ps.origin,ctfSpot));
+ /* at the spot, put down onto the floor below its 9-unit lift (ClientSpawn) */
+ CHECK(ti->inuse && cl[0].ps.origin[0]==ctfSpot[0] && cl[0].ps.origin[1]==ctfSpot[1] && fabs(cl[0].ps.origin[2]-(ctfSpot[2]-9))<0.1f);
  /* a new connection in the owner's slot is not the owner: no spawn on it */
  Reset(GT_FFA); ti=Planted(0,100,50);
  cl[0].pers.enterTime=level.time+1; CHECK(!G_InsertionOwner(ti) && !G_FindInsertion(&g_entities[0]));

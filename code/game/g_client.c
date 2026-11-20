@@ -1250,6 +1250,20 @@ void ClientSpawn(gentity_t *ent) {
 	// health will count down towards max_health
 	ent->health = client->ps.stats[STAT_HEALTH] = client->ps.stats[STAT_MAX_HEALTH] + 25;
 
+	// MW2 spawns players on the floor (its spawn points are dropped to it);
+	// Quake 3 lifts every spawn 9 units clear and lets it fall. A spawn into a
+	// frozen countdown, where gravity waits, would hang there, so the lifted
+	// spawn is put down onto whatever is just below it.
+	if ( client->sess.sessionTeam != TEAM_SPECTATOR ) {
+		trace_t	tr;
+		vec3_t	down;
+		VectorCopy( spawn_origin, down );
+		down[2] -= 32;
+		trap_Trace( &tr, spawn_origin, ent->r.mins, ent->r.maxs, down, ent->s.number, MASK_PLAYERSOLID );
+		if ( !tr.startsolid && !tr.allsolid && tr.fraction < 1 ) {
+			VectorCopy( tr.endpos, spawn_origin );
+		}
+	}
 	G_SetOrigin( ent, spawn_origin );
 	VectorCopy( spawn_origin, client->ps.origin );
 

@@ -460,6 +460,8 @@ qboolean G_SNDClientThink( gentity_t *ent, usercmd_t *cmd );
 qboolean G_SNDFrozen( gentity_t *ent );
 int G_GameEndTime( void );
 int G_IntermissionTime( void );
+qboolean G_GameEndDue( void );
+qboolean ScoreIsTied( void );
 qboolean G_SNDClientEndFrame( gentity_t *ent );
 qboolean G_SNDUse( gentity_t *ent, usercmd_t *cmd );
 qboolean G_SNDUsable( gentity_t *ent );

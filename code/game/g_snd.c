@@ -23,6 +23,10 @@ static sndCvar_t sndCvars[] = {
 // MW2's map_restart follows the final killcam by doFinalKillcam's wait 0.1
 // (then 0.05s polls until nobody is in the killcam).
 #define SND_KILLCAM_RESTART 100
+// gracePeriod's wait 0.05 between the gate opening and its own
+// updateGameEvents (_gamelogic.gsc:456-466): a team wiped out inside the
+// grace period loses that much after it ends.
+#define SND_GRACE_CHECK_DELAY 50
 
 typedef struct {
     sndPhase_t phase;
@@ -30,12 +34,10 @@ typedef struct {
     // defuse waits out its delay; freezeTime ends the round's last control.
     int round, deadline, carrier, plantedSite, winner, result, freezeTime;
     int planter;	// who planted this round's bomb: the blast is theirs (sd.gsc)
-    // MW2's grace period (SND_CheckElimination): an elimination before
-    // graceEnd decides the round only when it is over. graceClip is the end
-    // of the winning kill's replay when that was taken inside it, asked
-    // for graceClipTeam's last death at graceClipDeath.
-    int graceEnd, graceClip, graceClipDeath;
-    team_t graceClipTeam;
+    // MW2's grace period (SND_CheckElimination): a death from graceEnd on
+    // decides the round in the death; a team wiped out before it loses
+    // SND_GRACE_CHECK_DELAY after it.
+    int graceEnd;
     team_t attacking;
     qboolean spawning, practice;
     int roundMs, bombMs, plantMs, defuseMs, winLimit, switchRounds, pauseMs, graceMs;
@@ -375,11 +377,19 @@ static qboolean SND_Near( gentity_t *ent, vec3_t point, float radius ) {
     return !tr.startsolid && tr.fraction == 1;
 }
 
+// Whether a team's last death was the kill that ended the round: an enemy's,
+// past the grace period. It is MW2's final kill: onNormalDeath marks it only
+// if that death has already made the game postgame (sd.gsc:347, after
+// removeFromAliveCount's updateGameEvents, _damage.gsc:588), which inside
+// the grace period it has not (_gamelogic.gsc:301-302).
+static qboolean SND_DecidingKill( team_t team ) {
+    return snd.lastDeath[team].killer >= 0 && snd.lastDeath[team].time >= snd.graceEnd;
+}
+
 // The decisive elimination's death; now when nobody killed them, or when the
 // death fell inside the grace period and the round has only now ended.
 static int SND_EliminationTime( team_t team ) {
-    return snd.lastDeath[team].killer >= 0 && snd.lastDeath[team].time >= snd.graceEnd ?
-        snd.lastDeath[team].time : level.time;
+    return SND_DecidingKill(team) ? snd.lastDeath[team].time : level.time;
 }
 
 // MW2's sd_endGame/endGame. eventTime is the deciding moment: the last death
@@ -397,19 +407,15 @@ static void SND_EndRound( team_t winner, sndResult_t result, int eventTime ) {
     snd.freezeTime = eventTime + ROUNDEND_FREEZE_DELAY;
     snd.deadline = level.time + snd.pauseMs;
     matchWon = (winner == TEAM_RED || winner == TEAM_BLUE) && level.teamScores[winner] + 1 >= snd.winLimit;
-    if ( result == SND_ELIMINATION && snd.lastDeath[losing].killer >= 0 ) {
+    // Only the kill that ended the round has MW2's final killcam: not one
+    // inside the grace period, which decided nothing when it was made.
+    if ( result == SND_ELIMINATION && SND_DecidingKill(losing) ) {
         death = snd.lastDeath[losing].time;
-        if ( snd.graceClip && snd.graceClipTeam == losing && snd.graceClipDeath == death ) {
-            level.replayEndTime = snd.graceClip;	// taken at the kill (SND_HoldGraceClip)
-        } else {
-            if ( snd.graceClip ) trap_ReplayReset(qtrue);	// held for a result that did not come
-            level.replayEndTime = trap_ReplayStart(snd.lastDeath[losing].killer,
-                death - KILLCAM_REWIND, death + KILLCAM_LINGER,
-                eventTime + (matchWon ? KILLCAM_MATCH_DELAY : KILLCAM_ROUND_DELAY));
-        }
+        level.replayEndTime = trap_ReplayStart(snd.lastDeath[losing].killer,
+            death - KILLCAM_REWIND, death + KILLCAM_LINGER,
+            death + (matchWon ? KILLCAM_MATCH_DELAY : KILLCAM_ROUND_DELAY));
         if ( level.replayEndTime ) snd.deadline = level.replayEndTime + SND_KILLCAM_RESTART;
-    } else if ( snd.graceClip ) trap_ReplayReset(qtrue);
-    snd.graceClip = 0;
+    }
     snd.carrier = -1;
     if ( winner == TEAM_RED || winner == TEAM_BLUE ) level.teamScores[winner]++;
     for ( n = 0; n < level.maxclients; n++ ) SND_ClearUse(n);
@@ -436,21 +442,20 @@ static void SND_EndRound( team_t winner, sndResult_t result, int eventTime ) {
 // prematch, 450-466, 1773-1774) updateGameEvents returns at once (301-302),
 // so a team wiped out in that time has not lost yet. The round goes on, with
 // damage and the bomb, until gracePeriod's own updateGameEvents 0.05s after
-// the fifteenth second. g_sndGracePeriod is that 15; 0 decides every
-// elimination in the death. MW2 ends the grace in a frame's script pass,
-// before its entities; here the frame's S&D pass follows them.
+// the fifteenth second. The gate itself opens at the fifteenth second (the
+// count reaches 0), so a death from then on decides the round at once.
+// g_sndGracePeriod is that 15; 0 decides every elimination in the death.
+// MW2 ends the grace in a frame's script pass, before its entities; here
+// the frame's S&D pass follows them.
 static qboolean SND_Eliminated( team_t *winner, team_t *losing );
-static void SND_HoldGraceClip( team_t winner, team_t losing );
 
 static void SND_CheckElimination( void ) {
     team_t winner, losing;
     if ( (snd.phase != SND_LIVE && snd.phase != SND_PLANTED) || snd.result != SND_NONE ||
          level.time >= snd.deadline || snd.practice ) return;
-    if ( !SND_Eliminated(&winner, &losing) ) return;
-    if ( level.time < snd.graceEnd ) {
-        SND_HoldGraceClip(winner, losing);
-        return;
-    }
+    if ( !SND_Eliminated(&winner, &losing) || level.time < snd.graceEnd ) return;
+    if ( snd.graceMs && !SND_DecidingKill(losing) &&
+         level.time < snd.graceEnd + SND_GRACE_CHECK_DELAY ) return;
     SND_EndRound(winner, SND_ELIMINATION, SND_EliminationTime(losing));
 }
 
@@ -465,24 +470,6 @@ static qboolean SND_Eliminated( team_t *winner, team_t *losing ) {
     else if ( !defenders ) { *winner = snd.attacking; *losing = defending; }
     else return qfalse;
     return qtrue;
-}
-
-// The winning kill's clip, asked for when the kill falls inside the grace
-// period: the replay holds 6.5s, and by the time the round ends that kill
-// may be 15s old. (MW2's archive still has it: its final killcam's predelay
-// is the time since the death, _damage.gsc:867-900.) It plays when the round
-// has ended, as any round's does. Recording stops at a clip's end, so if a
-// different kill wins the round later in the same grace period there is no
-// clip of it, and that round ends without a killcam.
-static void SND_HoldGraceClip( team_t winner, team_t losing ) {
-    int death = snd.lastDeath[losing].time;
-    qboolean matchWon = level.teamScores[winner] + 1 >= snd.winLimit;
-    if ( snd.lastDeath[losing].killer < 0 || snd.graceClip ||
-         (snd.graceClipTeam == losing && snd.graceClipDeath == death) ) return;
-    snd.graceClipTeam = losing; snd.graceClipDeath = death;
-    snd.graceClip = trap_ReplayStart(snd.lastDeath[losing].killer,
-        death - KILLCAM_REWIND, death + KILLCAM_LINGER,
-        snd.graceEnd + (matchWon ? KILLCAM_MATCH_DELAY : KILLCAM_ROUND_DELAY));
 }
 
 // The site a carrier can plant at or the bomb a defender can defuse, in range
@@ -597,16 +584,17 @@ static void SND_GoLive( void ) {
     if ( !SND_Alive(snd.carrier) ||
          level.clients[snd.carrier].sess.sessionTeam != snd.attacking ) SND_AssignCarrier();
     snd.phase = SND_LIVE; snd.deadline = level.time + snd.roundMs;
-    // gracePeriod (_gamelogic.gsc:450-466): fifteen 1s waits and a 0.05s one
-    snd.graceEnd = level.time + (snd.graceMs ? snd.graceMs + 50 : 0);
+    // gracePeriod (_gamelogic.gsc:450-466): fifteen 1s waits
+    snd.graceEnd = level.time + snd.graceMs;
     trap_SendServerCommand(-1, "cp \"Search and Destroy\"");
 }
 
 // MW2 counts down, frozen, only before a match's first round: its prematch
 // period is 0 once game["gamestarted"] is set, which the round restart keeps
 // (_gamelogic.gsc:1241-1251, 1362-1372, 413-434), so a round that follows
-// another starts at once with everyone free. Here the first round is the one
-// that starts from waiting for players.
+// another starts at once with everyone free. Here that is the match's first
+// round; one that starts from waiting for players after a team emptied
+// mid-match does not count down again.
 static void SND_StartRound( qboolean prematch ) {
     int n;
     gentity_t *ent;
@@ -624,7 +612,7 @@ static void SND_StartRound( qboolean prematch ) {
     snd.switchRounds = SND_Clamp(sndSwitchRounds.integer,1,99);
     snd.pauseMs = SND_Clamp(sndRoundPause.integer,1,30)*1000;
     snd.graceMs = SND_Clamp(sndGracePeriod.integer,0,60)*1000;
-    snd.graceEnd = snd.graceClip = snd.graceClipDeath = 0; snd.graceClipTeam = TEAM_FREE;
+    snd.graceEnd = 0;
     snd.round++;
     snd.attacking = ((snd.round-1)/snd.switchRounds)%2 ? TEAM_BLUE : TEAM_RED;
     snd.deadline = level.time + SND_Clamp(sndCountdown.integer,1,30)*1000;
@@ -701,7 +689,7 @@ void G_SNDRunFrame( void ) {
         if ( snd.holdTarget[n] >= 0 && level.time-snd.holdSeen[n] > 200 ) SND_ClearUse(n);
     }
     if ( snd.phase == SND_WAITING ) {
-        if ( SND_EnoughPlayers() ) SND_StartRound(qtrue);
+        if ( SND_EnoughPlayers() ) SND_StartRound(snd.round == 0);
     } else if ( snd.phase == SND_COUNTDOWN ) {
         if ( !SND_EnoughPlayers() ) {
             snd.round--; SND_WaitForPlayers();

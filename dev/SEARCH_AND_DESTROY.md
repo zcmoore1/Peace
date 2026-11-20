@@ -76,9 +76,11 @@ side.
   after it (MW2's `onDeadEvent( "all" )`); there is no draw.
 - **The grace period.** For a round's first 15 seconds (`g_sndGracePeriod`;
   MW2's `level.gracePeriod`) a team wiped out has not lost yet. The round goes
-  on, with damage and the bomb, and is decided 15.05 s after it went live:
-  the survivors freeze 1.05 s after that, and the winning kill's killcam
-  follows the usual wait. So after an early round-winning kill the winner
+  on, with damage and the bomb, and is decided 15.05 s after it went live (a
+  death from the fifteenth second on decides at once, as any other):
+  the survivors freeze 1.05 s after that, and there is no killcam: the kill
+  decided nothing when it was made, which is MW2's rule for its final
+  killcam. So after an early round-winning kill the winner
   runs free for the rest of those 15 seconds. MW2 also lets a late comer
   spawn in that time and drops no weapon for a death in it; Peace does not.
 - A decisive enemy elimination plays **ROUND WINNING KILLCAM** for the entire
@@ -101,8 +103,11 @@ side.
 Default round time is 2:30; after planting, a separate 45-second bomb timer runs.
 There is a five-second deployment countdown before a match's first round only
 (MW2's prematch: a round that follows another starts at once, with nobody
-frozen), and a five-second round-result pause (MW2's 0.05 +
-`roundEndWait( 4, true )`) when there is no killcam. The match-winning round
+frozen; a team that empties mid-match does not bring it back), and a
+five-second round-result pause when there is no killcam. MW2's is at least
+5.05 s (endGame's waitframe and `roundEndWait( 4, true )`) and longer while
+a callout card is up: a defuse or plant card holds it to about 9 s after
+the defuse (see `dev/MW2_DIFFERENCES.md`, "Round end held by callouts"). The match-winning round
 shows its round end, then its killcam, then VICTORY or DEFEAT for six seconds
 before the scoreboard. The bomb's blast deals MW2's 200 at the bomb falling to
 20 at 512 units, credited to the planter.

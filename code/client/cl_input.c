@@ -1068,8 +1068,11 @@ usercmd_t CL_CreateCmd( void ) {
 	// MW2 takes no look input for a frozen player: its mouse, keyboard and
 	// pad turns all return when the last snapshot says PMF_FROZEN (CL_MouseMove
 	// 5a626b, the keyboard turn 5a5d92, IW4x's pad view). The view stays where
-	// it was, so nothing winds up to be let go when the freeze lifts.
-	if ( cl.snap.ps.pm_flags & PMF_FROZEN ) {
+	// it was, so nothing winds up to be let go when the freeze lifts. A killcam
+	// keeps it: its snapshots carry the killer's recorded state, not the
+	// viewer's, and every living player is frozen while one plays (S&D's round
+	// ends and every final killcam come after the freeze).
+	if ( ( cl.snap.ps.pm_flags & PMF_FROZEN ) || ( cl.snap.snapFlags & SNAPFLAG_REPLAY ) ) {
 		VectorCopy( oldAngles, cl.viewangles );
 	}
 

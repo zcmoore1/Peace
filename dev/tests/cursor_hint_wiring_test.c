@@ -21,6 +21,9 @@ void ClientBegin(int n) { (void)n; }
 void G_Damage(gentity_t *t,gentity_t *i,gentity_t *a,vec3_t d,vec3_t p,int damage,int flags,int mod) {(void)t;(void)i;(void)a;(void)d;(void)p;(void)damage;(void)flags;(void)mod;}
 qboolean G_SNDClientEndFrame(gentity_t *e) { (void)e; return qfalse; }
 qboolean G_SNDFrozen(gentity_t *e) { (void)e; return qfalse; }
+#ifdef MISSIONPACK
+vmCvar_t g_singlePlayer;	/* ClientFrozen reads it for missionpack's single-player arena */
+#endif
 qboolean G_SNDUsable(gentity_t *e) { (void)e; return bombUsable; }
 int Pickup_Team(gentity_t *e,gentity_t *o) { (void)e;(void)o; return 1; }
 void Team_CheckDroppedItem(gentity_t *e) { (void)e; }

@@ -6,17 +6,17 @@ This is a snapshot: work after `3a99c10` may close items. In that case update th
 
 ## Summary
 
-200 differences are listed. 63 now match MW2. 137 are open.
+199 differences are listed. 63 now match MW2. 136 are open.
 
 | Kind | Open | Unsettled (in open) | Now matches MW2 |
 |---|---:|---:|---:|
-| Not modelled: MW2 does it, Peace does not | 58 | 1 | 44 |
+| Not modelled: MW2 does it, Peace does not | 57 | 0 | 44 |
 | Placeholder: Peace's values or art, not MW2's | 40 | 0 | 11 |
 | Peace-only: Peace has it, MW2 does not | 14 | 0 | 1 |
 | Owner choice: a deliberate departure | 14 | 2 | 3 |
 | Unverified: MW2's side not fully read | 11 | 10 | 2 |
 | Bug | 0 | 0 | 2 |
-| **Total** | **137** | **13** | **63** |
+| **Total** | **136** | **12** | **63** |
 
 "Unsettled" means MW2's behaviour, or whether Peace matches it, has not been traced to the end. Those items are marked *(unsettled)*.
 
@@ -28,7 +28,7 @@ This is a snapshot: work after `3a99c10` may close items. In that case update th
 | Use and pickups | 8 | 2 |
 | Netcode and killcam | 9 | 8 |
 | Presentation, art and input | 20 | 2 |
-| Game modes | 14 | 8 |
+| Game modes | 13 | 8 |
 | Systems MW2 has that Peace lacks | 6 | 0 |
 | Peace-only extras | 8 | 0 |
 
@@ -50,7 +50,7 @@ The two bugs found are fixed: the knife did 100 instead of 135, and an empty let
 
 **Stances, falls and the player box**
 
-- **Stances and moves Peace lacks.** MW2 has lean (`leanf`, x0.4 speed; prone's bob factor 0.24 only while leaning), mantle (`PMF_MANTLE`), the last-stand crawl and the dive (`PMF_DIVING`, `perk_diveVelocity` 250). Peace has none of these (prone is MW2's: see below). `pm_flags` is full (18/18), so a new flag needs the wire format widened. *Not modelled.* MW2: iw4x.exe 0x406F80, 0x56D7B0, 0x4EB22E (re/bob_report.txt; re/res_re_landing.txt). Peace: `CLAUDE.md` (Capacity limits); `dev/STANCE.md`.
+- **Stances and moves Peace lacks.** MW2 has lean (`leanf`, x0.4 speed; prone's bob factor 0.24 only while leaning), mantle (`PMF_MANTLE`), the last-stand crawl and the dive (`PMF_DIVING`, `perk_diveVelocity` 250). Peace has none of these (prone is MW2's: see below). `pm_flags` is full (19/19, `PMF_FROZEN` the last), so a new flag needs the wire format widened. *Not modelled.* MW2: iw4x.exe 0x406F80, 0x56D7B0, 0x4EB22E (re/bob_report.txt; re/res_re_landing.txt). Peace: `CLAUDE.md` (Capacity limits); `dev/STANCE.md`.
 - **Dead box.** MW2 keeps the 70-tall standing box on the dead (its corpse is a separate entity). Peace keeps Quake 3's `DEAD_HEIGHT` (-8, a 16-tall box) for a dead player, while the eye falls at MW2's 180 a second to 8. *Owner choice* (decision D8, `dev/STANCE.md`). MW2: iw4x.exe 0x570B25, 0x570B5D. Peace: `code/game/bg_misc.c` (`BG_PlayerBox`).
 - **Spectator box and eye.** MW2's spectator is a 16-unit box about the origin with the eye at 0. Peace's spectator keeps the standing box and eye. *Owner choice* (decision D8, `dev/STANCE.md`). MW2: iw4x.exe 0x570A9F-0x570AF0, 0x5706CC. Peace: `code/game/bg_pmove.c` (`PM_CheckDuck`).
 - **The respawned move.** While `PMF_RESPAWNED` holds (until a command with neither the trigger nor prone), MW2 keeps only the stance and trigger buttons and zeroes the move. Peace clears the flag on MW2's condition and ignores stance requests meanwhile, but still moves. *Not modelled.* MW2: PmoveSingle 0x574429, 0x574617. Peace: `code/game/bg_pmove.c` (`PmoveSingle`).
@@ -315,10 +315,9 @@ The two bugs found are fixed: the knife did 100 instead of 135, and an empty let
 - **Grace period extras.** In a round's (or a match's) first 15s MW2 also lets a late comer spawn (`maySpawn`), respawns a player who changes team before doing combat, applies a class change at once, and drops no weapon or Scavenger bag for a death. Peace does none of these: a late comer waits for the next round, and a death always drops the gun. *Not modelled.* MW2: _playerlogic.gsc:54, 105-110; _menus.gsc:383-385, 504; _weapons.gsc:656-657, 923-924. Peace: `code/game/g_snd.c` (`G_SNDWaitForRound`).
 - **Deaths after a round has ended** *(unsettled)*. MW2's engine still kills a player whose frag cooks off in his hand, or who changes team, once the game is postgame: he drops where he stands, with no kill credited and no effect on the result. Peace does the same once a game without rounds has ended: the death scores nothing (`player_die`) and a team changer stays dead where he fell (`SetTeam`). In S&D, once the round is over, Peace still refuses the death: the frag vanishes and its holder lives, and a team changer vanishes into the round's dead. MW2's side is read from the code paths, not observed. *Unverified.* MW2: _damage.gsc:127, 459; CoD4's `EV_GRENADE_SUICIDE` handling (IW4's not disassembled). Peace: `code/game/g_combat.c` (`G_GrenadeSuicide`, `player_die`); `code/game/g_cmds.c` (`SetTeam`); `dev/tests/snd_roundend_test.c` (`TeamScoreLimit`).
 - **Spectators at a round's end.** MW2's endGame freezes every player, spectators included, and sends spectators to the intermission view. Peace's spectators keep flying. *Not modelled.* MW2: _gamelogic.gsc:2087-2100. Peace: `code/game/g_active.c` (`ClientFrozen`).
-- **Round-end frame order** *(unsettled)*. MW2 ends a detonation's 3s, a defuse's 1.5s and the grace period in a frame's script pass, before that frame's entities; Peace's S&D pass follows them, so a grenade going off in that one frame still hurts. A defuser killed in the frame his defuse completes loses the round in Peace (MW2 completes the defuse first), and the last defender's disconnect ends the round a frame late. MW2's freeze after an elimination may also come at 1100ms, not 1050: the disassembly suggests a death's callbacks run a script tick later, and nothing measured it. *Unverified.* MW2: iw4x.exe 0x415cd0, 0x4d6d00. Peace: `code/game/g_main.c` (`G_RunFrame`); `code/game/g_snd.c` (`G_SNDRunFrame`).
-- **Round end held by callouts.** MW2's `roundEndWait` polls every 0.5s while any player's callout card is up, and the banner waits for the player's own: the 4s "Bomb defused" and "Bomb planted" cards and the "last alive" cards. A defuse's next round comes about 9.05s after the defuse (Peace: 6.5s), a kill 1s after a plant gets its killcam at kill+8.05s (Peace: +5.05s), and with no card the pause is 5.05s (Peace: 5s). *Not modelled.* MW2: _gamelogic.gsc:1169-1224, 1854-1874; sd.gsc:369-382, 588, 613; splashtable_iw4x.csv:105-106. Peace: `code/game/g_snd.c` (`SND_EndRound`).
+- **Round-end frame order** *(unsettled)*. MW2 ends a detonation's 3s, a defuse's 1.5s and the grace period in a frame's script pass, before that frame's entities; Peace's S&D pass follows them, so a grenade going off in that one frame still hurts. A defuser killed in the frame his defuse completes loses the round in Peace (MW2 completes the defuse first), and the last defender's disconnect ends the round a frame late. MW2's freeze after an elimination may also come at 1100ms, not 1050: the disassembly suggests a death's callbacks run a script tick later, and nothing measured it. In a match's first round only, MW2's time-limit poll can fall one 50ms frame after the clock runs out, depending on when both teams spawned in the prematch (in every later round a poll lands on it, as Peace's deadline frame does). *Unverified.* MW2: iw4x.exe 0x415cd0, 0x4d6d00. Peace: `code/game/g_main.c` (`G_RunFrame`); `code/game/g_snd.c` (`G_SNDRunFrame`).
+- **Round end held by callouts.** MW2's `roundEndWait` polls every 0.5s while any player's callout card is up, and the banner waits for the player's own: the 4s "Bomb defused" and "Bomb planted" cards and the "last alive" cards. A defuse's next round comes about 9.05s after the defuse (Peace: 6.55s), and VICTORY about 8.55s after a match-winning one; a kill 1s after a plant gets its killcam at kill+8.05s (Peace: +5.05s). With no card up both wait 5.05s. *Not modelled.* MW2: _gamelogic.gsc:1169-1224, 1854-1874; sd.gsc:369-382, 588, 613; splashtable_iw4x.csv:105-106. Peace: `code/game/g_snd.c` (`SND_EndRound`).
 - **Kills credited for suicides.** MW2 credits a suicide, a fall or a world death to the enemy who did the most damage in the last 2.5s: he scores the kill, and in S&D it is the round's final kill with its killcam. Peace counts a self-inflicted death as a suicide (-1) with no killcam, in every mode. *Not modelled.* MW2: _damage.gsc:499-535, 649-655. Peace: `code/game/g_combat.c` (`player_die`); `code/game/g_snd.c` (`G_SNDRecordKill`).
-- **The time limit's poll** *(unsettled)*. MW2 checks the time limit every 1s, and every 0.1s in the last 3s, so a kill up to 0.1s after the clock runs out still ends the round by elimination, with its killcam. Peace ends the round in the frame the clock runs out, and that frame wins ties. *Not modelled.* MW2: _gamelogic.gsc:1573-1595. Peace: `code/game/g_snd.c` (`G_SNDRunFrame`).
 - **One-team rounds.** When a team empties mid-match MW2 keeps restarting rounds with one team, eliminations ignored until both teams have spawned, so only the clock or the bomb ends them. Peace stops and waits for players, free-roaming, and starts the next round when both teams have one. *Not modelled.* MW2: _gamelogic.gsc:295-302; _utility.gsc:1639-1643. Peace: `code/game/g_snd.c` (`SND_WaitForPlayers`).
 - **S&D side-switch pause.** On a side-switch round MW2 adds `displayRoundSwitch`'s `roundEndWait( 4, false )`, 4.5s, after the killcam before the restart. Peace switches with no extra pause. *Not modelled.* MW2: _gamelogic.gsc:1910-1946. Peace: `code/game/g_snd.c` (`SND_StartRound`).
 

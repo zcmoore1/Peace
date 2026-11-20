@@ -237,6 +237,14 @@ static void TestDirectSelectionAndGuards(void) {
 	CG_NextWeapon_f(); ExpectIntent(0,WP_SHOTGUN);
 }
 
+/* The out-of-ammo switch is the cycle's step: the other gun in its own
+ * mode, even when it was put away as its underbarrel. */
+static void TestOutOfAmmoMode(void) {
+	Setup(WP_SHOTGUN,WP_M16,qfalse);
+	snapshot.ps.slotFlags[1]|=BG_GUN_ALTERNATE; cg.predictedPlayerState.slotFlags[1]|=BG_GUN_ALTERNATE;
+	CG_OutOfAmmoChange();
+	CHECK(cg.weaponSelectSlot==1 && cg.weaponSelect==WP_M16 && !cg.weaponSelectAlternate);
+}
 /* MW2's WeaponCycleAllowed (59d590) and ActionSlotUsageAllowed (59d6f0)
  * refuse a frozen player: Y, the alt toggle and a weapon number during the
  * countdown ask for nothing, so nothing is waiting to begin when it lifts. */
@@ -256,7 +264,7 @@ static void TestFrozenSelection(void) {
 }
 int main(void) {
 	TestRapidModeInput(); TestCycle(); TestDuplicateGuns();
-	TestPickupAndRespawn(); TestDirectSelectionAndGuards(); TestFrozenSelection();
+	TestPickupAndRespawn(); TestDirectSelectionAndGuards(); TestFrozenSelection(); TestOutOfAmmoMode();
 	printf("PASS: %i client mode input, cycle, snapshot, pickup and respawn checks\n",checks);
 	return 0;
 }

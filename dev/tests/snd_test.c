@@ -444,7 +444,10 @@ static void TestBombBlast(void) {
  * until it is over (gracePeriod: fifteen 1s waits and a 0.05s one, counted
  * from the end of the prematch). The round goes on meanwhile. */
 static void TestGracePeriod(void) {
- int live;
+ int live, n;
+ /* the shipped default is MW2's level.gracePeriod, 15 */
+ for(n=0;n<(int)ARRAY_LEN(sndCvars);n++) if(sndCvars[n].value==&sndGracePeriod) break;
+ CHECK(n<(int)ARRAY_LEN(sndCvars) && !strcmp(sndCvars[n].initial,"15"));
  Reset(2); sndGracePeriod.integer=15; Live(); live=level.time;
  CHECK(snd.graceEnd==live+15000);
  level.time=live+3000; Die(1); G_SNDRecordKill(&g_entities[1],&g_entities[0]);
@@ -460,6 +463,7 @@ static void TestGracePeriod(void) {
  CHECK(snd.phase==SND_ROUND_OVER && snd.result==SND_ELIMINATION && snd.winner==TEAM_RED);
  CHECK(level.teamScores[TEAM_RED]==1 && snd.freezeTime==live+15050+ROUNDEND_FREEZE_DELAY);
  CHECK(!replayStarts && !level.replayEndTime && snd.deadline==level.time+snd.pauseMs);
+ CHECK(snd.pauseMs==sndRoundPause.integer*1000+50);	/* endGame's waitframe and roundEndWait: MW2's x.05s */
  CHECK(!G_SNDFrozen(&g_entities[0])); level.time=snd.freezeTime; CHECK(G_SNDFrozen(&g_entities[0]));
  /* the next round has its own: it starts live, and its grace with it */
  level.time=snd.deadline; G_SNDRunFrame();

@@ -156,7 +156,11 @@ static void TestModes(void) {
  move.cmd.weapon=BG_WeaponCommand(&ps,0,qtrue); Step(1);
  CHECK(ps.weapon==WP_M16 && ps.weaponstate==WEAPON_DROPPING && ps.weaponDraw!=WDRAW_ALT);
  CHECK(ps.weaponTime==M16_DROP_MS);
- Run(M16_DROP_MS);
+ /* and, as any drop, it takes no knife (the YY return is no return here:
+  * it is the other mode that was asked for) */
+ Step(1); move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
+ CHECK(ps.weapon==WP_M16 && ps.weaponstate==WEAPON_DROPPING && !(ps.weaponAction&WA_TYPE_MASK));
+ Run(M16_DROP_MS-2);
  CHECK(ps.weapon==WP_MASTERKEY && ps.weaponstate==WEAPON_RAISING && ps.weaponDraw==WDRAW_NORMAL);
  CHECK(ps.weaponTime==MASTERKEY_RAISE_MS);
 }

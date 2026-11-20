@@ -687,6 +687,16 @@ static void GracePeriod(void) {
 }
 /* A player's own blast costs him what an enemy's does (MW2; Quake 3 halved
  * it): the planter beside his bomb, a frag at one's own feet. */
+/* The console's kill in a round that is over: nothing can hurt a player
+ * then, so it does nothing (it left a living player with -999 health). */
+static void KillAfterTheRound(void) {
+ int death;
+ Com_sprintf(caseText,sizeof(caseText),"the console's kill after the round");
+ Reset(); death=WinningShot(24); (void)death;
+ Cmd_Kill_f(&g_entities[MATE]);
+ CHECK(g_entities[MATE].health==100 && clients[MATE].ps.stats[STAT_HEALTH]==100 && SND_Alive(MATE));
+ CHECK(snd.phase==SND_ROUND_OVER && snd.winner==TEAM_RED);
+}
 static void OwnDamage(void) {
  vec3_t dir={0,0,1};
  Com_sprintf(caseText,sizeof(caseText),"a player's own blast");
@@ -898,6 +908,9 @@ static void TeamScoreLimit(void) {
   Run(3000);
   CHECK(g_entities[MATE].health<=0 && clients[MATE].ps.pm_type==PM_DEAD && !(clients[MATE].ps.pm_flags&PMF_FROZEN));
  }
+ /* nor can the console's kill, once the game has ended */
+ Cmd_Kill_f(&g_entities[SHOOTER]);
+ CHECK(g_entities[SHOOTER].health>0 && clients[SHOOTER].ps.pm_type==PM_NORMAL && level.teamScores[TEAM_RED]==1);
  /* MW2's displayGameEnd: VICTORY to the winners and DEFEAT to the losers,
   * half a second in, and the scoreboard once the final killcam is over */
  Com_sprintf(caseText,sizeof(caseText),"the game's end screens after a kill");
@@ -979,6 +992,7 @@ int main(void) {
  SpectatorLeavesTheFrozen();
  GracePeriod();
  OwnDamage();
+ KillAfterTheRound();
  Prematch();
  PrematchHolds();
  BlastDecidesNothing();

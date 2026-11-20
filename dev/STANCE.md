@@ -50,8 +50,8 @@ Code and docs name them by number.
 Bits 25-31 are spare.
 
 **The playerstate.**
-- `pm_flags` is 18 bits on the wire: `PMF_PRONE` (bit 16) and `PMF_PRONEMOVE_OVERRIDDEN`
-  (bit 17), MW2's 0x1 and 0x200.
+- `pm_flags` is 19 bits on the wire: `PMF_PRONE` (bit 16) and `PMF_PRONEMOVE_OVERRIDDEN`
+  (bit 17), MW2's 0x1 and 0x200, and `PMF_FROZEN` (bit 18), MW2's 0x800.
 - `viewheight` is a float: the eye above Peace's origin.
 - MW2's eye leg:
   - `viewHeightTarget`, in `BG_EYE_*`: MW2 units above the feet, 60/40/11/8;

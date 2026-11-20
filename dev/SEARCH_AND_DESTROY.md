@@ -104,9 +104,9 @@ Default round time is 2:30; after planting, a separate 45-second bomb timer runs
 There is a five-second deployment countdown before a match's first round only
 (MW2's prematch: a round that follows another starts at once, with nobody
 frozen; a team that empties mid-match does not bring it back), and a
-five-second round-result pause when there is no killcam. MW2's is at least
-5.05 s (endGame's waitframe and `roundEndWait( 4, true )`) and longer while
-a callout card is up: a defuse or plant card holds it to about 9 s after
+round-result pause of 5.05 s when there is no killcam (`g_sndRoundPause` and
+endGame's waitframe: MW2's `roundEndWait( 4, true )` with no callout card
+up). MW2's is longer while a card is up: a defuse or plant card holds it to about 9 s after
 the defuse (see `dev/MW2_DIFFERENCES.md`, "Round end held by callouts"). The match-winning round
 shows its round end, then its killcam, then VICTORY or DEFEAT for six seconds
 before the scoreboard. The bomb's blast deals MW2's 200 at the bomb falling to
@@ -138,7 +138,7 @@ objectives; the S&D host menu defaults to open human slots rather than bots.
 | `g_sndWinLimit` | 4 | Round wins needed (1–99) |
 | `g_sndSwitchRounds` | 3 | Rounds between side changes (1–99) |
 | `g_sndCountdown` | 5 | First round's deployment countdown, seconds (1–30) |
-| `g_sndRoundPause` | 5 | Result pause, seconds (1–30) |
+| `g_sndRoundPause` | 5 | Result pause, seconds (1–30); endGame's 0.05 s waitframe is added, as MW2's |
 | `g_sndGracePeriod` | 15 | Seconds of a round in which a wiped-out team has not lost yet (0–60; 0 decides every elimination at once) |
 | `g_sndPractice` | 0 | Cheat-only solo mode; not archived |
 

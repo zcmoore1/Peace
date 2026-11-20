@@ -305,6 +305,17 @@ static void TestShootYYX(void) {
 				outside++;
 			}
 		}
+		/* MW2's window also takes the second Y on X's own command or the one
+		 * after it, and the first on the shot's own command (moni-b.md 3.6) */
+		for (y1 = 0; y1 < end; y1++) for (x = y1 + 1; x + 1 < end; x++) for (y2 = x; y2 <= x + 1; y2++) {
+			run_t r;
+			if (y2 <= y1) continue;
+			r = Shoot(0, qtrue, y1, y2, x, end + Frames(drop) + 8);
+			CHECK(!r.rifle && r.reloadStart == x + 1 && r.dropStart < 0);
+			CHECK(r.change == x + 2 && r.changeTo == WP_SHOTGUN);
+			CHECK(Shells(0, qtrue) == BG_WeaponMagSize(WP_MASTERKEY) - 1 && Owes(0, qtrue));
+			inside++;
+		}
 		/* one Y and X: the change is the mode change, which had no drop to lose */
 		for (y1 = 1; y1 + 2 < end; y1++) for (x = y1 + 1; x + 1 < end; x++) {
 			run_t r = Shoot(0, qtrue, y1, -1, x, end + 8);

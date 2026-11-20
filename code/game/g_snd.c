@@ -610,7 +610,9 @@ static void SND_StartRound( qboolean prematch ) {
     snd.defuseMs = SND_Clamp(sndDefuseTime.integer,1,30)*1000;
     snd.winLimit = SND_Clamp(sndWinLimit.integer,1,99);
     snd.switchRounds = SND_Clamp(sndSwitchRounds.integer,1,99);
-    snd.pauseMs = SND_Clamp(sndRoundPause.integer,1,30)*1000;
+    // endGame's waitframe, then roundEndWait( 4, true ): MW2's 5.05s with
+    // no callout card up (_gamelogic.gsc:2046, 1169-1224)
+    snd.pauseMs = SND_Clamp(sndRoundPause.integer,1,30)*1000 + 50;
     snd.graceMs = SND_Clamp(sndGracePeriod.integer,0,60)*1000;
     snd.graceEnd = 0;
     snd.round++;

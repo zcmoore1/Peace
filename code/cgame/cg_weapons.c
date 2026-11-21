@@ -1908,6 +1908,13 @@ void CG_NextWeapon_f( void ) {
 	if ( cg.predictedPlayerState.pm_flags & PMF_FROZEN ) {
 		return;
 	}
+	// WeaponCycleAllowed also refuses Y and weapprev, not the alt toggle,
+	// until the out-of-ammo change's lockout has run out (59d5cd-59d5d3):
+	// a press then is lost, and the change that went for a gun with ammo
+	// goes on.
+	if ( cg.time < cg.weaponForcedSelectTime ) {
+		return;
+	}
 
 	ps = &cg.predictedPlayerState;
 	trap_SendConsoleCommand("_peaceWeaponSwap\n");
@@ -2042,7 +2049,8 @@ nothing in its magazine and nothing in reserve, after its last shot
 (PM_Weapon_CheckFiringAmmo, 577080). It runs on the predicted state and
 selects as a Y does, with no swap press; pmove then changes guns as for any
 selection, so the freeze, the change gates and the drop and raise times are
-the ordinary ones.
+the ordinary ones. From a gun that is not an underbarrel it then holds Y off
+for CG_EMPTY_SWITCH_LOCKOUT, as MW2's does.
 ===================
 */
 void CG_OutOfAmmoChange( void ) {
@@ -2063,22 +2071,33 @@ void CG_OutOfAmmoChange( void ) {
 	// The gun the event is about is the slot's, in the mode it was raised in:
 	// MW2's ps.weapon, which an offhand pulled meanwhile never replaces.
 	gun = BG_ActiveSlotWeapon( ps );
-	cg.weaponSelectTime = cg.time;
+	// From a gun that is not an underbarrel MW2 holds Y and weapprev off for
+	// a while (5a0847-5a0865, CG_NextWeapon_f), before it looks for anything
+	// to select: also when nothing is then selected. The alt toggle is not
+	// held off.
+	if ( BG_BaseWeapon( gun ) == gun ) {
+		cg.weaponForcedSelectTime = cg.time + CG_EMPTY_SWITCH_LOCKOUT;
+	}
 
 	// Not a scan of weapon numbers, as stock Q3's was: melee and equipment are
 	// in the weapon enum above the guns, and a scan handed over a flashbang.
+	// Each selection is stamped as MW2's CG_SelectWeaponIndex stamps it
+	// (48bb03); a change that selects nothing stamps nothing.
 	// An underbarrel (MW2's altmode weapon, 5a0891) whose gun has ammo selects
 	// that gun in its own mode (5a08a3-5a08c4): MW2's alt switch, with its alt
 	// drop and raise.
 	if ( BG_BaseWeapon( gun ) != gun && CG_SlotModeHasAmmo( ps, slot, qfalse ) ) {
 		CG_SelectWeaponSlotMode( ps, slot, qfalse );
+		cg.weaponSelectTime = cg.time;
 		return;
 	}
 	// Otherwise MW2's cycle skipping empty guns (CycleWeapPrimary(lc, 1, 1, 0),
-	// 5a08dc), from the latest selection: from an underbarrel that is its gun
-	// all the same, from any other gun the next gun in its own mode if that
-	// has ammo.
+	// 5a08dc), from the latest selection: from an underbarrel still selected
+	// that is its gun, ammo or not; from any other selection (the gun in hand,
+	// or the rifle a Y has already asked for) the next gun in its own mode if
+	// that has ammo.
 	if ( CG_CycleWeapon( ps, qtrue ) ) {
+		cg.weaponSelectTime = cg.time;
 		return;
 	}
 	// The cycle found nothing: an underbarrel still goes to its gun
@@ -2086,6 +2105,7 @@ void CG_OutOfAmmoChange( void ) {
 	// no forced cycle (5a0906-5a090b).
 	if ( BG_BaseWeapon( gun ) != gun ) {
 		CG_SelectWeaponSlotMode( ps, slot, qfalse );
+		cg.weaponSelectTime = cg.time;
 	}
 }
 

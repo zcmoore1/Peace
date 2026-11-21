@@ -9,7 +9,9 @@
  * server's think (Pmove, then the use step), then cgame plays the predicted
  * state's new out-of-ammo events, as CG_CheckPlayerstateEvents does, and sets
  * the next command's weapon. The other events are counted, not played: their
- * pictures and sounds are not under test.
+ * pictures and sounds are not under test. Y and the alt toggle are the real
+ * CG_NextWeapon_f and CG_AltWeapon_f, with MW2's Y lockout after the change
+ * (0x5A084C-0x5A0865, 0x59D5CD).
  *
  * The test presses buttons and sets ammunition. Every time it compares
  * against is read from the game's tables. */
@@ -24,7 +26,7 @@ vmCvar_t cg_debugEvents, cg_footsteps, cg_nopredict, cg_synchronousClients;
 vmCvar_t cg_cameraOrbit, cg_singlePlayerActive;
 #endif
 static snapshot_t snapshot;
-static int checks, swapQueued, msec, cmdValue;
+static int checks, swapQueued, swapPresses, msec, cmdValue;
 static char weaponArgument[16];
 static pmove_t move;
 static bg_activate_t use;
@@ -38,6 +40,7 @@ void trap_SnapVector(float *v) { int i; for (i=0;i<3;i++) v[i]=rintf(v[i]); }
 void trap_SendConsoleCommand(const char *text) {
 	if (strcmp(text, "_peaceWeaponSwap\n")) abort();
 	swapQueued = 1;
+	swapPresses++;
 }
 const char *CG_Argv(int arg) { (void)arg; return weaponArgument; }
 int PickupNoteTime(int weapon, int seq, int kind);
@@ -271,6 +274,15 @@ static void TestMasterkeyToItsRifle(void) {
 		SetAmmo(0, BG_WeaponMagSize(WP_M16), 0, 1, 0);
 		Frame(BUTTON_ATTACK, IN_Y);
 		CHECK(raised[EV_FIRE_WEAPON] == 1 && raised[EV_NOAMMO] == 1 && Selected(0, WP_M16));
+		/* The same on a dry rifle: the rifle has nothing, so the cycle runs
+		 * from the selection the Y made, the rifle, and finds the SPAS with
+		 * its shells (0x5A08DC); the underbarrel's own step is not asked. */
+		Setup(0, qtrue);
+		SetAmmo(0, 0, 0, 1, 0);
+		Frame(BUTTON_ATTACK, IN_Y);
+		CHECK(raised[EV_FIRE_WEAPON] == 1 && raised[EV_NOAMMO] == 1 && Selected(1, WP_SHOTGUN));
+		Settle();
+		CHECK(PS->weapon == WP_SHOTGUN);
 		/* Y, Y and the last shell with both guns dry: the cycle from the SPAS
 		 * finds no ammo, and the underbarrel still goes to its rifle
 		 * (0x5A08E8-0x5A08FA). */
@@ -442,6 +454,20 @@ static void TestNotRaised(void) {
 		SetAmmo(0, BG_WeaponMagSize(WP_M16), 0, 0, 2);
 		Frame(BUTTON_ATTACK, 0);
 		CHECK(PS->weapon == WP_MASTERKEY && PS->weaponstate == WEAPON_RELOADING && Selected(0, WP_MASTERKEY));
+		/* Rounds given during a dry pull's 500ms (a scavenger bag): the gun
+		 * reloads on the next command, the trigger up or held, as MW2's reload
+		 * check comes before the weapon's time is asked (0x578670, 0x579474)
+		 * and its reload takes READY (0x575E60). */
+		for (f = 0; f < 2; f++) {
+			Setup(1, qfalse);
+			SetAmmo(1, 0, 0, 0, 0);
+			SetAmmo(0, 0, 0, 0, 0);
+			Frame(BUTTON_ATTACK, 0);
+			CHECK(raised[EV_NOAMMO] == 1 && PS->weaponstate == WEAPON_READY && PS->weaponTime == BG_DRY_FIRE_TIME);
+			SetAmmo(1, 0, BG_WeaponMagSize(WP_SHOTGUN), 0, 0);
+			Frame(f ? BUTTON_ATTACK : 0, 0);
+			CHECK(PS->weapon == WP_SHOTGUN && PS->weaponstate == WEAPON_RELOADING && raised[EV_NOAMMO] == 0);
+		}
 		/* the last shell with a reserve: the gun reloads itself out of its pump */
 		Setup(1, qfalse);
 		SetAmmo(1, 1, 3, 0, 0);
@@ -466,6 +492,16 @@ static void TestNotRaised(void) {
 static void DryPull(void) {
 	while (PS->weaponTime > 0) Frame(0, 0);
 	Frame(BUTTON_ATTACK, 0);
+}
+/* The out-of-ammo event played from the player's own entity, as
+ * CG_CheckPlayerstateEvents hands one over, with no pmove behind it. */
+static void PlayOwnNoAmmo(void) {
+	cg.predictedPlayerEntity.currentState.event = EV_NOAMMO | EV_EVENT_BIT1;
+	cg.predictedPlayerEntity.currentState.eventParm = 0;
+	cg.eventPlayerState = PS;
+	cg.eventPlayerSequence = PS->eventSequence;
+	CG_EntityEvent(&cg.predictedPlayerEntity, cg.predictedPlayerEntity.lerpOrigin);
+	cg.eventPlayerState = NULL;
 }
 /* Only the player's own live view selects (MW2's isPlayerView, 0x4DD76F, and
  * 0x5A07DA), and a frozen player pulls no trigger at all. */
@@ -494,11 +530,145 @@ static void TestOwnLiveViewOnly(void) {
 	PS->pm_flags |= PMF_FROZEN;
 	Frame(BUTTON_ATTACK, 0);
 	CHECK(raised[EV_NOAMMO] == 0 && Selected(1, WP_SHOTGUN) && PS->weaponTime == 0);
+
+	/* The event played straight from the player's own entity selects (the
+	 * control for the cases after it). */
+	Setup(1, qfalse);
+	PlayOwnNoAmmo();
+	CHECK(Selected(0, WP_M16) && cg.weaponForcedSelectTime == cg.time + CG_EMPTY_SWITCH_LOCKOUT);
+	/* Another player's dry fire reaches this client from their entity
+	 * (BG_EventReachesOthers): not this player's view, nothing selected. */
+	Setup(1, qfalse);
+	{
+		centity_t *other = &cg_entities[5];
+		memset(other, 0, sizeof(*other));
+		other->currentState.number = other->currentState.clientNum = 5;
+		other->currentState.eType = ET_PLAYER;
+		other->currentState.event = EV_NOAMMO | EV_EVENT_BIT1;
+		CG_EntityEvent(other, other->lerpOrigin);
+	}
+	CHECK(Selected(1, WP_SHOTGUN) && cg.weaponForcedSelectTime == 0);
+	/* The event in a state that is already dead (MW2's 0x5A07E7). */
+	Setup(1, qfalse);
+	PS->pm_type = PM_DEAD;
+	snapshot.ps = *PS;
+	PlayOwnNoAmmo();
+	CHECK(Selected(1, WP_SHOTGUN) && cg.weaponForcedSelectTime == 0);
+	/* A followed player's playerstate, asked directly: the change is this
+	 * client's own selection. */
+	Setup(1, qfalse);
+	snapshot.ps.pm_flags |= PMF_FOLLOW;
+	CG_OutOfAmmoChange();
+	CHECK(Selected(1, WP_SHOTGUN) && cg.weaponForcedSelectTime == 0);
+}
+
+/* MW2 holds Y and weapprev off after the change from an empty gun that is not
+ * an underbarrel (CG_OutOfAmmoChange 0x5A084C-0x5A0865: cg.time plus 750,
+ * iw4x.exe 0x798524, for the event's change, which forces no cycle), whether
+ * or not anything was then selected; WeaponCycleAllowed refuses them while
+ * cg.time is below it (0x59D5CD). A Y then is lost, so the change that went
+ * for a gun with ammo goes on. The alt toggle is not held off (its own gate,
+ * 0x59D6F0, never reads it), and an underbarrel's change holds nothing
+ * (0x5A0847-0x5A084A). */
+static void YThroughLockout(int slot, int weapon, int from) {
+	int presses = swapPresses;
+	while (cg.time < from + CG_EMPTY_SWITCH_LOCKOUT) {
+		Frame(0, IN_Y);
+		CHECK(Selected(slot, weapon));
+	}
+	CHECK(swapPresses == presses);
+}
+static void TestYLockout(void) {
+	/* 25ms puts a command's start on the lockout's very end */
+	static const int rates[] = { 8, 16, 25, 33 };
+	static const int offsets[] = { 0, 160, 320, 480, 640, CG_EMPTY_SWITCH_LOCKOUT - 1 };
+	int i, k, t, f;
+	CHECK(CG_EMPTY_SWITCH_LOCKOUT == 750);
+	for (i = 0; i < (int)(sizeof(rates) / sizeof(rates[0])); i++) {
+		msec = rates[i];
+		for (k = 0; k < 2; k++) {
+			/* k 0: the SPAS's last shell asks for the M16; k 1: the M16's
+			 * last round asks for the SPAS. */
+			int from = k ? 0 : 1, to = k ? 1 : 0, gun = k ? WP_SHOTGUN : WP_M16;
+			int first = k ? WP_M16 : WP_SHOTGUN;
+			Setup(from, qfalse);
+			SetAmmo(from, 1, 0, k ? BG_WeaponMagSize(WP_MASTERKEY) : 0, k ? 4 : 0);
+			Frame(BUTTON_ATTACK, 0);
+			t = cg.time;
+			CHECK(raised[EV_NOAMMO] == 1 && Selected(to, gun));
+			CHECK(cg.weaponForcedSelectTime == t + CG_EMPTY_SWITCH_LOCKOUT && cg.weaponSelectTime == t);
+			/* Y on every command short of it is lost; the first after it
+			 * is taken. */
+			YThroughLockout(to, gun, t);
+			Frame(0, IN_Y);
+			CHECK(Selected(from, first));
+			/* One Y anywhere in it, the reflex as the gun runs dry, and the
+			 * change goes on to the gun with ammo, which a later Y leaves. */
+			for (f = 0; f < (int)(sizeof(offsets) / sizeof(offsets[0])); f++) {
+				Setup(from, qfalse);
+				SetAmmo(from, 1, 0, k ? BG_WeaponMagSize(WP_MASTERKEY) : 0, k ? 4 : 0);
+				Frame(BUTTON_ATTACK, 0);
+				t = cg.time;
+				while (cg.time + msec <= t + offsets[f]) Frame(0, 0);
+				Frame(0, IN_Y);
+				CHECK(Selected(to, gun));
+				Settle();
+				CHECK(PS->weapon == gun && PS->weaponstate == WEAPON_READY);
+				while (cg.time < t + CG_EMPTY_SWITCH_LOCKOUT) Frame(0, 0);
+				Frame(0, IN_Y);
+				CHECK(Selected(from, first));
+			}
+		}
+		/* The alt toggle is taken in the lockout: the M16's last round asks
+		 * for the SPAS, and the toggle, with the M16 still in its shot, asks
+		 * for the Masterkey (from a gun with no other mode, the next gun's
+		 * underbarrel). */
+		Setup(0, qfalse);
+		SetAmmo(0, 1, 0, BG_WeaponMagSize(WP_MASTERKEY), 4);
+		Frame(BUTTON_ATTACK, 0);
+		CHECK(Selected(1, WP_SHOTGUN) && cg.time < cg.weaponForcedSelectTime);
+		CHECK(PS->weaponstate == WEAPON_FIRING);
+		CG_AltWeapon_f();
+		CHECK(Selected(0, WP_MASTERKEY));
+
+		/* The Masterkey's last shell holds nothing: a Y on the next command
+		 * goes on from its rifle to the SPAS. */
+		Setup(0, qtrue);
+		SetAmmo(0, BG_WeaponMagSize(WP_M16), 0, 1, 0);
+		Frame(BUTTON_ATTACK, 0);
+		CHECK(raised[EV_NOAMMO] == 1 && Selected(0, WP_M16) && cg.weaponForcedSelectTime == 0);
+		Frame(0, IN_Y);
+		CHECK(Selected(1, WP_SHOTGUN));
+
+		/* Nowhere to go holds Y off all the same, and stamps no selection.
+		 * Once it is over a Y takes the empty rifle: Y asks no ammo. */
+		Setup(1, qfalse);
+		SetAmmo(1, 0, 0, 0, 0);
+		SetAmmo(0, 0, 0, BG_WeaponMagSize(WP_MASTERKEY), 4);
+		f = cg.weaponSelectTime;
+		Frame(BUTTON_ATTACK, 0);
+		t = cg.time;
+		CHECK(raised[EV_NOAMMO] == 1 && Selected(1, WP_SHOTGUN) && cg.weaponSelectTime == f);
+		CHECK(cg.weaponForcedSelectTime == t + CG_EMPTY_SWITCH_LOCKOUT);
+		YThroughLockout(1, WP_SHOTGUN, t);
+		Frame(0, IN_Y);
+		CHECK(Selected(0, WP_M16) && cg.weaponSelectTime == cg.time - msec);
+		Settle();
+		CHECK(PS->weapon == WP_M16 && PS->ammo[WP_M16] == 0);
+
+		/* A respawn starts with no lockout. */
+		Setup(1, qfalse);
+		SetAmmo(1, 1, 0, 0, 0);
+		Frame(BUTTON_ATTACK, 0);
+		CHECK(cg.time < cg.weaponForcedSelectTime);
+		CG_Respawn();
+		CHECK(cg.weaponForcedSelectTime == 0);
+	}
 }
 
 int main(void) {
 	TestMasterkeyToItsRifle(); TestToTheOtherGun(); TestNothingToGoTo();
-	TestHeldTrigger(); TestNotRaised(); TestOwnLiveViewOnly();
+	TestHeldTrigger(); TestNotRaised(); TestOwnLiveViewOnly(); TestYLockout();
 	printf("PASS: %i empty-gun switch checks\n", checks);
 	return 0;
 }

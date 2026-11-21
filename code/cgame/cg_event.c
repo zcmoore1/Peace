@@ -851,6 +851,11 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_NOAMMO:
 		DEBUGNAME("EV_NOAMMO");
 //		trap_S_StartSound (NULL, es->number, CHAN_AUTO, cgs.media.noAmmoSound );
+		// MW2 plays the gun's empty-fire sound here for every view
+		// (4dd742-4dd767: emptyFireSoundPlayer in the player's own, else
+		// emptyFireSound). Peace has none, and its no-ammo click is the
+		// notes' cancel cue, so nothing is played (MW2_DIFFERENCES: Weapon
+		// sounds).
 		// MW2's (4dd76f-4dd77e): only the player's own view changes guns, and
 		// MW2's change (5a07c0) refuses one in a killcam (5a07da). It is this
 		// client's own selection: CG_EventOwnInput, as for leaveads.

@@ -393,12 +393,20 @@ source for MW2 behaviour; the owner rejects it.
   no shot and puts `BG_DRY_FIRE_TIME` (500) on the lock, so a held trigger
   clicks again each time it runs out (`PM_Weapon_CheckFiringAmmo`, 0x576FE0).
   The player's own live view then runs `CG_OutOfAmmoChange` (MW2's 0x5A07C0):
-  an underbarrel selects its own gun in its own mode, the alt switch, whether
-  that gun has ammo or not; any other gun is the cycle's step, the other
+  an underbarrel selects its own gun in its own mode, the alt switch, if that
+  gun has ammo; otherwise, and for any other gun, the cycle runs from the
+  latest selection skipping empty guns (MW2's ignoreEmpty): from an
+  underbarrel still selected its own gun, from any other selection the next
   slot's gun in its own mode, only if that mode has rounds in its magazine or
-  reserve (MW2's ignoreEmpty); with nowhere to go nothing is selected. It is a
-  selection like Y's, with no swap press, so every change gate, the freeze
-  and the times are the ordinary ones. Nothing names a gun.
+  reserve; if that finds nothing an underbarrel still goes to its own gun and
+  any other gun selects nothing. It is a selection like Y's, with no swap
+  press, so every change gate, the freeze and the times are the ordinary
+  ones. From a gun that is not an underbarrel it also holds Y and `weapprev`
+  off for `CG_EMPTY_SWITCH_LOCKOUT` (750, MW2's `weaponForcedSelectTime`,
+  0x5A084C), selection or not: a Y then is lost and the change goes on; the
+  alt toggle is not held off. A gun given rounds during the dry pull's 500ms
+  reloads at once (MW2's reload check comes before the busy gate, step 4e).
+  The empty-fire sound is not played. Nothing names a gun.
 - **Inventory instances own attachments and ammunition.** `BG_GetSlot` /
   `BG_PutSlot` / `BG_SelectSlot` bridge the two instances to the existing
   `ammo[]`, `ammoReserve[]` and `STAT_UNCHAMBERED` working registers. Stowed

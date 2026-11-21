@@ -180,7 +180,9 @@ static void Settle(void) {
 	int t;
 	for (t = 0; t < 5000; t++) {
 		Frame(0, 0);
-		if (PS->weaponstate == WEAPON_READY && PS->weapon == cg.weaponSelect) return;
+		/* not the READY think between a shot and the action it owes */
+		if (PS->weaponstate == WEAPON_READY && PS->weapon == cg.weaponSelect &&
+		    !BG_ShotAwaitsAction(PS)) return;
 	}
 	CHECK(0);
 }
@@ -619,6 +621,22 @@ static void TestYLockout(void) {
 				CHECK(Selected(from, first));
 			}
 		}
+		/* A number select is held off with Y (MW2 has none: every selection
+		 * but the alt toggle is WeaponCycleAllowed's), and taken after it. */
+		Setup(1, qfalse);
+		SetAmmo(1, 1, 0, 0, 0);
+		Frame(BUTTON_ATTACK, 0);
+		t = cg.time;
+		CHECK(Selected(0, WP_M16) && cg.weaponForcedSelectTime == t + CG_EMPTY_SWITCH_LOCKOUT);
+		Com_sprintf(weaponArgument, sizeof(weaponArgument), "%d", WP_SHOTGUN);
+		while (cg.time < t + CG_EMPTY_SWITCH_LOCKOUT) {
+			CG_Weapon_f();
+			CHECK(Selected(0, WP_M16));
+			Frame(0, 0);
+		}
+		CG_Weapon_f();
+		CHECK(Selected(1, WP_SHOTGUN));
+
 		/* The alt toggle is taken in the lockout: the M16's last round asks
 		 * for the SPAS, and the toggle, with the M16 still in its shot, asks
 		 * for the Masterkey (from a gun with no other mode, the next gun's
@@ -639,6 +657,35 @@ static void TestYLockout(void) {
 		CHECK(raised[EV_NOAMMO] == 1 && Selected(0, WP_M16) && cg.weaponForcedSelectTime == 0);
 		Frame(0, IN_Y);
 		CHECK(Selected(1, WP_SHOTGUN));
+		/* The same with the knife pressed on the next command of the shot's
+		 * client frame: the knife is in ps.weapon when the event is played,
+		 * and the gun the event is about is still the slot's, the
+		 * underbarrel (MW2's ps.weapon, which an offhand never replaces), so
+		 * nothing is held and its rifle is selected. (A frag or flash press
+		 * only starts the gun's drop on that command.) */
+		{
+			int from;
+			Setup(0, qtrue);
+			SetAmmo(0, BG_WeaponMagSize(WP_M16), 0, 1, 0);
+			from = PS->eventSequence;
+			memset(&move.cmd, 0, sizeof(move.cmd));
+			move.cmd.buttons = BUTTON_ATTACK; move.cmd.weapon = cmdValue;
+			move.cmd.serverTime = PS->commandTime + msec;
+			Pmove(&move);
+			BG_UpdateActivate(PS, &use, move.cmd.buttons, qfalse, qfalse);
+			move.cmd.buttons = BUTTON_MELEE;
+			move.cmd.serverTime = PS->commandTime + msec;
+			Pmove(&move);
+			BG_UpdateActivate(PS, &use, move.cmd.buttons, qfalse, qfalse);
+			cg.time += 2 * msec;
+			snapshot.ps = *PS;
+			CHECK(PS->eventSequence - from <= MAX_PS_EVENTS);
+			CHECK(PS->weapon != BG_ActiveSlotWeapon(PS) && BG_ActiveSlotWeapon(PS) == WP_MASTERKEY);
+			CHECK(BG_BaseWeapon(PS->weapon) == PS->weapon);
+			PlayEvents(from);
+			CHECK(raised[EV_FIRE_WEAPON] == 1 && raised[EV_NOAMMO] == 1);
+			CHECK(cg.weaponForcedSelectTime == 0 && Selected(0, WP_M16));
+		}
 
 		/* Nowhere to go holds Y off all the same, and stamps no selection.
 		 * Once it is over a Y takes the empty rifle: Y asks no ammo. */

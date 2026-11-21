@@ -3141,7 +3141,8 @@ static const bg_weaponNote_t bgnotes_shell_end[] = {
    "firing" for the whole refire - the shot leaves at the start and the rest is
    the action cycling. Notes mark the two moments that matter:
 
-     WNOTE_BOLT_OPEN        the blast is over and the pump begins  -> WEAPON_BOLTING
+     WNOTE_BOLT_OPEN    the blast is over: the shot ends here  -> READY (step 4f),
+                        and the owed action starts from it     -> WEAPON_BOLTING (step 4d)
      WNOTE_BOLT_CLOSED  a round is chambered                   -> lock released
 
    The chamber note carries no rounds (param 0): it clears the busy lock at once
@@ -5180,7 +5181,10 @@ PM_TorsoAnimation
 ==============
 */
 static void PM_TorsoAnimation( void ) {
-	if ( pm->ps->weaponstate == WEAPON_READY ) {
+	// The READY think between a shot and its owed action (step 4f) keeps the
+	// attack torso, as the action after it does: the Quake 3 torso is Peace's
+	// picture, and it leaves the attack pose when the whole cycle is over.
+	if ( pm->ps->weaponstate == WEAPON_READY && !BG_ShotAwaitsAction( pm->ps ) ) {
 		if ( pm->ps->weapon == WP_GAUNTLET ) {
 			PM_ContinueTorsoAnim( TORSO_STAND2 );
 		} else {

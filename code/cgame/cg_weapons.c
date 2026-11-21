@@ -2015,6 +2015,12 @@ void CG_Weapon_f( void ) {
 	if ( cg.predictedPlayerState.pm_flags & PMF_FROZEN ) {
 		return;
 	}
+	// MW2 has no number select: every selection but the alt toggle goes
+	// through WeaponCycleAllowed, which also holds it off while the
+	// out-of-ammo change's lockout runs (59d5cd-59d5d3), as CG_NextWeapon_f.
+	if ( cg.time < cg.weaponForcedSelectTime ) {
+		return;
+	}
 
 	num = atoi( CG_Argv( 1 ) );
 

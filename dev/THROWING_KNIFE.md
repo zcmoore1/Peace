@@ -60,7 +60,8 @@ provenance and regeneration are in `assets/source/throwingknife/README.md`.
   or a pump/bolt. A reload keeps only rounds whose fill landed before the
   press; a note due on the press think is lost (MW2's same-think hand step).
   The reload restarts from 0, and an open action stays owed in
-  `STAT_UNCHAMBERED` and is worked from 0 when the gun is back.
+  `STAT_UNCHAMBERED` and is worked whole, from its open note, when the gun is
+  back (the shot is not played again).
 
 ## In flight and at rest (`g_missile.c`)
 

@@ -387,6 +387,18 @@ source for MW2 behaviour; the owner rejects it.
   shared pmove cancels the drop and reaches the normal fire gates that think.
   There is no YY timing window or extra delay. Initial drops still stamp their
   real times; chamber debt, ammo, sprint and ladder ownership still apply.
+  A gun run completely dry (nothing in the magazine, nothing in reserve) asks
+  for another itself, as MW2's: pmove raises `EV_NOAMMO` after its last round
+  (MW2's `BG_SwitchWeaponsIfEmpty`, 0x576320) and on a dry pull, which starts
+  no shot and puts `BG_DRY_FIRE_TIME` (500) on the lock, so a held trigger
+  clicks again each time it runs out (`PM_Weapon_CheckFiringAmmo`, 0x576FE0).
+  The player's own live view then runs `CG_OutOfAmmoChange` (MW2's 0x5A07C0):
+  an underbarrel selects its own gun in its own mode, the alt switch, whether
+  that gun has ammo or not; any other gun is the cycle's step, the other
+  slot's gun in its own mode, only if that mode has rounds in its magazine or
+  reserve (MW2's ignoreEmpty); with nowhere to go nothing is selected. It is a
+  selection like Y's, with no swap press, so every change gate, the freeze
+  and the times are the ordinary ones. Nothing names a gun.
 - **Inventory instances own attachments and ammunition.** `BG_GetSlot` /
   `BG_PutSlot` / `BG_SelectSlot` bridge the two instances to the existing
   `ammo[]`, `ammoReserve[]` and `STAT_UNCHAMBERED` working registers. Stowed

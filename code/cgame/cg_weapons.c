@@ -1860,13 +1860,32 @@ static void CG_SelectWeaponSlot( const playerState_t *ps, int slot ) {
 // and no MW2 multiplayer weapon does. So it is two presses from the Masterkey
 // to the next gun, and the cycle never selects the Masterkey. It starts from
 // the latest selection, not from the gun in hand (cg.weaponSelect, 59ed68).
-static void CG_CycleWeapon( const playerState_t *ps ) {
+// MW2's ignoreEmpty (its third argument, 59eebf-59eecf; only the out-of-ammo
+// change passes it) skips a next gun whose own mode has nothing in its
+// magazine or reserve, and then nothing is selected: false. The underbarrel's
+// step to its gun asks no ammo (59ed8c-59edce).
+static qboolean CG_SlotModeHasAmmo( const playerState_t *ps, int slot, qboolean alternate ) {
+	bg_weaponInstance_t gun;
+	BG_GetSlot( ps, slot, &gun );
+	if ( gun.weapon <= WP_NONE || gun.weapon >= WP_NUM_WEAPONS ||
+	     !( ps->stats[STAT_WEAPONS] & ( 1 << gun.weapon ) ) ) {
+		return qfalse;
+	}
+	return alternate ? gun.altAmmo + gun.altReserve > 0 : gun.ammo + gun.reserve > 0;
+}
+static qboolean CG_CycleWeapon( const playerState_t *ps, qboolean ignoreEmpty ) {
+	int next;
 	if ( cg.weaponSelectAlternate && cg.weaponSelectSlot >= 0 && cg.weaponSelectSlot < SLOT_COUNT &&
 	     BG_AlternateWeapon( ps->stats[STAT_SLOT_PRIMARY + cg.weaponSelectSlot] ) != WP_NONE ) {
 		CG_SelectWeaponSlotMode( ps, cg.weaponSelectSlot, qfalse );
-	} else {
-		CG_SelectWeaponSlotMode( ps, (cg.weaponSelectSlot + 1) % SLOT_COUNT, qfalse );
+		return qtrue;
 	}
+	next = ( cg.weaponSelectSlot + 1 ) % SLOT_COUNT;
+	if ( ignoreEmpty && !CG_SlotModeHasAmmo( ps, next, qfalse ) ) {
+		return qfalse;
+	}
+	CG_SelectWeaponSlotMode( ps, next, qfalse );
+	return qtrue;
 }
 
 /*
@@ -1907,7 +1926,7 @@ void CG_NextWeapon_f( void ) {
 	// actions that return here. The cycle runs from the requested selection,
 	// not the last acknowledged active slot: a second press counts even before
 	// a server snapshot lands.
-	CG_CycleWeapon( ps );
+	CG_CycleWeapon( ps, qfalse );
 	want = cg.weaponSelect;
 
 	if ( want <= WP_NONE || want >= WP_NUM_WEAPONS ) {
@@ -2016,29 +2035,57 @@ void CG_Weapon_f( void ) {
 ===================
 CG_OutOfAmmoChange
 
-The current weapon has just run out of ammo
+MW2's (5a07c0), from the player's own out-of-ammo event (CG_EntityEvent
+4dd77e, through 5041f7, which passes no forceCycle): the gun in hand has
+nothing in its magazine and nothing in reserve, after its last shot
+(BG_SwitchWeaponsIfEmpty, 576320) or on a dry pull of the trigger
+(PM_Weapon_CheckFiringAmmo, 577080). It runs on the predicted state and
+selects as a Y does, with no swap press; pmove then changes guns as for any
+selection, so the freeze, the change gates and the drop and raise times are
+the ordinary ones.
 ===================
 */
 void CG_OutOfAmmoChange( void ) {
-	playerState_t	*ps = &cg.snap->ps;
-	int				other;
+	const playerState_t	*ps;
+	int					slot, gun;
 
+	if ( !cg.snap || ( cg.snap->ps.pm_flags & PMF_FOLLOW ) ) {
+		return;
+	}
+	ps = &cg.predictedPlayerState;
+	if ( ps->pm_type >= PM_DEAD ) {		// 5a07e7
+		return;
+	}
+	slot = ps->stats[STAT_ACTIVE_SLOT];
+	if ( slot < 0 || slot >= SLOT_COUNT ) {
+		return;
+	}
+	// The gun the event is about is the slot's, in the mode it was raised in:
+	// MW2's ps.weapon, which an offhand pulled meanwhile never replaces.
+	gun = BG_ActiveSlotWeapon( ps );
 	cg.weaponSelectTime = cg.time;
 
-	// Stock Q3 scanned from the HIGHEST weapon index down and took the first
-	// selectable one. With melee and equipment now living in the weapon enum
-	// above the guns, that handed you a flashbang whenever a gun ran dry - and
-	// because cg.weaponSelect feeds cmd.weapon, pmove then churned weapon
-	// changes forever and weaponstate never settled on READY.
-	// Two slots means there is exactly one place to go: the other one.
-	other = ( ps->stats[STAT_ACTIVE_SLOT] == SLOT_PRIMARY )
-	      ? ps->stats[STAT_SLOT_SECONDARY]
-	      : ps->stats[STAT_SLOT_PRIMARY];
-
-	if ( other > WP_NONE && other < WP_NUM_WEAPONS &&
-	     ( ps->stats[STAT_WEAPONS] & ( 1 << other ) ) ) {
-		// the cycle's step: the other gun in its own mode
-		CG_SelectWeaponSlotMode(ps, (ps->stats[STAT_ACTIVE_SLOT] + 1) % SLOT_COUNT, qfalse);
+	// Not a scan of weapon numbers, as stock Q3's was: melee and equipment are
+	// in the weapon enum above the guns, and a scan handed over a flashbang.
+	// An underbarrel (MW2's altmode weapon, 5a0891) whose gun has ammo selects
+	// that gun in its own mode (5a08a3-5a08c4): MW2's alt switch, with its alt
+	// drop and raise.
+	if ( BG_BaseWeapon( gun ) != gun && CG_SlotModeHasAmmo( ps, slot, qfalse ) ) {
+		CG_SelectWeaponSlotMode( ps, slot, qfalse );
+		return;
+	}
+	// Otherwise MW2's cycle skipping empty guns (CycleWeapPrimary(lc, 1, 1, 0),
+	// 5a08dc), from the latest selection: from an underbarrel that is its gun
+	// all the same, from any other gun the next gun in its own mode if that
+	// has ammo.
+	if ( CG_CycleWeapon( ps, qtrue ) ) {
+		return;
+	}
+	// The cycle found nothing: an underbarrel still goes to its gun
+	// (5a08e8-5a08fa); any other gun stays and clicks, as the event asks for
+	// no forced cycle (5a0906-5a090b).
+	if ( BG_BaseWeapon( gun ) != gun ) {
+		CG_SelectWeaponSlotMode( ps, slot, qfalse );
 	}
 }
 

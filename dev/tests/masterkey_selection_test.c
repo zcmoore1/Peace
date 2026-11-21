@@ -237,8 +237,9 @@ static void TestDirectSelectionAndGuards(void) {
 	CG_NextWeapon_f(); ExpectIntent(0,WP_SHOTGUN);
 }
 
-/* The out-of-ammo switch is the cycle's step: the other gun in its own
- * mode, even when it was put away as its underbarrel. */
+/* From a gun that is not an underbarrel the out-of-ammo switch is the
+ * cycle's step: the other gun in its own mode, even when it was put away as
+ * its underbarrel (empty_switch_test.c has the rest, through the event). */
 static void TestOutOfAmmoMode(void) {
 	Setup(WP_SHOTGUN,WP_M16,qfalse);
 	snapshot.ps.slotFlags[1]|=BG_GUN_ALTERNATE; cg.predictedPlayerState.slotFlags[1]|=BG_GUN_ALTERNATE;

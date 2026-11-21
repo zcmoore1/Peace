@@ -245,6 +245,10 @@ typedef enum {
 // is over meleeTime after it (MeleeEnd), where the gun's quick raise starts.
 #define BG_MELEE_DELAY            79
 #define BG_MELEE_TIME             800
+// MW2's dry fire (PM_Weapon_CheckFiringAmmo, 576fe0): a pull of the trigger
+// on a gun with nothing in its magazine and nothing in reserve adds 500ms to
+// the weapon's time (5770af), a literal in the code, not weapon data.
+#define BG_DRY_FIRE_TIME          500
 // MW2's offhand prepare, holdFireTime (weapon data, the IW4 dump's
 // weapons/mp files): OffHandPrepare (577800) locks the offhand for it, and the
 // offhand waits in HOLD for its release once it is over. The frag, flash and

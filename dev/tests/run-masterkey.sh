@@ -13,3 +13,5 @@ ${CC:-cc} $flags dev/tests/masterkey_selection_test.c code/cgame/cg_playerstate.
 out/tests/masterkey-selection-test
 ${CC:-cc} $flags dev/tests/moni_test.c code/cgame/cg_playerstate.c dev/tests/pickup_pmove_driver.c $game $common -Wl,--gc-sections -lm -o out/tests/moni-test
 out/tests/moni-test
+${CC:-cc} $flags dev/tests/empty_switch_test.c code/cgame/cg_event.c code/cgame/cg_playerstate.c dev/tests/pickup_pmove_driver.c $game $common -Wl,--gc-sections -lm -o out/tests/empty-switch-test
+out/tests/empty-switch-test

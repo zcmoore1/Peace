@@ -5770,6 +5770,26 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
+	// MW2's PM_Weapon_CheckFiringAmmo (576fe0), asked before anything of the
+	// shot starts (FireWeapon, 57725b): a gun with nothing in its magazine and
+	// nothing in reserve is a dry fire. It starts no shot and opens no action.
+	// It raises MW2's out-of-ammo event (0xc, 577080), which takes the
+	// player's own cgame to a gun with ammo (CG_OutOfAmmoChange), and adds
+	// BG_DRY_FIRE_TIME to the weapon's time (5770af), which MW2 has at 0 by
+	// then (WeaponTimeAdjust zeroes a spent time, 578b71), so a held trigger
+	// raises it again on the first think that has run out. The state is left
+	// as it is: with the trigger down MW2's ShouldBeFiring (576cc0) has not
+	// touched it. (MW2 also clears the rechamber here, 577094; a gun of
+	// Peace's that owes its action is already working it, step 4d, so there
+	// is none to clear.) Equipment keeps its own count and never gets here
+	// empty.
+	if ( !BG_IsActionWeapon( pm->ps->weapon ) && BG_WeaponMagSize( pm->ps->weapon ) > 0 &&
+	     pm->ps->ammo[pm->ps->weapon] <= 0 && pm->ps->ammoReserve[pm->ps->weapon] <= 0 ) {
+		PM_AddEvent( EV_NOAMMO );
+		pm->ps->weaponTime = BG_DRY_FIRE_TIME;
+		return;
+	}
+
 	// start the animation even if out of ammo
 	if ( pm->ps->weapon == WP_GAUNTLET ) {
 		// the guantlet only "fires" when it actually hits something
@@ -5826,6 +5846,14 @@ static void PM_Weapon( void ) {
 	BG_AddPredictableEventToPlayerstate( EV_FIRE_WEAPON, pm->ps->weapon, pm->ps );
 	if ( BG_IsActionWeapon( pm->ps->weapon ) ) {
 		pm->ps->weaponAction |= WA_FIRED;
+	}
+	// MW2's BG_SwitchWeaponsIfEmpty (576320), the shot's last step (5773c6):
+	// the round that left was the gun's last, magazine and reserve both, so
+	// the out-of-ammo event follows the shot (0xc, 576359) and cgame asks for
+	// a gun with ammo while this one is still firing.
+	if ( !BG_IsActionWeapon( pm->ps->weapon ) && BG_WeaponMagSize( pm->ps->weapon ) > 0 &&
+	     pm->ps->ammo[pm->ps->weapon] <= 0 && pm->ps->ammoReserve[pm->ps->weapon] <= 0 ) {
+		PM_AddEvent( EV_NOAMMO );
 	}
 	// MW2's fire and melee hit stop a prone crawl (0x576F8B, 0x5774CF)
 	PM_SetProneMoveOverride();

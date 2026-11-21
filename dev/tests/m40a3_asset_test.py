@@ -80,4 +80,9 @@ assert scope[18+4*(100*512+100)+3]==255 # outside ocular black
 assert scope[18+4*(260*512+260)+3]==0 # off the crosshair, inside clear
 world=(MODEL/'world.md3').read_bytes()
 assert world[:4]==b'IDP3' and struct.unpack_from('<i',world,104)[0]==len(world)
+# MW2's fireType, named as its weapon files name it: cheytac_mp is Single Shot,
+# and the generated header hands pmove that type (bg_fireType_t)
+header=(ROOT/'code/game/bg_m40a3_data.h').read_text()
+assert recipe['fire_type']=='Single Shot', 'cheytac_mp fires once a pull'
+assert '#define M40_FIRE_TYPE BG_FIRE_SINGLESHOT\n' in header
 print(f'PASS: {h[10]} rifle triangles, {h[19]} poses, timing, winding, scope mask and sprint continuity')

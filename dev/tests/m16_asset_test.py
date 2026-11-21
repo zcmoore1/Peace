@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Inspect the shipped M16/Masterkey files independently of their exporter."""
 from pathlib import Path
+import json
 import math
 import struct
 
@@ -134,6 +135,14 @@ for (names, idle, switch), (other_names, other_idle, _) in [(rifle, shotgun), (s
         there = other_idle[other_names.index(name)]
         assert max(abs(a-b) for a, b in zip(switch[0][index], there)) < .001, 'Mode switch pops at its start: '+name
 print('PASS: each mode switch starts on the other mode\'s rest pose')
+# MW2's fireType as its weapon files name it: m16_shotgun_attach_mp is Single
+# Shot; the rifle is Peace's placeholder automatic (m16_shotgun_mp's is a
+# 3-Round Burst). The generated header hands pmove each (bg_fireType_t).
+recipe = json.loads((ROOT / 'assets/source/m16/weapon.json').read_text())
+header = (ROOT / 'code/game/bg_m16_data.h').read_text()
+assert recipe['masterkey']['fire_type'] == 'Single Shot' and recipe['fire_type'] == 'Full Auto'
+assert '#define MASTERKEY_FIRE_TYPE BG_FIRE_SINGLESHOT\n' in header
+assert '#define M16_FIRE_TYPE BG_FIRE_FULLAUTO\n' in header
 
 world = (MODEL / 'world.md3').read_bytes()
 assert world[:4] == b'IDP3' and struct.unpack_from('<i', world, 104)[0] == len(world)

@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-20"
+#define	GAME_VERSION		BASEGAME "-21"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			(-40)
@@ -228,6 +228,7 @@ typedef enum {
 #define WA_SWAP_HELD       128  // edge latch across usercmd pmove substeps
 #define WA_RECOVERING      256  // thrown equipment returns original gun before queued selection
 #define WA_LEFT_EMPTY      512  // the quick action left no gun in hand (MW2's weapon 0): it returns to none
+#define WA_ATTACK_HELD     1024 // the trigger on the last pmove step: MW2's pm->oldcmd, copied every step (4cff61), for a fresh press
 
 // Ladder tuning is shared by prediction, authority and presentation. The drop
 // is an initial feel value, not MW2's (its ladder drop is the gun's
@@ -249,6 +250,22 @@ typedef enum {
 // on a gun with nothing in its magazine and nothing in reserve adds 500ms to
 // the weapon's time (5770af), a literal in the code, not weapon data.
 #define BG_DRY_FIRE_TIME          500
+// MW2's weapFireType_t, the weapon file's fireType, in MW2's order. Its
+// ShotLimitReached (5769e0, table 576a50) is how many shots one pull of the
+// trigger may fire: a single shot and a double barrel one, a burst its count,
+// full auto any number. The shots are counted in playerState_t.weaponShotCount
+// (MW2's weapState[hand].weaponShotCount, ps+0x200, 3 bits on the wire), which
+// every shot but a full-auto one adds to, capped at BG_SHOT_COUNT_MAX
+// (StartFiring, 576f93-576fc5).
+typedef enum {
+	BG_FIRE_FULLAUTO,		// "Full Auto"
+	BG_FIRE_SINGLESHOT,		// "Single Shot"
+	BG_FIRE_BURST2,			// "2-Round Burst"
+	BG_FIRE_BURST3,			// "3-Round Burst"
+	BG_FIRE_BURST4,			// "4-Round Burst"
+	BG_FIRE_DOUBLEBARREL	// "Double Barrel"
+} bg_fireType_t;
+#define BG_SHOT_COUNT_MAX         4
 // MW2's offhand prepare, holdFireTime (weapon data, the IW4 dump's
 // weapons/mp files): OffHandPrepare (577800) locks the offhand for it, and the
 // offhand waits in HOLD for its release once it is over. The frag, flash and
@@ -466,6 +483,9 @@ int  BG_ReloadSegmentTime( const playerState_t *ps, int seq );
 int  BG_HolsterTime( const playerState_t *ps );	// the holster this player is doing right now
 int  BG_WeaponFireLength( int weapon );		// 0 = no modelled fire animation
 qboolean BG_ShotAwaitsAction( const playerState_t *ps );	// READY between a shot and its action (picture only)
+qboolean BG_DryFiring( const playerState_t *ps );	// MW2's held dry fire: FIRING with no fire clip running (picture only)
+int  BG_WeaponFireType( int weapon );		// bg_fireType_t: MW2's fireType
+qboolean BG_ShotLimitReached( int fireType, int shotCount );	// MW2's ShotLimitReached (5769e0)
 int  BG_WeaponDropTime( int weapon );		// holster length, never 0
 int  BG_WeaponRaiseTime( int weapon );		// deploy length, never 0 for a gun; an offhand's holdFireTime
 int  BG_WeaponQuickDropTime( int weapon );	// MW2's quickDropTime: going away for a grenade
@@ -754,6 +774,11 @@ void BG_BeginWeaponDraw(playerState_t *ps);
 #define PWF_USE_RELOAD 1
 #define BG_SPRINT_FORWARD_MINIMUM 105	// MW2's player_sprintForwardMinimum, of 127
 #define PWF_SPRINT_RELEASE 2	// the sprint button is still down from the sprint it started or ended
+// MW2's RELOAD_START_INTERUPT and RELOADING_INTERUPT (weaponstates 11 and 9):
+// a segmented reload asked to stop, at the end of the segment it is in
+// (PM_Weapon_CheckForReload 578724-5787ad, FinishReloadStart 5783de-5783fc,
+// FinishReload 578564-578582). Only ever set while reloading.
+#define PWF_RELOAD_INTERRUPT 4
 // MW2's sprint time (player_sprintTime 4s; a start needs player_sprintMinTime
 // 1s left). Used while sprinting, refilled 1:1 while not (playerState_t.sprintUsed).
 #define BG_SPRINT_TIME        4000

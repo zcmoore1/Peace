@@ -140,66 +140,117 @@ static void RunFor( int duration, int step ) {
 	}
 }
 
-static void FinishAndFire( int loaded, int reserve, int step ) {
-	CHECK( testPs.weaponstate == WEAPON_RELOADING );
-	CHECK( testPs.weaponAnimSeq == RSEQ_END );
-	CHECK( testPs.weaponAnimTime == 0 );
-	CHECK( shots == 0 );
-	CHECK( testPs.ammo[WP_SHOTGUN] == loaded );
-	CHECK( testPs.ammoReserve[WP_SHOTGUN] == reserve );
-	RunFor( Seg( WP_SHOTGUN, RSEQ_END ) - 1, step );
-	CHECK( shots == 0 );
-	CHECK( testPs.weaponstate == WEAPON_RELOADING );
-	Step( 1 );
-	CHECK( shots == 1 );
-	CHECK( testPs.weaponstate == WEAPON_FIRING );
-	CHECK( testPs.ammo[WP_SHOTGUN] == loaded - 1 );
-	CHECK( testPs.ammoReserve[WP_SHOTGUN] == reserve );
+/* ---- the trigger and a segmented reload ----
+ * MW2 asks the reload to stop and lets the segment it is in play out, its
+ * round included: a fresh press asks in the loop at once and in the start only
+ * past 0.4 of it (PM_Weapon_CheckForReload, iw4x 0x578750-0x5787AD), and a
+ * trigger down as the start or a pass ends asks too (FinishReloadStart
+ * 0x5783DE-0x5783FC, FinishReload 0x578564-0x578582). Then the end plays, and
+ * a trigger still held fires on the reload's last command (the owner's
+ * choice; MW2 fires the think after). Each segment starts afresh on the think
+ * the one before it ended (MW2's crossing drops the overshoot, 0x578B71, and
+ * PM_SetReloadingState gives the next its whole time, 0x575E20): it ends on
+ * the first think at or past its start plus its length. */
+static int reloadElapsed;	/* ms of reload run since BeginReload */
+static void ReloadStep( int msec ) {
+	Step( msec );
+	reloadElapsed += msec;
 }
-
-static void TestAttackInterrupt( int step ) {
-	int i;
-	/* Start, loop before insertion, the insertion think itself, loop after. */
-	const int seats = ShellSeats( 1 );
-	const int times[] = {
-		Seg( WP_SHOTGUN, RSEQ_START ) / 2,
-		( Seg( WP_SHOTGUN, RSEQ_START ) + seats ) / 2,
-		seats - 1,
-		seats + 1
-	};
-	for ( i = 0; i < 4; i++ ) {
-		int loaded = i >= 2 ? 4 : 3;
-		int reserve = i >= 2 ? 9 : 10;
-		BeginReload( WP_SHOTGUN, 3, 10 );
-		RunFor( times[i], 1 );
-		testMove.cmd.buttons = BUTTON_ATTACK;
-		Step( 1 );
-		FinishAndFire( loaded, reserve, step );
-	}
+static void ReloadTo( int elapsed ) {
+	while ( reloadElapsed < elapsed ) ReloadStep( 1 );
 }
-
-static void TestEmptyTube( int step ) {
-	int elapsed;
-	BeginReload( WP_SHOTGUN, 0, 10 );
+/* The thinks run 1ms apart up to 'fine' and 'step' apart after it: the first
+   one at or past 't'. */
+static int ThinkAt( int t, int fine, int step ) {
+	return t <= fine ? t : fine + ( t - fine + step - 1 ) / step * step;
+}
+/* Where the end begins after the start and 'passes' passes, on those thinks. */
+static int EndBegins( int passes, int fine, int step ) {
+	int t = ThinkAt( Seg( WP_SHOTGUN, RSEQ_START ), fine, step );
+	while ( passes-- > 0 ) t = ThinkAt( t + Seg( WP_SHOTGUN, RSEQ_LOOP ), fine, step );
+	return t;
+}
+/* The reload stops after the start and 'passes' passes with 'loaded' shells,
+   plays its end, and the trigger, held from now on, fires on its last think. */
+static void StopsAndFires( int passes, int loaded, int reserve, int step ) {
+	const int stop = EndBegins( passes, reloadElapsed, step );
+	const int end = ThinkAt( stop + Seg( WP_SHOTGUN, RSEQ_END ), reloadElapsed, step );
 	testMove.cmd.buttons = BUTTON_ATTACK;
-	for ( elapsed = 0; elapsed < 2000 && testPs.weaponAnimSeq != RSEQ_END; elapsed += step ) {
-		Step( step );
-		CHECK( shots == 0 );
+	while ( reloadElapsed < end ) {
+		CHECK( shots == 0 && testPs.weaponstate == WEAPON_RELOADING );
+		ReloadStep( step );
+		if ( reloadElapsed < stop ) {
+			CHECK( testPs.weaponstate == WEAPON_RELOADING && testPs.weaponAnimSeq != RSEQ_END );
+		} else if ( reloadElapsed < end ) {
+			CHECK( testPs.weaponstate == WEAPON_RELOADING && testPs.weaponAnimSeq == RSEQ_END );
+			CHECK( testPs.ammo[WP_SHOTGUN] == loaded && testPs.ammoReserve[WP_SHOTGUN] == reserve );
+		}
 	}
-	CHECK( elapsed < 2000 );
-	FinishAndFire( 1, 9, step );
-}
-
-static void TestReleasedAttack( int step ) {
-	BeginReload( WP_SHOTGUN, 3, 10 );
-	testMove.cmd.buttons = BUTTON_ATTACK;
-	Step( step );
+	CHECK( shots == 1 && testPs.weaponstate == WEAPON_FIRING );
+	CHECK( testPs.ammo[WP_SHOTGUN] == loaded - 1 && testPs.ammoReserve[WP_SHOTGUN] == reserve );
 	testMove.cmd.buttons = 0;
-	RunFor( Seg( WP_SHOTGUN, RSEQ_END ) + SettleTime(), step );
-	CHECK( testPs.weaponstate == WEAPON_READY );
-	CHECK( shots == 0 );
-	CHECK( testPs.ammo[WP_SHOTGUN] == 3 );
-	CHECK( testPs.ammoReserve[WP_SHOTGUN] == 10 );
+}
+
+/* The trigger pressed at any point of the start or the first pass and held:
+   the segment it is in plays out (the pass's shell goes in), then the end. */
+static void TestAttackInterrupt( int step ) {
+	const int start = Seg( WP_SHOTGUN, RSEQ_START ), loop = Seg( WP_SHOTGUN, RSEQ_LOOP );
+	const int seats = ShellSeats( 1 ), i0 = 1;
+	/* the start's first think, its 0.4 and just past, the pass before its
+	   shell, the shell's own think and after it */
+	const int times[] = { i0, start * 2 / 5, start * 2 / 5 + 1, start - 1,
+		( start + seats ) / 2, seats - 1, seats, seats + 1, start + loop - 1 };
+	int i;
+	for ( i = 0; i < ARRAY_LEN( times ); i++ ) {
+		qboolean inStart = times[i] < start;
+		BeginReload( WP_SHOTGUN, 3, 10 );
+		reloadElapsed = 0;
+		ReloadTo( times[i] - 1 );
+		CHECK( testPs.weaponstate == WEAPON_RELOADING && testPs.weaponAnimSeq == ( inStart ? RSEQ_START : RSEQ_LOOP ) );
+		StopsAndFires( inStart ? 0 : 1, inStart ? 3 : 4, inStart ? 10 : 9, step );
+	}
+}
+
+/* An empty tube, the trigger held from the start: the start plays out, and as
+   it has no round to fire, one pass (MW2's PM_SetReloadingState keeps the
+   request, 0x575E3B-0x575E4A), then the end. */
+static void TestEmptyTube( int step ) {
+	BeginReload( WP_SHOTGUN, 0, 10 );
+	reloadElapsed = 0;
+	StopsAndFires( 1, 1, 9, step );
+}
+
+/* A tap, let go at once: in the start's first 0.4 it is forgotten and the
+   reload fills the tube; past it, the start plays out and the end follows; in
+   a pass, the pass plays out with its shell. It fires nothing. */
+static void TestReleasedAttack( int step ) {
+	const int start = Seg( WP_SHOTGUN, RSEQ_START ), loop = Seg( WP_SHOTGUN, RSEQ_LOOP );
+	const int taps[] = { step, start * 2 / 5, start * 2 / 5 + 1, start - 1, start + 1, start + loop - 1 };
+	int i;
+	for ( i = 0; i < ARRAY_LEN( taps ); i++ ) {
+		qboolean asked = taps[i] * 5 > start * 2;
+		int passes = !asked ? BG_WeaponMagSize( WP_SHOTGUN ) - 3 : taps[i] < start ? 0 : 1;
+		int loaded = !asked ? BG_WeaponMagSize( WP_SHOTGUN ) : taps[i] < start ? 3 : 4;
+		int stop, end;
+		BeginReload( WP_SHOTGUN, 3, 10 );
+		reloadElapsed = 0;
+		ReloadTo( taps[i] - 1 );
+		testMove.cmd.buttons = BUTTON_ATTACK;
+		ReloadStep( 1 );
+		testMove.cmd.buttons = 0;
+		stop = EndBegins( passes, reloadElapsed, step );
+		end = ThinkAt( stop + Seg( WP_SHOTGUN, RSEQ_END ), reloadElapsed, step );
+		while ( reloadElapsed < end ) {
+			CHECK( testPs.weaponstate == WEAPON_RELOADING );
+			CHECK( ( testPs.weaponAnimSeq == RSEQ_END ) == ( reloadElapsed >= stop ) );
+			ReloadStep( step );
+		}
+		CHECK( testPs.weaponstate == WEAPON_READY && shots == 0 );
+		CHECK( testPs.ammo[WP_SHOTGUN] == loaded && testPs.ammoReserve[WP_SHOTGUN] == 10 - ( loaded - 3 ) );
+	}
+	/* The start's 0.4 is of its own length: a press on its first think is
+	   below it at every rate a client sends. */
+	CHECK( 66 * 5 <= start * 2 );
 }
 
 static void TestNaturalEnd( int loaded, int reserve, int step ) {
@@ -369,22 +420,47 @@ static void TestFrozenShotEnd( int step ) {
 	Step( step );
 	CHECK( testPs.weaponstate == WEAPON_BOLTING && testPs.weaponAnimTime == open );
 	CHECK( testPs.weaponTime == ActionLength( WP_SHOTGUN ) && shots == 1 );
+
+	/* The trigger down as the freeze lifts: the shot ran out frozen, where
+	   MW2's command keeps no trigger, so that think's lock found it up and the
+	   pull was over (WeaponTimeAdjust 0x578B51-0x578B67); unfrozen, the gun is
+	   still FIRING and its time has run out, and MW2's ShouldBeFiring fires it
+	   again (0x576D3F-0x576D62), the action still owed: CheckForRechamber
+	   starts one only from READY (0x575B77). (PmoveSingle masks the frozen
+	   command; this test drives PM_Weapon alone, so it holds the trigger up.) */
+	ReadyToFire();
+	testMove.cmd.buttons = 0;
+	testPs.pm_flags |= PMF_FROZEN;
+	for ( t = 1; t < ShotEndThink( WP_SHOTGUN, step ) + 5; t++ ) Step( step );
+	CHECK( testPs.weaponstate == WEAPON_FIRING && testPs.weaponShotCount == 0 && shots == 1 );
+	testPs.pm_flags &= ~PMF_FROZEN;
+	testMove.cmd.buttons = BUTTON_ATTACK;
+	Step( step );
+	CHECK( shots == 2 && testPs.weaponstate == WEAPON_FIRING && testPs.weaponAnimTime == 0 );
+	CHECK( ( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN) ) && testPs.weaponShotCount == 1 );
+	testMove.cmd.buttons = 0;
 }
 
 static void TestPumpCannotBeShortCircuited( void ) {
-	int t;
+	int t, heldEnd = ShotEndThink( WP_SHOTGUN, 1 ) + Thinks( ActionLength( WP_SHOTGUN ), 1 );
 	/* Holding fire must not produce a second shot before the cycle is over -
 	   the chamber note gives the lock away partway through, so if anything
-	   were gated on the lock alone this is where it would double-fire. Nor on
-	   the shot's READY think, which owes the action. The second shot comes on
-	   the think the action ends: MW2's shot, its READY think and its
-	   rechamber (MW2's held trigger would wait for a release, which Peace
-	   does not model). */
+	   were gated on the lock alone this is where it would double-fire. Nor
+	   after it: the SPAS is single shot (spas12_mp), and MW2's lock holds a
+	   gun whose trigger is still down from its shot READY with weaponTime 1
+	   (WeaponTimeAdjust, iw4x 0x5789DD-0x578AE6), its pump started from that
+	   READY on the shot's last think. The pump ends READY under the lock, and
+	   only a release and a new pull fire again. */
 	ReadyToFire();
-	for ( t = 1; t < CycleEndThink( WP_SHOTGUN, 1 ); t++ ) {
+	for ( t = 1; t < heldEnd + 3 * Thinks( BG_WeaponFireLength( WP_SHOTGUN ), 1 ); t++ ) {
 		Step( 1 );
 		CHECK( shots == 1 );
+		if ( t >= heldEnd ) CHECK( testPs.weaponstate == WEAPON_READY && testPs.weaponTime == 1 );
 	}
+	testMove.cmd.buttons = 0;
+	Step( 1 );
+	CHECK( shots == 1 && testPs.weaponstate == WEAPON_READY && testPs.weaponTime == 0 );
+	testMove.cmd.buttons = BUTTON_ATTACK;
 	Step( 1 );
 	CHECK( shots == 2 );
 }

@@ -1197,10 +1197,11 @@ typedef struct playerState_s {
 	int			weapon;			// copied to entityState_t->weapon
 	int			weaponstate;
 	int			weaponAnimTime;	// ms ELAPSED into the current anim SEGMENT (counts UP). -1 = no anim playing. Notes fire on crossings of this; never derived from weaponTime.
-	int			weaponAction;	// action, button history, cancel acknowledgement, recovery (9 bits)
+	int			weaponAction;	// action, button history, cancel acknowledgement, recovery, the trigger's last step (11 bits)
 	int			weaponAnimSeq;	// which reload segment is playing (reloadSeq_t)
 	int             weaponDraw;     // WDRAW_*: the kind of raise, and of the drop before a mode change
 	int             weapFlags;      // PWF_* (MW2's name): PWF_USE_RELOAD is the server's use/reload request
+	int             weaponShotCount;	// MW2's weapState[hand].weaponShotCount (ps+0x200): shots of this pull of the trigger, 0..BG_SHOT_COUNT_MAX
 	int             perks;          // spawn-owned perk mask, predicted and replayed
 	int             moveClass;      // spawn-owned: MW2's class speed, from the class's primary (moveClass_t); never rebased
 	int             jumpLand;       // MW2's jump state: 0 none, -1 jumped and not landed, >0 ms of landing slowdown left

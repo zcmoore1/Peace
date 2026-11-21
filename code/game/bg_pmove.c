@@ -3141,7 +3141,8 @@ static const bg_weaponNote_t bgnotes_shell_end[] = {
    "firing" for the whole refire - the shot leaves at the start and the rest is
    the action cycling. Notes mark the two moments that matter:
 
-     WNOTE_BOLT_OPEN    the blast is over: the shot ends here  -> READY (step 4f),
+     WNOTE_BOLT_OPEN    the blast is over: the shot ends here  -> READY (step 4f,
+                        or, the trigger held, MW2's lock: PM_WeaponTimeAdjust),
                         and the owed action starts from it     -> WEAPON_BOLTING (step 4d)
      WNOTE_BOLT_CLOSED  a round is chambered                   -> lock released
 
@@ -3230,6 +3231,62 @@ static const bg_weaponAnimSeg_t bg_weaponFire[MAX_WEAPONS] = {
 int BG_WeaponFireLength( int weapon ) {
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
 	return bg_weaponFire[weapon].length;
+}
+
+/* Each gun's MW2 fireType (its weapons/mp file), for the guns that stand for an
+   MW2 one; the rest, Quake 3's own guns and equipment, fire as they always did,
+   which is MW2's full auto (MW2's offhands are never counted, and its knife is
+   the gun's own melee, so the gun's type decides the knife's end). The M16
+   rifle is Peace's placeholder automatic, not m16_shotgun_mp's 3-round burst;
+   the generated guns take it from their weapon.json. */
+static const int bg_weaponFireType[MAX_WEAPONS] = {
+	/* WP_NONE            */ BG_FIRE_FULLAUTO,
+	/* WP_GAUNTLET        */ BG_FIRE_FULLAUTO,
+	/* WP_MACHINEGUN      */ BG_FIRE_FULLAUTO,		/* m4_mp: Full Auto */
+	/* WP_SHOTGUN         */ BG_FIRE_SINGLESHOT,	/* spas12_mp: Single Shot */
+	/* WP_GRENADE_LAUNCHER*/ BG_FIRE_FULLAUTO,
+	/* WP_ROCKET_LAUNCHER */ BG_FIRE_FULLAUTO,		/* rpg_mp, at4_mp: Full Auto */
+	/* WP_LIGHTNING       */ BG_FIRE_FULLAUTO,
+	/* WP_RAILGUN         */ BG_FIRE_FULLAUTO,
+	/* WP_PLASMAGUN       */ BG_FIRE_FULLAUTO,
+	/* WP_BFG             */ BG_FIRE_FULLAUTO,
+	/* WP_GRAPPLING_HOOK  */ BG_FIRE_FULLAUTO,
+#ifdef MISSIONPACK
+	BG_FIRE_FULLAUTO, BG_FIRE_FULLAUTO, BG_FIRE_FULLAUTO,
+#endif
+	/* WP_KNIFE           */ BG_FIRE_FULLAUTO,
+	/* WP_FRAG            */ BG_FIRE_FULLAUTO,
+	/* WP_FLASH           */ BG_FIRE_FULLAUTO,
+	/* WP_SEMTEX          */ BG_FIRE_FULLAUTO,
+	/* WP_M40A3           */ M40_FIRE_TYPE,			/* cheytac_mp: Single Shot */
+	/* WP_THROWING_KNIFE  */ BG_FIRE_FULLAUTO,
+	/* WP_TACTICAL_INSERTION */ BG_FIRE_FULLAUTO,
+	/* WP_M16             */ M16_FIRE_TYPE,
+	/* WP_MASTERKEY       */ MASTERKEY_FIRE_TYPE	/* m16_shotgun_attach_mp: Single Shot */
+};
+
+int BG_WeaponFireType( int weapon ) {
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return BG_FIRE_FULLAUTO;
+	return bg_weaponFireType[weapon];
+}
+
+/* MW2's ShotLimitReached (5769e0): whether this pull of the trigger has fired
+   all the shots the gun's fireType allows (jump table 576a50: single shot and
+   double barrel at 1, the bursts at 2, 3 and 4, full auto never). */
+qboolean BG_ShotLimitReached( int fireType, int shotCount ) {
+	switch ( fireType ) {
+	case BG_FIRE_SINGLESHOT:
+	case BG_FIRE_DOUBLEBARREL:
+		return shotCount >= 1;
+	case BG_FIRE_BURST2:
+		return shotCount >= 2;
+	case BG_FIRE_BURST3:
+		return shotCount >= 3;
+	case BG_FIRE_BURST4:
+		return shotCount >= 4;
+	default:
+		return qfalse;
+	}
 }
 
 static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
@@ -4263,6 +4320,10 @@ static void PM_BeginReload( void ) {
 	pm->ps->weaponAnimTime = 0;
 	pm->ps->weaponTime     = BG_ReloadSegmentTime( pm->ps, RSEQ_START );
 	pm->ps->pm_flags      &= ~PMF_PENDING_MAG;
+	// MW2's PM_BeginWeaponReload starts a new pull of the trigger (575efe) and
+	// a reload that nothing has asked to stop (PM_SetReloadingState).
+	pm->ps->weaponShotCount = 0;
+	pm->ps->weapFlags     &= ~PWF_RELOAD_INTERRUPT;
 	PM_StartTorsoAnim( TORSO_GESTURE );
 	// The sound belongs to WNOTE_MAG_OUT, not to starting the reload.
 }
@@ -4383,8 +4444,10 @@ The shot of a gun with a worked action is over once its fire clip's clock has
 reached the open note (MW2's fireTime: the shot ends there, the action is what
 follows). Read from the gun's table; a gun with no open note shoots until its
 lock runs out, so its shot is never over here. True only on the think the
-clock gets there (MW2's FIRING with its weaponTime run out): step 4f leaves
-the gun READY at the end of that think, or, frozen, keeps it there.
+clock gets there (MW2's FIRING with its weaponTime run out): with the trigger
+held MW2's lock makes the gun READY at the top of that think
+(PM_WeaponTimeAdjust); otherwise step 4f leaves it READY at the end of it, or,
+frozen, keeps it there.
 ===============
 */
 // Where the shot ends on a gun's fire clip: its open note, or -1 with none.
@@ -4430,6 +4493,21 @@ qboolean BG_ShotAwaitsAction( const playerState_t *ps ) {
 	return ps->weaponstate == WEAPON_READY && ps->weaponAnimSeq == ASEQ_FIRE &&
 		ps->weaponAnimTime >= 0 && ps->weapon > WP_NONE && ps->weapon < MAX_WEAPONS &&
 		( ps->stats[STAT_UNCHAMBERED] & ( 1 << ps->weapon ) ) && BG_WeaponFireLength( ps->weapon ) > 0;
+}
+
+/*
+===============
+BG_DryFiring
+
+MW2's dry fire with the trigger held from the last round's shot: the gun stays
+FIRING (PM_Weapon_CheckFiringAmmo, 576fe0, leaves the state as it is) with the
+idle playing (5770a0), so a gun with a fire clip is FIRING with no fire clock.
+Nothing else is: every shot of such a gun starts its clock. Picture only.
+===============
+*/
+qboolean BG_DryFiring( const playerState_t *ps ) {
+	return ps->weaponstate == WEAPON_FIRING && ps->weaponAnimTime < 0 &&
+		BG_WeaponFireLength( ps->weapon ) > 0;
 }
 
 /*
@@ -4508,7 +4586,8 @@ static qboolean PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 			// note moves nothing: the shot ends READY in step 4f, after this
 			// think's checks, and the action starts from READY in step 4d on a
 			// later think, at this note (MW2's ShouldBeFiring, then
-			// CheckForRechamber).
+			// CheckForRechamber); with the trigger held, from the READY MW2's
+			// lock left at the top of this one (PM_WeaponTimeAdjust).
 			break;
 
 		case WNOTE_BOLT_CLOSED:
@@ -4543,28 +4622,41 @@ PM_AdvanceReloadSegments
 Walk the reload forward whenever the clock runs past the segment it is in.
 The loop repeats purely on "is there anything left to load" - there is no
 weapon-type test anywhere, which is why a magazine gun runs the loop once and
-a shell gun runs it until the tube is full.
+a shell gun runs it until the tube is full. Each segment starts on the think
+the one before it ended, with its whole length to run.
+
+The trigger stops a segmented (interruptible) reload as MW2's does: it is
+asked to stop, and the segment it is in plays out, its round included.
+A fresh press asks (MW2's PM_Weapon_CheckForReload, 578724-5787ad: this
+command's fire button against the last's): in the loop at once, in the start
+only once more than 0.4 of it has gone (5787a0, 0.4 at 795d98; a press before
+that is forgotten). A trigger down on the think the start or a loop pass ends
+asks too (FinishReloadStart 5783de-5783fc, FinishReload 578564-578582). Asked,
+the start goes to the end if the magazine has a round, otherwise through one
+more pass (578403-57843e, PM_SetReloadingState keeps the request), and a pass
+goes to the end (5785b3-5785da). The end ignores the trigger.
 ===============
 */
-static void PM_AdvanceReloadSegments( void ) {
+static void PM_AdvanceReloadSegments( qboolean attackPressed ) {
 	const bg_weaponReload_t *rl = BG_WeaponReload( pm->ps->weapon );
+	qboolean attack = ( pm->cmd.buttons & BUTTON_ATTACK ) != 0;
 	int guard;
 
 	if ( pm->ps->weaponAnimSeq < 0 || pm->ps->weaponAnimSeq >= RSEQ_COUNT ) {
 		pm->ps->weaponAnimSeq = RSEQ_START;
 	}
 
-	// Attack stops an interruptible reload once there is a round to fire.
-	// Notes and their queued ammo transfer have already run this think, so a
-	// shell that just seated stays loaded; an unfinished insertion is abandoned.
-	// Keep RELOADING through END so the gun returns to ready before it can fire.
-	// An empty gun keeps loading until its first round is available.
-	if ( rl->interruptible && ( pm->cmd.buttons & BUTTON_ATTACK ) &&
-	     pm->ps->ammo[pm->ps->weapon] > 0 &&
-	     pm->ps->weaponAnimSeq != RSEQ_END ) {
-		pm->ps->weaponAnimSeq  = RSEQ_END;
-		pm->ps->weaponAnimTime = 0;
-		pm->ps->weaponTime     = BG_ReloadSegmentTime(pm->ps, RSEQ_END);
+	if ( rl->interruptible && attackPressed ) {
+		if ( pm->ps->weaponAnimSeq == RSEQ_START ) {
+			int start = BG_ReloadSegmentTime( pm->ps, RSEQ_START );
+			// MW2's (iReloadStartTime - weaponTime) / iReloadStartTime > 0.4,
+			// this think's time already counted: elapsed / length > 2/5
+			if ( start > 0 && pm->ps->weaponAnimTime * 5 > start * 2 ) {
+				pm->ps->weapFlags |= PWF_RELOAD_INTERRUPT;
+			}
+		} else if ( pm->ps->weaponAnimSeq == RSEQ_LOOP ) {
+			pm->ps->weapFlags |= PWF_RELOAD_INTERRUPT;
+		}
 	}
 
 	for ( guard = 0; guard < RSEQ_COUNT + 4; guard++ ) {
@@ -4574,7 +4666,15 @@ static void PM_AdvanceReloadSegments( void ) {
 			if ( pm->ps->weaponAnimTime < length ) {
 				return;						// still playing
 			}
-			pm->ps->weaponAnimTime -= length;	// carry the overshoot
+			// The next segment starts afresh on this think, as MW2's reload
+			// states do: WeaponTimeAdjust drops what the last one overshot
+			// by (578b71) and PM_SetReloadingState gives the next its whole
+			// time (575e20). (A magazine's reload is one segment.)
+			pm->ps->weaponAnimTime = 0;
+		}
+		// The trigger down as a start or a pass ends asks the reload to stop.
+		if ( rl->interruptible && attack && pm->ps->weaponAnimSeq != RSEQ_END ) {
+			pm->ps->weapFlags |= PWF_RELOAD_INTERRUPT;
 		}
 
 		switch ( pm->ps->weaponAnimSeq ) {
@@ -4582,11 +4682,14 @@ static void PM_AdvanceReloadSegments( void ) {
 			// A start that fed its own round may have filled the gun: MW2's
 			// FinishReloadStart goes to the end unless there is still room and
 			// stock (578403-578475). A start that feeds nothing always has both.
-			pm->ps->weaponAnimSeq = PM_ReloadWantsMore() ? RSEQ_LOOP : RSEQ_END;
+			// Asked to stop, it goes to the end once there is a round to fire.
+			pm->ps->weaponAnimSeq = PM_ReloadWantsMore() &&
+				!( ( pm->ps->weapFlags & PWF_RELOAD_INTERRUPT ) && pm->ps->ammo[pm->ps->weapon] > 0 ) ?
+				RSEQ_LOOP : RSEQ_END;
 			break;
 
 		case RSEQ_LOOP:
-			if ( !PM_ReloadWantsMore() ) {
+			if ( !PM_ReloadWantsMore() || ( pm->ps->weapFlags & PWF_RELOAD_INTERRUPT ) ) {
 				pm->ps->weaponAnimSeq = RSEQ_END;
 			}
 			// else: stay on RSEQ_LOOP - the clock already wrapped, so the
@@ -4598,6 +4701,7 @@ static void PM_AdvanceReloadSegments( void ) {
 			pm->ps->weaponstate    = WEAPON_READY;
 			pm->ps->weaponAnimTime = -1;
 			pm->ps->weaponAnimSeq  = RSEQ_START;
+			pm->ps->weapFlags     &= ~PWF_RELOAD_INTERRUPT;
 			PM_StartTorsoAnim( TORSO_STAND );
 			return;
 		}
@@ -4896,7 +5000,8 @@ static void PM_UpdateWeaponAction( void ) {
 	}
 	if ( !( action & WA_TYPE_MASK ) ) leftEmpty = 0;
 	pm->ps->weaponAction = action | (held << WA_HELD_SHIFT) | returning | recovering |
-		(swap ? WA_SWAP_HELD : 0) | leftEmpty;
+		(swap ? WA_SWAP_HELD : 0) | leftEmpty |
+		( ( pm->cmd.buttons & BUTTON_ATTACK ) ? WA_ATTACK_HELD : 0 );
 	// Drawn once the latch says it is a return, so it is the quick raise.
 	// The cancel leaves no fuse: IW4x's bg_weaponOffHandFix zeroes
 	// grenadeTimeLeft after the HOLD cancel's OffHandEnd (0x578F52), where
@@ -5173,6 +5278,142 @@ static qboolean PM_LadderWeapon( void ) {
 		pm->ps->weaponstate == WEAPON_LADDER;
 }
 
+/*
+===============
+PM_WeaponTimeRanOut
+
+MW2's crossing: the think on which the state's weaponTime runs out
+(PM_Weapon_WeaponTimeAdjust, 578914-578933). A shot with a fire clip runs out
+on the think its clock reaches the open note (PM_ShotOver: MW2's fireTime),
+its action on the think the clock reaches the clip's length (step 4c: MW2's
+rechamberTime); anything else on the think its lock goes from above 0 to 0 or
+below. A reload's segments end on their own clock and never meet the lock
+(the reload began a new pull, PM_BeginReload), and the knife's draw is MW2's
+meleeDelay, no weaponTime at all.
+===============
+*/
+static qboolean PM_WeaponTimeRanOut( int oldTime ) {
+	switch ( pm->ps->weaponstate ) {
+	case WEAPON_RELOADING:
+	case WEAPON_LADDER:
+		return qfalse;
+	case WEAPON_BOLTING:
+		return pm->ps->weaponAnimTime >= 0 && pm->ps->weaponAnimTime >= BG_WeaponFireLength( pm->ps->weapon );
+	case WEAPON_FIRING:
+		if ( pm->ps->weaponAnimSeq == ASEQ_FIRE && pm->ps->weaponAnimTime >= 0 &&
+		     PM_ShotLength( pm->ps->weapon ) >= 0 ) {
+			return PM_ShotOver();
+		}
+		break;
+	case WEAPON_RAISING:
+		if ( BG_QuickActionInPlace( pm->ps->weapon ) ) {
+			return qfalse;
+		}
+		break;
+	default:
+		break;
+	}
+	return oldTime > 0 && pm->ps->weaponTime <= 0;
+}
+
+/*
+===============
+PM_LockGun
+
+The gun MW2's held-trigger lock asks about (5789dd-578ae1): the gun in hand,
+or, at the knife's end, the gun the knife was written over (MW2's knife is the
+gun's own melee states, MELEE_FIRE). Equipment, the gun going down for it and
+the gun's quick raise after it are MW2's offhand states, which it never locks
+(578a94). Nor the ladder's holster, which is Peace's own.
+===============
+*/
+static int PM_LockGun( void ) {
+	int action = pm->ps->weaponAction & WA_TYPE_MASK;
+	if ( BG_QuickActionInPlace( pm->ps->weapon ) ) {
+		if ( pm->ps->weaponstate != WEAPON_FIRING || ( pm->ps->weaponAction & WA_LEFT_EMPTY ) ) {
+			return WP_NONE;
+		}
+		return BG_ActiveSlotWeapon( pm->ps );
+	}
+	if ( BG_IsActionWeapon( pm->ps->weapon ) || action == WA_LETHAL || action == WA_TACTICAL ||
+	     ( pm->ps->stats[STAT_LADDER] & LADDER_HOLSTER ) ) {
+		return WP_NONE;
+	}
+	return pm->ps->weapon;
+}
+
+/*
+===============
+PM_WeaponTimeAdjust
+
+MW2's held trigger, against a press (PM_Weapon_WeaponTimeAdjust 5788b0,
+5789dd-578b71), asked on the think a state's time runs out and before anything
+else in the think. MW2's fire is a level test of the trigger (ShouldBeFiring
+576cc0); what makes a gun fire once a pull is this lock. With the trigger down
+(578a2b-578a52), the pull's shots all fired (ShotLimitReached 5769e0, counted
+in weaponShotCount), the command still naming the gun (578abc-578aca) and a
+round in its magazine (BG_GetAmmoInClip 43aad0, 578ad0-578ae1), the gun's time
+becomes 1 (578ae6). The shot over and the knife's end leave the gun READY
+(578b16-578b39), the action over leaves it READY as well (FinishRechamber
+578b06-578b0f, step 4c), and anything else keeps its state with the 1 (a raise
+stays a raise, 578b25-578b28). The 1 runs out on the next think, which asks
+again, so the gun does nothing for as long as the trigger stays down. A think
+that asks with the trigger up ends the pull: its count goes back to 0
+(578b51-578b67).
+
+The lock is only ever that time, so whatever zeroes the time lets the gun
+fire: YY's return, a grenade's, a change or a reload (MW2's PM_Weapon_Idle
+and PM_BeginWeaponReload). An action's end keeps its 1 to step 4c, which
+makes it READY: its close note, the only thing in between that gives a lock
+away, always crosses on an earlier think.
+===============
+*/
+static void PM_WeaponTimeAdjust( int oldTime ) {
+	int gun;
+
+	if ( !PM_WeaponTimeRanOut( oldTime ) ) {
+		return;
+	}
+	gun = PM_LockGun();
+	if ( gun <= WP_NONE || gun >= MAX_WEAPONS || !( pm->cmd.buttons & BUTTON_ATTACK ) ||
+	     !BG_ShotLimitReached( BG_WeaponFireType( gun ), pm->ps->weaponShotCount ) ||
+	     BG_RequestedWeapon( pm->ps, pm->cmd.weapon ) != gun ||
+	     BG_RequestedSlot( pm->ps, pm->cmd.weapon ) != pm->ps->stats[STAT_ACTIVE_SLOT] ||
+	     !pm->ps->ammo[gun] ) {
+		if ( !( pm->cmd.buttons & BUTTON_ATTACK ) ) {
+			pm->ps->weaponShotCount = 0;
+		}
+		return;
+	}
+	pm->ps->weaponTime = 1;
+	switch ( pm->ps->weaponstate ) {
+	case WEAPON_FIRING:
+		if ( BG_QuickActionInPlace( pm->ps->weapon ) ) {
+			// The knife's end: MW2 makes the gun under it READY there, with
+			// none of MeleeEnd's quick raise.
+			pm->ps->weapon = gun;
+			pm->ps->weaponAnimTime = -1;
+			pm->ps->pm_flags &= ~PMF_PENDING_MAG;
+			pm->ps->weaponAction &= ~( WA_TYPE_MASK | WA_FIRED | WA_RETURNING | WA_RECOVERING );
+			PM_StartTorsoAnim( TORSO_STAND );
+		}
+		// The shot keeps its clock at the open note, where step 4d starts
+		// the action from this READY on this same think (MW2's
+		// CheckForRechamber, 575b07-575ba9: READY, no weaponDelay).
+		pm->ps->weaponstate = WEAPON_READY;
+		break;
+	case WEAPON_RAISING:
+		// The gun's quick raise after the knife is MW2's MELEE_END.
+		if ( ( pm->ps->weaponAction & WA_TYPE_MASK ) == WA_MELEE ) {
+			pm->ps->weaponstate = WEAPON_READY;
+			PM_StartTorsoAnim( TORSO_STAND );
+		}
+		break;
+	default:
+		break;
+	}
+}
+
 
 /*
 ==============
@@ -5397,7 +5638,9 @@ Generates weapon events and modifes the weapon counter
 static void PM_Weapon( void ) {
 	int		addTime;
 	int		oldElapsed;
+	int		oldWeaponTime;
 	int		heldBefore;
+	qboolean attackBefore;
 	qboolean ladderWeapon;
 	qboolean reload;
 	qboolean chamberClosed = qfalse;
@@ -5439,9 +5682,11 @@ static void PM_Weapon( void ) {
 		reload = qtrue;
 	}
 	// MW2 asks a reloading gun nothing, even when its reload ends on this
-	// command. Peace's own rule: the trigger may fire on that command, so a
-	// held trigger and reload alternate (MW2's segmented reload, spending
-	// that command on finishing, loops start/end and never fires).
+	// command: its reload's last think ends READY and fires nothing
+	// (PM_Weapon_StateSwitch, 579246), and a held trigger fires on the think
+	// after. Peace's own rule: the trigger may fire on that command, so a held
+	// trigger and reload alternate. (A held trigger also stops MW2's segmented
+	// reload at the end of the segment it is in: PM_AdvanceReloadSegments.)
 	if ( pm->ps->weaponstate == WEAPON_RELOADING ) {
 		reload = qfalse;
 	}
@@ -5472,6 +5717,7 @@ static void PM_Weapon( void ) {
 	// mag-in zeroes the lock without touching elapsed, so the settle note still
 	// arrives at its own time.
 	oldElapsed = pm->ps->weaponAnimTime;
+	oldWeaponTime = pm->ps->weaponTime;
 
 	// Reload and fire/bolt actions advance the animation clock. The
 	// note runner below deliberately does NOT gate on weaponstate: step 1 may
@@ -5499,17 +5745,28 @@ static void PM_Weapon( void ) {
 	if ( pm->ps->weaponTime > 0 ) {
 		pm->ps->weaponTime -= pml.msec;
 	}
+	// Only a reload is ever asked to stop (MW2's two INTERUPT states are
+	// reload states): whatever took the gun out of one ended the request.
+	if ( pm->ps->weaponstate != WEAPON_RELOADING ) {
+		pm->ps->weapFlags &= ~PWF_RELOAD_INTERRUPT;
+	}
 
 	// MW2 counts a cooking grenade down here, after the timers and before
 	// any of its checks, and a think it ends is over (PM_UpdateGrenadeThrow,
 	// 44c3f7). That think's buttons are still the last ones the next think
 	// compares with, as MW2's oldcmd always is.
 	if ( PM_UpdateGrenadeThrow() ) {
-		pm->ps->weaponAction = ( pm->ps->weaponAction & ~( WA_HELD_MASK | WA_SWAP_HELD ) ) |
+		pm->ps->weaponAction = ( pm->ps->weaponAction & ~( WA_HELD_MASK | WA_SWAP_HELD | WA_ATTACK_HELD ) ) |
 			( PM_HeldActionButtons() << WA_HELD_SHIFT ) |
-			( ( pm->cmd.buttons & BUTTON_WEAPON_SWAP ) ? WA_SWAP_HELD : 0 );
+			( ( pm->cmd.buttons & BUTTON_WEAPON_SWAP ) ? WA_SWAP_HELD : 0 ) |
+			( ( pm->cmd.buttons & BUTTON_ATTACK ) ? WA_ATTACK_HELD : 0 );
 		return;
 	}
+
+	// MW2's held-trigger lock, decided here, after the timers and before any
+	// check of the think (PM_Weapon_WeaponTimeAdjust, 44c42b).
+	attackBefore = ( pm->ps->weaponAction & WA_ATTACK_HELD ) != 0;
+	PM_WeaponTimeAdjust( oldWeaponTime );
 
 	heldBefore = ( pm->ps->weaponAction & WA_HELD_MASK ) >> WA_HELD_SHIFT;
 	PM_UpdateWeaponAction();
@@ -5671,12 +5928,16 @@ static void PM_Weapon( void ) {
 	//     after the fill: whether the loop repeats depends on whether those
 	//     rounds just went in.
 	if ( pm->ps->weaponstate == WEAPON_RELOADING && pm->ps->weaponAnimTime >= 0 ) {
-		PM_AdvanceReloadSegments();
+		PM_AdvanceReloadSegments( ( pm->cmd.buttons & BUTTON_ATTACK ) && !attackBefore );
 	}
 
 	// 4c. The fire cycle ends on the ANIM clock, not the busy lock - the lock
 	//     was already given away by the chamber note, and the settle after it
-	//     still has to play. Same shape as advancing a reload segment.
+	//     still has to play. Same shape as advancing a reload segment. Ended
+	//     with the trigger still down from the shot, the gun is READY under
+	//     MW2's lock (FinishRechamber with weaponTime 1, 578b06-578b0f, put on
+	//     at the top of this think): step 5 holds it, and it fires nothing
+	//     until the trigger is let go.
 	if ( pm->ps->weaponstate == WEAPON_BOLTING && pm->ps->weaponAnimTime >= 0 &&
 	     pm->ps->weaponAnimTime >= BG_WeaponFireLength( pm->ps->weapon ) ) {
 		pm->ps->weaponstate    = WEAPON_READY;
@@ -5695,7 +5956,8 @@ static void PM_Weapon( void ) {
 	//     gun is READY ceil(rechamberTime / msec) thinks after this one.
 	//
 	//     Nothing here knows why the bit is set. The shot that just ended (4f
-	//     left it READY on its last think), a swap, a sprint, a knife or
+	//     left it READY on its last think, or the held trigger's lock on that
+	//     very think, PM_WeaponTimeAdjust), a swap, a sprint, a knife or
 	//     equipment, a death, a dropped weapon picked back up - they all leave
 	//     the same bit, so they all get the same answer without being
 	//     enumerated. The one way to not end up here is to have let the close
@@ -5732,26 +5994,42 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
-	// 4f. The shot's last think (PM_ShotOver) ends READY, owing the action,
-	//     and nothing more happens on it: MW2's ShouldBeFiring makes the shot
-	//     READY once its weaponTime has run out (576d99-576da3), after every
-	//     check of that think, and fires nothing. So a change, a knife,
-	//     equipment or a reload already took the gun out of the shot above,
-	//     the sprint waits for the next think (MW2's sprint check refuses
-	//     FIRING), and the action is not started on this think: step 4d
-	//     starts it from READY on the next (MW2's rechamber, 575b77), unless a
-	//     change, a sprint, a knife, equipment or a reload takes the READY gun
-	//     first and leaves it owed (MW2 checks all of them before its
+	// 4f. The shot's last think (PM_ShotOver), the trigger let go, ends READY,
+	//     owing the action, and nothing more happens on it: MW2's
+	//     ShouldBeFiring makes the shot READY once its weaponTime has run out
+	//     (576d99-576da3), after every check of that think, and fires nothing.
+	//     So a change, a knife, equipment or a reload already took the gun out
+	//     of the shot above, the sprint waits for the next think (MW2's sprint
+	//     check refuses FIRING), and the action is not started on this think:
+	//     step 4d starts it from READY on the next (MW2's rechamber, 575b77),
+	//     unless a change, a sprint, a knife, equipment or a reload takes the
+	//     READY gun first and leaves it owed (MW2 checks all of them before its
 	//     rechamber). The fire clip's clock stays at the open note
 	//     (BG_ShotAwaitsAction). A frozen player's hand step returns before
 	//     ShouldBeFiring (579505): the shot stays over and FIRING, its action
 	//     not started, until the freeze lifts.
+	//     The trigger still down from the shot: a gun with a round was locked
+	//     READY at the top of this think, and step 4d has started its action
+	//     already (MW2's CheckForRechamber from that READY, 575b07-575ba9, a
+	//     think sooner than with the trigger let go). One still here has
+	//     nothing in its magazine, or nothing left to lock (no single shot):
+	//     MW2's ShouldBeFiring holds it FIRING and fires it on this think
+	//     (576d3f-576d62), so it goes on to the fire gates, where an empty
+	//     magazine reloads from the shot, the action still owed, or, with
+	//     nothing in reserve, dry-fires (PM_Weapon_CheckFiringAmmo, 576fe0).
+	//     So does a shot that ran out frozen, the trigger down as the freeze
+	//     lifts: the frozen think found the trigger up (the command keeps
+	//     none) and ended the pull, so nothing locks, and it fires again,
+	//     its action still owed, as MW2's.
 	if ( PM_ShotOver() ) {
-		if ( !( pm->ps->pm_flags & PMF_FROZEN ) ) {
-			pm->ps->weaponstate = WEAPON_READY;
-			pm->ps->weaponTime  = 0;
+		if ( pm->ps->pm_flags & PMF_FROZEN ) {
+			return;
 		}
-		return;
+		pm->ps->weaponTime = 0;
+		if ( !( pm->cmd.buttons & BUTTON_ATTACK ) ) {
+			pm->ps->weaponstate = WEAPON_READY;
+			return;
+		}
 	}
 
 	// 5. Busy.
@@ -5846,13 +6124,18 @@ static void PM_Weapon( void ) {
 	// then (WeaponTimeAdjust zeroes a spent time, 578b71), so a held trigger
 	// raises it again on the first think that has run out. The state is left
 	// as it is: with the trigger down MW2's ShouldBeFiring (576cc0) has not
-	// touched it. (MW2 also clears the rechamber here, 577094; a gun of
-	// Peace's that owes its action is already working it, step 4d, so there
-	// is none to clear.) Equipment keeps its own count and never gets here
-	// empty.
+	// touched it, so out of the shot (step 4f) it stays FIRING, which takes
+	// no change and no sprint until the time has run out. MW2 also clears the
+	// rechamber here (BG_ClearRechamber, 577094) and plays the idle (5770a0):
+	// a gun that dry-fires on its last round's last think, the trigger held
+	// from the shot, never works that action. Out of READY there is never one
+	// owed (step 4d has started it first). Equipment keeps its own count and
+	// never gets here empty.
 	if ( !BG_IsActionWeapon( pm->ps->weapon ) && BG_WeaponMagSize( pm->ps->weapon ) > 0 &&
 	     pm->ps->ammo[pm->ps->weapon] <= 0 && pm->ps->ammoReserve[pm->ps->weapon] <= 0 ) {
 		PM_AddEvent( EV_NOAMMO );
+		pm->ps->stats[STAT_UNCHAMBERED] &= ~( 1 << pm->ps->weapon );
+		pm->ps->weaponAnimTime = -1;
 		pm->ps->weaponTime = BG_DRY_FIRE_TIME;
 		return;
 	}
@@ -5905,6 +6188,12 @@ static void PM_Weapon( void ) {
 		if ( pm->ps->ammo[ pm->ps->weapon ] != -1 ) {
 			pm->ps->ammo[ pm->ps->weapon ]--;
 		}
+	}
+	// The shot counts toward this pull of the trigger, but a full-auto one
+	// (MW2's PM_Weapon_StartFiring, 576f93-576fc5, capped at 4).
+	if ( BG_WeaponFireType( pm->ps->weapon ) != BG_FIRE_FULLAUTO &&
+	     pm->ps->weaponShotCount < BG_SHOT_COUNT_MAX ) {
+		pm->ps->weaponShotCount++;
 	}
 
 	// fire weapon. The parm names the gun that fired: the ring can still hold
@@ -5998,6 +6287,15 @@ static void PM_Weapon( void ) {
 		addTime /= 1.3;
 	}
 
+	// A gun's shot is given its whole time (MW2's PM_Weapon_StartFiring
+	// assigns iFireTime, 576e9c-576e9f): the think the last one's ran out,
+	// PM_Weapon_WeaponTimeAdjust dropped what it overshot by (578b71). So a
+	// held full-auto gun fires every ceil(fireTime / msec) thinks. The knife's
+	// time is MW2's one meleeTime from the press, of which its draw has
+	// counted down the part already gone, and equipment is MW2's offhand.
+	if ( pm->ps->weaponTime < 0 && !BG_IsActionWeapon( pm->ps->weapon ) ) {
+		pm->ps->weaponTime = 0;
+	}
 	pm->ps->weaponTime += addTime;
 }
 
@@ -6437,15 +6735,17 @@ a freeze was down on the last command, so when the freeze lifts it is no new
 press. Peace keeps that record in the player state, written from the command
 each think; a frozen think wrote it from the mask, which reads every held
 button as let go. So after a frozen command the record is written again from
-the command as it came: the knife and equipment buttons and Y (weaponAction),
-jump (PMF_JUMP_HELD) and sprint (PWF_SPRINT_RELEASE). A knife, grenade, jump
-or sprint held through the countdown waits for a fresh press, as MW2's does.
+the command as it came: the knife and equipment buttons, Y and the trigger
+(weaponAction), jump (PMF_JUMP_HELD) and sprint (PWF_SPRINT_RELEASE). A knife,
+grenade, jump or sprint held through the countdown waits for a fresh press, as
+MW2's does, and a trigger held through it is no fresh press to a reload.
 ================
 */
 static void PM_KeepHeldThroughFreeze( playerState_t *ps ) {
-	ps->weaponAction = ( ps->weaponAction & ~( WA_HELD_MASK | WA_SWAP_HELD ) ) |
+	ps->weaponAction = ( ps->weaponAction & ~( WA_HELD_MASK | WA_SWAP_HELD | WA_ATTACK_HELD ) ) |
 		( ( ( pm_rawButtons >> 15 ) & 7 ) << WA_HELD_SHIFT ) |
-		( ( pm_rawButtons & BUTTON_WEAPON_SWAP ) ? WA_SWAP_HELD : 0 );
+		( ( pm_rawButtons & BUTTON_WEAPON_SWAP ) ? WA_SWAP_HELD : 0 ) |
+		( ( pm_rawButtons & BUTTON_ATTACK ) ? WA_ATTACK_HELD : 0 );
 	if ( pm_rawUpmove >= 10 ) {
 		ps->pm_flags |= PMF_JUMP_HELD;
 	}
@@ -6463,9 +6763,10 @@ Can be called by either the server or the client
 */
 void Pmove (pmove_t *pmove) {
 	int			finalTime;
-	// MW2's pm->oldcmd for the next command: this one as it came, written
-	// once a command (never per chopped step, so each step compares with the
-	// command before) and only if a step ran
+	// MW2's pm->oldcmd for the next command, as prone reads it: this one as it
+	// came, written once a command (never per chopped step, so each step
+	// compares with the command before; MW2's Pmove copies it after every
+	// step, 4cff61, as WA_ATTACK_HELD is) and only if a step ran
 	int			prevCmd = BG_PrevCmdPack( &pmove->cmd );
 	qboolean	stepped = qfalse;
 

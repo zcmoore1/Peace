@@ -954,6 +954,31 @@ static void TestShotPictureAcrossReady(int gun) {
  CHECK(ready==1 && flowPs.weaponstate==WEAPON_READY && !(flowPs.stats[STAT_UNCHAMBERED]&(1<<gun)));
  CHECK(cg_returnTime==0 && base->clip==WANIM_IDLE);
 }
+/* MW2's dry fire with the trigger held from the last round's shot and nothing
+ * anywhere: the gun stays FIRING with no fire clock (BG_DryFiring) and plays its
+ * idle (PM_Weapon_CheckFiringAmmo, 0x5770A0), so the picture plays the shot to
+ * its end and then eases home, never the pump or bolt it does not work. */
+static void TestDryFirePicture(int gun) {
+ animLayer_t *base=&cg_weapLayers[LAYER_BASE];
+ int t;
+ FlowBeginWith(gun); FlowSlot(SLOT_SECONDARY);
+ for(t=0;t<10000 && !(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_READY &&
+  cg_weapLayers[LAYER_MOVE].weight==0);t+=8) FlowStep();
+ flowPs.ammo[gun]=1; flowPs.ammoReserve[gun]=0;
+ flow.cmd.buttons=BUTTON_ATTACK; FlowStep();
+ CHECK(flowPs.weaponstate==WEAPON_FIRING && base->clip==WANIM_FIRE);
+ for(t=0;t<10000 && flowPs.weaponstate==WEAPON_FIRING && !BG_DryFiring(&flowPs);t+=8) {
+  CHECK(base->clip==WANIM_FIRE);
+  FlowStep();
+ }
+ CHECK(BG_DryFiring(&flowPs) && !(flowPs.stats[STAT_UNCHAMBERED]&(1<<gun)));
+ CHECK(base->clip==WANIM_IDLE && cg_returnTime==0);	/* the shot's pose eases home */
+ for(t=0;t<3*BG_DRY_FIRE_TIME;t+=8) {
+  FlowStep();
+  CHECK(BG_DryFiring(&flowPs) && base->clip==WANIM_IDLE);
+ }
+ flow.cmd.buttons=0;
+}
 static void TestSprintReturnLikeExit(weapAnimDef_t *def,int weapon,const char *path) {
  static modelPose_t exitPoses[SPRINT_FRAMES];
  animLayer_t *move=&cg_weapLayers[LAYER_MOVE];
@@ -1427,6 +1452,7 @@ int main(void) {
  TestSprintFlow(def);
  TestSprintAfterTheCycle(WP_SHOTGUN);
  TestShotPictureAcrossReady(WP_SHOTGUN);
+ TestDryFirePicture(WP_SHOTGUN);
  TestSprintReturnLikeExit(def,WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm");
  TestSprintReturnUnmoved(WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm");
  TestSprintReentry(def);
@@ -1445,6 +1471,7 @@ int main(void) {
  TestActionHandoff(WP_M40A3);
  TestSprintAfterTheCycle(WP_M40A3);
  TestShotPictureAcrossReady(WP_M40A3);
+ TestDryFirePicture(WP_M40A3);
  TestModeSwitchPicture();
  printf("PASS: %d weapon presentation ownership checks\n",checks); return 0;
 }

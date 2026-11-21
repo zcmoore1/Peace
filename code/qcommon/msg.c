@@ -1133,9 +1133,10 @@ netField_t	playerStateFields[] =
 { PSF(weapon), 5 },
 { PSF(weaponAnimTime), -16 },
 { PSF(weaponAnimSeq), 2 },
-{ PSF(weaponAction), 10 },
+{ PSF(weaponAction), 11 },
 { PSF(weaponDraw), 2 },
-{ PSF(weapFlags), 2 },
+{ PSF(weapFlags), 3 },
+{ PSF(weaponShotCount), 3 },	// MW2's netfield 0x742600 {0x200, 3}
 { PSF(perks), PS_PERK_BITS },
 { PSF(moveClass), PS_MOVECLASS_BITS },
 { PSF(jumpLand), -12 },

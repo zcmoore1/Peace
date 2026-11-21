@@ -211,7 +211,11 @@ The knife is MW2's (MeleeInit, MeleeFire, MeleeEnd). It never lowers the gun:
 the knife is out on the press command itself, the hit lands
 `BG_MELEE_DELAY` (79ms, MW2's meleeDelay) after the press, and the knife is
 over `BG_MELEE_TIME` (800ms, MW2's meleeTime) after it, where the gun's quick
-raise (`BG_WeaponQuickRaiseTime`) starts with nothing put down in between. Both
+raise (`BG_WeaponQuickRaiseTime`) starts with nothing put down in between -
+unless the trigger is down there and the gun's pull has fired (a knife pressed
+in a single-shot gun's shot, or with the trigger held since it): then MW2's
+held-trigger lock leaves the gun READY in hand at once, with no quick raise,
+and an owed pump or bolt starts there. Both
 numbers are MW2 weapon data, the same for every MW2 MP gun. Equipment (frag,
 flash, Semtex, throwing knife, Tactical Insertion) goes the other way, through
 MW2's offhand machine with each item's own weapon data (the IW4 dump's

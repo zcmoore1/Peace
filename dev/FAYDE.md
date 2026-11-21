@@ -47,4 +47,9 @@ think between the shot and its action: the shot ends READY on its last think
 and the pump or bolt starts from READY on the next (`ShouldBeFiring`, then
 `CheckForRechamber`), a think later than when Peace ran the shot straight into
 the action. The rows with an instant reload start it out of the shot, so they
-did not move.
+did not move. Every shot here is a fresh pull: the SPAS and the M300 are single
+shot (MW2's fireType), so a trigger held from the shot starts the pump or bolt
+on the shot's last think and fires nothing until it is let go; let go on the
+action's last command and pulled on the next, it fires at the plain refire.
+YY, the Fayde's included, readies the gun with its time zeroed, which lets a
+held trigger fire at once (MW2's `PM_Weapon_Idle`).

@@ -32,6 +32,10 @@ NODES = [('Base', -1, ORIGIN), ('magazine', 0, (1.6, 0, -2.5)),
          ('shell', 0, (8, 0, -6))]
 MATERIALS = {'metal': (0, 0), 'polymer': (1, 0), 'fabric': (0, 1),
              'rubber': (1, 1), 'steel': (0, 0), 'shell': (0, 0), 'flash': (0, 0)}
+# MW2's weapon-file fireType names, as bg_public.h's bg_fireType_t names them.
+FIRE_TYPES = {'Full Auto': 'BG_FIRE_FULLAUTO', 'Single Shot': 'BG_FIRE_SINGLESHOT',
+              '2-Round Burst': 'BG_FIRE_BURST2', '3-Round Burst': 'BG_FIRE_BURST3',
+              '4-Round Burst': 'BG_FIRE_BURST4', 'Double Barrel': 'BG_FIRE_DOUBLEBARREL'}
 
 
 def nodes(underbarrel=False):
@@ -517,13 +521,15 @@ def build():
             '#ifndef BG_M16_DATA_H','#define BG_M16_DATA_H']
     names={'MAG_SIZE':'mag_size','RESERVE':'reserve','FIRE_MS':'fire_ms','DROP_MS':'drop_ms',
            'RAISE_MS':'raise_ms','ALT_DROP_MS':'alt_drop_ms','ALT_RAISE_MS':'alt_raise_ms',
-           'SPRINT_IN_MS':'sprint_in_ms','SPRINT_OUT_MS':'sprint_out_ms'}
+           'SPRINT_IN_MS':'sprint_in_ms','SPRINT_OUT_MS':'sprint_out_ms','FIRE_TYPE':'fire_type'}
     for prefix,source,extra in [('M16',data,{'RELOAD_MS':'reload_loop_ms','MAG_OUT_MS':'mag_out_ms','MAG_IN_MS':'mag_in_ms'}),
         ('MASTERKEY',shotgun,{'BOLT_OPEN_MS':'bolt_open_ms','BOLT_CLOSE_MS':'bolt_close_ms',
          'RELOAD_START_MS':'reload_start_ms','RELOAD_START_ADD_MS':'reload_start_add_ms',
          'RELOAD_LOOP_MS':'reload_loop_ms','RELOAD_END_MS':'reload_end_ms',
          'ROUND_IN_MS':'round_in_ms'})]:
-        for macro,key in dict(names,**extra).items():header.append(f'#define {prefix}_{macro} {source[key]}')
+        for macro,key in dict(names,**extra).items():
+            value=FIRE_TYPES[source[key]] if key=='fire_type' else source[key]
+            header.append(f'#define {prefix}_{macro} {value}')
     header+=['#endif','']
     return {'assets/baseq3/'+PREFIX+'view.iqm':model,'assets/baseq3/'+PREFIX+'view.cfg':cfg,
             'assets/baseq3/'+PREFIX+'view.sights':sights(data),

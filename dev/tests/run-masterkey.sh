@@ -15,3 +15,6 @@ ${CC:-cc} $flags dev/tests/moni_test.c code/cgame/cg_playerstate.c dev/tests/pic
 out/tests/moni-test
 ${CC:-cc} $flags dev/tests/empty_switch_test.c code/cgame/cg_event.c code/cgame/cg_playerstate.c dev/tests/pickup_pmove_driver.c $game $common -Wl,--gc-sections -lm -o out/tests/empty-switch-test
 out/tests/empty-switch-test
+# MW2's trigger, held against pressed: the shot limit's lock, the dry fire, the knife's end, the reload's stop
+${CC:-cc} $flags dev/tests/trigger_test.c code/cgame/cg_event.c code/cgame/cg_playerstate.c dev/tests/pickup_pmove_driver.c $game $common -Wl,--gc-sections -lm -o out/tests/trigger-test
+out/tests/trigger-test

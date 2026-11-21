@@ -119,9 +119,11 @@ static void CG_WeapAnim_ResetReturn(void) {
 // clip's clock at the open note (BG_ShotAwaitsAction, MW2's READY think).
 // On a pump gun the shot and the action are one authored animation, so the
 // picture keeps running across that think instead of easing out into idle.
+// MW2's dry fire out of the last round's shot (BG_DryFiring) is FIRING with
+// the idle playing (PM_Weapon_CheckFiringAmmo, 5770a0): no fire clip.
 static qboolean CG_WeapAnim_FireClip(const playerState_t *ps) {
-	return ps->weaponstate == WEAPON_FIRING || ps->weaponstate == WEAPON_BOLTING ||
-		BG_ShotAwaitsAction(ps);
+	return ( ps->weaponstate == WEAPON_FIRING && !BG_DryFiring(ps) ) ||
+		ps->weaponstate == WEAPON_BOLTING || BG_ShotAwaitsAction(ps);
 }
 
 // What a base-action release eases out of: a reload or the fire clip.
@@ -798,7 +800,8 @@ static float CG_WeapAnim_ReturnWeight(void) {
 }
 
 static void CG_WeapAnim_UpdateReturn(const playerState_t *ps, int msec) {
-	int next = ps->weaponstate;
+	// a held dry fire is the gun at rest, for the picture
+	int next = BG_DryFiring(ps) ? WEAPON_READY : ps->weaponstate;
 	qboolean nextAction = CG_WeapAnim_BaseAction(ps);
 	qboolean transition = cg_previousBaseAction && !nextAction &&
 		(next == WEAPON_READY || next == WEAPON_DROPPING);

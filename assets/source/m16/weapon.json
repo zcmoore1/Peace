@@ -1,5 +1,5 @@
 {
-  "description": "Original stylized M16 with an attached pump-action Masterkey. Game-space art. The swap times, the mode switch and the Masterkey's shot, pump and reload times are MW2's (weapons/mp/m16_shotgun_mp and m16_shotgun_attach_mp); the rifle's fire, reload, sprint and aim times are provisional.",
+  "description": "Original stylized M16 with an attached pump-action Masterkey. Game-space art. The swap times, the mode switch and the Masterkey's shot, pump and reload times are MW2's (weapons/mp/m16_shotgun_mp and m16_shotgun_attach_mp); the rifle's fire type (Peace's automatic; MW2's m16_shotgun_mp is a 3-Round Burst), fire, reload, sprint and aim times are provisional.",
   "fps": 60,
   "mag_size": 30,
   "reserve": 120,
@@ -7,6 +7,7 @@
   "drop_ms": 449,
   "alt_raise_ms": 730,
   "alt_drop_ms": 0,
+  "fire_type": "Full Auto",
   "fire_ms": 100,
   "reload_loop_ms": 1400,
   "mag_out_ms": 300,
@@ -24,6 +25,7 @@
     "drop_ms": 829,
     "alt_raise_ms": 730,
     "alt_drop_ms": 0,
+    "fire_type": "Single Shot",
     "fire_time_ms": 330,
     "rechamber_ms": 430,
     "rechamber_bolt_ms": 0,

@@ -14,7 +14,24 @@
   the current draw/drop clip back to ready, with an eased return capped at
   **250ms** and a 40ms fade to idle. Interrupting a draw reverses that same clip
   from its current position. These are presentation only: holding fire still
-  fires on the second Y when the gun is chambered and gameplay permits it.
+  fires on the second Y when the gun is chambered and gameplay permits it,
+  even a trigger held from the last shot: YY readies the gun with its time
+  zeroed, and the held-trigger lock is only that time (MW2's
+  `PM_Weapon_Idle`).
+- The SPAS is single shot (`spas12_mp`'s fireType): it fires once a pull of
+  the trigger. Held through the shot, MW2's lock (`PM_Weapon_WeaponTimeAdjust`)
+  makes it READY on the shot's last think and the pump starts there, a think
+  sooner than with the trigger let go, and nothing fires until the trigger is
+  let go; let go on the pump's last command and pulled on the next, it fires
+  where a let-go trigger would. Held through its last shell with a reserve, it
+  reloads on that think, out of the shot, the pump owed; with nothing anywhere
+  and nowhere to go, it dry-fires there and never pumps (MW2's
+  `PM_Weapon_CheckFiringAmmo` forgives the action, 0x577094). A knife pressed
+  in the shot and still held at its end leaves the SPAS READY there, with no
+  quick raise, pumping. The trigger stops a shell reload at the end of the
+  segment it is in, its shell included: a press in the loop at once, in the
+  start only past 0.4 of it (a press before that is forgotten), and a trigger
+  down as a segment ends; then the end plays (`dev/tests/trigger_test.c`).
 - The synthetic holster still follows the draw backwards, but samples that
   path with ease-out progress `f*(2-f)`. This gives the start of a quick YY
   noticeable movement instead of lingering in the draw's near-still final

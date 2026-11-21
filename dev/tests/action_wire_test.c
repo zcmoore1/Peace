@@ -1,11 +1,14 @@
-/* Verify the real playerstate delta format preserves all ten action bits, MW2's grenadeTimeLeft
+/* Verify the real playerstate delta format preserves all eleven action bits, MW2's grenadeTimeLeft
  * and the spawn's move class, including a tap released while holstering, through prediction
  * corrections. Protocol 88: MW2's stance on the wire - the usercmd's stance bits, pm_flags'
  * PMF_PRONE and PMF_PRONEMOVE_OVERRIDDEN, the float eye and its leg, the prone body, prevCmd,
  * and an ET_PLAYER's stance flags, eye and prone body (BG_PlayerStateToEntityState).
  * Protocol 89 also carries per-instance underbarrel pools, selected mode and pump debt.
  * Protocol 90 widens weaponDraw to the three kinds of draw (WDRAW_*).
- * Protocol 91 widens pm_flags for MW2's PMF_FROZEN (bit 18). */
+ * Protocol 91 widens pm_flags for MW2's PMF_FROZEN (bit 18).
+ * Protocol 92 is MW2's held trigger: weaponShotCount (MW2's netfield 0x742600, 3 bits), the
+ * trigger's last step in weaponAction (WA_ATTACK_HELD, eleven bits) and the reload's stop
+ * request in weapFlags (PWF_RELOAD_INTERRUPT, three bits). */
 #include "../../code/qcommon/q_shared.h"
 #include "../../code/qcommon/qcommon.h"
 #include "../../code/game/bg_public.h"
@@ -154,10 +157,12 @@ static void TestStanceEntity(void) {
 int main(void) {
  playerState_t from,to,decoded;
  byte data[MAX_MSGLEN]; msg_t msg; int i,j;
+ CHECK(WA_ATTACK_HELD==1024 && WA_LEFT_EMPTY==512);	/* the eleventh bit, above the other ten */
+ /* every value of the low ten bits from every other, the eleventh both ways with each */
  for(i=0;i<1024;i++) for(j=0;j<1024;j++) {
-  memset(&from,0,sizeof(from)); from.weaponAction=i; from.perks=i&((1<<PS_PERK_BITS)-1);
+  memset(&from,0,sizeof(from)); from.weaponAction=i|((j&1) ? WA_ATTACK_HELD : 0); from.perks=i&((1<<PS_PERK_BITS)-1);
   from.moveClass=i%MOVECLASS_COUNT;
-  to=from; to.weaponAction=j; to.perks=j&((1<<PS_PERK_BITS)-1);
+  to=from; to.weaponAction=j|((i&1) ? WA_ATTACK_HELD : 0); to.perks=j&((1<<PS_PERK_BITS)-1);
   to.moveClass=j%MOVECLASS_COUNT;	/* every move class, from every other */
   to.ammo[3]=7; to.ammoReserve[3]=24;
   to.stats[PS_STAT_WEAPONS]=(1<<14)|(1<<17)|(1<<(MAX_WEAPONS-1));
@@ -174,7 +179,8 @@ int main(void) {
   from.cursorHint=i%CURSOR_HINT_COUNT; to.cursorHint=j%CURSOR_HINT_COUNT;	/* every hint type, from every other */
   to.pickupTarget=1023; to.pickupSerial=2147483000; to.pickupTime=1000;
   to.pickupSlot=j&1; to.pickupHeld=j&3;
-  from.weapFlags=i&3; to.weapFlags=j&3;	/* PWF_USE_RELOAD and PWF_SPRINT_RELEASE */
+  from.weapFlags=i&7; to.weapFlags=j&7;	/* PWF_USE_RELOAD, PWF_SPRINT_RELEASE and PWF_RELOAD_INTERRUPT */
+  from.weaponShotCount=i%(BG_SHOT_COUNT_MAX+1); to.weaponShotCount=j%(BG_SHOT_COUNT_MAX+1);
   /* MW2's jump and sprint state: an airborne jump (-1), the longest landing
    * slowdown, the full jump wait, a fractional take-off height, the meter. */
   to.jumpLand=(j&1) ? -1 : BG_JUMP_LAND_TIME; to.jumpWait=(i&1) ? BG_JUMP_WAIT : 0;
@@ -186,7 +192,7 @@ int main(void) {
   MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,&from,&to);
   CHECK(!msg.overflowed); MSG_BeginReading(&msg);
   MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
-  CHECK(decoded.weaponAction==j);
+  CHECK(decoded.weaponAction==to.weaponAction);
   CHECK(decoded.perks==to.perks);
   CHECK(decoded.moveClass==to.moveClass);
   CHECK(decoded.ammo[3]==7 && decoded.ammoReserve[3]==24);
@@ -202,7 +208,7 @@ int main(void) {
   CHECK(decoded.slotAttachments[0]==to.slotAttachments[0] && decoded.slotAttachments[1]==to.slotAttachments[1]);
   CHECK(decoded.pickupTarget==1023 && decoded.pickupSerial==to.pickupSerial && decoded.pickupTime==1000);
   CHECK(decoded.pickupSlot==to.pickupSlot && decoded.pickupHeld==to.pickupHeld);
-  CHECK(decoded.weapFlags==to.weapFlags);
+  CHECK(decoded.weapFlags==to.weapFlags && decoded.weaponShotCount==to.weaponShotCount);
   CHECK(decoded.jumpLand==to.jumpLand && decoded.jumpWait==to.jumpWait);
   CHECK(decoded.jumpOriginZ==to.jumpOriginZ && decoded.sprintUsed==to.sprintUsed);
   CHECK(decoded.cursorHintEntIndex==to.cursorHintEntIndex);
@@ -213,7 +219,20 @@ int main(void) {
   * Tactical Insertion types, the top one included, each from every other.
   * Protocol 85 adds grenadeTimeLeft; protocol 87 adds moveClass, 88 stance,
   * and 89 the underbarrel inventory fields. */
- CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==91);
+ CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==92);
+ /* MW2's shot count in its three bits: every value it takes (to BG_SHOT_COUNT_MAX, MW2's cap
+  * of 4) and the rest of the field, each from every other and alone in a delta; and the three
+  * weapFlags bits, PWF_RELOAD_INTERRUPT the top one */
+ CHECK(BG_SHOT_COUNT_MAX==4 && PWF_RELOAD_INTERRUPT==4 && PWF_SPRINT_RELEASE==2 && PWF_USE_RELOAD==1);
+ for(i=0;i<8;i++) for(j=0;j<8;j++) {
+  memset(&from,0,sizeof(from)); to=from; from.weaponShotCount=i; to.weaponShotCount=j;
+  from.weapFlags=i; to.weapFlags=j; from.weaponAction=WA_ATTACK_HELD*(i&1); to.weaponAction=WA_ATTACK_HELD*(j&1);
+  MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,&from,&to);
+  CHECK(!msg.overflowed); MSG_BeginReading(&msg);
+  MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
+  CHECK(decoded.weaponShotCount==j && decoded.weapFlags==j && decoded.weaponAction==to.weaponAction);
+  CHECK(!memcmp(&decoded,&to,sizeof(to)));
+ }
  CHECK(WDRAW_NORMAL==0 && WDRAW_FIRST==1 && WDRAW_ALT==2);
  /* moveClass is MW2's nine weapon classes in PS_MOVECLASS_BITS (4): every one,
   * the last included, from every other, and alone in a delta. */

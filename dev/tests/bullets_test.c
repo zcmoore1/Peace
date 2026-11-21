@@ -118,7 +118,8 @@ typedef struct {
 	int		lag;			/* client frames a snapshot waits before it arrives */
 	int		commands;
 	qboolean	move, turn, ads, predicted;
-	qboolean	lastOnly;	/* the trigger only on each server frame's last command */
+	qboolean	lastOnly;	/* the trigger only on each server frame's last command (else held, or
+						   pulled every other command for a gun that fires once a pull) */
 	int		useReloadAt;	/* a use/reload tap on this command, the trigger only after it (0: none) */
 	float	pitch;
 } run_t;
@@ -142,7 +143,10 @@ static usercmd_t Cmd( const run_t *r, int k, int t ) {
 	} else if ( r->useReloadAt ) {	/* a few rounds, a pause, the tap, then the trigger */
 		if ( k < 24 || k > r->useReloadAt ) c.buttons |= BUTTON_ATTACK;
 		if ( k == r->useReloadAt ) c.buttons |= BUTTON_USE_RELOAD;
-	} else if ( !r->lastOnly || ( k + 1 ) % r->snapEvery == 0 ) c.buttons |= BUTTON_ATTACK;
+	} else if ( r->lastOnly ? ( k + 1 ) % r->snapEvery == 0 :
+		/* a gun that fires once a pull (MW2's ShotLimitReached at one shot:
+		   held, it fires no more) has its trigger pulled every other command */
+		!( ( k & 1 ) && BG_ShotLimitReached( BG_WeaponFireType( r->weapon ), 1 ) ) ) c.buttons |= BUTTON_ATTACK;
 	if ( r->ads ) c.buttons |= BUTTON_ADS;
 	if ( r->turn ) {	/* sweep across the victim and the wall behind them */
 		yaw = 6 * sin( k * 0.37 ); pitch += 2.5f * cos( k * 0.23 );

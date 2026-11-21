@@ -254,7 +254,9 @@ typedef struct {
 	qboolean rifle;		/* the rifle was in hand at some point */
 } run_t;
 
-/* The shot is command 0. Y on commands y1 and y2 and X on command x (-1: none). */
+/* The shot is command 0. Y on commands y1 and y2 and X on command x (-1: none),
+ * the trigger let go after the shot or, with holdTrigger, held all along. */
+static qboolean holdTrigger;
 static run_t Shoot(int slot, qboolean alternate, int y1, int y2, int x, int frames) {
 	run_t r;
 	int f, from;
@@ -264,7 +266,7 @@ static run_t Shoot(int slot, qboolean alternate, int y1, int y2, int x, int fram
 	r.reloadStart = r.dropStart = r.change = -1; r.changeTo = WP_NONE; r.rifle = qfalse;
 	for (f = 0; f < frames; f++) {
 		int was = PS->weaponstate;
-		Frame((f == 0 ? BUTTON_ATTACK : 0) | (f == x ? BUTTON_USE_RELOAD : 0), (f == y1 || f == y2) ? IN_Y : 0);
+		Frame((f == 0 || holdTrigger ? BUTTON_ATTACK : 0) | (f == x ? BUTTON_USE_RELOAD : 0), (f == y1 || f == y2) ? IN_Y : 0);
 		if (f == 0) CHECK(PS->weapon == from && PS->weaponstate == WEAPON_FIRING);
 		if (r.reloadStart < 0 && PS->weaponstate == WEAPON_RELOADING && was != WEAPON_RELOADING) r.reloadStart = f;
 		if (r.dropStart < 0 && PS->weaponstate == WEAPON_DROPPING) r.dropStart = f;
@@ -276,7 +278,11 @@ static run_t Shoot(int slot, qboolean alternate, int y1, int y2, int x, int fram
 
 /* Shoot the Masterkey, Y, Y, X: with all three inside the shot, the next gun is
  * in hand on the second command after X, with no drop at all, on every timing.
- * The shot's own length (the open note) is the whole window. */
+ * The shot's own length (the open note) is the whole window, the trigger let
+ * go or held through the shot alike: MW2's held-trigger lock is asked only as
+ * the shot runs out (WeaponTimeAdjust, 0x5789DD), and there the command names
+ * the gun the Ys asked for, so it locks nothing (0x578ABC-0x578ACA) and the
+ * change begins (0x578C0A-0x578C31) as it would with the trigger up. */
 static void TestShootYYX(void) {
 	static const int rates[] = { 8, 16, 33 };
 	int i, y1, y2, x, inside = 0, outside = 0;
@@ -575,9 +581,73 @@ static void TestRechamberTiming(void) {
 	}
 }
 
+/* The rechamber with the trigger held from the shot: MW2's lock makes the gun
+ * READY on the shot's last command with weaponTime 1 (WeaponTimeAdjust,
+ * 0x5789DD-0x578AE6), and CheckForRechamber starts the action from that READY
+ * on that same command (0x575B07-0x575BA9: READY, no weaponDelay), so the bolt
+ * and the end come a command sooner, and the action ends READY under the lock.
+ * A change first seen on the shot's last command is a whole drop with the
+ * action owed (the command names the other gun: no lock); on the bolt's
+ * command, now the one after the shot's last on the Masterkey, the instant
+ * swap with it owed (the bolt's delayed action finishes the drop begun on its
+ * think, 0x579474, 0x57928C); a command later a whole drop with it paid. */
+static void TestHeldRechamber(void) {
+	static const int rates[] = { 8, 16, 33 };
+	int i, k, c, cmd;
+	for (i = 0; i < (int)(sizeof(rates) / sizeof(rates[0])); i++) for (k = 0; k < 2; k++) {
+		const pumpGun_t *g = &pumpGuns[k];
+		int open = PickupNoteTime(g->weapon, ASEQ_FIRE, WNOTE_BOLT_OPEN);
+		int close = PickupNoteTime(g->weapon, ASEQ_FIRE, WNOTE_BOLT_CLOSED);
+		int fire = BG_WeaponFireLength(g->weapon), shells = BG_WeaponMagSize(g->weapon) - 1;
+		int heldBolt, heldEnd, points[4], n = 0, p;
+		msec = rates[i];
+		PumpShot(g);
+		heldBolt = shotEnd + Frames(close - open);
+		heldEnd = shotEnd + Frames(fire - open);
+		CHECK(heldBolt == boltCmd - 1 && heldEnd == actionEnd - 1);
+		for (cmd = 1; cmd < shotEnd; cmd++) {
+			Frame(BUTTON_ATTACK, 0);
+			CHECK(PS->weaponstate == WEAPON_FIRING);
+		}
+		Frame(BUTTON_ATTACK, 0);
+		CHECK(PS->weaponstate == WEAPON_BOLTING && PS->weaponAnimTime == open && Owes(g->slot, g->alternate));
+		for (cmd = shotEnd + 1; cmd < heldEnd; cmd++) {
+			Frame(BUTTON_ATTACK, 0);
+			CHECK(PS->weaponstate == WEAPON_BOLTING && Owes(g->slot, g->alternate) == (cmd < heldBolt));
+		}
+		Frame(BUTTON_ATTACK, 0);
+		CHECK(PS->weaponstate == WEAPON_READY && PS->weaponTime == 1 && Shells(g->slot, g->alternate) == shells);
+		Frame(BUTTON_ATTACK, 0);
+		CHECK(PS->weaponstate == WEAPON_READY && Shells(g->slot, g->alternate) == shells);
+		if (g->weapon == WP_MASTERKEY) CHECK(heldBolt == shotEnd + 1);
+
+		points[n++] = shotEnd;
+		if (heldBolt - 1 > shotEnd) points[n++] = heldBolt - 1;
+		points[n++] = heldBolt; points[n++] = heldBolt + 1;
+		for (p = 0; p < n; p++) {
+			c = points[p];
+			PumpShot(g);
+			for (cmd = 1; cmd < c - 1; cmd++) Frame(BUTTON_ATTACK, 0);
+			if (g->alternate) CG_NextWeapon_f();
+			Frame(BUTTON_ATTACK, IN_Y);
+			CHECK(cg.weaponSelect == g->other && PS->weapon == g->weapon);
+			Frame(BUTTON_ATTACK, 0);
+			if (c == heldBolt) {
+				CHECK(PS->weapon == g->other && PS->weaponstate == WEAPON_RAISING);
+			} else {
+				CHECK(PS->weapon == g->weapon && PS->weaponstate == WEAPON_DROPPING);
+				CHECK(PS->weaponTime == BG_WeaponDropTime(g->weapon));
+			}
+			CHECK(Owes(g->slot, g->alternate) == (c <= heldBolt));
+			CHECK(Shells(g->slot, g->alternate) == shells);
+		}
+	}
+}
+
 int main(void) {
 	TestCycle(); TestAltToggle(); TestShootYYX(); TestSpasPaysItsDrop(); TestPumpOwed();
-	TestRechamberTiming();
+	holdTrigger = qtrue; TestShootYYX(); holdTrigger = qfalse;
+	TestRechamberTiming(); TestHeldRechamber();
 	printf("PASS: %i cycle, mode switch, shoot-Y-Y-X, pump and rechamber checks\n", checks);
 	return 0;
 }

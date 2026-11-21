@@ -142,8 +142,9 @@ source for MW2 behaviour; the owner rejects it.
   holstered out of. Sprint is MW2's `PM_Weapon_CheckForSprint` (iw4x
   0x578060), which does nothing while the gun is FIRING or RECHAMBERING;
   the sprint flag, speed and meter run as usual (MW2's sprint gates never
-  test those states). MW2's shot ends READY owing its action at the end of
-  its last think (`ShouldBeFiring`, 0x576D99-0x576DA3), and on the next think
+  test those states). With the trigger let go, MW2's shot ends READY owing its
+  action at the end of its last think (`ShouldBeFiring`, 0x576D99-0x576DA3),
+  and on the next think
   every check, the sprint's included, comes before `CheckForRechamber`
   (0x575a30, which starts the action only from READY, 0x575B77), so a sprint
   on by then takes the READY gun and the action stays owed: step 4d works all
@@ -162,7 +163,48 @@ source for MW2 behaviour; the owner rejects it.
   `PM_BeginWeaponReload` accepts READY, FIRING and RECHAMBERING (owner's
   rule: shoot and reload with no delay); the fire cycle is simply abandoned,
   its debt still owed. An empty gun reloads itself once the shot is over, on
-  its READY think (MW2's auto reload refuses FIRING), never out of the shot.
+  its READY think (MW2's auto reload refuses FIRING), never out of the shot,
+  unless the trigger is still down from the shot (below).
+- **A single-shot gun fires once a pull of the trigger (owner's rule: do what
+  MW2 does).** MW2's fire is a level test of the trigger (`ShouldBeFiring`,
+  0x576CC0); what stops a held trigger is the lock `PM_WeaponTimeAdjust` puts
+  on the think a state's time runs out (MW2's `PM_Weapon_WeaponTimeAdjust`,
+  0x5789DD-0x578B71), before anything else of the think: with the trigger
+  down, the pull's shots all fired (`BG_ShotLimitReached`, MW2's
+  `ShotLimitReached` 0x5769E0, on the gun's fireType from `BG_WeaponFireType`,
+  and `ps.weaponShotCount`, MW2's counter, which every shot but a full-auto one
+  adds to, capped at 4, 0x576F93-0x576FC5, and a reload zeroes, 0x575EFE), the
+  command still naming the gun and a round in its magazine, the gun's time
+  becomes 1 (0x578AE6): the shot's end, the action's end and the knife's end
+  leave the gun READY, any other state (a raise) keeps its state, and the 1
+  runs out on the next think, which asks again. A think that asks with the
+  trigger up zeroes the count. So the SPAS, the M300 (as the Intervention) and
+  the Masterkey, Single Shot in MW2's files, are READY under the lock on the
+  shot's last think with the trigger held, and step 4d starts the action from
+  that READY on that same think (MW2's `CheckForRechamber` takes READY with no
+  weaponDelay, 0x575B07-0x575BA9): the bolt and the end come a think sooner
+  than with the trigger let go, the READY think after the shot exists only
+  with the trigger let go, and the gun fires nothing until the trigger has
+  been let go: let go on the action's last command and pulled on the next, it
+  fires on the command a let-go trigger would have, so holding gains nothing
+  (`dev/tests/trigger_test.c`). Full auto (the machinegun's `m4_mp`, the rocket launcher's
+  `rpg_mp`, the Quake 3 guns, the M16 as Peace's placeholder automatic) is
+  never locked, and each of its shots is given its whole time on the think the
+  last one's ran out (MW2's `StartFiring` assigns `iFireTime`, 0x576E9C-0x576E9F,
+  after the crossing dropped the overshoot, 0x578B71): held, it fires every
+  ceil(fireTime / msec) thinks. (The knife's time is MW2's one meleeTime from
+  the press, so its draw's overshoot carries into it.) The fire type is data (`bg_weaponFireType`, and the generated
+  guns' `fire_type` in their `weapon.json`); never test a weapon id for it.
+  The lock is only the time, so whatever zeroes it lets a held trigger fire:
+  YY's return, the gun's return after equipment (MW2's offhand states are
+  never locked, 0x578A94), a reload; the count is the hand's, so a
+  single-shot gun swapped to with the trigger still down from another's shot
+  waits in its raise. With the trigger held from a last round, nothing is
+  locked (no round): with a reserve the reload starts out of the shot on its
+  last think, the action owed (MW2's `CheckFiringAmmo`, 0x5770C0), and with
+  nothing anywhere and nowhere to go it dry-fires there (below). Never add a
+  semi-auto flag, a trigger-release latch or a weapon-named branch: the
+  count, the fire type and the time are the whole rule.
 - **The bolt cancel is the reload cancel.** `WNOTE_BOLT_CLOSED` on the fire
   animation carries no rounds. Like `WNOTE_MAG_IN` it clears the lock on its
   think and only queues its completion: the chambering commits in step 4, the
@@ -176,8 +218,15 @@ source for MW2 behaviour; the owner rejects it.
   in the same place, that opens the reload's window. Never write a second
   cancel.
 - **An open action is a debt, and it is never resumed.** Firing sets the
-  weapon's bit in `STAT_UNCHAMBERED`; only the close note's step-4 commit or
-  the reload's delayed action clears it. A gun that reaches `WEAPON_READY`
+  weapon's bit in `STAT_UNCHAMBERED`; only the close note's step-4 commit, the
+  reload's delayed action, or MW2's dry fire clears it. The dry fire is MW2's
+  `PM_Weapon_CheckFiringAmmo` (0x576FE0), which clears the rechamber
+  (`BG_ClearRechamber`, 0x577094) whenever it dry-fires a gun with no round in
+  its magazine and none in reserve; it only ever finds a debt when the trigger
+  is held from that gun's last round through the shot's last think, with no
+  gun to go to: the gun dry-fires on that think, out of the shot, and never
+  works the action. (Out of READY it never has one: step 4d starts the action
+  first.) A gun that reaches `WEAPON_READY`
   with its bit set re-enters `WEAPON_BOLTING` (step 4d) on the next think
   that finds it READY, from the action's own start, the open note: the whole
   action, never from where it was and never the shot again, exactly as a
@@ -185,13 +234,14 @@ source for MW2 behaviour; the owner rejects it.
   (0x575B77): RECHAMBERING (0x575BA9) for `rechamberTime` (0x575BD2), the fire
   clip after its open note, with the bolt `rechamberBoltTime` in, or 1 when
   that is 0 (0x575BD8-0x575C03), the close note's place after the open note.
-  The shot itself ends READY with its bit set (step 4f), so the same rule
-  starts the action after every shot: the bolt comes a think after the
-  action begins at the earliest, and the gun is ready ceil(rechamberTime /
-  msec) thinks after. A cancel before the close note, or on its very think,
-  costs the full pump or bolt when you come back; a cancel a think later
-  keeps the chambering. Never add a partial-bolt state, and never clear the
-  bit anywhere but those two commits (spawn is the one exception).
+  The shot itself ends READY with its bit set (step 4f, or with the trigger
+  held the lock on its last think), so the same rule starts the action after
+  every shot: the bolt comes a think after the action begins at the earliest,
+  and the gun is ready ceil(rechamberTime / msec) thinks after. A cancel before
+  the close note, or on its very think, costs the full pump or bolt when you
+  come back; a cancel a think later keeps the chambering. Never add a
+  partial-bolt state, and never clear the bit anywhere but those three places
+  (spawn is the one exception).
 - **The reload's delayed action is MW2's (owner's rule: do what MW2 does).**
   When a reload starts on a gun that still owes its pump or bolt, the action is
   settled after the gun's OWN action length (fire-cycle open to close, MW2's
@@ -222,7 +272,13 @@ source for MW2 behaviour; the owner rejects it.
   too, and only one first seen on the bolt's own think (the next one on the
   Masterkey) is instant with it owed: the bolt's delayed action finishes the
   drop begun on its think (MW2's path A, 0x579474, 0x57928C; model trace
-  `mk_rech_frame` in wf20). A think later the bolt is paid. Never let the
+  `mk_rech_frame` in wf20). A think later the bolt is paid. With the trigger
+  held from the shot the action starts on the shot's last think (the lock's
+  READY), so the Masterkey's bolt think, the instant swap's, is the one after
+  the shot's last; a change first seen on the shot's last think names another
+  gun, so it locks nothing and is the whole drop with the action owed, as
+  with the trigger let go (`moni_test.c`'s `TestHeldRechamber`). The Moni
+  (shoot, Y, Y, X inside the shot) is the same either way. Never let the
   fire clock run from the shot into the action: a gun whose bolt is 1ms in
   would pay its pump on the very think a waiting swap begins, and swap free.
 - **Clip frame ranges are data.** They live in the `.cfg` beside the model and
@@ -337,7 +393,10 @@ source for MW2 behaviour; the owner rejects it.
   zeroes this think's copies (`pml.forwardmove`, `pml.rightmove`), and every
   mover, the bob, the legs and the sprint read the copies. The stance's speed
   (`BG_StanceScale`) is read from the eye's state every think, and MW2's
-  `oldcmd` (`ps.prevCmd`) is written once a command, never per step.
+  `oldcmd` (`ps.prevCmd`) is written once a command, never per step (MW2's
+  `Pmove` copies it after every step, 0x4CFF61, which differs only on a
+  command chopped into steps; the trigger's record, `WA_ATTACK_HELD`, is
+  written every step as MW2's).
 - **The walk is MW2's (owner's rule: MW2's numbers, at IW4x's exe defaults).**
   `g_speed` is 190 (`BG_PLAYER_SPEED`; the world was already MW2's, so nothing
   else is scaled, never by 0.8). `PM_WalkScale` is MW2's `PM_CmdScale_Walk`
@@ -408,6 +467,11 @@ source for MW2 behaviour; the owner rejects it.
   (MW2's `BG_SwitchWeaponsIfEmpty`, 0x576320) and on a dry pull, which starts
   no shot and puts `BG_DRY_FIRE_TIME` (500) on the lock, so a held trigger
   clicks again each time it runs out (`PM_Weapon_CheckFiringAmmo`, 0x576FE0).
+  Held from the last round's shot with nowhere to go, the click comes on the
+  shot's last think, out of the shot: the gun stays FIRING (no change until
+  the 500 has run out, 0x578C31), shows its idle (`BG_DryFiring`) and its
+  action is forgiven (An open action is a debt); each click re-arms the 750ms
+  Y lockout below, so Y waits for the trigger to be let go.
   The player's own live view then runs `CG_OutOfAmmoChange` (MW2's 0x5A07C0):
   an underbarrel selects its own gun in its own mode, the alt switch, if that
   gun has ammo; otherwise, and for any other gun, the cycle runs from the
@@ -511,7 +575,12 @@ source for MW2 behaviour; the owner rejects it.
   knife is over `BG_MELEE_TIME` (800ms, MW2's meleeTime) after the press, and
   on that command the gun's quick raise starts with nothing put down in
   between (`PM_BeginWeaponChange` draws straight from the knife, as from an
-  empty hand). Both are MW2 weapon data, identical for every MW2 MP gun in the
+  empty hand). With the trigger down there and the gun's pull already fired
+  (a knife pressed in a single-shot gun's shot, or out of its lock), MW2's
+  lock takes the knife's end (MELEE_FIRE, 0x578B2A-0x578B39): the gun is READY
+  in hand at once, under the lock, with no quick raise, and works an owed
+  action from there; MW2's MELEE_END, the quick raise's end, is locked the
+  same way. Both are MW2 weapon data, identical for every MW2 MP gun in the
   dump; everything else follows from them. The only knife data is
   `BG_QuickActionInPlace` and the knife's table rows: no knife-named branch,
   no glitch branch. Every knife gate stays: equipment pressed on the knife's
@@ -602,7 +671,8 @@ source for MW2 behaviour; the owner rejects it.
   throwing knife and the Tactical Insertion (not MW2's flare fireTime 0.6 /
   fireDelay 0.129) are held `BG_QUICK_ACTION_HOLD` (500ms) and go away in
   `BG_RAPID_DROP_TIME` (50ms); the knife has neither, and goes straight from
-  `BG_MELEE_TIME` into the raise. Either way the gun comes back on its MW2
+  `BG_MELEE_TIME` into the raise (or, the trigger held with the gun's pull
+  fired, into the READY gun with no raise at all: "The knife is MW2's"). Either way the gun comes back on its MW2
   quick raise (`BG_WeaponQuickRaiseTime`: 750ms for rifles, shotguns and
   launchers, 250ms for the M300, as the Intervention), a Semtex cancel's
   return included (owner's rule: MW2's MeleeEnd and OffHandEnd). A frag that
@@ -805,8 +875,19 @@ source for MW2 behaviour; the owner rejects it.
   recovery draw, where it is not read at all (MW2's reload check skips melee
   and offhand) — and a gun that is reloading when the command begins drops it
   (MW2's rule). Peace's own rule: the trigger may fire on the command a reload
-  ends, so a held trigger and reload alternate (MW2 loops its segmented reload
-  instead). The client never sets the bit; it
+  ends, so a held trigger and reload alternate (MW2's reload's last think fires
+  nothing, and a held trigger fires on the think after: one command later). The trigger stops a
+  segmented reload as MW2's does: asked by a fresh press (in the start only
+  past 0.4 of it, `PM_Weapon_CheckForReload` 0x578750-0x5787AD) or by a
+  trigger down as a segment ends (0x5783DE-0x5783FC, 0x578564-0x578582), the
+  segment it is in plays out with its round, then the end; the request is
+  `PWF_RELOAD_INTERRUPT` and the press compares with `WA_ATTACK_HELD`, the last
+  step's trigger (MW2's `pm->oldcmd`, copied every step, 0x4CFF61). Each
+  segment starts afresh on the think the one before it ended, with its whole
+  length to run (`PM_AdvanceReloadSegments`: MW2's crossing drops the
+  overshoot, 0x578B71, and `PM_SetReloadingState` assigns the next segment's
+  time, 0x575E20), so a segment ends ceil(length / msec) thinks after it
+  began. The client never sets the bit; it
   gets it from a snapshot and replays its commands over it, so a tap made as
   the gun comes back can reach the client's return after the server has already
   dropped it: the fake reload. A tap just before a shot is taken by the server
@@ -985,18 +1066,25 @@ source for MW2 behaviour; the owner rejects it.
   (`RSEQ_START/LOOP/END` + `ASEQ_FIRE`). A fifth animation segment has to widen
   the field.
 - `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
-- `weaponAction` — a separate 10-bit predicted/networked field: action type (2),
+- `weaponAction` — a separate 11-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
-  swap edge latch, post-throw recovery, and `WA_LEFT_EMPTY`. Protocol 91 (GAME_VERSION -20) requires client, server
-  and all modules rebuilt together. Older builds/demos are incompatible.
+  swap edge latch, post-throw recovery, `WA_LEFT_EMPTY`, and `WA_ATTACK_HELD`
+  (the last step's trigger, MW2's `pm->oldcmd`, for a reload's fresh press;
+  written every step and kept through a freeze). Protocol 92 (GAME_VERSION
+  -21) requires client, server and all modules rebuilt together. Older
+  builds/demos are incompatible.
+- `weaponShotCount` — MW2's `weapState[hand].weaponShotCount` (ps+0x200, its
+  netfield's 3 bits, 0x742600): the shots of this pull of the trigger, 0 to
+  `BG_SHOT_COUNT_MAX` (4). Predicted, never rebased. Protocol 92.
 - `weaponDraw` — 2 bits, three of four values used (`WDRAW_NORMAL`,
   `WDRAW_FIRST`, `WDRAW_ALT`): the kind of draw, and for a mode change the kind
   of drop before it (MW2's RAISING_ALTSWITCH and DROPPING_ALT states).
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
-  `weapFlags` (MW2's name; 2 bits) carries `PWF_USE_RELOAD`, the
-  server's use/reload request, and `PWF_SPRINT_RELEASE`. Neither is a clock,
-  and neither is rebased. Protocol 80 adds `jumpLand` (signed 12 bits),
+  `weapFlags` (MW2's name; 3 bits since protocol 92) carries `PWF_USE_RELOAD`,
+  the server's use/reload request, `PWF_SPRINT_RELEASE` and
+  `PWF_RELOAD_INTERRUPT` (MW2's RELOAD_START_INTERUPT and RELOADING_INTERUPT,
+  set only while reloading). None is a clock, and none is rebased. Protocol 80 adds `jumpLand` (signed 12 bits),
   `jumpWait` (10), `jumpOriginZ` (float) and `sprintUsed` (14): durations and a
   height, none rebased. Protocol 81 adds `cursorHintEntIndex`
   (`GENTITYNUM_BITS`; an entity number, never rebased) and widens
@@ -1157,14 +1245,25 @@ gun with a worked action, the close note's chamber commit (early, exact and
 late cancels by swap and ladder, at every think length), MW2's shot ending READY
 on its last think and the action starting from READY at the open note on the
 next (`TestPumpIsItsOwnState`; frozen, the shot stays FIRING until the freeze
-lifts, `TestFrozenShotEnd`), a sprint begun in the
+lifts, and a trigger down as it lifts fires it again with its action owed, as
+MW2's, `TestFrozenShotEnd`), a sprint begun in the
 shot, on its last think or on the READY think after it lowering the gun on that
 READY think with the whole action still owed, and one begun in the action or on
 any think around the close note waiting for the whole cycle (`PM_Weapon` alone and
 full `Pmove` with a real sprint press, SPAS and M300, at every think length) and the aim a
 NAC carries onto the incoming gun through full `Pmove`. Every
 timing in it is read from the shipped tables; never write a literal there, or
-retiming a weapon breaks the test without telling you anything.
+retiming a weapon breaks the test without telling you anything. Its reload
+tests pin MW2's trigger against a segmented reload (a press in the start's
+first 0.4 forgotten, the segment the trigger stops always played out with its
+round), and `TestPumpCannotBeShortCircuited` MW2's held trigger (no second
+shot until a release). `dev/tests/trigger_test.c` (in `run-masterkey`) drives
+the held trigger through the real `Pmove` and the client's selection at 8, 16
+and 33ms commands: the lock on the SPAS, the M300 and the Masterkey (the
+action from the shot's last command, no shot while held, the release), full
+auto, what releases the lock (YY, a grenade's return, a swap with the count
+at its limit), the last round held (the reload out of the shot, the dry fire
+with nowhere to go), the knife's end, and the reload's stop.
 
 `dev/tests/run-loadouts.cmd` (or `.sh`) checks class validation/persistence,
 modulo selection, same-update YY firing, reload/pull-out cancellation, tap/hold
@@ -1561,9 +1660,13 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   bolt on the one after, and it is ready ceil(430/msec) thinks after it
   began; a swap first seen on the bolt's think is the instant one with the
   pump owed (`moni_test.c`'s `TestRechamberTiming` pins it, and the SPAS's,
-  command by command at 8, 16 and 33ms). The rifle's fire,
-  reload, sprint and aim times are still provisional (it is automatic, not
-  MW2's burst), and so are both modes' damage, ammo counts and the Masterkey's
+  command by command at 8, 16 and 33ms). The Masterkey is Single Shot (MW2's
+  `fireType`, `weapon.json`'s `fire_type`): held from the shot the pump starts
+  on the shot's last think and nothing fires until the trigger is let go
+  (`TestHeldRechamber`, `trigger_test.c`). The rifle's fire,
+  reload, sprint and aim times are still provisional (it is automatic, `fire_type`
+  Full Auto, not MW2's 3-Round Burst, which the shot count supports: a burst
+  type's limit is its count), and so are both modes' damage, ammo counts and the Masterkey's
   sights (MW2's has none). It uses ordinary note/holster/raise rules. Never add
   a special NAC for it: MW2's Moni comes out of its data. Protocol 89 / game
   -18 added the alternate ammo fields; protocol 90 / game -19 widened

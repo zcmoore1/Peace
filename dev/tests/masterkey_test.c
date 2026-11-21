@@ -295,14 +295,21 @@ static void TestNoteTransitions(void) {
   else CHECK(ps.weapon==WP_M16 && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==M16_DROP_MS);
   CHECK(ps.ammo[WP_M16]==(offset>0?30:7));
  }
- /* Fire interrupts shell loading through END, never immediately. A tap is
-  * not queued, while a held trigger shoots after the close completes. */
+ /* Fire stops shell loading at the end of the pass it is in, through END,
+  * never at once: MW2's press in RELOADING asks it to (578750-5787ad) and
+  * the pass plays out with its shell (FinishReload, 5785b3-5785da). A tap
+  * is not queued as a shot. */
  ModeReady(qtrue); ps.ammo[WP_MASTERKEY]=1;
  move.cmd.buttons=BUTTON_RELOAD; Step(1); move.cmd.buttons=0;
  Run(MASTERKEY_RELOAD_START_MS+1);
+ CHECK(ps.weaponstate==WEAPON_RELOADING && ps.weaponAnimSeq==RSEQ_LOOP && ps.ammo[WP_MASTERKEY]==2);
  move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0;
- CHECK(ps.weaponstate==WEAPON_RELOADING && ps.weaponAnimSeq==RSEQ_END && !fired[WP_MASTERKEY]);
+ CHECK(ps.weaponstate==WEAPON_RELOADING && ps.weaponAnimSeq==RSEQ_LOOP && !fired[WP_MASTERKEY]);
+ Run(MASTERKEY_RELOAD_LOOP_MS-3);
+ CHECK(ps.weaponstate==WEAPON_RELOADING && ps.weaponAnimSeq==RSEQ_LOOP && ps.ammo[WP_MASTERKEY]==3);
+ Step(1); CHECK(ps.weaponstate==WEAPON_RELOADING && ps.weaponAnimSeq==RSEQ_END && ps.ammo[WP_MASTERKEY]==3);
  Run(MASTERKEY_RELOAD_END_MS+1); CHECK(!fired[WP_MASTERKEY] && ps.weaponstate==WEAPON_READY);
+ CHECK(ps.ammo[WP_MASTERKEY]==3 && ps.ammoReserve[WP_MASTERKEY]==14);
 }
 
 static void TestWireAndReplay(void) {

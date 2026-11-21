@@ -36,7 +36,8 @@ classifiers in `bg_loadout.c` are its data:
 
 - **Pull.** weaponClass grenade, so `BG_OffhandPreparesAtOnce` is false: from
   a gun at rest the gun goes down on its own quick drop (`BG_HolsterTime`,
-  250ms for every MW2 gun), as MW2's OffHandInit; from an empty hand,
+  250ms for every MW2 gun), as MW2's OffHandInit; from an empty hand (a
+  knife drawn out of one included: MW2's code reads weapon 0 under it),
   `BG_EMPTY_HAND_OFFHAND_TIME` with a use hint and none without one
   (CheckForOffHand's OffHandPrepare, 0x5791B0-0x5791CE). On the think after
   another offhand's return to the empty hand, MW2's one-think OFFHAND_END
@@ -71,8 +72,10 @@ classifiers in `bg_loadout.c` are its data:
   lowered - so TI, Y, TI, Y is MW2's own instant double cancel on the lethal
   button. From a gun at rest it always drops.
 - **Recovery** is Peace's ONE equipment recovery: `BG_QUICK_ACTION_HOLD`
-  (500ms) after the throw, the rapid drop (`BG_RAPID_DROP_TIME`, 50ms), then
-  the gun's quick raise; no sprint through it. See "Differences" for MW2's.
+  (500ms) after the throw, whole from its command (the ignite's end leaves no
+  time over, MW2's crossing, 0x578B71: at 16 and 33ms it was 490 before wf32),
+  the rapid drop (`BG_RAPID_DROP_TIME`, 50ms), then the gun's quick raise; no
+  sprint through it. See "Differences" for MW2's.
 - `BG_LethalWeapon` returns it for a class that carries it (held, ammo, or
   the mask bit kept through its last throw); `BG_RebuildWeaponMask` owns its
   bit. The fire's `addTime` is the generic equipment hold
@@ -212,8 +215,9 @@ code for it either).
 
 - **Recovery.** MW2 plants at fireDelay (129ms) after the release and raises
   the gun after fireTime (600ms). Peace plants on the release command and uses
-  its ONE equipment recovery (500ms hold, 50ms rapid drop, the gun's quick
-  raise), the owner's rule for every piece of equipment.
+  its ONE equipment recovery (500ms hold, whole from the release's command,
+  50ms rapid drop, the gun's quick raise), the owner's rule for every piece of
+  equipment.
 - **Occupied spawn.** MW2 spawns on the TI regardless; Peace gives a normal
   spawn and frees the TI if another player stands in the box.
 - **No splash, dialog or scoring.** MW2's "ti_destroyed" dialog, the

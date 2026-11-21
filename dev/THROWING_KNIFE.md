@@ -51,8 +51,9 @@ provenance and regeneration are in `assets/source/throwingknife/README.md`.
   before Y is read unless an offhand button is down on that command and the
   one before (`PM_OffhandHeld`): a release and Y on one command, or Y on the
   command after a tap's press, is the throw. See `dev/SEMTEX.md`.
-- **Recovery** is the ONE equipment recovery: `BG_QUICK_ACTION_HOLD`, the
-  rapid drop, then the gun's quick raise (OFFHAND_END). (The melee knife has
+- **Recovery** is the ONE equipment recovery: `BG_QUICK_ACTION_HOLD`, whole
+  from the throw's command (its pull is 0, so nothing ever carried into it),
+  the rapid drop, then the gun's quick raise (OFFHAND_END). (The melee knife has
   no hold or drop: it ends at `BG_MELEE_TIME` straight into the quick raise.) From an empty hand it
   goes back to an empty hand. With no knives left, `BG_LethalWeapon` falls back
   to the frag, which has none, so a press asks for nothing.

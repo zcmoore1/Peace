@@ -62,7 +62,9 @@ think after is MW2's one-think OFFHAND_END delay, `OffHandEnd` with weapon 0,
 The gun goes away on its MW2 quick drop (`BG_WeaponQuickDropTime`, 250ms), as for
 every grenade, followed by the 600ms pullback, semtex_mp's holdFireTime (MW2's
 OffHandPrepare; the frag and flash have the same 600). After release it shares
-`BG_QUICK_ACTION_HOLD` (500ms) and `BG_RAPID_DROP_TIME` (50ms) with frag/flash
+`BG_QUICK_ACTION_HOLD` (500ms, whole from the release's command: the pullback's
+end leaves no time over, MW2's crossing, 0x578B71) and `BG_RAPID_DROP_TIME`
+(50ms) with frag/flash
 (the knife has neither: it ends at `BG_MELEE_TIME`), then the original gun's MW2
 quick raise
 (`BG_WeaponQuickRaiseTime`; SPAS 750ms, M300 250ms) - a pre-release cancel's

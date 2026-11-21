@@ -3532,7 +3532,9 @@ drop clip, so the picture can never disagree with the timer.
 
   ladder grab - the universal BG_LADDER_DROP_TIME
   equipment   - the gun (or the knife it cuts) going away for a grenade not
-                yet thrown: the gun's quickDropTime, as MW2's OffHandInit
+                yet thrown: the gun's quickDropTime, as MW2's OffHandInit;
+                from an empty hand (or a knife drawn out of one) its
+                weapon-0 branch, BG_EMPTY_HAND_OFFHAND_TIME
   recovery    - thrown equipment going away: the universal BG_RAPID_DROP_TIME
   mode change - the gun's own BG_WeaponAltDropTime (MW2's DROPPING_ALT)
   otherwise   - the weapon's own BG_WeaponDropTime
@@ -3550,7 +3552,9 @@ int BG_HolsterTime( const playerState_t *ps ) {
 	}
 	if ( ( action == WA_LETHAL || action == WA_TACTICAL ) && !( ps->weaponAction & WA_FIRED ) ) {
 		int quick = BG_WeaponQuickDropTime( BG_ActiveSlotWeapon( ps ) );
-		if ( ps->weapon == WP_NONE ) {
+		// An empty hand, or the knife drawn out of one (the action out of it
+		// keeps WA_LEFT_EMPTY): MW2's OffHandInit with weapon 0 (578e70-578ed3).
+		if ( ps->weapon == WP_NONE || ( ps->weaponAction & WA_LEFT_EMPTY ) ) {
 			return BG_EMPTY_HAND_OFFHAND_TIME;
 		}
 		// MW2's OffHandInit keeps a drop already running: while more of the
@@ -4752,6 +4756,14 @@ static void PM_AdvanceReloadSegments( qboolean attackPressed ) {
 
 		case RSEQ_END:
 		default:
+			// MW2's crossing drops what the end overshot by (578b71) before
+			// FinishReloadEnd readies the gun (5769a0). An end with no note
+			// to zero its time (the Masterkey's) still has its overshoot
+			// here, but this think always goes on to the fire path (a reload
+			// asked on it is refused, as MW2 asks a reloading gun nothing),
+			// whose READY with nothing to fire zeroes it, or whose shot
+			// (or an owed action, step 4d) assigns its whole time: the gun
+			// leaves the think with no time over.
 			pm->ps->weaponstate    = WEAPON_READY;
 			pm->ps->weaponAnimTime = -1;
 			pm->ps->weaponAnimSeq  = RSEQ_START;
@@ -4929,6 +4941,13 @@ static void PM_UpdateWeaponAction( void ) {
 		pm->ps->weaponstate == WEAPON_RAISING;
 	qboolean prepare = qfalse;
 	int leftEmpty = pm->ps->weaponAction & WA_LEFT_EMPTY;
+	// The hand is empty with nothing in it, or with the knife drawn out of an
+	// empty hand: MW2's knife is the hand's own melee states written over
+	// what is in it (MeleeInit never changes the weapon), so under that knife
+	// every check reads weapon 0 (CheckForOffHand 5791bc, OffHandInit 578e70,
+	// OffHandEnd 577a10). Read before the action is replaced.
+	qboolean emptyHand = pm->ps->weapon == WP_NONE ||
+		( BG_QuickActionInPlace( pm->ps->weapon ) && leftEmpty );
 	// MW2's ladder drop is a weapon change (CheckForChangeWeapon's ladder
 	// branch, 578c72), and that check refuses every melee and offhand state,
 	// the quick raise after one included (578bc0-578c04). So a ladder grabbed
@@ -5026,9 +5045,12 @@ static void PM_UpdateWeaponAction( void ) {
 				// MW2's OffHandInit out of a melee state stamps the gun's whole
 				// quickDropTime. Nothing was put down for the knife, so that is
 				// simply the drop step 1 stamps: the knife in hand, or the gun's
-				// quick raise after it, goes away on the gun's quick drop.
+				// quick raise after it, goes away on the gun's quick drop. Out of
+				// a knife drawn from an empty hand it is weapon 0's 100 ms
+				// (578ed3, BG_HolsterTime).
 				// MW2's CheckForOffHand (5791b0-5791ce): with no use hint at
-				// all and either no gun in hand or the gun's quick raise after
+				// all and either no gun in hand (the knife drawn out of an
+				// empty hand included) or the gun's quick raise after
 				// equipment, the equipment comes straight out (OffHandPrepare)
 				// and the gun is never lowered. The hint is server state; pmove
 				// only reads it. The throwing knife comes out at once anyway,
@@ -5036,7 +5058,7 @@ static void PM_UpdateWeaponAction( void ) {
 				// MeleeInit writes the melee state straight over the gun's.
 				qboolean straightOut = nextAction != WA_MELEE &&
 					pm->ps->cursorHintEntIndex == ENTITYNUM_NONE &&
-					( pm->ps->weapon == WP_NONE || offhandEnd );
+					( emptyHand || offhandEnd );
 				prepare = straightOut ||
 					BG_OffhandPreparesAtOnce( nextWeapon ) || BG_QuickActionInPlace( nextWeapon );
 				// MW2's events for the offhand, in its order: CheckForOffHand's
@@ -5055,7 +5077,9 @@ static void PM_UpdateWeaponAction( void ) {
 				}
 				action = nextAction;
 				returning = recovering = 0;
-				leftEmpty = pm->ps->weapon == WP_NONE ? WA_LEFT_EMPTY : 0;
+				// Equipment that cuts a knife drawn out of an empty hand goes
+				// back to that hand: MW2's OffHandEnd with weapon 0 (577a1a).
+				leftEmpty = emptyHand ? WA_LEFT_EMPTY : 0;
 				// MW2's OffHandInit (578e00) clamps a negative fuse: a
 				// cook-out's -1 is cleared by the next offhand's start.
 				if ( BG_OffhandHeldToThrow( nextWeapon ) && pm->ps->grenadeTimeLeft < 0 ) {
@@ -5462,7 +5486,9 @@ becomes 1 (578ae6). The shot over and the knife's end leave the gun READY
 stays a raise, 578b25-578b28). The 1 runs out on the next think, which asks
 again, so the gun does nothing for as long as the trigger stays down. A think
 that asks with the trigger up ends the pull: its count goes back to 0
-(578b51-578b67).
+(578b51-578b67). Any crossing the lock does not take drops what the time
+overshot by (578b71): MW2 never leaves a weaponTime below 0, and every state
+that follows assigns its own whole time.
 
 The lock is only ever that time, so whatever zeroes the time lets the gun
 fire: YY's return, a grenade's, a change or a reload (MW2's PM_Weapon_Idle
@@ -5485,6 +5511,15 @@ static void PM_WeaponTimeAdjust( int oldTime ) {
 	     !pm->ps->ammo[gun] ) {
 		if ( !( pm->cmd.buttons & BUTTON_ATTACK ) ) {
 			pm->ps->weaponShotCount = 0;
+		}
+		// MW2's crossing drops what the time overshot by, in every state the
+		// lock does not take (578b71): the state that follows starts its
+		// whole time from 0. A raise's READY, the ladder's holster and a
+		// released lock are left at 0, and equipment's prepare hands its
+		// HOLD a 0 (OffHandHold zeroes it again, 577934), so the throw gets
+		// its whole hold (the HOLD handler assigns it, 578f82).
+		if ( pm->ps->weaponTime < 0 ) {
+			pm->ps->weaponTime = 0;
 		}
 		return;
 	}
@@ -6199,9 +6234,11 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
-	// 6. Stock transitions. A raise that ends is ready from the next think. The
-	//    knife's draw is no raise but MW2's meleeDelay, which ends in the hit on
-	//    the think it runs out (MeleeFire), so the knife goes on to fire.
+	// 6. Stock transitions. A raise that ends is ready from the next think,
+	//    with no time over (PM_WeaponTimeAdjust dropped it, MW2's 578b71
+	//    before FinishWeaponRaise, 576720). The knife's draw is no raise but
+	//    MW2's meleeDelay, which ends in the hit on the think it runs out
+	//    (MeleeFire), so the knife goes on to fire.
 	if ( pm->ps->weaponstate == WEAPON_RAISING ) {
 		pm->ps->weaponstate = WEAPON_READY;
 		if ( pm->ps->weapon == WP_GAUNTLET ) {
@@ -6460,7 +6497,10 @@ static void PM_Weapon( void ) {
 	// PM_Weapon_WeaponTimeAdjust dropped what it overshot by (578b71). So a
 	// held full-auto gun fires every ceil(fireTime / msec) thinks. The knife's
 	// time is MW2's one meleeTime from the press, of which its draw has
-	// counted down the part already gone, and equipment is MW2's offhand.
+	// counted down the part already gone (its draw is MW2's meleeDelay, no
+	// crossing, PM_WeaponTimeRanOut). Equipment's time starts at 0: its
+	// prepare's crossing dropped the overshoot (578b71, OffHandHold 577934),
+	// so the throw is given its whole hold (the HOLD handler, 578f82).
 	if ( pm->ps->weaponTime < 0 && !BG_IsActionWeapon( pm->ps->weapon ) ) {
 		pm->ps->weaponTime = 0;
 	}

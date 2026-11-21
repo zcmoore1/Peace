@@ -202,8 +202,13 @@ source for MW2 behaviour; the owner rejects it.
   never locked, and each of its shots is given its whole time on the think the
   last one's ran out (MW2's `StartFiring` assigns `iFireTime`, 0x576E9C-0x576E9F,
   after the crossing dropped the overshoot, 0x578B71): held, it fires every
-  ceil(fireTime / msec) thinks. (The knife's time is MW2's one meleeTime from
-  the press, so its draw's overshoot carries into it.) The fire type is data (`bg_weaponFireType`, and the generated
+  ceil(fireTime / msec) thinks. That crossing drops the overshoot in every
+  state the lock does not take, not only before a shot: a raise (the quick
+  raises included), the ladder's holster and equipment's prepare all end with
+  no time over (MW2 never leaves a weaponTime below 0), and the state after
+  each starts its whole time. (The knife's time is MW2's one meleeTime from
+  the press, so its draw's overshoot carries into it: its draw is MW2's
+  meleeDelay, no crossing, `PM_WeaponTimeRanOut`.) The fire type is data (`bg_weaponFireType`, and the generated
   guns' `fire_type` in their `weapon.json`); never test a weapon id for it.
   The lock is only the time, so whatever zeroes it lets a held trigger fire:
   YY's return, the gun's return after equipment (MW2's offhand states are
@@ -543,7 +548,17 @@ source for MW2 behaviour; the owner rejects it.
   raise, `PM_Weapon_Idle` on the knife's last think (0x578DF3-0x578DF7: READY,
   no time, no delay), so the think after is an ordinary READY think, with no
   OFFHAND_END delay: a knife, a gun asked for and equipment are all taken on
-  it, equipment's prepare played. Old plain weapon IDs are supported for bots/tools. Neither
+  it, equipment's prepare played. Equipment pressed during that knife comes
+  out of the empty hand under it (MW2's offhand code reads weapon 0 under its
+  knife, which never changes the weapon: `emptyHand` in
+  `PM_UpdateWeaponAction`): with no use hint straight out, no drop
+  (`CheckForOffHand`'s OffHandPrepare, 0x5791B0-0x5791CE), and on the knife's
+  hit think, a delay think, in hand and ready on it, its prepare unplayed;
+  with a hint the knife goes on `BG_EMPTY_HAND_OFFHAND_TIME` (OffHandInit's
+  weapon-0 branch, 0x578ED3), not a gun's quick drop; and it goes back to the
+  empty hand (`WA_LEFT_EMPTY`, OffHandEnd with weapon 0, 0x577A1A), so a gun
+  asked for comes up two thinks after the hand empties, on its ordinary
+  raise. Old plain weapon IDs are supported for bots/tools. Neither
   inventory replacement nor a delayed pickup event may overwrite Y intent.
   First deployment is pending until the instance is drawn, then consumed on
   start; normal holster/YY/sprint retention may interrupt it. No CAN state.
@@ -710,7 +725,10 @@ source for MW2 behaviour; the owner rejects it.
 - **Recovering from equipment is ONE thing, in time and function, and the
   knife ends in the same quick raise.** Frag, flash, a released Semtex, the
   throwing knife and the Tactical Insertion (not MW2's flare fireTime 0.6 /
-  fireDelay 0.129) are held `BG_QUICK_ACTION_HOLD` (500ms) and go away in
+  fireDelay 0.129) are held `BG_QUICK_ACTION_HOLD` (500ms), whole from the
+  throw's command at every command rate (MW2's prepare crossing drops the
+  overshoot, 0x578B71, OffHandHold zeroes the time, 0x577934, and the throw
+  assigns its own, 0x578F82), and go away in
   `BG_RAPID_DROP_TIME` (50ms); the knife has neither, and goes straight from
   `BG_MELEE_TIME` into the raise (or, the trigger held with the gun's pull
   fired, into the READY gun with no raise at all: "The knife is MW2's"). Either way the gun comes back on its MW2
@@ -1345,9 +1363,17 @@ last round's lock with the
 trigger up; equipment pressed on the knife's hit, or on the think an empty
 hand's return from equipment ends, is prepared on that think (with no use
 hint, out of the empty hand, it is in hand and ready on it; a think later its
-prepare plays), and a knife pressed there is lost; the knife's own return to
-an empty hand has no such think (a knife, a gun asked for and equipment are
-all taken on the think after it);
+prepare plays), and a knife pressed there is lost, after the flash as after
+the frag; the knife's own return to an empty hand has no such think (a knife,
+a gun asked for and equipment are all taken on the think after it), and
+equipment pressed during that knife comes out of the empty hand under it
+(straight out with no use hint, in hand and ready on the hit's think; the
+empty hand's drop with one) and goes back to it, a gun asked for drawn two
+thinks after on its ordinary raise; every crossing leaves no time over (a
+raise's end, normal, first or alternate, a quick raise's, a reload's with its
+button held) and equipment's throw holds `BG_QUICK_ACTION_HOLD` whole from its
+command, the rapid drop, the quick raise and the recovery's end following on
+their whole times, for the frag, flash, Semtex, TI and throwing knife;
 a knife pressed on a reload's round or settle is lost while the round seats
 or the pump is paid, and one pressed on the SPAS's or M300's reload end's
 close note is taken (MW2's RELOAD_END has no delay). The held trigger at

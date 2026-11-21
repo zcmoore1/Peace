@@ -246,8 +246,10 @@ is simply gone and the gun comes back on its quick raise). The flash's fuse is
 along the view and 120 up, the throwing knife at 1400 and 40 up, each plus the
 thrower's own velocity along the throw. Held at death, any of them is dropped
 at the body with the fuse it has (a TI is planted). After the throw the item
-is held `BG_QUICK_ACTION_HOLD` (500ms) and goes away in `BG_RAPID_DROP_TIME`
-(50ms), then the same quick raise. Neither can be sprinted
+is held `BG_QUICK_ACTION_HOLD` (500ms), whole from the throw's command at
+every command rate (MW2's prepare ends with no time over, 0x578B71, and
+OffHandHold and the throw assign theirs, 0x577934, 0x578F82), and goes away in
+`BG_RAPID_DROP_TIME` (50ms), then the same quick raise. Neither can be sprinted
 through: the latch holds until the gun is fully back. Empty equipment does nothing; a ladder
 grab takes nothing from a knife or grenade under way (a frag cooks on): the ladder drop waits for
 the gun's quick raise, as MW2's ladder drop is a weapon change, and nothing new starts on the

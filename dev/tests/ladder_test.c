@@ -1304,7 +1304,9 @@ static void TestHeldTriggerHolster(int dt) {
         CHECK(ps.weaponstate == WEAPON_DROPPING && ps.weaponTime == BG_LADDER_DROP_TIME - k * dt);
     }
     QuickTick(dt);
-    CHECK(ps.weaponstate == WEAPON_LADDER && ps.weapon == WP_SHOTGUN && Attached());
+    /* no time over: the holster is no state the lock takes, so its crossing
+     * drops the overshoot (0x578B71) */
+    CHECK(ps.weaponstate == WEAPON_LADDER && ps.weapon == WP_SHOTGUN && Attached() && ps.weaponTime == 0);
     CHECK((move.cmd.buttons & BUTTON_ATTACK) && ps.weaponShotCount == 1 && fired[WP_SHOTGUN] == 1);
 }
 int main(void) {

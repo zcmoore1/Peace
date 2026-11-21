@@ -178,7 +178,10 @@ the close note never meets a sprint lock. A reload is still lowered at once
 Sprint + Y and sprint + YY use the ordinary cycle/drop-cancellation path.
 On cancellation a retained draw/drop or sprint transition returns along its
 visible clip. A swap does not end a sprint (a sprint latches, as in MW2), so
-its entry resumes without jumping back to frame zero. Sprint, Y, end the
+its entry resumes without jumping back to frame zero: the YY think readies the
+gun (MW2's double-tap cancel comes after its sprint check, iw4x 0x44C4D7, so
+a pump or bolt still owed is worked first) and the next think lowers it again
+from the pose its return shows. Sprint, Y, end the
 sprint (a fresh sprint press, aim, letting go of forward), Y brings the
 retained entry, carry or exit home through the same move-layer return, as
 the ordinary sprint exit would bring that posture home. A carry (finished
@@ -221,7 +224,8 @@ flash, Semtex, throwing knife, Tactical Insertion) goes the other way, through
 MW2's offhand machine with each item's own weapon data (the IW4 dump's
 `weapons/mp` files; the table in `bg_loadout.c` and the raise table in
 `bg_pmove.c`): the gun goes down on its quick drop (250ms; the throwing knife
-comes straight out), then the item's prepare, its holdFireTime (600ms for the
+comes straight out, and an item pressed on the knife's hit think is prepared
+on it, as MW2's meleeDelay running out spends the drop), then the item's prepare, its holdFireTime (600ms for the
 frag, flash and Semtex, none for the throwing knife, the TI's 2.63s ignite).
 Then it waits in hand (MW2's HOLD) while an offhand button - the lethal or the
 tactical, either one - is down on this command and the one before, and is
@@ -243,7 +247,8 @@ through: the latch holds until the gun is fully back. Empty equipment does nothi
 grab takes nothing from a knife or grenade under way (a frag cooks on): the ladder drop waits for
 the gun's quick raise, as MW2's ladder drop is a weapon change, and nothing new starts on the
 ladder. Every knife and grenade defers a Y until the gun it
-left is fully back on its quick raise (MW2's CheckForChangeWeapon); YY cannot
+left is fully back on its quick raise, and the swap begins on the think after
+(MW2's CheckForChangeWeapon refuses that raise's last think too); YY cannot
 cancel that raise. The Semtex's hold/release and pre-throw cancel (MW2's: in
 the drop or the pull Y always cancels; once held ready only while an offhand
 button is still down, so letting go with Y on one command throws) are

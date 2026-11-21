@@ -18,3 +18,6 @@ out/tests/empty-switch-test
 # MW2's trigger, held against pressed: the shot limit's lock, the dry fire, the knife's end, the reload's stop
 ${CC:-cc} $flags dev/tests/trigger_test.c code/cgame/cg_event.c code/cgame/cg_playerstate.c dev/tests/pickup_pmove_driver.c $game $common -Wl,--gc-sections -lm -o out/tests/trigger-test
 out/tests/trigger-test
+# What a weapon state's last think does (MW2's ProcessHand), through the real Pmove.
+${CC:-cc} $flags dev/tests/state_end_test.c $game $common -Wl,--gc-sections -lm -o out/tests/state-end-test
+out/tests/state-end-test

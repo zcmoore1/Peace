@@ -37,7 +37,13 @@ classifiers in `bg_loadout.c` are its data:
 - **Pull.** weaponClass grenade, so `BG_OffhandPreparesAtOnce` is false: from
   a gun at rest the gun goes down on its own quick drop (`BG_HolsterTime`,
   250ms for every MW2 gun), as MW2's OffHandInit; from an empty hand,
-  `BG_EMPTY_HAND_OFFHAND_TIME`.
+  `BG_EMPTY_HAND_OFFHAND_TIME` with a use hint and none without one
+  (CheckForOffHand's OffHandPrepare, 0x5791B0-0x5791CE). On the think after
+  another offhand's return to the empty hand, MW2's one-think OFFHAND_END
+  delay runs out and its switch runs whatever the lock (0x579474): with a hint
+  the drop is spent and the ignite starts on that think; with none the TI is
+  in hand at once, its ignite never played (OFFHAND_PREPARE's case is
+  OffHandHold, 0x5792DA).
 - **Ignite.** Its draw is `BG_INSERTION_IGNITE_MS` (2630, holdFireTime): MW2's
   OffHandPrepare. No release cuts it short: a tap is queued and the TI is
   thrown on the first command after the ignite ends (MW2's PREPARE ends in

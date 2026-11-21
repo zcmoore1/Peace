@@ -13,7 +13,9 @@ No code names either trick.
    rechamberBoltTime), counted on the reload's clock and capped by the reload
    start's first round or its end. Nothing is placed by hand. It lands like a
    note: the busy lock goes on that think, and the debt is settled in the same
-   step as a queued round - so a swap finishing on that think skips both.
+   step as a queued round - so a swap finishing on that think skips both. A
+   knife pressed on that think is lost and the action is paid (MW2's knife
+   check refuses any think whose weapon delay runs out, iw4x 0x5776ED).
 
 The NAC and the Fayde fall out of the existing ordering in `PM_Weapon`, which
 is MW2's: a swap always stamps a real holster, a note or delayed action can

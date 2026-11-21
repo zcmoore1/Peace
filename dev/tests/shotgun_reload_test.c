@@ -1089,9 +1089,15 @@ static void SprintOutAndFire( int weapon, int full, int step, int owed ) {
 	for ( t = 0; t < BG_WeaponSprintOutTime( weapon ) && testPs.weaponstate == WEAPON_SPRINT_OUT; t += step )
 		CycleThink( full, step );
 	CHECK( !!( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) ) == owed );
+	/* the sprint-out's last think ends READY, and that think is over: MW2's
+	   SPRINT_DROP ends in its state switch (PM_Weapon_Idle, 0x5793D8 entry
+	   25), which returns before anything fires (0x5794B4-0x5794B6), after a
+	   rechamber check that starts nothing out of SPRINT_DROP (0x575B77) */
+	CHECK( testPs.weaponstate == WEAPON_READY && testPs.weaponAnimTime == -1 && shots == 1 );
 	if ( owed ) {
-		/* the sprint-out's last think hands a ready gun to the debt gate,
-		   which starts the action alone: from the open note, rechamberTime */
+		/* the next think hands the ready gun to the debt gate, which starts
+		   the action alone: from the open note, rechamberTime */
+		CycleThink( full, step );
 		CHECK( testPs.weaponstate == WEAPON_BOLTING );
 		CHECK( testPs.weaponAnimTime == GunNote( bg_weaponFire[weapon].notes, WNOTE_BOLT_OPEN ) );
 		CHECK( testPs.weaponTime == ActionLength( weapon ) );
@@ -1234,8 +1240,11 @@ static void TestSprintDefersAnOwedAction( int weapon ) {
 	Step( 1 );
 	CHECK( testPs.weaponstate == WEAPON_SPRINT_OUT );
 	RunFor( BG_WeaponSprintOutTime( weapon ), 1 );
-	/* the sprint-out's last think hands a ready gun to the debt gate, which
-	   works the action alone, from its open note */
+	/* the sprint-out's last think ends READY and is over (MW2's SPRINT_DROP
+	   ends in PM_Weapon_Idle); the next hands the ready gun to the debt gate,
+	   which works the action alone, from its open note */
+	CHECK( testPs.weaponstate == WEAPON_READY && ( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) ) );
+	Step( 1 );
 	CHECK( testPs.weaponstate == WEAPON_BOLTING &&
 		testPs.weaponAnimTime == GunNote( bg_weaponFire[weapon].notes, WNOTE_BOLT_OPEN ) );
 	shots = 0; testMove.cmd.buttons = BUTTON_ATTACK;

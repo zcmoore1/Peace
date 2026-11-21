@@ -152,9 +152,19 @@ static void TestYY(void) {
  Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.ammo[WP_MACHINEGUN]=ps.ammoReserve[WP_MACHINEGUN]=0;
  Toggle(); Step(1); Toggle(); move.cmd.buttons=BUTTON_ATTACK; Step(1);
  CHECK(fired[WP_MACHINEGUN]==0);
+ /* MW2's double-tap cancel is in its change check, after its sprint check
+  * (iw4x 0x44C4CA, 0x44C4D7; the sprint check refused the drop, 0x5780C6):
+  * the YY think readies the gun and the rest of it runs as READY, so even
+  * with the sprint flag on a held trigger fires there, and with none the
+  * sprint pose comes on the next think. */
  Ready(WP_MACHINEGUN,WP_SHOTGUN);
  Toggle(); Step(1); Toggle(); ps.pm_flags|=PMF_SPRINTING;
  move.cmd.buttons=BUTTON_ATTACK; Step(1);
+ CHECK(fired[WP_MACHINEGUN]==1 && ps.weaponstate==WEAPON_FIRING);
+ Ready(WP_MACHINEGUN,WP_SHOTGUN);
+ Toggle(); Step(1); Toggle(); ps.pm_flags|=PMF_SPRINTING; Step(1);
+ CHECK(ps.weaponstate==WEAPON_READY && ps.weaponTime==0);
+ Step(1);
  CHECK(fired[WP_MACHINEGUN]==0 && ps.weaponstate==WEAPON_SPRINT_IN);
  Ready(WP_MACHINEGUN,WP_SHOTGUN);
  ps.stats[STAT_LADDER]=LADDER_ATTACHED; Step(1);
@@ -219,9 +229,10 @@ static void TestActions(void) {
  CHECK(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_READY);
  /* A ladder grabbed with the knife out takes nothing from it: MW2's ladder
   * drop is a weapon change, refused in the melee states and the quick raise
-  * after them (CheckForChangeWeapon 578bc0-578c04). The knife lands, the gun
-  * comes back, and the ladder drop starts on the think the latch would clear
-  * with no ladder (i 0). Nothing new starts on the ladder meanwhile. */
+  * after them (CheckForChangeWeapon 578bc0-578c04), the quick raise's last
+  * think included. The knife lands, the gun comes back, and the ladder drop
+  * starts on the think after the latch would clear with no ladder (i 0),
+  * from READY. Nothing new starts on the ladder meanwhile. */
  for(i=0;i<2;i++) {
   Ready(WP_MACHINEGUN,WP_SHOTGUN);
   move.cmd.buttons=BUTTON_MELEE; Step(1); move.cmd.buttons=0;
@@ -236,7 +247,9 @@ static void TestActions(void) {
   move.cmd.buttons=0;
   CHECK(fired[WP_KNIFE]==1 && ps.weapon==WP_MACHINEGUN && !(ps.weaponAction&WA_TYPE_MASK));
   if(!i) { clear=t; CHECK(ps.weaponstate==WEAPON_READY && ps.ammo[WP_FRAG]==2); continue; }
-  CHECK(t==clear && (ps.stats[STAT_LADDER]&LADDER_HOLSTER) && ps.ammo[WP_FRAG]==2);
+  CHECK(t==clear && !(ps.stats[STAT_LADDER]&LADDER_HOLSTER) && ps.weaponstate==WEAPON_READY);
+  Step(1);
+  CHECK((ps.stats[STAT_LADDER]&LADDER_HOLSTER) && ps.ammo[WP_FRAG]==2);
   CHECK(ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_LADDER_DROP_TIME);
   Run(BG_LADDER_DROP_TIME); CHECK(ps.weaponstate==WEAPON_LADDER);
   ps.stats[STAT_LADDER]=0;
@@ -417,8 +430,9 @@ static void TestRecovery(void) {
   }
  }
  /* A swap asked for during the recovery draw waits (MW2's CheckForChangeWeapon
-  * refuses the gun's quick raise after a knife): the draw runs on, and once
-  * the gun is up the ordinary holster starts, not melee's. */
+  * refuses the gun's quick raise after a knife, its last think included,
+  * 0x578BC9-0x578BE4): the draw runs on, and once the gun is up the ordinary
+  * holster starts from READY on the next think, not melee's. */
  {
   int t;
   Ready(WP_SHOTGUN, WP_MACHINEGUN);
@@ -428,6 +442,8 @@ static void TestRecovery(void) {
   move.cmd.weapon = WP_MACHINEGUN; RStep();
   CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_RAISING);
   for (t = 0; t < 9000 && ps.weaponstate == WEAPON_RAISING; t++) RStep();
+  CHECK(ps.weaponstate == WEAPON_READY && !(ps.weaponAction & WA_TYPE_MASK));
+  RStep();
   CHECK(ps.weaponstate == WEAPON_DROPPING && ps.weaponTime == BG_WeaponDropTime(WP_SHOTGUN));
   move.cmd.weapon = WP_SHOTGUN; RStep();
   CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_READY);
@@ -473,6 +489,8 @@ static void TestRecovery(void) {
    for (t = 0; t < 200; t++) RStep();
    move.cmd.weapon = WP_MACHINEGUN;
    for (t = 0; t < 9000 && ps.weaponstate == WEAPON_RAISING; t++) RStep();
+   CHECK(ps.weaponstate == WEAPON_READY);	/* OFFHAND_END's last think begins nothing */
+   RStep();
    CHECK(ps.weaponstate == WEAPON_DROPPING && ps.weaponTime > BG_RAPID_DROP_TIME);
    if (yy) { move.cmd.weapon = WP_SHOTGUN; RStep(); CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_READY); }
    else for (t = 0; t < 100; t++) RStep();
@@ -510,9 +528,14 @@ static void TestSprintTransitions(void) {
   CHECK(fired[weapon]==1 && ps.ammo[weapon]==ammo-1);
   CHECK(!(ps.pm_flags&PMF_SPRINTING));
   /* Keeping sprint held still requests sprint; presentation cannot erase the
-   * real sprint lock. Releasing input allows ordinary same-think YY firing. */
+   * real sprint lock. Releasing input allows ordinary same-think YY firing.
+   * The YY think itself readies the gun: MW2's double-tap cancel comes after
+   * its sprint check (iw4x 0x44C4CA, 0x44C4D7), so the gun lowers again on
+   * the next think, with the whole sprint entry. */
   Ready(weapon,other); move.cmd.buttons=BUTTON_SPRINT; SprintStep(1);
   Toggle(); SprintStep(1); Toggle(); SprintStep(1);
+  CHECK(ps.weaponstate==WEAPON_READY && ps.weaponTime==0 && (ps.pm_flags&PMF_SPRINTING));
+  SprintStep(1);
   CHECK(ps.weaponstate==WEAPON_SPRINT_IN && ps.weaponTime==BG_WeaponSprintInTime(weapon));
   CHECK(fired[weapon]==0 && (ps.pm_flags&PMF_SPRINTING));
  }
@@ -802,10 +825,15 @@ static void TestGrenadeKeepsRecoveryHolster(void) {
   Run(BG_WeaponQuickRaiseTime(gun)/2);
   CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_RAISING &&
    (ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==((f ? WA_LETHAL : WA_MELEE)|WA_FIRED));
-  /* MW2 refuses the change until the gun is up, then it is an ordinary holster. */
+  /* MW2 refuses the change until the gun is up, its quick raise's last think
+   * included (MELEE_END and OFFHAND_END end in PM_Weapon_Idle, iw4x
+   * 0x579279, and the change check refuses them, 0x578BC9-0x578BF2), then it
+   * is an ordinary holster, from READY on the next think. */
   Toggle(); Step(1);
   CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_RAISING);
   for(t=0;t<12000 && ps.weaponstate==WEAPON_RAISING;t++) Step(1);
+  CHECK(ps.weaponstate==WEAPON_READY && !(ps.weaponAction&WA_TYPE_MASK));
+  Step(1);
   CHECK(ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==drop && !(ps.weaponAction&WA_TYPE_MASK));
   while(ps.weaponTime>left) Step(1);
   special=p ? WP_FLASH : BG_LethalWeapon(&ps);
@@ -855,6 +883,10 @@ static void TestNoSwapInQuickAction(void) {
   Toggle(); Step(1); Toggle(); Step(1);	/* YY: nothing to cancel */
   CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);
   for(t=0;t<12000 && ps.weaponstate==WEAPON_RAISING;t++) Step(1);
+  /* the quick raise's last think readies the gun and begins nothing (MW2's
+   * change check refuses MELEE_END and OFFHAND_END, 0x578BC9-0x578BF2) */
+  CHECK(ps.weaponstate==WEAPON_READY && !(ps.weaponAction&WA_TYPE_MASK));
+  Step(1);
   CHECK(ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_WeaponDropTime(WP_SHOTGUN) &&
    !(ps.weaponAction&WA_TYPE_MASK));
   for(t=0;t<12000 && !(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
@@ -1378,6 +1410,8 @@ static void TestHoldThrowsBeforeCancel(void) {
    for(t=0;t<20000 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
    CHECK(t<20000 && ps.weaponTime>=BG_WeaponQuickRaiseTime(WP_SHOTGUN)-1);
    for(t=0;t<20000 && ps.weaponstate==WEAPON_RAISING;t++) Step(1);
+   CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_READY);	/* OFFHAND_END's last think */
+   Step(1);
    CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_WeaponDropTime(WP_SHOTGUN));
    for(t=0;t<20000 && ps.weapon!=WP_MACHINEGUN;t++) Step(1);
    CHECK(ps.weapon==WP_MACHINEGUN && fired[offhand]==1);
@@ -1548,8 +1582,9 @@ static void TestFragCook(void) {
   * weapon change, refused in every offhand state, 578bc0-578c04): the fuse
   * runs on, the release throws with what is left (k 0) or the frag goes off
   * in the hand at the end of it (k 1), and the ladder drop waits for the
-  * gun's quick raise, starting on the think the latch would clear with no
-  * ladder (i 0) */
+  * gun's quick raise, starting on the think after the latch would clear with
+  * no ladder (i 0): that think is OFFHAND_END's last, which MW2's change
+  * check, the ladder's branch included, refuses (578bc9-578bf2) */
  for(k=0;k<2;k++) {
   int clear=0;
   for(i=0;i<2;i++) {
@@ -1564,7 +1599,9 @@ static void TestFragCook(void) {
    for(t=0;t<10000 && (ps.weaponAction&WA_TYPE_MASK);t++) { CHECK(!(ps.stats[STAT_LADDER]&LADDER_HOLSTER)); Step(1); }
    CHECK(ps.weapon==WP_SHOTGUN && fired[WP_FRAG]==!k && suicides==k);
    if(!i) { clear=t; CHECK(ps.weaponstate==WEAPON_READY); continue; }
-   CHECK(t==clear && (ps.stats[STAT_LADDER]&LADDER_HOLSTER));
+   CHECK(t==clear && !(ps.stats[STAT_LADDER]&LADDER_HOLSTER) && ps.weaponstate==WEAPON_READY);
+   Step(1);
+   CHECK(ps.stats[STAT_LADDER]&LADDER_HOLSTER);
    CHECK(ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_LADDER_DROP_TIME);
    Run(BG_LADDER_DROP_TIME); CHECK(ps.weaponstate==WEAPON_LADDER);
    ps.stats[STAT_LADDER]=0;

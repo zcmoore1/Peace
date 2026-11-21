@@ -28,6 +28,10 @@ cl %flags% /Feout\build\masterkey-tests\trigger.exe dev\tests\trigger_test.c cod
 if errorlevel 1 goto fail
 out\build\masterkey-tests\trigger.exe
 if errorlevel 1 goto fail
+cl %flags% /Feout\build\masterkey-tests\state-end.exe dev\tests\state_end_test.c %game% %common% /link /OPT:REF
+if errorlevel 1 goto fail
+out\build\masterkey-tests\state-end.exe
+if errorlevel 1 goto fail
 popd
 exit /b 0
 :fail

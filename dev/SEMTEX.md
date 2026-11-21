@@ -37,7 +37,9 @@ none of them.
 
 After emission, Y updates the selected slot/HUD immediately but queues the
 physical swap. The throw completes, the original gun recovers, then the normal
-weapon drop starts on the exact frame its raise lock expires. A second Y toggles
+weapon drop starts on the think after its raise lock expires (that think is
+still MW2's OFFHAND_END, which its change check refuses, iw4x 0x578BEA-0x578BF2).
+A second Y toggles
 the pending slot modulo two and can cancel that queued swap. An emitted
 projectile is never recalled or refunded. A ladder grabbed with the Semtex out
 waits: the throw or cancel and the gun's quick raise finish, then the ladder takes

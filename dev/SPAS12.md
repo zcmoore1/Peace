@@ -110,7 +110,10 @@ weapon to the right. This is original animation on the supplied
 rig, taking its direction from the requested MW2 SPAS/Intervention carry.
 
 Entry and exit follow the existing predicted weapon timers. A short sprint
-tap reverses the partial transition; ending the sprint (it latches: a fresh
+tap reverses the partial transition; a sprint pressed again during the exit
+lets the exit finish and starts the entry from rest the think after (MW2's
+sprint check does nothing in its sprint-out, iw4x 0x5780F4-0x578107); ending
+the sprint (it latches: a fresh
 press, aiming or letting go of forward) does not wait for a whole carry loop
 to finish. Swapping preserves the existing ownership rule:
 sprint-in plays to its last frame and holds, while the full carry keeps

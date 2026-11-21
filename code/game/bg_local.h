@@ -73,6 +73,15 @@ typedef struct {
 	// (PmoveSingle 0x574570, 0x574769) zero the command; Peace zeroes these
 	// copies, so a chopped command's next step still reads the real one.
 	int			forwardmove;
+
+	// The weapon think's own facts about this think, set by PM_Weapon before
+	// anything reads them. delayedAction is MW2's (PM_Weapon_WeaponTimeAdjust's
+	// return, 0x578B7B-0x578BAB): a weapon delay runs out on this think.
+	// recoveryEnds: the return from a knife or equipment (MW2's MELEE_END or
+	// OFFHAND_END: the gun's quick raise, or an empty hand's one think) ends
+	// on this think.
+	qboolean	delayedAction;
+	qboolean	recoveryEnds;
 } pml_t;
 
 extern	pmove_t		*pm;

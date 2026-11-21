@@ -931,6 +931,57 @@ static void TestPictureFinishesTheAction(void) {
 	CHECK(handed && sawReady && sawAction && pred.ammo[GUN] == rest.ammo[GUN]);
 }
 
+/* The shot's READY think is still the shot (BG_ShotAwaitsAction): a correction
+ * whose snapshot base lands exactly on it keeps the shot the picture began.
+ * No network desync in this model moves a shot by a command (every action
+ * after the READY think is longer than any base age it makes), so drive the
+ * picture directly, as TestSwapOnlyCorrection does: frame 1 predicts the shot
+ * a command late; frame 2's snapshot is the server's shot a command earlier,
+ * its base exactly on that shot's READY think and newer than every command,
+ * so prediction is that READY think while the picture's own run, a command
+ * behind, is still in the shot. Prediction kept the shot: the picture follows
+ * it, and does not detach. The timings are the command spacing and the gun's
+ * own shot, found by running to the READY think. */
+static void TestCorrectionOnTheReadyThink(void) {
+	playerState_t rest, sv, shot, before;
+	pmove_t pm, model;
+	script_t idle = Script(ACT_NONE, X);
+	int i, k;
+	Run(0, &idle, NONE);
+	rest = svPs;
+	CHECK(GunAtRest(&rest) && rest.ammo[GUN] > 1);
+	memset(cmds, 0, sizeof(cmds));
+	for (i = 0; i < 600; i++) { cmds[i].serverTime = rest.commandTime + CL_FRAME * (i + 1); cmds[i].weapon = BG_SLOT_COMMAND; }
+	cmds[1].buttons = BUTTON_ATTACK;
+	memset(&model, 0, sizeof(model)); FakeReloadModel(&model);
+	CG_WeapPicture_Reset();
+	/* frame 1: prediction fires on command 1 */
+	numCmds = 2;
+	CG_WeapPicture_BeginReplay(&rest);
+	shot = rest;
+	for (i = 0; i < numCmds; i++) {
+		before = shot; memset(&pm, 0, sizeof(pm)); pm.ps = &shot; pm.cmd = cmds[i]; FakeReloadPmove(&pm);
+		CG_WeapPicture_ReplayStep(&before, &shot, NULL);
+	}
+	CG_WeapPicture_Update(&shot, &model, 0, numCmds - 1, GetCmd);
+	CG_WeapPicture_Update(&shot, &model, 0, numCmds - 1, GetCmd);
+	CHECK(shot.weaponstate == WEAPON_FIRING && CG_WeapPicture_State(&shot) == &shot);
+	/* the server fired on command 0: its run to that shot's READY think */
+	sv = rest;
+	for (k = 0; k < 600; k++) {
+		memset(&pm, 0, sizeof(pm)); pm.ps = &sv; pm.cmd = cmds[k];
+		if (k == 0) pm.cmd.buttons |= BUTTON_ATTACK;
+		FakeReloadPmove(&pm);
+		if (BG_ShotAwaitsAction(&sv)) break;
+	}
+	CHECK(k > 1 && k < 600 && sv.commandTime == cmds[k].serverTime);
+	/* frame 2: that snapshot, with no command after it */
+	numCmds = k + 1;
+	CG_WeapPicture_BeginReplay(&sv);
+	CG_WeapPicture_Update(&sv, &model, 0, numCmds - 1, GetCmd);
+	CHECK(CG_WeapPicture_State(&sv) == &sv);
+}
+
 /* How often a use/reload tap released d ms before the gun is at rest gives a
  * fake reload, over every phase of the server's snapshots against the quick
  * action (the player cannot see that phase, so this is the success rate). */
@@ -1120,10 +1171,12 @@ int main(void) {
 	TestSwapOnlyCorrection();
 	TestPictureHandsBack();
 	TestPictureFinishesTheAction();
+	TestCorrectionOnTheReadyThink();
 	Windows();
 	FakeReloads(); FakeBullets(); FakeBulletWindows();
 	GUN = WP_M40A3; MeasureAnchors();
 	TestPictureFinishesTheAction();
+	TestCorrectionOnTheReadyThink();
 	Windows();
 	FakeReloads(); FakeBullets(); FakeBulletWindows(); WildScopes();
 #ifdef FAKERELOAD_ENGINE

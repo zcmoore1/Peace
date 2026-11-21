@@ -52,7 +52,10 @@ static void TestSemtex(void) {
    CHECK(!fired[WP_SEMTEX]);
   }
   // Post-release Y selects immediately but does not interrupt the throw or
-  // original-gun raise. The new holster begins on the exact ready boundary.
+  // original-gun raise. The new holster begins on the think after the ready
+  // boundary: that think is MW2's OFFHAND_END's last, which ends in
+  // PM_Weapon_Idle (iw4x 0x579279) and which its change check refuses
+  // (0x578BEA-0x578BF2).
   SemtexReady(gun); Hold(); move.cmd.buttons=0; Step(1);
   CHECK(fired[WP_SEMTEX]==1);
   move.cmd.weapon=ps.stats[STAT_SLOT_SECONDARY]; move.cmd.buttons=BUTTON_WEAPON_SWAP; Step(1);
@@ -65,6 +68,8 @@ static void TestSemtex(void) {
   CHECK(ps.weaponAction&WA_RECOVERING);
   Run(BG_WeaponQuickRaiseTime(gun)-1);
   CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_RAISING && ps.weaponTime==1);
+  Step(1);
+  CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_READY && !(ps.weaponAction&(WA_TYPE_MASK|WA_RECOVERING)));
   Step(1);
   CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_DROPPING);
   CHECK(ps.weaponTime==BG_WeaponDropTime(gun) && !(ps.weaponAction&WA_RECOVERING));
@@ -128,7 +133,9 @@ static void TestSemtex(void) {
  /* A ladder grabbed with the Semtex held takes nothing from it (MW2's ladder
   * drop is a weapon change, refused in every offhand state): it is thrown on
   * the release, or Y cancels it (k 1), the gun comes back on its quick raise,
-  * and the ladder drop starts on the think the latch clears. */
+  * and the ladder drop starts on the think after the latch clears (the
+  * quick raise's last think is OFFHAND_END's, which MW2's change check, the
+  * ladder's branch included, refuses: 0x578BEA-0x578BF2). */
  for(phase=0;phase<2;phase++) {
   SemtexReady(WP_SHOTGUN); Hold();
   ps.stats[STAT_LADDER]=LADDER_ATTACHED; Step(1);
@@ -138,6 +145,8 @@ static void TestSemtex(void) {
   else { move.cmd.buttons=0; Step(1); CHECK(fired[WP_SEMTEX]==1); }
   move.cmd.buttons=0;
   for(t=0;t<10000 && (ps.weaponAction&WA_TYPE_MASK);t++) { CHECK(!(ps.stats[STAT_LADDER]&LADDER_HOLSTER)); Step(1); }
+  CHECK(!(ps.stats[STAT_LADDER]&LADDER_HOLSTER) && ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_READY);
+  Step(1);
   CHECK((ps.stats[STAT_LADDER]&LADDER_HOLSTER) && ps.weapon==WP_SHOTGUN && ps.weaponTime==BG_LADDER_DROP_TIME);
   Run(BG_LADDER_DROP_TIME);
   CHECK(ps.weaponstate==WEAPON_LADDER && fired[WP_SEMTEX]==!phase && ps.ammo[WP_SEMTEX]==2-!phase);

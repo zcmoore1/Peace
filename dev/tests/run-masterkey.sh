@@ -15,3 +15,6 @@ ${CC:-cc} $flags dev/tests/moni_test.c code/cgame/cg_playerstate.c dev/tests/pic
 out/tests/moni-test
 ${CC:-cc} $flags dev/tests/empty_switch_test.c code/cgame/cg_event.c code/cgame/cg_playerstate.c dev/tests/pickup_pmove_driver.c $game $common -Wl,--gc-sections -lm -o out/tests/empty-switch-test
 out/tests/empty-switch-test
+# What a weapon state's last think does (MW2's ProcessHand), through the real Pmove.
+${CC:-cc} $flags dev/tests/state_end_test.c $game $common -Wl,--gc-sections -lm -o out/tests/state-end-test
+out/tests/state-end-test

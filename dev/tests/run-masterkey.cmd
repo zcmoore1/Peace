@@ -24,6 +24,10 @@ cl %flags% /Feout\build\masterkey-tests\empty-switch.exe dev\tests\empty_switch_
 if errorlevel 1 goto fail
 out\build\masterkey-tests\empty-switch.exe
 if errorlevel 1 goto fail
+cl %flags% /Feout\build\masterkey-tests\state-end.exe dev\tests\state_end_test.c %game% %common% /link /OPT:REF
+if errorlevel 1 goto fail
+out\build\masterkey-tests\state-end.exe
+if errorlevel 1 goto fail
 popd
 exit /b 0
 :fail

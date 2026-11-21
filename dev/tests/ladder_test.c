@@ -922,8 +922,9 @@ static void TestLadderPush(int dt) {
  * takes nothing from it. The knife lands; the frag cooks on, and is thrown on
  * its release or goes off in the hand at the end of its fuse; the Semtex is
  * thrown, or Y cancels it; the gun comes back on its quick raise; and the
- * ladder drop starts on the think the latch clears, never before. Nothing new
- * starts on the ladder meanwhile. The grab is real contact with the shipped
+ * ladder drop starts on the think after the latch clears, never before (that
+ * think is still the quick raise's: 578bc9-578bf2). Nothing new starts on the
+ * ladder meanwhile. The grab is real contact with the shipped
  * BSP, through the real Pmove. */
 static int fired[MAX_WEAPONS], suicides;
 static void QuickTick(int dt) {
@@ -959,13 +960,21 @@ static void GrabWithAction(int dt) {
     CHECK(Attached() && !LadderHasHands());
     CHECK((ps.weaponAction & WA_TYPE_MASK) == (latch & WA_TYPE_MASK) && ps.weapon == weapon);
 }
-/* hang on until the ladder takes the hands: never while the latch holds, and
- * on the think it clears. press: an offhand button pressed once in the gun's
- * quick raise, which starts nothing on a ladder. */
+/* hang on until the ladder takes the hands: never while the latch holds, nor
+ * on the think it clears (the gun's quick raise's last, MW2's OFFHAND_END or
+ * MELEE_END, whose change check, the ladder's branch included, refuses it:
+ * 0x578BC9-0x578BF2), and on the think after that, from READY. press: an
+ * offhand button pressed once in the gun's quick raise, which starts nothing
+ * on a ladder. */
 static void UntilLadderDrop(int dt, int press) {
-    int t;
+    int t, cleared = 0;
     for (t = 0; t < 10000 && !LadderHasHands(); t += dt) {
-        CHECK(Attached() && (ps.weaponAction & WA_TYPE_MASK));
+        if (!(ps.weaponAction & WA_TYPE_MASK)) {
+            /* the think before cleared the latch and took nothing */
+            CHECK(!cleared && ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_READY);
+            cleared = 1;
+        }
+        CHECK(Attached() && ((ps.weaponAction & WA_TYPE_MASK) || cleared));
         if (press && (ps.weaponAction & WA_FIRED) && !BG_IsActionWeapon(ps.weapon)) {
             /* the gun's quick raise: equipment pressed here would start the
              * next throw off a ladder; on one it starts nothing */
@@ -979,7 +988,7 @@ static void UntilLadderDrop(int dt, int press) {
         }
         QuickTick(dt);
     }
-    CHECK(t < 10000 && !press && Attached() && !(ps.weaponAction & WA_TYPE_MASK));
+    CHECK(t < 10000 && !press && cleared && Attached() && !(ps.weaponAction & WA_TYPE_MASK));
     CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_DROPPING &&
           (ps.stats[STAT_LADDER] & LADDER_HOLSTER) && ps.weaponTime == BG_LADDER_DROP_TIME);
     CHECK(BG_HolsterTime(&ps) == BG_LADDER_DROP_TIME);

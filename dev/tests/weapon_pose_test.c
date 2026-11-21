@@ -891,10 +891,15 @@ static void TestSprintAfterTheCycle(int gun) {
    CHECK(flowPs.weaponstate==WEAPON_SPRINTING && (flowPs.stats[STAT_UNCHAMBERED]&(1<<gun)));
    for(t=0;t<2000;t+=8) FlowStep();
    CHECK(!cg_retainedActive && sprint->clip==WANIM_SPRINT_LOOP && sprint->weight==1);
-   /* back up: the whole action, from its open note on the fire clip (MW2's
+   /* back up: the sprint-out's last think ends READY and is over (MW2's
+    * SPRINT_DROP ends in PM_Weapon_Idle, iw4x 0x5793D8 entry 25), and the
+    * next starts the whole action, from its open note on the fire clip (MW2's
     * rechamber from READY), the shot not played again */
    flowPs.pm_flags&=~PMF_SPRINTING;
-   for(t=0;t<BG_WeaponSprintOutTime(gun)+8 && flowPs.weaponstate!=WEAPON_BOLTING;t+=8) FlowStep();
+   for(t=0;t<BG_WeaponSprintOutTime(gun)+8 && flowPs.weaponstate==WEAPON_SPRINTING;t+=8) FlowStep();
+   for(t=0;t<BG_WeaponSprintOutTime(gun)+8 && flowPs.weaponstate==WEAPON_SPRINT_OUT;t+=8) FlowStep();
+   CHECK(flowPs.weaponstate==WEAPON_READY && (flowPs.stats[STAT_UNCHAMBERED]&(1<<gun)));
+   FlowStep();
    CHECK(flowPs.weaponstate==WEAPON_BOLTING && flowPs.weaponAnimTime==PickupNoteTime(gun,ASEQ_FIRE,WNOTE_BOLT_OPEN));
    FlowStep();
    CHECK(flowPs.weaponstate==WEAPON_BOLTING && flowPs.weaponAnimTime==PickupNoteTime(gun,ASEQ_FIRE,WNOTE_BOLT_OPEN)+8);
@@ -1190,6 +1195,48 @@ static void TestSprintReentry(weapAnimDef_t *def) {
    CHECK(GunRotationDistance(&before,&after)<.005f && RigDistance(&before,&after)<.15f);
    CHECK(sprint->startFraction>0 && sprint->startFraction<1);
   }
+
+  /* YY with the sprint still on: MW2's double-tap cancel is in its change
+   * check, after its sprint check (iw4x 0x44C4CA, 0x44C4D7), so the YY think
+   * readies the gun, its picture returning along the entry it showed, and
+   * the next think lowers it again from that visible pose with the whole
+   * entry lock. */
+  FlowWorldBegin();flow.cmd.buttons=BUTTON_SPRINT;
+  for(t=0;t<BG_WeaponSprintInTime(WP_SHOTGUN)/2;t+=8)FlowWorldStep(qtrue);
+  CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN);
+  FlowSlot(SLOT_PRIMARY);FlowWorldStep(qtrue);
+  CHECK(flowPs.weaponstate==WEAPON_DROPPING && (flowPs.pm_flags&PMF_SPRINTING) && CG_WeapAnim_HoldsDrop());
+  FlowSlot(SLOT_SECONDARY);FlowWorldStep(qtrue);
+  CHECK(flowPs.weaponstate==WEAPON_READY && flowPs.weaponTime==0 && (flowPs.pm_flags&PMF_SPRINTING));
+  CHECK(move->fit==MOVE_FIT_RETURN && move->clip==WANIM_SPRINT_IN && move->weight==1);
+  Picture(&flowPs,0,&before);last=move->time;
+  FlowWorldStep(qtrue);Picture(&flowPs,0,&after);
+  CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN && flowPs.weaponTime==BG_WeaponSprintInTime(WP_SHOTGUN));
+  CHECK(fabs(sprint->time-last)<.01f && PoseDistance(&before,&after)<.001f);
+  CHECK(sprint->startFraction>0 && sprint->startFraction<1);
+
+  /* A sprint on again during the exit: MW2's sprint check does nothing while
+   * sprinting in SPRINT_DROP (iw4x 0x5780F4-0x578107), so the exit plays to
+   * its end, the gun is ready for a think, and the next think's entry starts
+   * at its authored ready pose, where the exit left it, never reversing the
+   * exit part way. */
+  FlowWorldBegin();flow.cmd.buttons=BUTTON_SPRINT;
+  for(t=0;t<BG_WeaponSprintInTime(WP_SHOTGUN)+32;t+=8)FlowWorldStep(qtrue);
+  CHECK(flowPs.weaponstate==WEAPON_SPRINTING);
+  FlowEndSprint();
+  CHECK(flowPs.weaponstate==WEAPON_SPRINT_OUT);
+  for(t=0;t<BG_WeaponSprintOutTime(WP_SHOTGUN)/2;t+=8)FlowWorldStep(qtrue);
+  flow.cmd.buttons=BUTTON_SPRINT;FlowWorldStep(qtrue);
+  CHECK((flowPs.pm_flags&PMF_SPRINTING) && flowPs.weaponstate==WEAPON_SPRINT_OUT && sprint->clip==WANIM_SPRINT_OUT);
+  for(t=0;t<BG_WeaponSprintOutTime(WP_SHOTGUN) && flowPs.weaponstate==WEAPON_SPRINT_OUT;t+=8) {
+   last=sprint->time;FlowWorldStep(qtrue);
+   if(flowPs.weaponstate==WEAPON_SPRINT_OUT) CHECK(sprint->clip==WANIM_SPRINT_OUT && sprint->time>=last);
+  }
+  CHECK(flowPs.weaponstate==WEAPON_READY && (flowPs.pm_flags&PMF_SPRINTING));
+  FlowWorldStep(qtrue);Picture(&flowPs,0,&after);
+  CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN && flowPs.weaponTime==BG_WeaponSprintInTime(WP_SHOTGUN));
+  CHECK(sprint->startFraction==0 && sprint->time==0);
+  CHECK(PoseDistance(&after,&authored[def->clips[WANIM_SPRINT_IN].firstFrame])<.001f);
  }
  nativePose=qfalse;
 }

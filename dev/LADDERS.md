@@ -64,9 +64,10 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
   ladder branch 0x578C72). So the knife lands, a cooking frag's fuse runs on and
   it is thrown on its release or goes off in the hand, a Semtex is thrown or
   Y-cancelled, and the gun comes back on its quick raise. The ladder drop then
-  starts on the think the quick-action latch clears, the ready boundary a queued
-  swap also starts on, if the ladder is still held. Jump off first and there is
-  no ladder drop at all.
+  starts on the think after the quick-action latch clears, as a queued swap
+  does, if the ladder is still held: the latch's last think is MW2's MELEE_END
+  or OFFHAND_END, which the change check, its ladder branch included, refuses
+  (0x578BC9-0x578BF2). Jump off first and there is no ladder drop at all.
 - The original reload helpers, swap helpers, note runner and their non-ladder
   ordering are unchanged. A ladder just owns the weapon while the hands are busy.
   Leaving raises the selected weapon using the existing deploy logic/timing.
@@ -103,7 +104,7 @@ falling contact at the base, jump separation, the 128 jump push, the ±100 yaw
 clamp, prediction replay, mode changes, reload/bolt note ordering, and grabs with
 the knife out, a frag cooking (thrown, cooked out, or the ladder left again
 first) and a Semtex held (thrown or Y-cancelled): the fuse runs on, nothing new
-starts, and the ladder drop never comes before the quick-action latch clears. Existing weapon/sight tests remain.
+starts, and the ladder drop never comes before the think after the quick-action latch clears. Existing weapon/sight tests remain.
 Linux: repeat with `LADDER_TEST_DEFINES=-DMISSIONPACK` to check the full stat layout.
 
 For the hands-on pass, try running sideways into a grab, falling onto it, a

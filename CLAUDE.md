@@ -99,7 +99,10 @@ source for MW2 behaviour; the owner rejects it.
 - **Animation ownership is generic.** Sprint preserves a running non-reload
   action; a holster keeps that source through its whole duration, including a
   ladder holster. One-shots finish and hold their endpoint; loops keep playing.
-  Ordinary sprint entry/exit still reverses continuously within its own layer.
+  An ordinary sprint entry still reverses into its exit within its own layer;
+  a sprint on again during the exit lets the exit finish (MW2's sprint check
+  does nothing in SPRINT_DROP, 0x5780F4-0x578107), and the entry, on the
+  think after the exit's last, starts at its ready pose, where the exit left it.
   Returning the requested slot releases the retained picture through the same
   cancellation used for any drop. No named-glitch branch, weapon-specific
   retention list, zero lock, or separate glide state. Reloads and quick actions
@@ -128,7 +131,11 @@ source for MW2 behaviour; the owner rejects it.
   fading to idle. The ready endpoint stays fixed throughout that fade. A new
   sprint may inherit only a posture that is still visible (including a
   move-layer return), never a hidden layer's old clock. A sprint still running
-  through the swap still requests sprint. In the air the picture uses the same
+  through the swap still requests sprint: YY readies the gun on its think and
+  the next think lowers it again (MW2's double-tap cancel comes after its
+  sprint check, 0x44C4D7), its entry starting from the pose the return shows;
+  a pump or bolt still owed is worked first, from READY on the YY think. In
+  the air the picture uses the same
   sprint weapon states; whether a sprint starts, goes on or ends there is the
   MW2 sprint rule below (holding jump ends one).
 - **Base-action releases preserve the last picture.** Fire/bolt/reload completion
@@ -162,7 +169,9 @@ source for MW2 behaviour; the owner rejects it.
   `PM_BeginWeaponReload` accepts READY, FIRING and RECHAMBERING (owner's
   rule: shoot and reload with no delay); the fire cycle is simply abandoned,
   its debt still owed. An empty gun reloads itself once the shot is over, on
-  its READY think (MW2's auto reload refuses FIRING), never out of the shot.
+  its READY think (MW2's auto reload refuses FIRING), never out of the shot;
+  a gun with no fire clip the think after its lock runs out, unless the
+  trigger is still held there (MW2's FireWeapon ammo check, 0x5770C0).
 - **The bolt cancel is the reload cancel.** `WNOTE_BOLT_CLOSED` on the fire
   animation carries no rounds. Like `WNOTE_MAG_IN` it clears the lock on its
   think and only queues its completion: the chambering commits in step 4, the
@@ -450,9 +459,10 @@ source for MW2 behaviour; the owner rejects it.
   first draw), and the hand stays empty about a round trip, until the
   client's selection catches up (MW2's select hand-off). Nothing is put down
   from an empty hand and nothing is aimed with it; equipment out of it pays
-  `BG_EMPTY_HAND_OFFHAND_TIME`, and comes back to an empty hand
-  (`WA_LEFT_EMPTY`, MW2's OffHandEnd with weapon 0), a Semtex cancel's
-  included, so the gun then comes up on its ordinary raise. Old plain weapon IDs are supported for bots/tools. Neither
+  `BG_EMPTY_HAND_OFFHAND_TIME` (none on the think another's return to the
+  empty hand ends, MW2's one-think OFFHAND_END delay), and comes back to an
+  empty hand (`WA_LEFT_EMPTY`, MW2's OffHandEnd with weapon 0), a Semtex
+  cancel's included, so the gun then comes up on its ordinary raise. Old plain weapon IDs are supported for bots/tools. Neither
   inventory replacement nor a delayed pickup event may overwrite Y intent.
   First deployment is pending until the instance is drawn, then consumed on
   start; normal holster/YY/sprint retention may interrupt it. No CAN state.
@@ -517,14 +527,19 @@ source for MW2 behaviour; the owner rejects it.
   no glitch branch. Every knife gate stays: equipment pressed on the knife's
   own command wins (MW2 checks its offhands first), and equipment cuts the
   knife at any point (MW2's offhand check takes every melee state): pressed
-  before the hit, it never lands. A knife is started only from no quick
+  before the hit, or on the hit's own think, it never lands. A knife is
+  started only from no quick
   action, and never in a raise or drop (MW2's knife check refuses states 1-5),
   so a knife pressed during a swap, a draw or a quick action's return is lost -
   except on the command YY returns the drop to the held gun, as MW2 readies
   the gun before its knife (the knife is out on that command). For the same
   reason Y and the knife on one command is the swap: its holster starts and
   the knife is lost. No knife while a scoped gun is aimed, nor while a pump or
-  bolt is still open: a press before `WNOTE_BOLT_CLOSED` is lost. A knife or
+  bolt is still open: a press before `WNOTE_BOLT_CLOSED` is lost. Nor on any
+  think a weapon delay runs out (`PM_WeaponDelayEnds`, MW2's delayedAction,
+  which its knife check refuses, 0x5776ED): a reload's round or its settle of
+  an owed action, or the bolt's close; the press is lost, and the round seats
+  or the action is paid. A knife or
   grenade pressed during a gun's fire lock, or on the READY think after the
   shot, starts at once (MW2's melee and offhand checks take FIRING and READY,
   and run before its rechamber check; only a Y swap waits out the shot,
@@ -539,7 +554,12 @@ source for MW2 behaviour; the owner rejects it.
   (owner's rule: MW2's numbers). Out of the knife, in hand or in the gun's
   quick raise after it, that is the whole quick drop from the press: no drop
   is running there to keep or restamp, and the knife's time after its hit
-  ends on the press (`PM_WeaponChangeOpen`). A grenade pressed during a
+  ends on the press (`PM_WeaponChangeOpen`). The one exception is the think
+  the knife's draw ends: that is MW2's meleeDelay running out, a weapon delay,
+  so like a note it takes the lock of a drop begun on it (step 2c), and the
+  equipment is prepared on that think, with no drop and no hit (MW2's
+  OffHandInit, then OFFHAND_INIT's case of its state switch, 0x5792C7). A
+  grenade pressed during a
   running holster keeps it, as OffHandInit keeps a drop already going: while
   more of the gun's own drop is left than a quick drop, `BG_HolsterTime`
   answers that drop, so nothing shortens it. cgame re-anchors a drop whose
@@ -581,7 +601,8 @@ source for MW2 behaviour; the owner rejects it.
   it after a HOLD cancel only (0x578F52; the INIT and PREPARE cancels have none
   yet). A ladder grab takes nothing: MW2's ladder drop is a weapon change,
   which waits out every melee and offhand state and the quick raise after one
-  (`PM_LadderWeapon` holds `LADDER_HOLSTER` until the latch clears), so the
+  (`PM_LadderWeapon` holds `LADDER_HOLSTER` until the think after the latch
+  clears), so the
   fuse runs on and no new quick action starts on the ladder. The launch is MW2's
   (4c3690): forward times projectileSpeed, plus projectileSpeedUp and the
   flattened forward's projectileSpeedForward (`BG_OffhandLaunchVelocity`),
@@ -619,7 +640,15 @@ source for MW2 behaviour; the owner rejects it.
   while latched, `PM_DesiredWeapon` wants the knife or equipment, then the gun
   it left. A Y meanwhile updates the requested slot/HUD at once, the gun the
   action left comes back on its quick raise, and the ordinary holster starts on
-  the ready boundary. So YY never cancels a recovery draw, and a Semtex cancel
+  the think after the ready boundary: that think is still MW2's MELEE_END or
+  OFFHAND_END, which its state switch ends and its change check refuses
+  (0x578BC9-0x578BF2), so step 1 and the ladder hold it (`pml.recoveryEnds`);
+  equipment pressed on it comes out. An empty hand's return is MW2's one-think
+  OFFHAND_END (`OffHandEnd` with weapon 0, 0x577A1A-0x577A2A), so a gun
+  selected meanwhile is drawn two thinks after the hand empties; that one
+  think's delay is a weapon delay (`PM_WeaponDelayEnds`), so equipment pressed
+  on it comes out with no empty-hand drop (step 2c, MW2's path A). So YY never
+  cancels a recovery draw, and a Semtex cancel
   can never reset a fire lock for free. A grenade pressed during the draw
   starts the next one, as MW2 lets one come out of the gun's return, but a
   knife pressed while a gun is being drawn back, the draw's last command
@@ -797,7 +826,8 @@ source for MW2 behaviour; the owner rejects it.
   (OFFHAND_END) is not refused, which is where the fake reload after equipment
   is tapped. As in MW2 (owner's rule), X and
   R end a sprint and keep one from starting (`PM_CheckSprint`), and the reload
-  is taken straight out of the rise (step 4e); a fresh sprint press still
+  is taken straight out of the rise (step 4e; on its last think, step 3b); a
+  fresh sprint press still
   cancels the reload. A
   released press holds nothing (CoD4 keeps its hold entity until the next
   press). `PM_Weapon` takes the bit as a reload press and
@@ -1166,6 +1196,21 @@ NAC carries onto the incoming gun through full `Pmove`. Every
 timing in it is read from the shipped tables; never write a literal there, or
 retiming a weapon breaks the test without telling you anything.
 
+`dev/tests/run-masterkey.sh` (and `.cmd`) also builds `state_end_test.c`:
+what the think a weapon state ends does, MW2's `ProcessHand` (0x579450),
+through the real `Pmove` at 8, 16 and 33ms commands for the SPAS, the M300 and
+the Machinegun. The sprint-out's last think readies the gun and is over (the
+shot, an owed action and an empty magazine's reload come on the next; a reload
+press is taken on it); a sprint on again in the sprint-out waits for its end; a
+swap queued behind the knife's or equipment's return, or an empty hand's,
+begins the think after it ends, while equipment pressed then comes out; YY
+while sprinting is READY on its think, working an owed action first; a gun
+with no fire clip reloads the think after its last round's lock with the
+trigger up; equipment pressed on the knife's hit, or on the think an empty
+hand's return ends, is prepared on that think; and a knife pressed on a reload's round or settle is lost while the round
+seats or the pump is paid. Only buttons are pressed, and every time is read
+from the tables or from the lock pmove stamped.
+
 `dev/tests/run-loadouts.cmd` (or `.sh`) checks class validation/persistence,
 modulo selection, same-update YY firing, reload/pull-out cancellation, tap/hold
 actions, the sprint latch and its ending conditions, aim with sprint held, MW2
@@ -1192,7 +1237,7 @@ cook: the fuse at the release, the cook-out at every think length and on every
 step of a several-step command (with and without a gun), the event's frag, a
 hand that lives keeping the -1 until the next offhand, a death, and a ladder
 grabbed while cooking (the fuse runs on, the throw or cook-out, then the ladder
-drop on the think the latch would clear without one). `offhand_server_test.c` (sh only) runs the real `ClientThink`,
+drop on the think after the latch would clear without one). `offhand_server_test.c` (sh only) runs the real `ClientThink`,
 `ClientEvents`, `FireWeapon`, missiles and `player_die`: every launch velocity,
 start time and fuse, the cook-out's suicide and explosion (also on commands
 the real `Pmove` chops, pmove_fixed or not, gun or empty hand), god mode and a
@@ -1290,7 +1335,11 @@ through the real `Com_Frame` and loopback (`common.c`, `net_chan.c`,
 reload after knife/frag/Semtex cancel, tap vs hold, aiming/shooting/real reload
 during it, `+reload` never faking, no fake shot, the lone knife, the fake bullet
 (per tap, and over every snapshot phase on your own host, one frame later than
-ioquake3's host) and the M300 wild scope at 0/50/100/200 ms.
+ioquake3's host) and the M300 wild scope at 0/50/100/200 ms. It also drives
+the picture directly where no modelled lag reaches: a correction whose
+snapshot lands exactly on the shot's READY think keeps the shot the picture
+began (`TestCorrectionOnTheReadyThink`: `BG_ShotAwaitsAction` is a gun action
+to `CG_WeapPicture_PredictionKept`).
 `FAKERELOAD_PROBE=1` prints every tap timing; `FAKERELOAD_SVFPS` changes the
 server rate; `FAKERELOAD_BULLETS=1` prints the fake bullet over every phase
 (`FAKERELOAD_CLFRAME`, `FAKERELOAD_ONLINEGAME=0` for 50ms snapshots online,

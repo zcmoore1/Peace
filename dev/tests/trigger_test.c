@@ -411,6 +411,14 @@ static void TestLockReleases(void) {
 		Frame(BUTTON_ATTACK, 0);
 		CHECK(PS->weapon == WP_SHOTGUN && PS->weaponstate == WEAPON_FIRING && shots == 2);
 
+		/* let go: the lock's 1 runs out unlocked, and the crossing leaves the
+		   READY gun at 0, not 1 less a think (578b71) */
+		Setup(&spas); Cycle(&spas);
+		Frame(BUTTON_ATTACK, 0); Hold(EndFrom(shotEnd) + 2);
+		CHECK(PS->weaponstate == WEAPON_READY && PS->weaponTime == 1 && shots == 1);
+		Frame(0, 0);
+		CHECK(PS->weaponstate == WEAPON_READY && PS->weaponTime == 0 && PS->weaponShotCount == 0);
+
 		/* a frag out of the lock, the trigger held all along */
 		Setup(&spas);
 		Frame(BUTTON_ATTACK, 0); Hold(EndFrom(shotEnd) + 2);
@@ -444,7 +452,9 @@ static void TestLockReleases(void) {
 				Hold(Frames(raise));
 				CHECK(PS->weaponstate == WEAPON_RAISING && PS->weaponTime == 1 && shots == 1);
 				Frame(0, 0);
-				CHECK(PS->weaponstate == WEAPON_READY && PS->weaponShotCount == 0 && shots == 1);
+				/* the raise's lock let go ends READY at 0 (578b71) */
+				CHECK(PS->weaponstate == WEAPON_READY && PS->weaponTime == 0 &&
+				      PS->weaponShotCount == 0 && shots == 1);
 				Frame(BUTTON_ATTACK, 0);
 				CHECK(PS->weaponstate == WEAPON_FIRING && shots == 2);
 			}

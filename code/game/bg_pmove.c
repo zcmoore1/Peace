@@ -3238,7 +3238,8 @@ int BG_WeaponFireLength( int weapon ) {
    never counted or locked (MW2's offhands are never counted, and its knife is
    the gun's own melee, so the gun's type decides the knife's end). Full auto
    is not quite how the Quake 3 guns always fired: like every gun's, their shot
-   is given its whole time (the fire path's overshoot drop, MW2's 578b71), so
+   is given its whole time (the crossing drops the overshoot, MW2's 578b71, in
+   PM_WeaponTimeAdjust, with the fire path's zero as a backstop), so
    a held one fires every ceil(time / msec) thinks where it used to average its
    time: the lightning gun's 50ms every 2 commands at 33ms, the plasma gun's
    100ms every 4. The M16 rifle is Peace's placeholder automatic, not

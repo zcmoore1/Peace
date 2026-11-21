@@ -934,10 +934,12 @@ source for MW2 behaviour; the owner rejects it.
   and offhand) — and a gun that is reloading when the command begins drops it
   (MW2's rule). Peace's own rule: the trigger may fire on the think a reload
   ends, so a held trigger and reload alternate (MW2's reload's last think fires
-  nothing, and a held trigger fires on the think after: one pmove step later,
-  which is the next command at any rate up to 66ms commands; a longer command
-  is split into steps of at most 66ms, MW2's `Pmove` 0x4CFF4A as Peace's, and
-  the step after can be in the same command). The trigger stops a
+  nothing, and a held trigger fires on the think after: one pmove step later.
+  With `pmove_fixed` off that is the next command at any rate up to 66ms; a
+  longer command is split into steps of at most 66ms, MW2's `Pmove` 0x4CFF4A
+  as Peace's, and the step after can be in the same command. With
+  `pmove_fixed` on, Peace steps every `pmove_msec`, which MW2 has no mode for,
+  and the next step is often in the same command). The trigger stops a
   segmented reload as MW2's does: asked by a fresh press (in the start only
   past 0.4 of it, `PM_Weapon_CheckForReload` 0x578750-0x5787AD) or by a
   trigger down as a segment ends (0x5783DE-0x5783FC, 0x578564-0x578582), the

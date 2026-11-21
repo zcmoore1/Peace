@@ -18,7 +18,7 @@
 
 static playerState_t ps;
 static pmove_t move;
-static int checks, msec, buttons, forward, slot;
+static int checks, msec, buttons, forward, slot, stale;
 static int fired[MAX_WEAPONS], prepared[MAX_WEAPONS];
 
 #define CHECK(x) do { checks++; if (!(x)) { \
@@ -64,14 +64,18 @@ static void Setup(int primary, int secondary) {
 	ps.weapon = BG_ActiveSlotWeapon(&ps);
 	ps.weaponstate = WEAPON_READY; ps.weaponTime = 0; ps.weaponAnimTime = -1;
 	move.ps = &ps; move.trace = FloorTrace; move.pointcontents = NoContents; move.tracemask = MASK_PLAYERSOLID;
-	buttons = forward = 0; slot = SLOT_PRIMARY;
+	buttons = forward = stale = 0; slot = SLOT_PRIMARY;
 }
-/* One command, msec long, through the whole Pmove. */
+/* One command, msec long, through the whole Pmove. With 'stale' the slot's
+ * command carries the other generation, as one sent before the client saw a
+ * pickup's take: it names no gun (BG_SlotCommandCurrent), so an empty hand
+ * stays empty. */
 static void Frame(void) {
 	int seq = ps.eventSequence;
 	memset(&move.cmd, 0, sizeof(move.cmd));
 	move.cmd.buttons = buttons; move.cmd.forwardmove = forward;
 	move.cmd.weapon = BG_SlotCommand(&ps, slot);
+	if (stale) move.cmd.weapon = BG_SLOT_COMMAND + ((move.cmd.weapon - BG_SLOT_COMMAND) ^ SLOT_COUNT);
 	move.cmd.serverTime = ps.commandTime + msec;
 	Pmove(&move);
 	for (; seq < ps.eventSequence; seq++) {
@@ -262,6 +266,47 @@ static void TestReturnEnds(int gun) {
 	buttons = BUTTON_TACTICAL; Frame(); buttons = 0;
 	CHECK((ps.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == WA_TACTICAL);
 	CHECK(ps.weapon == WP_FLASH && ps.weaponstate == WEAPON_RAISING && prepared[WP_FLASH] == 1);
+	CHECK(ps.weaponTime == BG_WeaponRaiseTime(WP_FLASH));	/* the prepare plays whole */
+}
+
+/* With no use hint, equipment comes straight out of an empty hand
+ * (CheckForOffHand's OffHandPrepare, 0x5791B0-0x5791CE: hint 0x7FF and
+ * weapon 0). On the think the hand's return ends, the run-out of
+ * OFFHAND_END's one-think delay, the hand's switch then runs on
+ * OFFHAND_PREPARE whatever its time (0x579474), and that state's case is
+ * OffHandHold (the entry for state 17, 0x5792DA -> 0x577920): the equipment
+ * is in hand and ready on that think, its fuse written (0x577958-0x577961),
+ * its prepare never played. A think later no delay runs out, and the prepare
+ * plays whole. */
+static void TestStraightOutOfTheReturn(int gun) {
+	int late, t, lethal;
+	for (late = 0; late < 2; late++) {
+		Setup(gun, Other(gun));
+		ps.weapon = WP_NONE; ps.cursorHintEntIndex = ENTITYNUM_NONE;
+		stale = 1;	/* the hand stays empty once the throw is over */
+		lethal = BG_LethalWeapon(&ps);
+		buttons = BUTTON_LETHAL; Frame(); buttons = 0;
+		CHECK(ps.weapon == lethal && (ps.weaponAction & WA_LEFT_EMPTY) && ps.weaponstate == WEAPON_RAISING);
+		CHECK(ps.weaponTime == BG_WeaponRaiseTime(lethal));	/* no delay ran out: it plays */
+		for (t = 0; t < 20000 && ps.weapon != WP_NONE; t += msec) Frame();
+		CHECK(ps.weapon == WP_NONE && ps.weaponstate == WEAPON_READY && fired[lethal] == 1);	/* E */
+		if (late) {
+			Frame();	/* E+1, nothing pressed: the return is over */
+			CHECK(ps.weapon == WP_NONE && ps.weaponstate == WEAPON_READY && !(ps.weaponAction & WA_TYPE_MASK));
+		}
+		CHECK(ps.ammo[WP_FLASH] > 0 && BG_WeaponRaiseTime(WP_FLASH) > msec && prepared[WP_FLASH] == 0);
+		buttons = BUTTON_TACTICAL; Frame(); buttons = 0;
+		CHECK(ps.weapon == WP_FLASH && (ps.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == WA_TACTICAL);
+		CHECK(prepared[WP_FLASH] == 1 && (ps.weaponAction & WA_LEFT_EMPTY));
+		if (late) {
+			CHECK(ps.weaponstate == WEAPON_RAISING && ps.weaponTime == BG_WeaponRaiseTime(WP_FLASH));
+			continue;
+		}
+		CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 0);
+		CHECK(ps.grenadeTimeLeft == BG_OffhandFuseTime(WP_FLASH));
+		Frame();	/* the button is up: HOLD's first think throws it */
+		CHECK(fired[WP_FLASH] == 1);
+	}
 }
 
 /* D4. YY while sprinting: MW2's double-tap cancel is in its change check,
@@ -423,6 +468,40 @@ static void TestKnifeOnADelay(int gun) {
 	}
 }
 
+/* The reload end's close note (Peace's SPAS-12 and M300 data, which MW2's
+ * reload end does not have) is no weapon delay: MW2's RELOAD_END has none
+ * (FinishReload stamps reloadEndTime alone, 0x5785EB-0x578606;
+ * PM_SetWeaponReloadAddAmmoDelay gives one only to RELOADING and
+ * RELOAD_START, 0x575C50), and its knife check takes a reload state on any
+ * think no delay runs out on (0x577734-0x577755, 0x5776ED). So the knife
+ * comes out on that note's think, as on the think before it. */
+static int EndNote(int gun) {
+	const bg_weaponNote_t *n;
+	for (n = PM_SegNotes(gun, RSEQ_END); n->note != WNOTE_NONE; n++)
+		if (n->note == WNOTE_BOLT_CLOSED) return BG_ReloadTime(&ps, n->time);
+	return -1;
+}
+static void TestKnifeOnTheEndsNote(int gun) {
+	int early, t, close;
+	for (early = 0; early < 2; early++) {
+		Setup(gun, Other(gun));
+		ps.ammo[gun] = BG_WeaponMagSize(gun) - 1;
+		close = EndNote(gun);
+		CHECK(close > 2 * msec);
+		buttons = BUTTON_RELOAD; Frame(); buttons = 0;
+		for (t = 0; t < 20000 && ps.weaponAnimSeq != RSEQ_END; t += msec) Frame();
+		CHECK(ps.weaponstate == WEAPON_RELOADING && ps.weaponAnimSeq == RSEQ_END && ps.weaponAnimTime < msec);
+		CHECK(ps.ammo[gun] == BG_WeaponMagSize(gun));
+		/* to the think before the one that crosses the note (early: two before) */
+		while (ps.weaponAnimTime + (1 + early) * msec < close) Frame();
+		CHECK(ps.weaponstate == WEAPON_RELOADING && ps.weaponAnimSeq == RSEQ_END &&
+			ps.weaponAnimTime + early * msec < close);
+		buttons = BUTTON_MELEE; Frame(); buttons = 0;
+		CHECK(ps.weapon == WP_KNIFE && ps.weaponstate == WEAPON_RAISING && ps.weaponTime == BG_MELEE_DELAY);
+		CHECK(ps.ammo[gun] == BG_WeaponMagSize(gun) && (ps.weaponAction & WA_TYPE_MASK) == WA_MELEE);
+	}
+}
+
 int main(void) {
 	const int steps[] = { 8, 16, 33 };
 	const int guns[] = { WP_SHOTGUN, WP_M40A3, WP_MACHINEGUN };
@@ -433,12 +512,15 @@ int main(void) {
 			TestSprintOutEnds(guns[g]);
 			TestSprintAgainInTheSprintOut(guns[g]);
 			TestReturnEnds(guns[g]);
+			TestStraightOutOfTheReturn(guns[g]);
 			TestYYWhileSprinting(guns[g]);
 			TestEquipmentOnTheHit(guns[g]);
 		}
 		TestLastRoundEnds(WP_MACHINEGUN);
 		TestKnifeOnADelay(WP_SHOTGUN);
 		TestKnifeOnADelay(WP_M40A3);
+		TestKnifeOnTheEndsNote(WP_SHOTGUN);
+		TestKnifeOnTheEndsNote(WP_M40A3);
 	}
 	printf("PASS: %d checks of what a weapon state's last think does, at 8, 16 and 33ms commands\n", checks);
 	return 0;

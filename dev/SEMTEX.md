@@ -53,7 +53,9 @@ pre-throw cancel without changing selection. A return-acknowledgement bit handle
 stale slot requests. `WA_RECOVERING` pins the physical weapon through post-throw
 recovery without overwriting the requested selection - only when the Semtex
 left a gun: from an empty hand the hand is back the think it empties, as with
-every offhand, and a queued Y draws from it.
+every offhand, and a queued Y draws from it two thinks after it empties (the
+think after is MW2's one-think OFFHAND_END delay, `OffHandEnd` with weapon 0,
+0x577A1A-0x577A2A, whose change check refuses it).
 
 ## Timings / art
 

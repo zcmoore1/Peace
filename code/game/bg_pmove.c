@@ -4543,15 +4543,18 @@ PM_WeaponDelayEnds
 MW2's delayedAction: whether a weapon delay runs out on this think
 (PM_Weapon_WeaponTimeAdjust's return, 578b7b-578bab, taken before any check,
 44c42b). Peace's delays are the notes that release the lock - a reload's
-round (WNOTE_MAG_IN) and the bolt (WNOTE_BOLT_CLOSED), on whatever clip is
-playing, exactly as PM_RunWeaponNotes crosses them (the close note of a shell
-gun's reload end is Peace's own data: MW2's RELOAD_END has no delay); the
-reload's settle of an owed action (PM_ReloadSettleCrossed, MW2's reload
-delayed action); the knife's draw, MW2's meleeDelay (MeleeInit arms it as the
-weapon delay, 577581-577599; its hit, MeleeFire, comes on the think it runs
-out); and an empty hand's return from equipment, MW2's OffHandEnd with weapon
-0, which stamps no raise but a one-think delay in OFFHAND_END (577a1a-577a2a):
-it runs out on the think after the hand empties, the think the latch clears.
+round (WNOTE_MAG_IN) and the bolt (WNOTE_BOLT_CLOSED), exactly as
+PM_RunWeaponNotes crosses them, but not the close note of a shell gun's
+reload end: that is Peace's own data, and MW2's RELOAD_END has no delay
+(FinishReload stamps reloadEndTime alone, 5785eb-578606; only RELOADING and
+RELOAD_START get one, 575c50), so its knife check takes that think
+(577734-577755); the reload's settle of an owed action
+(PM_ReloadSettleCrossed, MW2's reload delayed action); the knife's draw,
+MW2's meleeDelay (MeleeInit arms it as the weapon delay, 577581-577599; its
+hit, MeleeFire, comes on the think it runs out); and an empty hand's return
+from equipment, MW2's OffHandEnd with weapon 0, which stamps no raise but a
+one-think delay in OFFHAND_END (577a1a-577a2a): it runs out on the think
+after the hand empties, the think the latch clears.
 Read once the clocks have run.
 ===============
 */
@@ -4565,7 +4568,7 @@ static qboolean PM_WeaponDelayEnds( int oldElapsed ) {
 	if ( BG_QuickActionInPlace( pm->ps->weapon ) && pm->ps->weaponstate == WEAPON_RAISING ) {
 		return pm->ps->weaponTime <= 0;
 	}
-	if ( pm->ps->weaponAnimTime < 0 ) {
+	if ( pm->ps->weaponAnimTime < 0 || pm->ps->weaponAnimSeq == RSEQ_END ) {
 		return qfalse;
 	}
 	for ( n = PM_SegNotes( pm->ps->weapon, pm->ps->weaponAnimSeq ); n->note != WNOTE_NONE; n++ ) {
@@ -4831,8 +4834,7 @@ static void PM_UpdateWeaponAction( void ) {
 	pml.recoveryEnds = qfalse;
 	if (recovering && pm->ps->weapon == BG_ActiveSlotWeapon(pm->ps) &&
 		pm->ps->weaponstate == WEAPON_RAISING && pm->ps->weaponTime <= 0) {
-		recovering = 0;
-		pml.recoveryEnds = qtrue;
+		recovering = 0;		// the latch clears below on this think too
 	}
 	if ( ladder && !( action & WA_TYPE_MASK ) ) {
 		action = 0;
@@ -4969,6 +4971,17 @@ static void PM_UpdateWeaponAction( void ) {
 	}
 	if ( prepare ) {
 		PM_FinishWeaponChange();
+		// On a think a weapon delay runs out (the one after an empty hand's
+		// return, OFFHAND_END's one-think delay), MW2's hand switch runs
+		// whatever the lock (579474) on the OFFHAND_PREPARE its offhand check
+		// left (OffHandPrepare, 5791ce or 578ef2), and that state's case is
+		// OffHandHold (the table's entry for state 17, 5792da -> 577920): in
+		// hand and ready, the fuse written, the prepare never played. Step 6
+		// does that on this think. A prepare step 3 begins after a drop is
+		// OFFHAND_INIT's case on the switch's one pass, and plays.
+		if ( pml.delayedAction && BG_OffhandHeldToThrow( pm->ps->weapon ) ) {
+			pm->ps->weaponTime = 0;
+		}
 	}
 	if ( action & WA_TYPE_MASK ) {
 		// A sprint the action ends waits for its button (PM_CheckSprint).
@@ -5697,9 +5710,10 @@ static void PM_Weapon( void ) {
 	//     (OFFHAND_INIT's case, 5792c7 -> OffHandPrepare 577800), the knife
 	//     never hitting. Nor has an empty hand's return from equipment, the
 	//     one-think delay of MW2's OFFHAND_END with weapon 0 (577a1a-577a2a):
-	//     equipment pressed on the think it runs out is prepared on it, its
-	//     empty hand's drop spent. So their drop's lock goes here, and step 3
-	//     finishes it.
+	//     equipment pressed on the think it runs out with a use hint is
+	//     prepared on it, its empty hand's drop spent (with no hint it comes
+	//     straight out and is in hand at once, PM_UpdateWeaponAction). So
+	//     their drop's lock goes here, and step 3 finishes it.
 	if ( pml.delayedAction && pm->ps->weaponstate == WEAPON_DROPPING ) {
 		pm->ps->weaponTime = 0;
 	}
@@ -5910,11 +5924,11 @@ static void PM_Weapon( void ) {
 	// clip): MW2's auto reload refuses FIRING (57886d) and its trigger-up
 	// ShouldBeFiring only makes the gun READY (576d99-576da3), so the reload
 	// comes on the next think (step 4e). A held trigger reloads on this one,
-	// through FireWeapon's ammo check (5770c0-5770c9).
+	// through the fire path's ammo check below (FireWeapon's, 5770c0-5770c9).
 	if ( BG_WeaponMagSize( pm->ps->weapon ) > 0 &&
 	     pm->ps->ammo[pm->ps->weapon] <= 0 &&
 	     pm->ps->ammoReserve[pm->ps->weapon] > 0 &&
-	     ( pm->ps->weaponstate != WEAPON_FIRING || ( pm->cmd.buttons & BUTTON_ATTACK ) ) ) {
+	     pm->ps->weaponstate != WEAPON_FIRING ) {
 		PM_BeginReload();
 		return;
 	}

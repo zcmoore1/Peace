@@ -460,9 +460,11 @@ source for MW2 behaviour; the owner rejects it.
   client's selection catches up (MW2's select hand-off). Nothing is put down
   from an empty hand and nothing is aimed with it; equipment out of it pays
   `BG_EMPTY_HAND_OFFHAND_TIME` (none on the think another's return to the
-  empty hand ends, MW2's one-think OFFHAND_END delay), and comes back to an
-  empty hand (`WA_LEFT_EMPTY`, MW2's OffHandEnd with weapon 0), a Semtex
-  cancel's included, so the gun then comes up on its ordinary raise. Old plain weapon IDs are supported for bots/tools. Neither
+  empty hand ends, MW2's one-think OFFHAND_END delay; with no use hint it pays
+  nothing, and on that think it is in hand and ready, its prepare unplayed:
+  MW2's switch sends OFFHAND_PREPARE to OffHandHold, 0x5792DA), and comes
+  back to an empty hand (`WA_LEFT_EMPTY`, MW2's OffHandEnd with weapon 0), a
+  Semtex cancel's included, so the gun then comes up on its ordinary raise. Old plain weapon IDs are supported for bots/tools. Neither
   inventory replacement nor a delayed pickup event may overwrite Y intent.
   First deployment is pending until the instance is drawn, then consumed on
   start; normal holster/YY/sprint retention may interrupt it. No CAN state.
@@ -539,10 +541,11 @@ source for MW2 behaviour; the owner rejects it.
   think a weapon delay runs out (`PM_WeaponDelayEnds`, MW2's delayedAction,
   which its knife check refuses, 0x5776ED): a reload's round or its settle of
   an owed action, or the bolt's close; the press is lost, and the round seats
-  or the action is paid. A knife or
-  grenade pressed during a gun's fire lock, or on the READY think after the
-  shot, starts at once (MW2's melee and offhand checks take FIRING and READY,
-  and run before its rechamber check; only a Y swap waits out the shot,
+  or the action is paid. The close note of a reload's end is none (MW2's
+  RELOAD_END has no delay, 0x5785EB-0x578606): the knife is taken on it.
+  A knife or grenade pressed during a gun's fire lock, or on the READY think
+  after the shot, starts at once (MW2's melee and offhand checks take FIRING
+  and READY, and run before its rechamber check; only a Y swap waits out the shot,
   `PM_WeaponChangeOpen`), and a pump or bolt still owed is worked whole, from
   its open note, when the gun is back. Whatever the gun was doing is abandoned on the press, as by
   the throwing knife's pull. `BG_HolsterTime` is the single drop rule - gun's
@@ -647,11 +650,13 @@ source for MW2 behaviour; the owner rejects it.
   OFFHAND_END (`OffHandEnd` with weapon 0, 0x577A1A-0x577A2A), so a gun
   selected meanwhile is drawn two thinks after the hand empties; that one
   think's delay is a weapon delay (`PM_WeaponDelayEnds`), so equipment pressed
-  on it comes out with no empty-hand drop (step 2c, MW2's path A). So YY never
-  cancels a recovery draw, and a Semtex cancel
-  can never reset a fire lock for free. A grenade pressed during the draw
-  starts the next one, as MW2 lets one come out of the gun's return, but a
-  knife pressed while a gun is being drawn back, the draw's last command
+  on it comes out with no empty-hand drop (step 2c, MW2's path A), and with no
+  use hint, straight out, is in hand and ready on it (MW2's switch runs on the
+  OFFHAND_PREPARE its offhand check left: OffHandHold, 0x5792DA -> 0x577920).
+  So YY never cancels a recovery draw, and a Semtex cancel can never reset a
+  fire lock for free. A grenade pressed during the draw starts the next one,
+  as MW2 lets one come out of the gun's return, but a knife pressed while a
+  gun is being drawn back, the draw's last command
   included, is lost (owner's rule: MW2's knife check skips every raise).
 - **An ordinary raise is cancellable by YY.** That is the owner's rule, not a
   bug: the NAC skips a holster, YY skips a draw, so long swap times on both
@@ -1207,9 +1212,13 @@ begins the think after it ends, while equipment pressed then comes out; YY
 while sprinting is READY on its think, working an owed action first; a gun
 with no fire clip reloads the think after its last round's lock with the
 trigger up; equipment pressed on the knife's hit, or on the think an empty
-hand's return ends, is prepared on that think; and a knife pressed on a reload's round or settle is lost while the round
-seats or the pump is paid. Only buttons are pressed, and every time is read
-from the tables or from the lock pmove stamped.
+hand's return ends, is prepared on that think (with no use hint, out of the
+empty hand, it is in hand and ready on it; a think later its prepare plays);
+a knife pressed on a reload's round or settle is lost while the round seats
+or the pump is paid, and one pressed on the SPAS's or M300's reload end's
+close note is taken (MW2's RELOAD_END has no delay). Only buttons are
+pressed, and every time is read from the tables or from the lock pmove
+stamped.
 
 `dev/tests/run-loadouts.cmd` (or `.sh`) checks class validation/persistence,
 modulo selection, same-update YY firing, reload/pull-out cancellation, tap/hold

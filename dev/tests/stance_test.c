@@ -1018,8 +1018,11 @@ static qboolean Overridden(void) { return (ps.pm_flags & PMF_PRONEMOVE_OVERRIDDE
 static void Toggle(void) { move.cmd.weapon = BG_ToggleSlotWeapon(&ps, move.cmd.weapon); }
 
 /* Test 26: a burst holds the crawl, a push in the shot does not crawl, the
- * crawl comes back with the gun ready; a pump stops it until a push, which
- * crawls while the pump finishes. */
+ * crawl comes back with the gun ready. A pump gun's shot holds it to the
+ * shot's last think; the READY think after it is quiet (MW2's 0x572AA0 takes
+ * READY, read at 0x57454E before the weapon), so the crawl comes back there
+ * with no push, and the pump, which sets no stop (MW2's rechamber never calls
+ * PM_SetProneMovementOverride, 0x461FE0), crawls on. */
 static void TestCrawlBurst(void) {
 	int t, shots = 0;
 	Floor(); Spawn(0, 0, STAND_Z, 0); Gun(WP_MACHINEGUN); Settle(8); ProneRested(8);
@@ -1038,11 +1041,12 @@ static void TestCrawlBurst(void) {
 	Floor(); Spawn(0, 0, STAND_Z, 0); Gun(WP_SHOTGUN); Settle(8); ProneRested(8);
 	Hold(100, 8, BUTTON_PRONE, 64, 0);
 	Cmd(8, BUTTON_PRONE | BUTTON_ATTACK, 64, 0); CHECK(Raised(EV_FIRE_WEAPON, -1) == 1);
-	for (t = 0; t < 200 && ps.weaponstate != WEAPON_BOLTING; t++) { Cmd(8, BUTTON_PRONE, 64, 0); CHECK(Stopped()); }
-	CHECK(ps.weaponstate == WEAPON_BOLTING);
-	Cmd(8, BUTTON_PRONE, 64, 0); CHECK(Stopped() && Overridden());	/* the pump holds it */
-	Cmd(8, BUTTON_PRONE, 127, 0); CHECK(!Stopped() && !Overridden() && ps.weaponstate == WEAPON_BOLTING);
-	for (t = 0; t < 200 && ps.weaponstate == WEAPON_BOLTING; t++) { Cmd(8, BUTTON_PRONE, 127, 0); CHECK(!Stopped()); }
+	for (t = 0; t < 200 && ps.weaponstate == WEAPON_FIRING; t++) { Cmd(8, BUTTON_PRONE, 64, 0); CHECK(Stopped() && Overridden()); }
+	CHECK(ps.weaponstate == WEAPON_READY && BG_ShotAwaitsAction(&ps));	/* the shot's last think */
+	Cmd(8, BUTTON_PRONE, 64, 0);	/* the READY think: no push needed, and the pump starts */
+	CHECK(!Stopped() && !Overridden() && ps.weaponstate == WEAPON_BOLTING);
+	for (t = 0; t < 200 && ps.weaponstate == WEAPON_BOLTING; t++) { Cmd(8, BUTTON_PRONE, 64, 0); CHECK(!Stopped() && !Overridden()); }
+	CHECK(ps.weaponstate == WEAPON_READY);
 }
 
 /* Test 27: a magazine reload never stops the crawl; a shell reload taken out

@@ -881,6 +881,56 @@ static void TestPictureHandsBack(void) {
 	CHECK(detached && handed && GunAtRest(&pred));
 }
 
+/* A shot the server never fired, on a gun with rounds left: the detached
+ * picture plays the shot you were shown, the READY think after it (MW2's,
+ * owing the action, the fire clock parked at the open note) and the whole
+ * pump or bolt from there - one fire clip - and hands back only once the gun
+ * is at rest. The READY think is not rest, and the action that follows it is
+ * not something the picture's own run began. */
+static void TestPictureFinishesTheAction(void) {
+	playerState_t rest, base2, shot, pred, before;
+	pmove_t pm, model;
+	script_t idle = Script(ACT_NONE, X);
+	int i, j, sawReady = 0, sawAction = 0, handed = 0;
+	Run(0, &idle, NONE);
+	rest = svPs;
+	CHECK(GunAtRest(&rest) && rest.ammo[GUN] > 1);
+	memset(cmds, 0, sizeof(cmds));
+	for (i = 0; i < 600; i++) { cmds[i].serverTime = rest.commandTime + 8 * (i + 1); cmds[i].weapon = BG_SLOT_COMMAND; }
+	cmds[0].buttons = BUTTON_ATTACK;
+	memset(&model, 0, sizeof(model)); FakeReloadModel(&model);
+	CG_WeapPicture_Reset();
+	/* frame 1: prediction fires */
+	numCmds = 1;
+	CG_WeapPicture_BeginReplay(&rest);
+	shot = rest; memset(&pm, 0, sizeof(pm)); pm.ps = &shot; pm.cmd = cmds[0]; FakeReloadPmove(&pm);
+	CG_WeapPicture_ReplayStep(&rest, &shot, NULL);
+	CG_WeapPicture_Update(&shot, &model, 0, 0, GetCmd);
+	CG_WeapPicture_Update(&shot, &model, 0, 0, GetCmd);
+	CHECK(shot.weaponstate == WEAPON_FIRING && CG_WeapPicture_State(&shot) == &shot);
+	/* then the server's snapshot: it never fired, and prediction rests */
+	base2 = rest; base2.commandTime = cmds[0].serverTime;
+	for (i = 1; i < 600 && !handed; i++) {
+		const playerState_t *pic;
+		numCmds = i + 1;
+		CG_WeapPicture_BeginReplay(&base2);
+		pred = base2;
+		for (j = 1; j <= i; j++) {
+			before = pred; memset(&pm, 0, sizeof(pm)); pm.ps = &pred; pm.cmd = cmds[j]; FakeReloadPmove(&pm);
+			CG_WeapPicture_ReplayStep(&before, &pred, NULL);
+		}
+		CG_WeapPicture_Update(&pred, &model, 0, i, GetCmd);
+		pic = CG_WeapPicture_State(&pred);
+		CHECK(GunAtRest(&pred));
+		if (pic != &pred) {
+			if (BG_ShotAwaitsAction(pic)) sawReady = 1;
+			if (pic->weaponstate == WEAPON_BOLTING) { CHECK(sawReady); sawAction = 1; }
+		} else handed = 1;
+	}
+	/* handed back at rest, with the whole action drawn and no round spent */
+	CHECK(handed && sawReady && sawAction && pred.ammo[GUN] == rest.ammo[GUN]);
+}
+
 /* How often a use/reload tap released d ms before the gun is at rest gives a
  * fake reload, over every phase of the server's snapshots against the quick
  * action (the player cannot see that phase, so this is the success rate). */
@@ -1069,9 +1119,11 @@ int main(void) {
 	TestClockBase();
 	TestSwapOnlyCorrection();
 	TestPictureHandsBack();
+	TestPictureFinishesTheAction();
 	Windows();
 	FakeReloads(); FakeBullets(); FakeBulletWindows();
 	GUN = WP_M40A3; MeasureAnchors();
+	TestPictureFinishesTheAction();
 	Windows();
 	FakeReloads(); FakeBullets(); FakeBulletWindows(); WildScopes();
 #ifdef FAKERELOAD_ENGINE

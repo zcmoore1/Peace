@@ -461,6 +461,7 @@ int  BG_ReloadTime( const playerState_t *ps, int authoredTime );
 int  BG_ReloadSegmentTime( const playerState_t *ps, int seq );
 int  BG_HolsterTime( const playerState_t *ps );	// the holster this player is doing right now
 int  BG_WeaponFireLength( int weapon );		// 0 = no modelled fire animation
+qboolean BG_ShotAwaitsAction( const playerState_t *ps );	// READY between a shot and its action (picture only)
 int  BG_WeaponDropTime( int weapon );		// holster length, never 0
 int  BG_WeaponRaiseTime( int weapon );		// deploy length, never 0 for a gun; an offhand's holdFireTime
 int  BG_WeaponQuickDropTime( int weapon );	// MW2's quickDropTime: going away for a grenade

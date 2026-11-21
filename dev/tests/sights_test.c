@@ -419,7 +419,7 @@ static void TestScopeThroughPmove(void) {
 	for(t=0;t<BG_WeaponFireLength(WP_SHOTGUN) &&
 		(ps->stats[STAT_UNCHAMBERED] & (1<<WP_SHOTGUN));t++) MoveAim(&move,1,qfalse);
 	CHECK(!(ps->stats[STAT_UNCHAMBERED] & (1<<WP_SHOTGUN)));
-	closed=ps->weaponAnimTime;
+	closed=t;	/* the think it closed on, counted from the shot's own */
 	CHECK(closed>1 && closed<BG_WeaponFireLength(WP_SHOTGUN));
 	for(offset=-1;offset<=1;offset++) {
 		BeginAimedShot(&move);

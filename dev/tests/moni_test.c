@@ -20,6 +20,7 @@ static char weaponArgument[16];
 static pmove_t move;
 static bg_activate_t use;
 static int cmdValue;
+static int forward;	/* the move every command carries (a sprint needs forward) */
 
 #define CHECK(x) do { checks++; if (!(x)) { fprintf(stderr,"FAIL %d (%d ms commands): %s\n",__LINE__,msec,#x); exit(1); } } while (0)
 void QDECL Com_Printf(const char *fmt, ...) { (void)fmt; }
@@ -77,6 +78,7 @@ static void Setup(int activeSlot, qboolean alternate) {
 	CG_ValidateWeaponSelect();
 	cmdValue = BG_WeaponCommand(&snapshot.ps, cg.weaponSelectSlot, cg.weaponSelectAlternate);
 	swapQueued = 0;
+	forward = 0;
 }
 
 #define IN_Y    1
@@ -88,6 +90,7 @@ static void Frame(int buttons, int keys) {
 	if (keys & IN_PREV) CG_PrevWeapon_f();
 	if (keys & IN_ALT) CG_AltWeapon_f();
 	memset(&move.cmd, 0, sizeof(move.cmd));
+	move.cmd.forwardmove = forward;
 	move.cmd.buttons = buttons | (swapQueued ? BUTTON_WEAPON_SWAP : 0);
 	move.cmd.weapon = cmdValue;
 	move.cmd.serverTime = PS->commandTime + msec;
@@ -385,19 +388,36 @@ static void TestPumpOwed(void) {
 			CHECK(r.change == end && r.changeTo == WP_M16 && r.dropStart < 0);
 			CHECK(PS->weaponstate == WEAPON_RAISING && PS->weaponDraw == WDRAW_ALT && Owes(0, qtrue));
 		}
-		/* back on the underbarrel it works its action before it can fire */
+		/* back on the underbarrel it works its action before it can fire: the
+		 * pump alone, from its open note (MW2's rechamber from READY, 575b77),
+		 * bolted on the next command (its bolt delay of 1, 575c00) and over
+		 * Frames(rechamberTime) commands after it began, where the held
+		 * trigger fires */
 		Frame(0, IN_ALT);
 		CHECK(cg.weaponSelect == WP_M16);	/* refused during the mode change's raise */
 		Settle();
 		Frame(0, IN_ALT); Settle();
-		CHECK(PS->weapon == WP_MASTERKEY);
+		CHECK(PS->weapon == WP_MASTERKEY && Owes(0, qtrue));
 		Frame(BUTTON_ATTACK, 0);
 		CHECK(PS->weaponstate == WEAPON_BOLTING && Shells(0, qtrue) == BG_WeaponMagSize(WP_MASTERKEY) - 1);
-		Idle(Frames(fire) + 2);
-		CHECK(PS->weaponstate == WEAPON_READY && !Owes(0, qtrue));
+		CHECK(PS->weaponAnimTime == shot && PS->weaponTime == fire - shot && Owes(0, qtrue));
+		Frame(BUTTON_ATTACK, 0);
+		CHECK(PS->weaponstate == WEAPON_BOLTING && !Owes(0, qtrue));
+		for (f = 2; f < Frames(fire - shot); f++) {
+			Frame(BUTTON_ATTACK, 0);
+			CHECK(PS->weaponstate == WEAPON_BOLTING);
+		}
+		Frame(BUTTON_ATTACK, 0);
+		CHECK(PS->weaponstate == WEAPON_FIRING && Shells(0, qtrue) == BG_WeaponMagSize(WP_MASTERKEY) - 2);
 
-		/* Y's command arriving two commands or more into the pump: nothing is owed */
-		for (f = end + 1; f * msec < fire - msec; f++) {
+		/* Y's command on the READY think after the shot, or on the pump's bolt
+		 * think after that: the mode change, and the pump is owed */
+		for (f = end; f <= end + 1; f++) {
+			run_t r = Shoot(0, qtrue, f, -1, -1, f + 8);
+			CHECK(r.change == f + 1 && r.changeTo == WP_M16 && Owes(0, qtrue));
+		}
+		/* Y's command arriving after the bolt think: nothing is owed */
+		for (f = end + 2; f * msec < fire - msec; f++) {
 			run_t r = Shoot(0, qtrue, f, -1, -1, f + 8);
 			CHECK(r.change == f + 1 && r.changeTo == WP_M16 && !Owes(0, qtrue));
 		}
@@ -414,8 +434,150 @@ static void TestPumpOwed(void) {
 	}
 }
 
+/* MW2's rechamber, command by command, at 8, 16 and 33ms, for both pump guns.
+ * The shot's last command (its clock reaches the open note: MW2's FIRING whose
+ * weaponTime runs out) ends READY owing the action (ShouldBeFiring,
+ * 576d99-576da3). The next starts the action alone, from READY at the open
+ * note (CheckForRechamber, 575b77-575c03: rechamberTime, the bolt
+ * rechamberBoltTime in, or 1 when that is 0); the command whose clock crosses
+ * the close note takes the bolt (575abd-575acc); the gun is READY, and a held
+ * trigger fires, Frames(rechamberTime) commands after the action began. MW2's
+ * checks run before its rechamber check (44c4d7), so a change first seen on
+ * the shot's last command or on the READY one is a whole drop with the action
+ * owed, one first seen on the bolt's command is instant with it owed (the
+ * bolt's delayed action finishes the drop begun on its think, 579474 ->
+ * 57928c: model trace mk_rech_frame), and a later one is a whole drop with it
+ * paid. A sprint takes the READY gun before the action starts and waits once
+ * it is under way; a knife is taken from the shot and from the READY gun, and
+ * refused while the bolt is pending (MW2's knife check refuses a delayed
+ * action think and a weaponDelay still running, 5776ed, 577734-577753). */
+typedef struct { int slot; qboolean alternate; int weapon, other; } pumpGun_t;
+static const pumpGun_t pumpGuns[] = {
+	{ 0, qtrue, WP_MASTERKEY, WP_SHOTGUN },
+	{ 1, qfalse, WP_SHOTGUN, WP_M16 }
+};
+static int shotEnd, actionStart, boltCmd, actionEnd;
+/* The shot on command 0; returns with nothing run after it. */
+static void PumpShot(const pumpGun_t *g) {
+	int open = PickupNoteTime(g->weapon, ASEQ_FIRE, WNOTE_BOLT_OPEN);
+	int close = PickupNoteTime(g->weapon, ASEQ_FIRE, WNOTE_BOLT_CLOSED);
+	int fire = BG_WeaponFireLength(g->weapon);
+	CHECK(open > 0 && close > open && fire > close);
+	shotEnd = Frames(open);
+	actionStart = shotEnd + 1;
+	boltCmd = actionStart + Frames(close - open);
+	actionEnd = actionStart + Frames(fire - open);
+	Setup(g->slot, g->alternate);
+	Idle(4);
+	Frame(BUTTON_ATTACK, 0);
+	CHECK(PS->weapon == g->weapon && PS->weaponstate == WEAPON_FIRING && Owes(g->slot, g->alternate));
+}
+static void TestRechamberTiming(void) {
+	static const int rates[] = { 8, 16, 33 };
+	int i, k, c, cmd;
+	for (i = 0; i < (int)(sizeof(rates) / sizeof(rates[0])); i++) for (k = 0; k < 2; k++) {
+		const pumpGun_t *g = &pumpGuns[k];
+		int open = PickupNoteTime(g->weapon, ASEQ_FIRE, WNOTE_BOLT_OPEN);
+		int fire = BG_WeaponFireLength(g->weapon), shells = BG_WeaponMagSize(g->weapon) - 1;
+		int points[5], n = 0, p;
+		msec = rates[i];
+
+		/* The cycle alone, the trigger held from the READY command on. */
+		PumpShot(g);
+		for (cmd = 1; cmd < shotEnd; cmd++) {
+			Frame(0, 0);
+			CHECK(PS->weaponstate == WEAPON_FIRING && PS->weaponAnimTime == cmd * msec);
+		}
+		Frame(0, 0);
+		CHECK(PS->weaponstate == WEAPON_READY && PS->weaponTime == 0 && BG_ShotAwaitsAction(PS));
+		CHECK(PS->weaponAnimTime == open && Owes(g->slot, g->alternate));
+		Frame(BUTTON_ATTACK, 0);
+		CHECK(PS->weaponstate == WEAPON_BOLTING && PS->weaponAnimTime == open);
+		CHECK(PS->weaponTime == fire - open && Owes(g->slot, g->alternate));
+		for (cmd = actionStart + 1; cmd < actionEnd; cmd++) {
+			Frame(BUTTON_ATTACK, 0);
+			CHECK(PS->weaponstate == WEAPON_BOLTING && Shells(g->slot, g->alternate) == shells);
+			CHECK(Owes(g->slot, g->alternate) == (cmd < boltCmd));
+		}
+		Frame(BUTTON_ATTACK, 0);
+		CHECK(PS->weaponstate == WEAPON_FIRING && Shells(g->slot, g->alternate) == shells - 1);
+		/* MW2's Masterkey: the bolt on the command after the pump began */
+		if (g->weapon == WP_MASTERKEY) CHECK(boltCmd == actionStart + 1);
+
+		/* A change first seen on the shot's last command, the READY command,
+		 * the command before the bolt's (where there is one), the bolt's and
+		 * the one after. */
+		points[n++] = shotEnd; points[n++] = actionStart;
+		if (boltCmd - 1 > actionStart) points[n++] = boltCmd - 1;
+		points[n++] = boltCmd; points[n++] = boltCmd + 1;
+		for (p = 0; p < n; p++) {
+			c = points[p];
+			PumpShot(g);
+			for (cmd = 1; cmd < c - 1; cmd++) Frame(0, 0);
+			/* pressed on the frame before: its selection goes out on command c.
+			 * From the underbarrel, the second press of that frame is the next gun. */
+			if (g->alternate) CG_NextWeapon_f();
+			Frame(0, IN_Y);
+			CHECK(cg.weaponSelect == g->other && PS->weapon == g->weapon);
+			Frame(0, 0);
+			if (c == boltCmd) {
+				CHECK(PS->weapon == g->other && PS->weaponstate == WEAPON_RAISING);
+			} else {
+				CHECK(PS->weapon == g->weapon && PS->weaponstate == WEAPON_DROPPING);
+				CHECK(PS->weaponTime == BG_WeaponDropTime(g->weapon));
+			}
+			CHECK(Owes(g->slot, g->alternate) == (c <= boltCmd));
+			CHECK(Shells(g->slot, g->alternate) == shells);
+		}
+
+		/* A sprint first on the shot's last command lowers on the READY one;
+		 * first on the READY command it lowers there; either way before the
+		 * action starts, which stays owed. First on the command after, the
+		 * action is under way: the gun works it and lowers chambered. */
+		for (c = shotEnd; c <= actionStart + 1; c++) {
+			PumpShot(g);
+			for (cmd = 1; cmd < c; cmd++) { forward = 127; Frame(0, 0); }
+			forward = 127; Frame(BUTTON_SPRINT, 0);
+			CHECK(PS->pm_flags & PMF_SPRINTING);
+			if (c == shotEnd) {
+				CHECK(PS->weaponstate == WEAPON_READY && BG_ShotAwaitsAction(PS));
+				forward = 127; Frame(0, 0);
+			}
+			if (c <= actionStart) {
+				CHECK(PS->weaponstate == WEAPON_SPRINT_IN && PS->weaponTime == BG_WeaponSprintInTime(g->weapon));
+				CHECK(PS->weaponAnimTime == open && Owes(g->slot, g->alternate));
+			} else {
+				for (cmd = c; cmd < actionEnd; cmd++) {
+					CHECK(PS->weaponstate == WEAPON_BOLTING && (PS->pm_flags & PMF_SPRINTING));
+					forward = 127; Frame(0, 0);
+				}
+				CHECK(PS->weaponstate == WEAPON_READY && !Owes(g->slot, g->alternate));
+				forward = 127; Frame(0, 0);
+				CHECK(PS->weaponstate == WEAPON_SPRINT_IN);
+			}
+		}
+
+		/* A knife on the shot's last command, the READY one, the commands the
+		 * bolt is pending on, and the one after the bolt. */
+		for (c = shotEnd; c <= boltCmd + 1; c++) {
+			qboolean taken = c <= actionStart || c > boltCmd;
+			PumpShot(g);
+			for (cmd = 1; cmd < c; cmd++) Frame(0, 0);
+			Frame(BUTTON_MELEE, 0);
+			if (taken) {
+				CHECK(PS->weapon == WP_KNIFE && (PS->weaponAction & WA_TYPE_MASK) == WA_MELEE);
+				CHECK(Owes(g->slot, g->alternate) == (c <= boltCmd));
+			} else {
+				CHECK(PS->weapon == g->weapon && PS->weaponstate == WEAPON_BOLTING);
+				CHECK(!(PS->weaponAction & WA_TYPE_MASK));
+			}
+		}
+	}
+}
+
 int main(void) {
 	TestCycle(); TestAltToggle(); TestShootYYX(); TestSpasPaysItsDrop(); TestPumpOwed();
-	printf("PASS: %i cycle, mode switch, shoot-Y-Y-X and pump checks\n", checks);
+	TestRechamberTiming();
+	printf("PASS: %i cycle, mode switch, shoot-Y-Y-X, pump and rechamber checks\n", checks);
 	return 0;
 }

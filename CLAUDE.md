@@ -142,24 +142,27 @@ source for MW2 behaviour; the owner rejects it.
   holstered out of. Sprint is MW2's `PM_Weapon_CheckForSprint` (iw4x
   0x578060), which does nothing while the gun is FIRING or RECHAMBERING;
   the sprint flag, speed and meter run as usual (MW2's sprint gates never
-  test those states). MW2's shot ends READY owing its action, and the sprint
-  check comes before `CheckForRechamber` (0x575a30, which starts the action
-  only from READY), so a sprint already on when the shot ends takes the gun
-  there and the action stays owed: step 4d works all of it once the gun is
-  back up (a deferral, never a cancel). The shot ends on the think its clock
-  reaches `WNOTE_BOLT_OPEN` (`PM_ShotOver`; that note moves the state in
-  step 2, after step 1b), and that think lowers. Once the action is under
-  way step 1b never lowers `WEAPON_BOLTING`: you run while it finishes and
-  the gun lowers the think after step 4c ends it, chambered. (MW2 lowers on
-  the READY think after the shot's last; Peace on that last think, so its
-  window ends a think sooner.) A knife waits for
-  `WNOTE_BOLT_CLOSED` (MW2's knife refuses the rechamber's pending bolt-close
-  delay): a press before it is lost, one after it cuts the tail short. It ends on the anim
-  clock, never on the lock. A reload is taken at once out of the shot or the
-  action, as MW2's `PM_BeginWeaponReload` accepts READY, FIRING and
-  RECHAMBERING (owner's rule: shoot and reload with no delay); the fire cycle
-  is simply abandoned, its debt still owed. An empty gun reloads itself out of
-  the action, never out of the shot.
+  test those states). MW2's shot ends READY owing its action at the end of
+  its last think (`ShouldBeFiring`, 0x576D99-0x576DA3), and on the next think
+  every check, the sprint's included, comes before `CheckForRechamber`
+  (0x575a30, which starts the action only from READY, 0x575B77), so a sprint
+  on by then takes the READY gun and the action stays owed: step 4d works all
+  of it once the gun is back up (a deferral, never a cancel). The shot's last
+  think is the one its clock reaches `WNOTE_BOLT_OPEN` (`PM_ShotOver`): still
+  FIRING, it does not lower, and step 4f leaves it READY at that note
+  (`BG_ShotAwaitsAction`, which cgame reads to keep the one fire clip on
+  screen); the next think lowers before step 4d can start the action. Once
+  the action is under way step 1b never lowers `WEAPON_BOLTING`: you run
+  while it finishes and the gun lowers the think after step 4c ends it,
+  chambered. A knife waits for `WNOTE_BOLT_CLOSED` (MW2's knife refuses the
+  rechamber's pending bolt-close delay): a press before it is lost, one
+  after it cuts the tail short; the shot and its READY think take one. It
+  ends on the anim clock, never on the lock. A reload is taken at once out
+  of the shot, its READY think or the action, as MW2's
+  `PM_BeginWeaponReload` accepts READY, FIRING and RECHAMBERING (owner's
+  rule: shoot and reload with no delay); the fire cycle is simply abandoned,
+  its debt still owed. An empty gun reloads itself once the shot is over, on
+  its READY think (MW2's auto reload refuses FIRING), never out of the shot.
 - **The bolt cancel is the reload cancel.** `WNOTE_BOLT_CLOSED` on the fire
   animation carries no rounds. Like `WNOTE_MAG_IN` it clears the lock on its
   think and only queues its completion: the chambering commits in step 4, the
@@ -175,12 +178,20 @@ source for MW2 behaviour; the owner rejects it.
 - **An open action is a debt, and it is never resumed.** Firing sets the
   weapon's bit in `STAT_UNCHAMBERED`; only the close note's step-4 commit or
   the reload's delayed action clears it. A gun that reaches `WEAPON_READY`
-  with its bit set re-enters `WEAPON_BOLTING` from elapsed 0 — the whole
-  cycle, exactly like a reload, which never resumes either. A cancel before
-  the close note, or on its very think, costs the full pump or bolt when you
-  come back; a cancel a think later keeps the chambering. Never add a
-  partial-bolt state, and never clear the bit anywhere but those two commits
-  (spawn is the one exception).
+  with its bit set re-enters `WEAPON_BOLTING` (step 4d) on the next think
+  that finds it READY, from the action's own start, the open note: the whole
+  action, never from where it was and never the shot again, exactly as a
+  reload restarts from 0. That is MW2's `CheckForRechamber` from READY
+  (0x575B77): RECHAMBERING (0x575BA9) for `rechamberTime` (0x575BD2), the fire
+  clip after its open note, with the bolt `rechamberBoltTime` in, or 1 when
+  that is 0 (0x575BD8-0x575C03), the close note's place after the open note.
+  The shot itself ends READY with its bit set (step 4f), so the same rule
+  starts the action after every shot: the bolt comes a think after the
+  action begins at the earliest, and the gun is ready ceil(rechamberTime /
+  msec) thinks after. A cancel before the close note, or on its very think,
+  costs the full pump or bolt when you come back; a cancel a think later
+  keeps the chambering. Never add a partial-bolt state, and never clear the
+  bit anywhere but those two commits (spawn is the one exception).
 - **The reload's delayed action is MW2's (owner's rule: do what MW2 does).**
   When a reload starts on a gun that still owes its pump or bolt, the action is
   settled after the gun's OWN action length (fire-cycle open to close, MW2's
@@ -204,11 +215,16 @@ source for MW2 behaviour; the owner rejects it.
   shot has time left (0x578C0A-0x578C31), and its rechamber starts only from
   READY, on a later think (0x575B77): the change takes the gun first and the
   action stays owed. Here the shot ends on the think its clock reaches
-  `WNOTE_BOLT_OPEN`: `PM_WeaponChangeOpen` opens there (`PM_ShotOver`), as step
-  1b's sprint does, and the shot's clock stops at that note until the gun is in
-  the action, so the close note can never land on the shot's last think. Never
-  let the fire clock run from the shot into the action: a gun whose bolt is 1ms
-  in would pay its pump on the very think a waiting swap begins, and swap free.
+  `WNOTE_BOLT_OPEN`: `PM_WeaponChangeOpen` opens there (`PM_ShotOver`), the
+  shot's clock stops at that note, and step 4f leaves the gun READY there.
+  MW2's change check runs before its rechamber check (0x44C4D7), so a change
+  first seen on the READY think after is a whole drop with the action owed
+  too, and only one first seen on the bolt's own think (the next one on the
+  Masterkey) is instant with it owed: the bolt's delayed action finishes the
+  drop begun on its think (MW2's path A, 0x579474, 0x57928C; model trace
+  `mk_rech_frame` in wf20). A think later the bolt is paid. Never let the
+  fire clock run from the shot into the action: a gun whose bolt is 1ms in
+  would pay its pump on the very think a waiting swap begins, and swap free.
 - **Clip frame ranges are data.** They live in the `.cfg` beside the model and
   are read by `CG_WeapAnim_RegisterClips`. Re-exporting a model must never mean
   editing C, and no weapon may be named in that loader.
@@ -460,7 +476,8 @@ source for MW2 behaviour; the owner rejects it.
   was doing, as any swap does: a reload keeps only rounds whose fill landed
   before the press (a note due on the press think is lost, MW2's same-think
   hand step) and restarts from 0, and an open action stays owed in
-  `STAT_UNCHAMBERED` and is worked from 0 when the gun is back. It stamps no
+  `STAT_UNCHAMBERED` and is worked whole, from its open note, when the gun is
+  back. It stamps no
   drop, so the NAC ordering is untouched.
 - **The knife is MW2's: no drop, the hit at meleeDelay, over at meleeTime
   (owner's rule: MW2's MeleeInit, MeleeFire and MeleeEnd).** On the press the
@@ -488,10 +505,11 @@ source for MW2 behaviour; the owner rejects it.
   reason Y and the knife on one command is the swap: its holster starts and
   the knife is lost. No knife while a scoped gun is aimed, nor while a pump or
   bolt is still open: a press before `WNOTE_BOLT_CLOSED` is lost. A knife or
-  grenade pressed during a gun's fire lock starts at once (MW2's melee and
-  offhand checks take FIRING; only a Y swap waits out the shot,
-  `PM_WeaponChangeOpen`), and a pump or bolt still owed is redone from 0 when
-  the gun is back. Whatever the gun was doing is abandoned on the press, as by
+  grenade pressed during a gun's fire lock, or on the READY think after the
+  shot, starts at once (MW2's melee and offhand checks take FIRING and READY,
+  and run before its rechamber check; only a Y swap waits out the shot,
+  `PM_WeaponChangeOpen`), and a pump or bolt still owed is worked whole, from
+  its open note, when the gun is back. Whatever the gun was doing is abandoned on the press, as by
   the throwing knife's pull. `BG_HolsterTime` is the single drop rule - gun's
   own drop, quick drop, rapid, or the ladder's; the knife has no line in it,
   since nothing is put down for it - used by pmove to stamp and by cgame to
@@ -828,8 +846,11 @@ source for MW2 behaviour; the owner rejects it.
   correction that only removes a swap is followed at once, so a lone knife is
   never a fake knife. The harness checks that the picture never draws a reload
   or knife prediction never had, that a knife the server refuses never cuts a
-  fake reload short, and that a run which would begin something by itself
-  hands back to prediction.
+  fake reload short, that a run which would begin something by itself
+  hands back to prediction, and that a shot the server never fired is drawn
+  through its READY think and its whole pump or bolt, one fire clip, before
+  the picture comes to rest (the shot's READY think, `BG_ShotAwaitsAction`,
+  is neither rest nor a new action).
   Aim, camera and HUD always read the predicted state. Run
   `dev/tests/run-fakereload.sh`; `dev/FAKE_RELOAD.md` has the measured windows.
 - **The game pad moves and aims the MW2 way (owner's rule: do what MW2 does).**
@@ -1113,10 +1134,13 @@ which `#include`s `bg_pmove.c` and drives `PM_Weapon` directly — reload
 segments, ammo conservation, swap/sprint ordering and the fire cycle, plus
 shoot-reload resets (instant reload, fastest NAC, Fayde, YY too early) on every
 gun with a worked action, the close note's chamber commit (early, exact and
-late cancels by swap and ladder, at every think length), a sprint begun in the
-shot or on its last think lowering the gun where the shot ends with the whole
-action still owed, and one begun on the think after it, in the action or on any
-think around the close note waiting for the whole cycle (`PM_Weapon` alone and
+late cancels by swap and ladder, at every think length), MW2's shot ending READY
+on its last think and the action starting from READY at the open note on the
+next (`TestPumpIsItsOwnState`; frozen, the shot stays FIRING until the freeze
+lifts, `TestFrozenShotEnd`), a sprint begun in the
+shot, on its last think or on the READY think after it lowering the gun on that
+READY think with the whole action still owed, and one begun in the action or on
+any think around the close note waiting for the whole cycle (`PM_Weapon` alone and
 full `Pmove` with a real sprint press, SPAS and M300, at every think length) and the aim a
 NAC carries onto the incoming gun through full `Pmove`. Every
 timing in it is read from the shipped tables; never write a literal there, or
@@ -1157,9 +1181,12 @@ command a fall kills its holder.
 Pose checks cover source retention, ladder holsters, loop/endpoint semantics,
 reload/action exclusions, ordinary sprint reversal and frame-only crossfades,
 plus YY flow (reversed draw, eased return, fire cut-in) and a sprint over the
-shot (lowered where it ends, carrying the fire clip, the whole action played
-from its start once back up) or the action (fire clip to its end, entry from
-rest after it) through the real `PM_Weapon`, which is why the pose test links
+shot (lowered on the READY think after it, the fire clip still on screen
+across that think, the whole action played from its open note once back up)
+or the action (fire clip to its end, entry from rest after it), and the one
+fire clip played across the shot's READY think with no release eased over it
+(`TestShotPictureAcrossReady`), through the real `PM_Weapon`, which is why the
+pose test links
 `pickup_pmove_driver.c`.
 The glide return is compared frame by frame with the ordinary sprint exit
 from the same posture (carry, loop, exit under way, partial entry), in both
@@ -1509,7 +1536,12 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   `bg_m16_data.h` from it, the same bytes on every platform. The swap times,
   the mode switch and the Masterkey's shot (330), pump (430, its bolt 1ms in)
   and reload (a 1000 start that feeds a shell at 600, 750 a shell, a 1350 end)
-  are MW2's `m16_shotgun_mp` and `m16_shotgun_attach_mp`. The rifle's fire,
+  are MW2's `m16_shotgun_mp` and `m16_shotgun_attach_mp`. As MW2's, the shot
+  ends READY on its last think, the pump starts from READY on the next, its
+  bolt on the one after, and it is ready ceil(430/msec) thinks after it
+  began; a swap first seen on the bolt's think is the instant one with the
+  pump owed (`moni_test.c`'s `TestRechamberTiming` pins it, and the SPAS's,
+  command by command at 8, 16 and 33ms). The rifle's fire,
   reload, sprint and aim times are still provisional (it is automatic, not
   MW2's burst), and so are both modes' damage, ammo counts and the Masterkey's
   sights (MW2's has none). It uses ordinary note/holster/raise rules. Never add

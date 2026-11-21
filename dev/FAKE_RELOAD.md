@@ -75,7 +75,10 @@ scripts do every one of these with `+usereload`.
    the real `Pmove`, withholding whatever would begin something new (it only
    finishes what you saw), until that run comes to rest or prediction starts a
    real action. It never detaches into an action that only its own run began.
-   A correction that only removes a swap is followed at once. Aim, camera, HUD
+   A shot's pump or bolt is the same action as the shot, across the READY
+   think between them (`BG_ShotAwaitsAction`), so a shot you were shown is
+   drawn to the end of its action. A correction that only removes a swap is
+   followed at once. Aim, camera, HUD
    and gameplay read the predicted state.
 
 ## The clock and the host (MW2's)

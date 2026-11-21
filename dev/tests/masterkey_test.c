@@ -200,18 +200,27 @@ static void TestNoteTransitions(void) {
  CHECK(Note(WP_MASTERKEY,RSEQ_START,WNOTE_MAG_IN)==MASTERKEY_RELOAD_START_ADD_MS);
  CHECK(Note(WP_MASTERKEY,RSEQ_LOOP,WNOTE_MAG_IN)==MASTERKEY_ROUND_IN_MS);
  CHECK(Note(WP_MASTERKEY,RSEQ_END,WNOTE_BOLT_CLOSED)<0 && Note(WP_MASTERKEY,RSEQ_END,WNOTE_MAG_IN)<0);
- /* A change on, before and after the pump's bolt think. To the gun's other mode
-  * it is the mode change whenever it comes; to the other slot it is instant only
-  * on that one think. Either way the pump is owed unless the bolt's think came
-  * first, and one asked for before the shot is over waits for its last think. */
- for(mode=0;mode<2;mode++) for(offset=-2;offset<=1;offset++) {
+ /* A change on, before and after the pump's bolt think, at 1ms thinks: the
+  * shot's last think (its clock reaches the open note; it ends READY owing the
+  * pump, MW2's ShouldBeFiring 576d99-576da3), the READY think after it (the
+  * pump starts from READY at the open note, CheckForRechamber 575b77-575c03,
+  * its bolt delay 1ms), and the bolt think after that (575abd-575acc). To the
+  * gun's other mode it is the mode change whenever it comes; to the other slot
+  * it is instant only on the bolt think (MW2's delayed action finishing the
+  * drop begun on its think, 579474 -> 57928c). Either way the pump is owed
+  * unless the bolt's think came first. One asked for before the shot is over
+  * waits for its last think; there, and on the READY think, it is the whole
+  * drop (MW2's change check runs before its rechamber check, 44c4d7). */
+ for(mode=0;mode<2;mode++) for(offset=-3;offset<=1;offset++) {
+  int shotEnd=MASTERKEY_BOLT_OPEN_MS, bolt=shotEnd+2, before;
   ModeReady(qtrue);
   move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0;
-  Run(MASTERKEY_BOLT_CLOSE_MS+offset-1);
-  CHECK(ps.weaponstate==(offset<0?WEAPON_FIRING:WEAPON_BOLTING));
+  Run(bolt+offset-1); before=bolt+offset-1;
+  CHECK(ps.weaponstate==(before<shotEnd?WEAPON_FIRING:before==shotEnd?WEAPON_READY:WEAPON_BOLTING));
+  CHECK(BG_ShotAwaitsAction(&ps)==(before==shotEnd));
   move.cmd.weapon=mode?BG_WeaponCommand(&ps,0,qfalse):BG_WeaponCommand(&ps,1,qfalse); Step(1);
   CHECK(ps.ammo[WP_MASTERKEY]==3 && ps.ammo[WP_M16]==30);
-  if(offset==-2) {
+  if(offset==-3) {
    /* still in the shot: held */
    CHECK(ps.weapon==WP_MASTERKEY && ps.weaponstate==WEAPON_FIRING);
    Step(1);
@@ -222,7 +231,9 @@ static void TestNoteTransitions(void) {
   CHECK(!!(ps.stats[STAT_UNCHAMBERED]&(1<<WP_MASTERKEY))==(offset<=0));
   FinishSelection();
   move.cmd.weapon=BG_WeaponCommand(&ps,0,qtrue); FinishSelection(); Step(1);
-  if(offset<=0) CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==0);
+  /* the owed pump alone, from its open note: rechamberTime */
+  if(offset<=0) CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==MASTERKEY_BOLT_OPEN_MS &&
+   ps.weaponTime==MASTERKEY_FIRE_MS-MASTERKEY_BOLT_OPEN_MS);
   else CHECK(ps.weaponstate==WEAPON_READY);
  }
  /* The same on a shell's note, in the start (MW2's reloadStartAddTime) and in
@@ -304,7 +315,15 @@ static void TestWireAndReplay(void) {
  ps.slotFlags[1]=BG_GUN_GENERATION|BG_GUN_ALTERNATE|BG_GUN_ALT_UNCHAMBERED;
  ps.slotAltAmmo[1]=2; ps.slotAltReserve[1]=7;
  move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0;
- Run(MASTERKEY_BOLT_CLOSE_MS-1); from=ps;	/* in the action, on the think before its bolt */
+ /* the shot's READY think travels as itself: READY, the pump owed, the fire
+  * clock at the open note */
+ Run(MASTERKEY_BOLT_OPEN_MS); from=ps;
+ MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,NULL,&from);
+ CHECK(!msg.overflowed); MSG_BeginReading(&msg); MSG_ReadDeltaPlayerstate(&msg,NULL,&decoded);
+ CHECK(BG_ShotAwaitsAction(&from) && BG_ShotAwaitsAction(&decoded));
+ CHECK(decoded.weaponstate==WEAPON_READY && decoded.weaponAnimTime==MASTERKEY_BOLT_OPEN_MS);
+ Step(1); from=ps;	/* in the action, on the think before its bolt */
+ CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==MASTERKEY_BOLT_OPEN_MS);
  MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,NULL,&from);
  CHECK(!msg.overflowed); MSG_BeginReading(&msg); MSG_ReadDeltaPlayerstate(&msg,NULL,&decoded);
  CHECK(decoded.slotFlags[1]==ps.slotFlags[1] && decoded.slotAltAmmo[1]==2 && decoded.slotAltReserve[1]==7);

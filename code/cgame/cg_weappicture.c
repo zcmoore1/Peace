@@ -46,15 +46,20 @@ static qboolean CG_WeapPicture_GunAction( const playerState_t *ps ) {
 	if ( ps->weapon <= WP_NONE || ps->weapon >= WP_NUM_WEAPONS || BG_IsActionWeapon( ps->weapon ) ) {
 		return qfalse;
 	}
+	// The shot's READY think (BG_ShotAwaitsAction) is still the shot: its
+	// pump or bolt follows on the next think.
 	return ps->weaponstate == WEAPON_RELOADING || ps->weaponstate == WEAPON_FIRING ||
-		ps->weaponstate == WEAPON_BOLTING;
+		ps->weaponstate == WEAPON_BOLTING || BG_ShotAwaitsAction( ps );
 }
 
-// A new action of the held gun, not the pump continuing the same shot.
+// A new action of the held gun, not the pump continuing the same shot, across
+// the shot's READY think or straight over it.
 static qboolean CG_WeapPicture_BeganAction( const playerState_t *before, const playerState_t *after ) {
+	qboolean shot = before->weaponstate == WEAPON_FIRING || BG_ShotAwaitsAction( before );
 	if ( !CG_WeapPicture_GunAction( after ) ) return qfalse;
 	if ( after->weaponstate == before->weaponstate && after->weapon == before->weapon ) return qfalse;
-	if ( before->weaponstate == WEAPON_FIRING && after->weaponstate == WEAPON_BOLTING ) return qfalse;
+	if ( shot && after->weapon == before->weapon &&
+		( after->weaponstate == WEAPON_BOLTING || BG_ShotAwaitsAction( after ) ) ) return qfalse;
 	return qtrue;
 }
 
@@ -66,7 +71,7 @@ static qboolean CG_WeapPicture_BeganQuick( const playerState_t *before, const pl
 }
 
 static qboolean CG_WeapPicture_AtRest( const playerState_t *ps ) {
-	return ps->weaponstate == WEAPON_READY && !BG_IsActionWeapon( ps->weapon ) &&
+	return ps->weaponstate == WEAPON_READY && !BG_ShotAwaitsAction( ps ) && !BG_IsActionWeapon( ps->weapon ) &&
 		!( ps->weaponAction & ( WA_TYPE_MASK | WA_RETURNING | WA_RECOVERING ) );
 }
 

@@ -394,6 +394,7 @@ static void TestFirstDraw(weapAnimDef_t *def, int weapon) {
  * states). Gameplay is READY the moment the drop is cancelled; only the picture
  * eases home along the clip it was showing, and a shot takes it over at once. */
 void PickupWeaponStep(pmove_t *move, int msec);
+int PickupNoteTime(int weapon, int seq, int kind);
 static pmove_t flow;
 static playerState_t flowPs;
 static void FlowTrace(trace_t *t,const vec3_t a,const vec3_t b,const vec3_t c,const vec3_t d,int e,int f) {
@@ -845,10 +846,11 @@ static int SprintExitFrames(playerState_t *ps,int weapon,modelPose_t *poses) {
 /* A sprint over the shot or the action, through the real PM_Weapon. Pmove
  * keeps the shot to its end and the action to its end (MW2's
  * PM_Weapon_CheckForSprint returns on FIRING/RECHAMBERING). MW2's shot ends
- * READY and its sprint check comes before the rechamber, so a sprint already
- * on lowers the gun where the shot ends, carrying the fire clip it was
- * showing, and the action is still owed: once the gun is back up it plays the
- * whole cycle from its start. A sprint begun in the action lets the fire clip
+ * READY on its last think and its sprint check comes before the rechamber on
+ * the next, so a sprint already on lowers the gun there, where the shot ended,
+ * carrying the fire clip it was showing (the READY think between still shows
+ * it), and the action is still owed: once the gun is back up it plays the
+ * whole action from its open note. A sprint begun in the action lets the fire clip
  * play to its end with no sprint posture over it, and the entry starts from
  * rest on the think after the cycle ends READY: the gun never drops into a
  * carry over an unfinished pump or bolt. */
@@ -870,12 +872,17 @@ static void TestSprintAfterTheCycle(int gun) {
   CHECK(flowPs.weaponstate==(press ? WEAPON_BOLTING : WEAPON_FIRING));
   flowPs.pm_flags|=PMF_SPRINTING;
   if(!press) {
-   /* the shot plays on to its end, then the gun lowers there, the action owed */
+   /* the shot plays on to its end: its last think ends READY with the fire
+    * clip still on screen at the open note, and the next lowers the gun
+    * there, the action owed */
    for(t=0;t<10000;t+=8) {
     FlowStep();
     if(flowPs.weaponstate!=WEAPON_FIRING) break;
     CHECK(sprint->weight==0);
    }
+   CHECK(flowPs.weaponstate==WEAPON_READY && BG_ShotAwaitsAction(&flowPs));
+   CHECK(base->clip==WANIM_FIRE && sprint->weight==0);
+   FlowStep();
    CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN && flowPs.weaponTime==BG_WeaponSprintInTime(gun));
    CHECK(flowPs.stats[STAT_UNCHAMBERED]&(1<<gun));
    /* the picture carries the fire clip it was showing into the sprint */
@@ -884,13 +891,15 @@ static void TestSprintAfterTheCycle(int gun) {
    CHECK(flowPs.weaponstate==WEAPON_SPRINTING && (flowPs.stats[STAT_UNCHAMBERED]&(1<<gun)));
    for(t=0;t<2000;t+=8) FlowStep();
    CHECK(!cg_retainedActive && sprint->clip==WANIM_SPRINT_LOOP && sprint->weight==1);
-   /* back up: the whole action, from the start of its clip */
+   /* back up: the whole action, from its open note on the fire clip (MW2's
+    * rechamber from READY), the shot not played again */
    flowPs.pm_flags&=~PMF_SPRINTING;
    for(t=0;t<BG_WeaponSprintOutTime(gun)+8 && flowPs.weaponstate!=WEAPON_BOLTING;t+=8) FlowStep();
-   CHECK(flowPs.weaponstate==WEAPON_BOLTING && flowPs.weaponAnimTime==0);
+   CHECK(flowPs.weaponstate==WEAPON_BOLTING && flowPs.weaponAnimTime==PickupNoteTime(gun,ASEQ_FIRE,WNOTE_BOLT_OPEN));
    FlowStep();
-   CHECK(flowPs.weaponstate==WEAPON_BOLTING && flowPs.weaponAnimTime==8);
-   CHECK(base->clip==WANIM_FIRE && base->time<CG_WeapAnim_ClipLength(&bg_weapAnimDefs[gun],WANIM_FIRE)/4);
+   CHECK(flowPs.weaponstate==WEAPON_BOLTING && flowPs.weaponAnimTime==PickupNoteTime(gun,ASEQ_FIRE,WNOTE_BOLT_OPEN)+8);
+   CHECK(base->clip==WANIM_FIRE && fabs(base->time-(float)(PickupNoteTime(gun,ASEQ_FIRE,WNOTE_BOLT_OPEN)+8)/BG_WeaponFireLength(gun)*
+    CG_WeapAnim_ClipLength(&bg_weapAnimDefs[gun],WANIM_FIRE))<.01f);
    for(t=0;t<10000 && flowPs.weaponstate==WEAPON_BOLTING;t+=8) FlowStep();
    CHECK(flowPs.weaponstate==WEAPON_READY && !(flowPs.stats[STAT_UNCHAMBERED]&(1<<gun)));
    continue;
@@ -912,6 +921,38 @@ static void TestSprintAfterTheCycle(int gun) {
   for(t=0;t<BG_WeaponSprintInTime(gun)+8 && flowPs.weaponstate==WEAPON_SPRINT_IN;t+=8) FlowStep();
   CHECK(flowPs.weaponstate==WEAPON_SPRINTING && sprint->clip==WANIM_SPRINT_LOOP && sprint->weight==1);
  }
+}
+/* One fire clip from the shot to the action's end, through the real PM_Weapon
+ * at 8ms. The shot's last think leaves the gun READY owing its action (MW2's
+ * ShouldBeFiring) with the clip's clock at the open note, and the action
+ * starts from there on the next think: the picture stays on the fire clip at
+ * that clock across the READY think, with no base-action release eased over
+ * it, and the release comes only when the action ends. */
+static void TestShotPictureAcrossReady(int gun) {
+ animLayer_t *base=&cg_weapLayers[LAYER_BASE];
+ float len=CG_WeapAnim_ClipLength(&bg_weapAnimDefs[gun],WANIM_FIRE);
+ int t,ready=0;
+ CHECK(len>0);
+ FlowBeginWith(gun); FlowSlot(SLOT_SECONDARY);
+ for(t=0;t<10000 && !(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_READY &&
+  cg_weapLayers[LAYER_MOVE].weight==0);t+=8) FlowStep();
+ flow.cmd.buttons=BUTTON_ATTACK; FlowStep(); flow.cmd.buttons=0;
+ CHECK(flowPs.weaponstate==WEAPON_FIRING && base->clip==WANIM_FIRE);
+ for(t=0;t<10000;t+=8) {
+  FlowStep();
+  if(flowPs.weaponstate!=WEAPON_FIRING && flowPs.weaponstate!=WEAPON_BOLTING && !BG_ShotAwaitsAction(&flowPs)) break;
+  if(BG_ShotAwaitsAction(&flowPs)) {
+   ready++;
+   CHECK(flowPs.weaponstate==WEAPON_READY && flowPs.weaponAnimTime==PickupNoteTime(gun,ASEQ_FIRE,WNOTE_BOLT_OPEN));
+  }
+  CHECK(base->clip==WANIM_FIRE && base->weight==1);
+  CHECK(fabs(base->time-(float)flowPs.weaponAnimTime/BG_WeaponFireLength(gun)*len)<.01f);
+  CHECK(cg_returnTime==RETURN_BLEND_MSEC && CG_WeapAnim_ReturnWeight()==0);
+ }
+ /* one READY think between the shot and its action, and the cycle's end is
+  * the release */
+ CHECK(ready==1 && flowPs.weaponstate==WEAPON_READY && !(flowPs.stats[STAT_UNCHAMBERED]&(1<<gun)));
+ CHECK(cg_returnTime==0 && base->clip==WANIM_IDLE);
 }
 static void TestSprintReturnLikeExit(weapAnimDef_t *def,int weapon,const char *path) {
  static modelPose_t exitPoses[SPRINT_FRAMES];
@@ -1385,6 +1426,7 @@ int main(void) {
  TestShortDropKept();
  TestSprintFlow(def);
  TestSprintAfterTheCycle(WP_SHOTGUN);
+ TestShotPictureAcrossReady(WP_SHOTGUN);
  TestSprintReturnLikeExit(def,WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm");
  TestSprintReturnUnmoved(WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm");
  TestSprintReentry(def);
@@ -1402,6 +1444,7 @@ int main(void) {
  TestPictureContinuity(def,WP_M40A3,"assets/baseq3/models/weapons2/m40a3/view.iqm");
  TestActionHandoff(WP_M40A3);
  TestSprintAfterTheCycle(WP_M40A3);
+ TestShotPictureAcrossReady(WP_M40A3);
  TestModeSwitchPicture();
  printf("PASS: %d weapon presentation ownership checks\n",checks); return 0;
 }

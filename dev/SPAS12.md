@@ -36,17 +36,19 @@
   animations use the same weapon states as on the ground. Holding jump ends a
   sprint (MW2), and a held sprint button sprints again once jump is let go.
 - Sprint never lowers the gun in the middle of the shot or the pump (MW2's
-  `PM_Weapon_CheckForSprint` returns on FIRING/RECHAMBERING). A sprint already
-  on when the shot ends (the think the fire clock reaches its open note, MW2's
-  READY think) lowers the gun there, and the pump stays owed: once the gun is
-  back up it works the whole pump before the next shot. A sprint begun once
+  `PM_Weapon_CheckForSprint` returns on FIRING/RECHAMBERING). The shot's last
+  think (the fire clock reaches its open note) ends READY owing the pump, as
+  MW2's, and a sprint on by the next think, MW2's READY think, lowers the gun
+  there before the pump starts: the pump stays owed, and once the gun is back
+  up it works the whole pump, from its open note, before the next shot. A sprint begun once
   the pump is under way waits for it: you run while it finishes and the gun
   goes into the carry the think after, chambered. There is no "bolt NAC into a
   sprint": a sprint pressed on the bolt-close think waits for the pump like one
   pressed at any other point of it.
 - A swap or ladder grab on the exact bolt-close think keeps the instant
   transition but abandons chamber completion. Returning requires the **entire
-  pump from zero**. Going one think late keeps the completed chambering.
+  pump**, from its open note (never the shot again). Going one think late
+  keeps the completed chambering.
 - Aim progress survives a weapon change while the outgoing ADS permission is
   still live. An instantaneous aimed SPAS-to-M300 swap (the NAC off the pump)
   shows one frame of the M300 scope;

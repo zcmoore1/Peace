@@ -99,7 +99,8 @@ static int           cg_dropLock, cg_dropDuration;	// the drop as last fitted
 static qboolean      cg_lastFrameValid, cg_lastPoseValid, cg_returnPoseValid;
 static refEntity_t   cg_lastFrame, cg_returnSource;
 static modelPose_t   cg_returnPose;
-static int           cg_returnFrame, cg_previousWeaponState;
+static int           cg_returnFrame;
+static qboolean      cg_previousBaseAction;
 static float         cg_returnTime;
 static qboolean      cg_animTimeValid;
 static int           cg_animUpdateTime;
@@ -109,8 +110,23 @@ static qboolean CG_WeapAnim_SampleLayers(const weapAnimDef_t *def, refEntity_t *
 static void CG_WeapAnim_ResetReturn(void) {
 	cg_lastFrameValid = cg_lastPoseValid = cg_returnPoseValid = qfalse;
 	cg_returnTime = RETURN_BLEND_MSEC;
-	cg_previousWeaponState = WEAPON_READY;
+	cg_previousBaseAction = qfalse;
 	cg_animTimeValid = qfalse;
+}
+
+// The fire clip is the gun's picture: the shot, the action, and the think
+// between them, where pmove has the shot READY owing its action with the
+// clip's clock at the open note (BG_ShotAwaitsAction, MW2's READY think).
+// On a pump gun the shot and the action are one authored animation, so the
+// picture keeps running across that think instead of easing out into idle.
+static qboolean CG_WeapAnim_FireClip(const playerState_t *ps) {
+	return ps->weaponstate == WEAPON_FIRING || ps->weaponstate == WEAPON_BOLTING ||
+		BG_ShotAwaitsAction(ps);
+}
+
+// What a base-action release eases out of: a reload or the fire clip.
+static qboolean CG_WeapAnim_BaseAction(const playerState_t *ps) {
+	return ps->weaponstate == WEAPON_RELOADING || CG_WeapAnim_FireClip(ps);
 }
 
 static int CG_WeapAnim_DrawClip(const weapAnimDef_t *def, const playerState_t *ps) {
@@ -488,8 +504,8 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	// Firing and pumping share one clip. On a pump gun the shot and the action
 	// working are a single authored animation; the split into two states is a
 	// gameplay distinction, not a second piece of art, so the picture just
-	// keeps running across the boundary.
-	if ( ps->weaponstate == WEAPON_FIRING || ps->weaponstate == WEAPON_BOLTING ) {
+	// keeps running across the boundary, the shot's READY think included.
+	if ( CG_WeapAnim_FireClip( ps ) ) {
 		baseClip = WANIM_FIRE;
 	} else if ( ps->weaponstate == WEAPON_RELOADING ) {
 		// The reload is segmented in pmove, so the picture follows the same
@@ -621,8 +637,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 		int duration = BG_ReloadSegmentTime( ps, ps->weaponAnimSeq );
 		base->time = duration > 0 ? (float)ps->weaponAnimTime / duration *
 		             CG_WeapAnim_ClipLength( def, base->clip ) : 0.0f;
-	} else if ( ( ps->weaponstate == WEAPON_FIRING ||
-	              ps->weaponstate == WEAPON_BOLTING ) &&
+	} else if ( CG_WeapAnim_FireClip( ps ) &&
 	            ps->weaponAnimSeq == ASEQ_FIRE && ps->weaponAnimTime >= 0 ) {
 		int duration = BG_WeaponFireLength( ps->weapon );
 		base->time = duration > 0 ? (float)ps->weaponAnimTime / duration *
@@ -783,9 +798,9 @@ static float CG_WeapAnim_ReturnWeight(void) {
 }
 
 static void CG_WeapAnim_UpdateReturn(const playerState_t *ps, int msec) {
-	int old = cg_previousWeaponState, next = ps->weaponstate;
-	qboolean baseAction = old == WEAPON_RELOADING || old == WEAPON_FIRING || old == WEAPON_BOLTING;
-	qboolean transition = old != next && baseAction &&
+	int next = ps->weaponstate;
+	qboolean nextAction = CG_WeapAnim_BaseAction(ps);
+	qboolean transition = cg_previousBaseAction && !nextAction &&
 		(next == WEAPON_READY || next == WEAPON_DROPPING);
 
 	// A shot takes over immediately; a previous base-action release cannot
@@ -802,7 +817,7 @@ static void CG_WeapAnim_UpdateReturn(const playerState_t *ps, int msec) {
 		cg_returnTime += msec;
 		if (cg_returnTime > RETURN_BLEND_MSEC) cg_returnTime = RETURN_BLEND_MSEC;
 	}
-	cg_previousWeaponState = next;
+	cg_previousBaseAction = nextAction;
 }
 
 // ---------------------------------------------------------------------------

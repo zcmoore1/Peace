@@ -4381,7 +4381,9 @@ PM_ShotOver
 The shot of a gun with a worked action is over once its fire clip's clock has
 reached the open note (MW2's fireTime: the shot ends there, the action is what
 follows). Read from the gun's table; a gun with no open note shoots until its
-lock runs out, so its shot is never over here.
+lock runs out, so its shot is never over here. True only on the think the
+clock gets there (MW2's FIRING with its weaponTime run out): step 4f leaves
+the gun READY at the end of that think, or, frozen, keeps it there.
 ===============
 */
 // Where the shot ends on a gun's fire clip: its open note, or -1 with none.
@@ -4408,6 +4410,25 @@ static qboolean PM_ShotOver( void ) {
 	}
 	length = PM_ShotLength( pm->ps->weapon );
 	return length >= 0 && pm->ps->weaponAnimTime >= length;
+}
+
+/*
+===============
+BG_ShotAwaitsAction
+
+The think between a shot and its action: MW2's READY think, owing the
+rechamber (ShouldBeFiring at the shot's last think, 576d99-576da3; the
+rechamber from READY on the next, 575b77). Step 4f leaves the gun READY with
+the fire clip's clock where the shot stopped it, at the open note, and nothing
+else is READY with a fire clock running. Picture only: pmove works an owed
+action from READY whatever the clock says, and cgame keeps playing the one
+fire clip across this think instead of easing the shot out into idle.
+===============
+*/
+qboolean BG_ShotAwaitsAction( const playerState_t *ps ) {
+	return ps->weaponstate == WEAPON_READY && ps->weaponAnimSeq == ASEQ_FIRE &&
+		ps->weaponAnimTime >= 0 && ps->weapon > WP_NONE && ps->weapon < MAX_WEAPONS &&
+		( ps->stats[STAT_UNCHAMBERED] & ( 1 << ps->weapon ) ) && BG_WeaponFireLength( ps->weapon ) > 0;
 }
 
 /*
@@ -4482,12 +4503,11 @@ static qboolean PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 
 
 		case WNOTE_BOLT_OPEN:
-			// The shot is over; what is left is the action working. Only moved
-			// out of FIRING so a shot that has already been cancelled is not
-			// dragged back - the same reason nothing else here tests state.
-			if ( pm->ps->weaponstate == WEAPON_FIRING ) {
-				pm->ps->weaponstate = WEAPON_BOLTING;
-			}
+			// Where the shot ends and the action starts (PM_ShotLength). The
+			// note moves nothing: the shot ends READY in step 4f, after this
+			// think's checks, and the action starts from READY in step 4d on a
+			// later think, at this note (MW2's ShouldBeFiring, then
+			// CheckForRechamber).
 			break;
 
 		case WNOTE_BOLT_CLOSED:
@@ -4640,7 +4660,9 @@ static void PM_OffhandEnd( void ) {
 // asked for during the shot begins on the shot's last think, before the
 // rechamber can start (575b77: only from READY), and leaves the action owed.
 // On a gun with a fire clip that think is the one its clock reaches the open
-// note (PM_ShotOver), as for the sprint in step 1b.
+// note (PM_ShotOver). A change first asked for on the think after it takes the
+// READY gun step 4f left (MW2's change check runs before its rechamber check,
+// 44c4d7), so it too is a whole drop with the action owed.
 static qboolean PM_WeaponChangeOpen( void ) {
 	return pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING || PM_ShotOver() ||
 		( ( BG_IsActionWeapon( pm->ps->weapon ) || ( pm->ps->weaponAction & WA_TYPE_MASK ) ) &&
@@ -5455,12 +5477,14 @@ static void PM_Weapon( void ) {
 	       pm->ps->weaponstate == WEAPON_BOLTING ) &&
 	     pm->ps->weaponAnimTime >= 0 ) {
 		pm->ps->weaponAnimTime += pml.msec;		// no clamp - overshoot carries
-		// ...but not from the shot into the action. MW2's rechamber and its
-		// bolt delay start only from READY, on a think after the shot's last
-		// (PM_Weapon_CheckForRechamber, 575b77), so nothing of the action can
-		// happen on that last think, whatever takes the gun there. The action
-		// here is the rest of the fire clip: the shot's clock stops at the open
-		// note, and runs on from it once the gun is in the action.
+		// ...but not from the shot into the action. MW2's shot ends READY on
+		// its last think (ShouldBeFiring, 576d99-576da3) and its rechamber
+		// starts only from READY, on the think after (CheckForRechamber,
+		// 575b77-575ba9), so nothing of the action can happen on the shot's
+		// last think, whatever takes the gun there. The action here is the
+		// rest of the fire clip: the shot's clock stops at the open note, step
+		// 4f leaves the gun READY there, and step 4d starts the action from
+		// that note on a later think.
 		if ( pm->ps->weaponstate == WEAPON_FIRING && pm->ps->weaponAnimSeq == ASEQ_FIRE ) {
 			int shot = PM_ShotLength( pm->ps->weapon );
 			if ( shot >= 0 && pm->ps->weaponAnimTime > shot ) {
@@ -5531,19 +5555,20 @@ static void PM_Weapon( void ) {
 	//     raise or drop, so a switch resolves first. The sprint flag, its speed
 	//     and its meter still run (PM_CheckSprint: MW2's start and end gates,
 	//     56ED10/56ED80, never test those states).
-	//     MW2's shot ends READY, owing its action, and the sprint check runs
-	//     before the rechamber can start (575A30 starts it only from READY),
-	//     so a sprint that is on as the shot ends takes the gun first and the
-	//     action stays owed; step 4d works all of it once the gun is back up.
-	//     The open note that ends the shot here runs in step 2, after this, so
-	//     the shot is over on the think its clock reaches that note
-	//     (PM_ShotOver): that think lowers, and step 2 then finds no shot to
-	//     move into the action. Once the action is under way the sprint waits:
-	//     you run while it finishes, and the gun lowers on the think after
-	//     step 4c ends it, already chambered. So no sprint lock is ever stamped
-	//     while BOLTING, and the close note never has one to take away.
+	//     MW2's shot ends READY, owing its action, at the end of its last think
+	//     (ShouldBeFiring, 576d99-576da3), and on the next the sprint check
+	//     runs before the rechamber can start (575A30 starts it only from
+	//     READY), so a sprint that is on then takes the READY gun first and
+	//     the action stays owed; step 4d works all of it once the gun is back
+	//     up. Here the shot's last think is the one its clock reaches the open
+	//     note (PM_ShotOver): still FIRING, it does not lower; step 4f leaves
+	//     it READY, and the think after lowers before step 4d. Once the action
+	//     is under way the sprint waits: you run while it finishes, and the
+	//     gun lowers on the think after step 4c ends it, already chambered. So
+	//     no sprint lock is ever stamped while BOLTING, and the close note
+	//     never has one to take away.
 	if ( !ladderWeapon && pm->ps->weaponstate != WEAPON_DROPPING && pm->ps->weaponstate != WEAPON_RAISING &&
-	     ( pm->ps->weaponstate != WEAPON_FIRING || PM_ShotOver() ) && pm->ps->weaponstate != WEAPON_BOLTING ) {
+	     pm->ps->weaponstate != WEAPON_FIRING && pm->ps->weaponstate != WEAPON_BOLTING ) {
 		if ( pm->ps->pm_flags & PMF_SPRINTING ) {
 			if ( pm->ps->weaponstate != WEAPON_SPRINT_IN &&
 			     pm->ps->weaponstate != WEAPON_SPRINTING ) {
@@ -5655,21 +5680,32 @@ static void PM_Weapon( void ) {
 	}
 
 	// 4d. The mirror of 4c. A gun sitting READY with its action still open has
-	//     to work it before it can fire, and works ALL of it - the clock starts
-	//     at 0, exactly like a reload, which never resumes either.
+	//     to work it before it can fire, and works ALL of it: the action, from
+	//     its own start, the open note, to the fire clip's end, exactly as a
+	//     reload starts from 0 and never resumes. The shot is not played again.
+	//     This is MW2's CheckForRechamber from READY (575b77): RECHAMBERING
+	//     (575ba9) for rechamberTime (575bd2), the fire clip's length after its
+	//     open note, with the bolt rechamberBoltTime in, or 1 when that is 0
+	//     (575bd8-575c03): the close note's place after the open note. So the
+	//     bolt is taken on the think after this one at the earliest, and the
+	//     gun is READY ceil(rechamberTime / msec) thinks after this one.
 	//
-	//     Nothing here knows why the bit is set. A swap, a sprint, a death, a
-	//     dropped weapon picked back up - they all leave the same bit, so they
-	//     all get the same answer without being enumerated. The one way to not
-	//     end up here is to have let the close note's completion commit before
-	//     leaving. Interrupting on the note itself still abandons the action.
+	//     Nothing here knows why the bit is set. The shot that just ended (4f
+	//     left it READY on its last think), a swap, a sprint, a knife or
+	//     equipment, a death, a dropped weapon picked back up - they all leave
+	//     the same bit, so they all get the same answer without being
+	//     enumerated. The one way to not end up here is to have let the close
+	//     note's completion commit before leaving. Interrupting on the note
+	//     itself still abandons the action.
 	if ( pm->ps->weaponstate == WEAPON_READY &&
 	     ( pm->ps->stats[STAT_UNCHAMBERED] & ( 1 << pm->ps->weapon ) ) &&
 	     BG_WeaponFireLength( pm->ps->weapon ) > 0 ) {
+		int open = PM_ShotLength( pm->ps->weapon );
+		if ( open < 0 ) open = 0;
 		pm->ps->weaponstate    = WEAPON_BOLTING;
 		pm->ps->weaponAnimSeq  = ASEQ_FIRE;
-		pm->ps->weaponAnimTime = 0;
-		pm->ps->weaponTime     = BG_WeaponFireLength( pm->ps->weapon );
+		pm->ps->weaponAnimTime = open;
+		pm->ps->weaponTime     = BG_WeaponFireLength( pm->ps->weapon ) - open;
 	}
 
 	// 4e. Reload is taken out of the shot, out of the pump or bolt and out of
@@ -5684,6 +5720,28 @@ static void PM_Weapon( void ) {
 	     ( ( reload && pm->ps->ammo[pm->ps->weapon] < BG_WeaponMagSize( pm->ps->weapon ) ) ||
 	       ( pm->ps->weaponstate == WEAPON_BOLTING && pm->ps->ammo[pm->ps->weapon] <= 0 ) ) ) {
 		PM_BeginReload();
+		return;
+	}
+
+	// 4f. The shot's last think (PM_ShotOver) ends READY, owing the action,
+	//     and nothing more happens on it: MW2's ShouldBeFiring makes the shot
+	//     READY once its weaponTime has run out (576d99-576da3), after every
+	//     check of that think, and fires nothing. So a change, a knife,
+	//     equipment or a reload already took the gun out of the shot above,
+	//     the sprint waits for the next think (MW2's sprint check refuses
+	//     FIRING), and the action is not started on this think: step 4d
+	//     starts it from READY on the next (MW2's rechamber, 575b77), unless a
+	//     change, a sprint, a knife, equipment or a reload takes the READY gun
+	//     first and leaves it owed (MW2 checks all of them before its
+	//     rechamber). The fire clip's clock stays at the open note
+	//     (BG_ShotAwaitsAction). A frozen player's hand step returns before
+	//     ShouldBeFiring (579505): the shot stays over and FIRING, its action
+	//     not started, until the freeze lifts.
+	if ( PM_ShotOver() ) {
+		if ( !( pm->ps->pm_flags & PMF_FROZEN ) ) {
+			pm->ps->weaponstate = WEAPON_READY;
+			pm->ps->weaponTime  = 0;
+		}
 		return;
 	}
 

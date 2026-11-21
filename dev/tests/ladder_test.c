@@ -315,7 +315,9 @@ static void TestWeaponOrdering(void) {
         CHECK(ps.weaponstate == WEAPON_READY);
         WeaponTick(1);
         CHECK(ps.weaponstate == (offset <= 0 ? WEAPON_BOLTING : WEAPON_READY));
-        if (offset <= 0) CHECK(ps.weaponAnimTime == 0);
+        /* the owed pump alone, from its open note (MW2's rechamber from READY) */
+        if (offset <= 0) CHECK(ps.weaponAnimTime == Note(WP_SHOTGUN, ASEQ_FIRE, WNOTE_BOLT_OPEN) &&
+            ps.weaponTime == BG_WeaponFireLength(WP_SHOTGUN) - Note(WP_SHOTGUN, ASEQ_FIRE, WNOTE_BOLT_OPEN));
     }
 }
 

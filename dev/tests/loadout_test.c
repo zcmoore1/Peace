@@ -146,7 +146,9 @@ static void TestYY(void) {
  ps.stats[STAT_UNCHAMBERED]=1<<WP_SHOTGUN;
  Toggle(); Step(1); Toggle(); move.cmd.buttons=BUTTON_ATTACK; Step(1);
  CHECK(fired[WP_SHOTGUN]==0 && ps.weaponstate==WEAPON_BOLTING);
- CHECK(ps.weaponAnimTime==0 && ps.weaponTime==BG_WeaponFireLength(WP_SHOTGUN));
+ /* the action alone, from its open note (MW2's rechamber from READY) */
+ CHECK(ps.weaponAnimTime==Note(WP_SHOTGUN,ASEQ_FIRE,WNOTE_BOLT_OPEN));
+ CHECK(ps.weaponTime==BG_WeaponFireLength(WP_SHOTGUN)-Note(WP_SHOTGUN,ASEQ_FIRE,WNOTE_BOLT_OPEN));
  Ready(WP_MACHINEGUN,WP_SHOTGUN); ps.ammo[WP_MACHINEGUN]=ps.ammoReserve[WP_MACHINEGUN]=0;
  Toggle(); Step(1); Toggle(); move.cmd.buttons=BUTTON_ATTACK; Step(1);
  CHECK(fired[WP_MACHINEGUN]==0);
@@ -1863,8 +1865,8 @@ static void TestKnifeOutOfReloadSettle(void) {
   CHECK(ps.ammo[gun]==ammo && ps.ammo[gun]+ps.ammoReserve[gun]==total && fired[gun]==1);
   Step(1);
   if(when<2) {
-   CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==0 &&
-    ps.weaponTime==BG_WeaponFireLength(gun));
+   CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==Note(gun,ASEQ_FIRE,WNOTE_BOLT_OPEN) &&
+    ps.weaponTime==BG_WeaponFireLength(gun)-Note(gun,ASEQ_FIRE,WNOTE_BOLT_OPEN));
    for(t=0;t<12000 && ps.weaponstate==WEAPON_BOLTING;t++) Step(1);
   }
   CHECK(ps.weaponstate==WEAPON_READY && !(ps.stats[STAT_UNCHAMBERED]&(1<<gun)) && fired[gun]==1);
@@ -1883,7 +1885,10 @@ static void TestKnifeOutOfAction(void) {
   CHECK(open>0 && close>open && close<BG_WeaponFireLength(gun));
   move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0;
   CHECK(fired[gun]==1 && ps.weaponAnimTime==0);
-  Run(press-1);
+  /* 1ms thinks to the one before the press: into the shot, or through its
+   * last think (READY, the clock at the open note) and the action's start
+   * from READY at that note, into the action */
+  Run(when ? press : press-1);
   CHECK(ps.weaponstate==states[when] && ps.weaponAnimTime==press-1);
   CHECK(when || ps.weaponTime>0);
   CHECK(!!(ps.stats[STAT_UNCHAMBERED]&(1<<gun))==(when<3));
@@ -1891,8 +1896,8 @@ static void TestKnifeOutOfAction(void) {
   CHECK(fired[gun]==1 && ps.ammo[gun]==BG_WeaponMagSize(gun)-1);
   Step(1);
   if(when<3) {
-   CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==0 &&
-    ps.weaponTime==BG_WeaponFireLength(gun));
+   CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==open &&
+    ps.weaponTime==BG_WeaponFireLength(gun)-open);
    for(t=0;t<12000 && ps.weaponstate==WEAPON_BOLTING;t++) Step(1);
   }
   CHECK(ps.weaponstate==WEAPON_READY && !(ps.stats[STAT_UNCHAMBERED]&(1<<gun)) && fired[gun]==1);
@@ -1984,8 +1989,8 @@ static void TestActionOutOfShot(void) {
   CHECK(fired[specials[b]]==1 && ps.weapon==gun);
   CHECK(!!(ps.stats[STAT_UNCHAMBERED]&(1<<gun))==owed);
   Step(1);
-  CHECK(owed ? ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==0 &&
-   ps.weaponTime==BG_WeaponFireLength(gun) :
+  CHECK(owed ? ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==Note(gun,ASEQ_FIRE,WNOTE_BOLT_OPEN) &&
+   ps.weaponTime==BG_WeaponFireLength(gun)-Note(gun,ASEQ_FIRE,WNOTE_BOLT_OPEN) :
    ps.weaponstate==(ps.ammo[gun] ? WEAPON_READY : WEAPON_RELOADING));
  }
 }

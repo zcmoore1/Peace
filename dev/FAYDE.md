@@ -29,8 +29,8 @@ kept, and the swap is an ordinary holster.
 
 | | SPAS | M300 |
 |---|---|---|
-| plain refire, waiting for the pump/bolt | 648 ms | 960 ms |
-| no reload, NAC off the pump/bolt (close note) | 504 ms | 784 ms |
+| plain refire, waiting for the pump/bolt | 656 ms | 968 ms |
+| no reload, NAC off the pump/bolt (close note) | 512 ms | 792 ms |
 | ...and swapping back | full pump | full bolt |
 | instant reload, NAC on the first round in | 544 ms | 808 ms |
 | **instant reload, Y on the settle think: fastest NAC** | **296 ms** | **512 ms** |
@@ -40,6 +40,11 @@ kept, and the swap is an ordinary holster.
 
 Times are from the shot. The settle comes out at 283 ms into the SPAS reload
 (its pump is 350 ms, capped by the 283 ms reload start) and 500 ms into the
-M300's (bolt 620, capped by the 500 ms start). The SPAS Fayde fires at 53% of a
+M300's (bolt 620, capped by the 500 ms start). The SPAS Fayde fires at 52% of a
 plain refire; MW2's fires at 51%. Retiming a gun's fire cycle or reload start
-moves both automatically.
+moves both automatically. The two rows without a reload include MW2's READY
+think between the shot and its action: the shot ends READY on its last think
+and the pump or bolt starts from READY on the next (`ShouldBeFiring`, then
+`CheckForRechamber`), a think later than when Peace ran the shot straight into
+the action. The rows with an instant reload start it out of the shot, so they
+did not move.

@@ -45,26 +45,39 @@ static void TestCatalog(void) {
 }
 static void TestCycle(void) {
  int open=Note(ASEQ_FIRE,WNOTE_BOLT_OPEN), close=Note(ASEQ_FIRE,WNOTE_BOLT_CLOSED), end=BG_WeaponFireLength(WP_M40A3);
+ /* MW2's cycle at 1ms thinks, the trigger held: the shot, whose last think
+  * ends READY owing the bolt (ShouldBeFiring, 576d99-576da3); the bolt from
+  * READY on the next, at the open note (CheckForRechamber, 575b77-575c03),
+  * its close on the think its clock crosses the close note, and the second
+  * shot on the think it ends. */
  Ready(); move.cmd.buttons=BUTTON_ATTACK; Step(1);
  CHECK(shots==1 && ps.ammo[WP_M40A3]==BG_WeaponMagSize(WP_M40A3)-1);
  CHECK(ps.stats[STAT_UNCHAMBERED]&(1<<WP_M40A3));
- Run(open); CHECK(ps.weaponstate==WEAPON_BOLTING && shots==1);
- Run(close-open); CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponTime==0);
+ Run(open-1); CHECK(ps.weaponstate==WEAPON_FIRING && shots==1);
+ Step(1); CHECK(ps.weaponstate==WEAPON_READY && BG_ShotAwaitsAction(&ps) && shots==1);
+ CHECK(ps.weaponAnimTime==open && (ps.stats[STAT_UNCHAMBERED]&(1<<WP_M40A3)));
+ Step(1); CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==open && ps.weaponTime==end-open);
+ Run(close-open-1); CHECK(ps.weaponstate==WEAPON_BOLTING && (ps.stats[STAT_UNCHAMBERED]&(1<<WP_M40A3)));
+ Step(1); CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponTime==0);
  CHECK(!(ps.stats[STAT_UNCHAMBERED]&(1<<WP_M40A3)));
- Run(end-close-1); CHECK(shots==1); Run(2); CHECK(shots==2);
- /* Miss the close note: stowing cannot forgive chamber debt. */
+ Run(end-close-1); CHECK(shots==1); Step(1); CHECK(shots==2);
+ /* Miss the close note: stowing cannot forgive chamber debt. Asked for on
+  * the shot's READY think, the swap takes the READY gun before its bolt. */
  Ready(); move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0; Run(open);
+ CHECK(BG_ShotAwaitsAction(&ps));
  move.cmd.weapon=BG_SLOT_COMMAND+1; Step(1);
+ CHECK(ps.weapon==WP_M40A3 && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_WeaponDropTime(WP_M40A3));
  Run(BG_WeaponDropTime(WP_M40A3)+BG_WeaponRaiseTime(WP_MACHINEGUN)+1);
  CHECK(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_READY);
  CHECK(ps.stats[STAT_UNCHAMBERED]&(1<<WP_M40A3));
  move.cmd.weapon=BG_SLOT_COMMAND; Step(1);
  Run(BG_WeaponDropTime(WP_MACHINEGUN)+BG_WeaponRaiseTime(WP_M40A3)+1);
  CHECK(ps.weapon==WP_M40A3 && ps.weaponstate==WEAPON_BOLTING);
- CHECK(ps.weaponAnimTime<=1 && shots==1);
+ CHECK(ps.weaponAnimTime>=open && ps.weaponAnimTime<=open+1 && shots==1);
  /* A note colliding with the holster clears its lock, then the completed
   * holster returns before chamber completion. The next draw owes a full bolt. */
- Ready(); move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0; Run(close-1);
+ Ready(); move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0; Run(close);
+ CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==close-1);
  move.cmd.weapon=BG_SLOT_COMMAND+1; Step(1);
  CHECK(ps.weapon==WP_MACHINEGUN && ps.weaponstate==WEAPON_RAISING);
  CHECK(ps.stats[STAT_UNCHAMBERED]&(1<<WP_M40A3));
@@ -73,8 +86,8 @@ static void TestCycle(void) {
  Run(BG_WeaponDropTime(WP_MACHINEGUN)+BG_WeaponRaiseTime(WP_M40A3));
  CHECK(ps.weapon==WP_M40A3 && ps.weaponstate==WEAPON_READY);
  move.cmd.buttons=BUTTON_ATTACK; Step(1);
- CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==0 && shots==1);
- Run(end-1); CHECK(shots==1); Step(1); CHECK(shots==2);
+ CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==open && shots==1);
+ Run(end-open-1); CHECK(shots==1); Step(1); CHECK(shots==2);
 }
 static void TestReload(void) {
  int start=BG_WeaponReloadSegLength(WP_M40A3,RSEQ_START), loop=BG_WeaponReloadSegLength(WP_M40A3,RSEQ_LOOP);

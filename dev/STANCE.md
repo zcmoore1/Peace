@@ -165,9 +165,11 @@ the curve, so on the way down the eye is above the new box for 110ms of stand to
   raises `EV_STANCE_INVALID 3` every think and undoes 98% of a small turn the same way. The
   pitches follow the ground at 70 a second. The server's `SetClientViewAngle` keeps the same
   limits.
-- *The crawl and the gun*: a shot, a pump or bolt, the knife and every offhand stop the crawl
+- *The crawl and the gun*: a shot, the knife and every offhand stop the crawl
   (`PMF_PRONEMOVE_OVERRIDDEN`) until the stick is pushed further than on the command before or
-  the weapon is quiet again; a magazine reload and a swap never stop it. An unscoped aim stops it;
+  the weapon is quiet again; a magazine reload and a swap never stop it. A pump gun's shot ends
+  READY on its last think, as MW2's, and that READY think is quiet (MW2's 0x572AA0), so the
+  crawl comes back there with no push; its pump or bolt, like MW2's rechamber, stops nothing. An unscoped aim stops it;
   an aim held since the command before does not start while crawling; a scoped gun crawls aimed.
 - *Water* is sampled from the standing eye in every stance (`BG_WATER_SAMPLE_EYE`), so neither a
   crouch nor prone swims or drowns where standing wades.

@@ -185,13 +185,14 @@ source for MW2 behaviour; the owner rejects it.
   adds to, capped at 4, 0x576F93-0x576FC5, and a reload zeroes, 0x575EFE), the
   command still naming the gun and a round in its magazine, the gun's time
   becomes 1 (0x578AE6): the shot's end, the action's end and the knife's end
-  leave the gun READY, any other state (a raise) keeps its state, and the 1
-  runs out on the next think, which asks again. A think that asks with the
-  trigger up zeroes the count. So the SPAS, the M300 (as the Intervention) and
-  the Masterkey, Single Shot in MW2's files, are READY under the lock on the
-  shot's last think with the trigger held, and step 4d starts the action from
-  that READY on that same think (MW2's `CheckForRechamber` takes READY with no
-  weaponDelay, 0x575B07-0x575BA9): the bolt and the end come a think sooner
+  leave the gun READY, any other state (a raise, the sprint-out) keeps its
+  state, and the 1 runs out on the next think, which asks again. A think that
+  asks with the trigger up zeroes the count. So the SPAS, the M300 (as the
+  Intervention) and the Masterkey, Single Shot in MW2's files, are READY
+  under the lock on the shot's last think with the trigger held, and step 4d
+  starts the action from that READY on that same think (MW2's
+  `CheckForRechamber` takes READY with no weaponDelay, 0x575B07-0x575BA9):
+  the bolt and the end come a think sooner
   than with the trigger let go, the READY think after the shot exists only
   with the trigger let go, and the gun fires nothing until the trigger has
   been let go: let go on the action's last command and pulled on the next, it
@@ -716,7 +717,11 @@ source for MW2 behaviour; the owner rejects it.
   the think after the ready boundary: that think is still MW2's MELEE_END or
   OFFHAND_END, which its state switch ends and its change check refuses
   (0x578BC9-0x578BF2), so step 1 and the ladder hold it (`pml.recoveryEnds`);
-  equipment pressed on it comes out. An empty hand's return is MW2's one-think
+  equipment pressed on it comes out. (The knife's quick raise ending under the
+  held trigger's lock, below, is READY to that check, which takes it
+  (0x578C0A-0x578C47): a ladder grabbed then drops the gun on that think; a
+  queued swap never meets the lock, whose command names the gun.) An empty
+  hand's return is MW2's one-think
   OFFHAND_END (`OffHandEnd` with weapon 0, 0x577A1A-0x577A2A), so a gun
   selected meanwhile is drawn two thinks after the hand empties; that one
   think's delay is a weapon delay (`PM_WeaponDelayEnds`), so equipment pressed
@@ -1315,9 +1320,19 @@ hand's return ends, is prepared on that think (with no use hint, out of the
 empty hand, it is in hand and ready on it; a think later its prepare plays);
 a knife pressed on a reload's round or settle is lost while the round seats
 or the pump is paid, and one pressed on the SPAS's or M300's reload end's
-close note is taken (MW2's RELOAD_END has no delay). Only buttons are
-pressed, and every time is read from the tables or from the lock pmove
-stamped.
+close note is taken (MW2's RELOAD_END has no delay). The held trigger at
+those ends (`TestHeldTriggerAtTheEnds`): with the SPAS's or M300's pull spent
+(a frag thrown out of the lock, the trigger let go after the return) the
+sprint-out stays lowered under the lock while the trigger is down and ends
+READY when it is let go; YY with the trigger pressed on its think fires there,
+or works an owed action first; a frag on the knife's hit with the trigger held
+is prepared there and the gun's unlocked return fires on the next think; and
+after a swap on a reload's settle the other gun's raise, the reload having
+begun a new pull, ends unlocked. Only buttons are pressed, and every time is
+read from the tables or from the lock pmove stamped. `ladder_test.c`'s
+`TestHeldTriggerGrab` grabs a ladder during the knife's quick raise: ended
+under the held trigger's lock it is READY, and the ladder drop starts on that
+think; let go, on the think after.
 
 `dev/tests/run-loadouts.cmd` (or `.sh`) checks class validation/persistence,
 modulo selection, same-update YY firing, reload/pull-out cancellation, tap/hold

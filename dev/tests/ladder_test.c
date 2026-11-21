@@ -1211,6 +1211,49 @@ static void TestStepRules(void) {
     }
     move.cmd.forwardmove = 0;
 }
+/* The gun's quick raise after the knife, ended under the held trigger's
+ * lock: on the think that raise's time runs out with the trigger down, the
+ * gun's pull spent (the SPAS's shot), the command naming the gun and a round
+ * in it, MW2's WeaponTimeAdjust makes MELEE_END READY with weaponTime 1
+ * before every check (0x578B25 -> 0x578B2A-0x578B39). Its change check then
+ * finds READY, with time and no delay, which it takes (0x578C0A-0x578C47), so
+ * a ladder grabbed during that raise drops the gun on the raise's last think
+ * (its ladder branch: PMF_LADDER, 0x578C72-0x578C78, the drop to weapon 0,
+ * 0x578C54-0x578C67), not on the think after, as with the
+ * trigger let go (MELEE_END refused, 0x578BC9-0x578BE4). A Y during the knife
+ * keeps the knife's own end unlocked (the command names the machinegun,
+ * 0x578ABC), and a Y back during the quick raise names the SPAS again. */
+static void TestHeldTriggerGrab(int dt) {
+    int held, t;
+    for (held = 0; held < 2; held++) {
+        QuickReset(WP_FRAG, dt);
+        move.cmd.buttons = BUTTON_ATTACK; QuickTick(dt);
+        CHECK(fired[WP_SHOTGUN] == 1 && ps.weaponShotCount == 1);
+        move.cmd.buttons = BUTTON_ATTACK | BUTTON_MELEE; QuickTick(dt);
+        CHECK(ps.weapon == WP_KNIFE);
+        move.cmd.buttons = BUTTON_ATTACK; move.cmd.weapon = WP_MACHINEGUN;
+        for (t = 0; t < 5000 && ps.weapon == WP_KNIFE; t += dt) QuickTick(dt);
+        CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_RAISING && (ps.weaponAction & WA_FIRED));
+        CHECK(ps.weaponTime == BG_WeaponQuickRaiseTime(WP_SHOTGUN) && ps.weaponShotCount == 1);
+        move.cmd.weapon = WP_SHOTGUN;
+        if (!held) move.cmd.buttons = 0;
+        GrabWithAction(dt);
+        while (ps.weaponstate == WEAPON_RAISING && ps.weaponTime > dt) {
+            QuickTick(dt);
+            CHECK(Attached() && !LadderHasHands() && ps.weapon == WP_SHOTGUN);
+        }
+        CHECK(ps.weaponstate == WEAPON_RAISING && ps.weaponTime > 0);
+        QuickTick(dt);  /* the quick raise's last think */
+        if (held) {
+            CHECK(ps.weaponstate == WEAPON_DROPPING && (ps.stats[STAT_LADDER] & LADDER_HOLSTER));
+        } else {
+            CHECK(ps.weaponstate == WEAPON_READY && !LadderHasHands());
+            QuickTick(dt);
+            CHECK(ps.weaponstate == WEAPON_DROPPING && (ps.stats[STAT_LADDER] & LADDER_HOLSTER));
+        }
+        CHECK(ps.weaponTime == BG_LADDER_DROP_TIME && fired[WP_SHOTGUN] == 1 && Attached());
+    }
+}
 int main(void) {
     int checksum, i;
     const int steps[] = {8, 16, 33, 66};
@@ -1223,6 +1266,7 @@ int main(void) {
         TestLadderJumpHeight(steps[i]);
         TestLadderPush(steps[i]);
         TestOffhandGrab(steps[i]);
+        TestHeldTriggerGrab(steps[i]);
         TestBottomExit(steps[i]);
         TestPredictionReplay(steps[i]);
     }

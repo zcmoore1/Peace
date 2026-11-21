@@ -4960,7 +4960,10 @@ static void PM_UpdateWeaponAction( void ) {
 		// one-think weaponDelay in OFFHAND_END (577a1a-577a2a), and on the
 		// think that delay runs out the change check still refuses the state
 		// before the switch ends it, so the latch clearing here, the think
-		// after the hand emptied, is that think.
+		// after the hand emptied, is that think. The knife's quick raise ended
+		// under the held trigger's lock is READY already (PM_WeaponTimeAdjust:
+		// MW2's lock readies MELEE_END before every check, 578b25-578b39), so
+		// its change check takes that think (578c0a-578c47): no recoveryEnds.
 		if ( (action & WA_FIRED) && !BG_IsActionWeapon( pm->ps->weapon ) &&
 			((pm->ps->weaponstate != WEAPON_RAISING && pm->ps->weaponstate != WEAPON_DROPPING) ||
 			 (pm->ps->weaponstate == WEAPON_RAISING && pm->ps->weaponTime <= 0) || yyReturn) ) {
@@ -5335,7 +5338,10 @@ static void PM_FinishWeaponChange( void ) {
 // raise after it included (PM_UpdateWeaponAction): the drop starts on the
 // think after the latch clears, if the ladder is still held (MW2's change
 // check, the ladder's branch included, refuses MELEE_END and OFFHAND_END on
-// the think they end, 578bc9-578bf2; it starts from READY on the next).
+// the think they end, 578bc9-578bf2; it starts from READY on the next). The
+// knife's quick raise that ends under the held trigger's lock is READY to that
+// check already (PM_WeaponTimeAdjust, 578b25-578b39), which takes READY with
+// time and no delay (578c0a-578c47): the drop starts on that think.
 static qboolean PM_LadderWeapon( void ) {
 	int state = pm->ps->stats[STAT_LADDER];
 	if ( ((state & LADDER_ATTACHED) || pml.ladderGrabbed) &&

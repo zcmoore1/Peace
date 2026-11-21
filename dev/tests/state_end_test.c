@@ -507,6 +507,142 @@ static void TestKnifeOnTheEndsNote(int gun) {
 	}
 }
 
+/* The held trigger at these ends (MW2's PM_Weapon_WeaponTimeAdjust,
+ * 0x5788B0, run before every check, 0x44C42B). On the think a state's
+ * weaponTime runs out with the trigger down, the pull's shots all fired
+ * (ShotLimitReached 0x5769E0), the command naming the gun and a round in it,
+ * the time becomes 1 (0x578AE6): FIRING and the melee states go READY
+ * (0x578B16-0x578B39), the offhand states are never locked (0x578A94), any
+ * other state keeps its state (0x578B25-0x578B28), and the 1 runs out on the
+ * next think, which asks again. A think that asks with the trigger up zeroes
+ * the count and the time (0x578B51-0x578B71). A single-shot gun's pull is
+ * spent by its shot; a frag thrown out of the lock with the trigger held all
+ * along keeps it spent (its return is an offhand state, so it stays unlocked
+ * and the time is zeroed with the count kept, 0x578B51-0x578B71), and a
+ * trigger let go on the think after the return asks nothing (no time runs
+ * out), so the pull is still spent with the trigger up. */
+static void ShootHeldToTheLock(int gun) {
+	int t;
+	buttons = BUTTON_ATTACK; Frame();
+	CHECK(fired[gun] == 1 && ps.weaponShotCount == 1);
+	for (t = 0; t < 20000 && !(ps.weaponstate == WEAPON_READY && !Owes(gun)); t += msec) Frame();
+	CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 1 && !Owes(gun) && fired[gun] == 1);
+}
+static void SpentWithTheTriggerUp(int gun) {
+	int t, lethal = BG_LethalWeapon(&ps);
+	ShootHeldToTheLock(gun);
+	buttons = BUTTON_ATTACK | BUTTON_LETHAL; Frame();
+	CHECK((ps.weaponAction & WA_TYPE_MASK) == WA_LETHAL);
+	buttons = BUTTON_ATTACK;
+	for (t = 0; t < 20000 && !(ps.weapon == gun && ps.weaponstate == WEAPON_READY); t += msec) Frame();
+	/* the return's last think: READY, nothing fired, the pull still spent */
+	CHECK(fired[lethal] == 1 && fired[gun] == 1 && ps.weaponShotCount == 1 && !(ps.weaponAction & WA_TYPE_MASK));
+	buttons = 0; Frame();
+	CHECK(ps.weaponstate == WEAPON_READY && ps.weaponShotCount == 1 && fired[gun] == 1);
+}
+static void TestHeldTriggerAtTheEnds(int gun) {
+	int k, t, owed, other = Other(gun), lethal, raise;
+	CHECK(BG_ShotLimitReached(BG_WeaponFireType(gun), 1) && BG_WeaponFireLength(gun) > 0);
+
+	/* D1 under the lock: the trigger pressed in the sprint entry ends the
+	   sprint, and with the pull spent the sprint-out's last think locks it
+	   (SPRINT_DROP keeps its state with weaponTime 1) for as long as the
+	   trigger stays down; let go, it ends as ever, READY and nothing fired
+	   (PM_Weapon_Idle), and a fresh pull fires on the next think */
+	Setup(gun, other); SpentWithTheTriggerUp(gun);
+	forward = 127; buttons = BUTTON_SPRINT; Frame(); buttons = 0;
+	CHECK((ps.pm_flags & PMF_SPRINTING) && ps.weaponstate == WEAPON_SPRINT_IN);
+	CHECK(Thinks(BG_WeaponSprintInTime(gun)) > 2);
+	Frame();
+	buttons = BUTTON_ATTACK; Frame();
+	CHECK(!(ps.pm_flags & PMF_SPRINTING));
+	ThroughTheSprintOut(gun);
+	Frame();
+	CHECK(ps.weaponstate == WEAPON_SPRINT_OUT && ps.weaponTime == 1 && fired[gun] == 1);
+	for (k = 0; k < Thinks(BG_WeaponFireLength(gun)); k++) {
+		Frame();
+		CHECK(ps.weaponstate == WEAPON_SPRINT_OUT && ps.weaponTime == 1 && fired[gun] == 1);
+	}
+	buttons = 0; Frame();
+	CHECK(ps.weaponstate == WEAPON_READY && ps.weaponShotCount == 0 && fired[gun] == 1);
+	buttons = BUTTON_ATTACK; Frame();
+	CHECK(ps.weaponstate == WEAPON_FIRING && fired[gun] == 2);
+	/* the pull not spent (the shot's own last think let go): the same press
+	   ends the sprint-out on its time, and the trigger fires the think after */
+	Setup(gun, other); IntoTheCarry(gun, 0);
+	CHECK(ps.weaponShotCount == 0);
+	buttons = BUTTON_ATTACK; Frame();
+	ThroughTheSprintOut(gun);
+	Frame();
+	CHECK(ps.weaponstate == WEAPON_READY && fired[gun] == 0);
+
+	/* D4 with the trigger: pressed on the YY think, it ends the sprint first
+	   (PM_UpdateSprint), the cancel readies the gun, and the hand fires on
+	   that think (ShouldBeFiring), or, owing its action, starts the action
+	   from READY and fires nothing (CheckForRechamber first, 0x579464); that
+	   action's end is no lock (the shot's own last think let go ended its
+	   pull) and fires as a rechamber's end does */
+	for (owed = 0; owed < 2; owed++) {
+		Setup(gun, other); IntoTheCarry(gun, owed);
+		slot = SLOT_SECONDARY; Frame();
+		CHECK(ps.weaponstate == WEAPON_DROPPING && (ps.pm_flags & PMF_SPRINTING));
+		slot = SLOT_PRIMARY; buttons = BUTTON_ATTACK; Frame();	/* YY on N */
+		CHECK(!(ps.pm_flags & PMF_SPRINTING) && ps.weapon == gun);
+		if (!owed) {
+			CHECK(ps.weaponstate == WEAPON_FIRING && fired[gun] == 1);
+			continue;
+		}
+		CHECK(ps.weaponstate == WEAPON_BOLTING && ps.weaponAnimTime == Open(gun) && fired[gun] == 1);
+		for (k = 1; k < Thinks(ActionLength(gun)); k++) Frame();
+		CHECK(ps.weaponstate == WEAPON_BOLTING && fired[gun] == 1);
+		Frame();
+		CHECK(ps.weaponstate == WEAPON_FIRING && Owes(gun) && fired[gun] == 2);
+	}
+
+	/* D6 with the trigger: the knife out of the lock, the trigger held, and
+	   a frag on the hit's think, which is prepared there; the gun's return
+	   after the throw ends READY and unlocked (an offhand state), nothing
+	   fired, and the held trigger fires on the next think (no time ran out,
+	   so nothing asks: ShouldBeFiring is a level test, 0x576CC0) */
+	Setup(gun, other); lethal = BG_LethalWeapon(&ps);
+	ShootHeldToTheLock(gun);
+	buttons = BUTTON_ATTACK | BUTTON_MELEE; Frame();	/* P */
+	CHECK(ps.weapon == WP_KNIFE && ps.weaponstate == WEAPON_RAISING && ps.weaponTime == BG_MELEE_DELAY);
+	buttons = BUTTON_ATTACK;
+	for (k = 1; k < Thinks(BG_MELEE_DELAY); k++) Frame();
+	buttons = BUTTON_ATTACK | BUTTON_LETHAL; Frame();	/* H */
+	CHECK(ps.weapon == lethal && ps.weaponstate == WEAPON_RAISING && prepared[lethal] == 1 && fired[WP_KNIFE] == 0);
+	buttons = BUTTON_ATTACK;
+	for (t = 0; t < 20000 && !(ps.weapon == gun && ps.weaponstate == WEAPON_READY); t += msec) Frame();
+	CHECK(fired[lethal] == 1 && fired[gun] == 1 && ps.weaponShotCount == 1);
+	Frame();
+	CHECK(ps.weaponstate == WEAPON_FIRING && fired[gun] == 2);
+
+	/* the reload's delayed action, the trigger held from the shot: a Y on
+	   the settle's think is the instant swap (MW2's path A), and the other
+	   gun's raise ends READY, unlocked, since the reload began a new pull
+	   (PM_BeginWeaponReload zeroes the count, 0x575EFE): the held trigger
+	   fires on the next think. (The same raise with the pull spent waits
+	   under the lock: trigger_test.c.) */
+	Setup(gun, other);
+	buttons = BUTTON_ATTACK; Frame();
+	buttons = BUTTON_ATTACK | BUTTON_RELOAD; Frame();	/* R */
+	CHECK(ps.weaponstate == WEAPON_RELOADING && Owes(gun) && ps.weaponShotCount == 0);
+	buttons = BUTTON_ATTACK;
+	for (k = 1; k < Thinks(Settle(gun)); k++) Frame();
+	CHECK(ps.weaponstate == WEAPON_RELOADING && Owes(gun));
+	slot = SLOT_SECONDARY; Frame();
+	CHECK(ps.weapon == other && ps.weaponstate == WEAPON_RAISING && Owes(gun));
+	raise = ps.weaponTime;
+	CHECK(raise == BG_WeaponDrawTime(&ps) && raise > msec);
+	for (k = 1; k < Thinks(raise); k++) Frame();
+	CHECK(ps.weaponstate == WEAPON_RAISING && fired[other] == 0);
+	Frame();
+	CHECK(ps.weaponstate == WEAPON_READY && fired[other] == 0);
+	Frame();
+	CHECK(ps.weaponstate == WEAPON_FIRING && fired[other] == 1);
+}
+
 int main(void) {
 	const int steps[] = { 8, 16, 33 };
 	const int guns[] = { WP_SHOTGUN, WP_M40A3, WP_MACHINEGUN };
@@ -526,6 +662,8 @@ int main(void) {
 		TestKnifeOnADelay(WP_M40A3);
 		TestKnifeOnTheEndsNote(WP_SHOTGUN);
 		TestKnifeOnTheEndsNote(WP_M40A3);
+		TestHeldTriggerAtTheEnds(WP_SHOTGUN);
+		TestHeldTriggerAtTheEnds(WP_M40A3);
 	}
 	printf("PASS: %d checks of what a weapon state's last think does, at 8, 16 and 33ms commands\n", checks);
 	return 0;

@@ -67,7 +67,9 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
   starts on the think after the quick-action latch clears, as a queued swap
   does, if the ladder is still held: the latch's last think is MW2's MELEE_END
   or OFFHAND_END, which the change check, its ladder branch included, refuses
-  (0x578BC9-0x578BF2). Jump off first and there is no ladder drop at all.
+  (0x578BC9-0x578BF2). (The knife's quick raise that ends under a held
+  trigger's lock is READY on that think already, 0x578B25-0x578B39, so the drop
+  starts on it.) Jump off first and there is no ladder drop at all.
 - The original reload helpers, swap helpers, note runner and their non-ladder
   ordering are unchanged. A ladder just owns the weapon while the hands are busy.
   Leaving raises the selected weapon using the existing deploy logic/timing.

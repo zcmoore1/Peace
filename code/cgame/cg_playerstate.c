@@ -198,6 +198,11 @@ void CG_Respawn( void ) {
 
 	// display weapons available
 	cg.weaponSelectTime = cg.time;
+	// A new life inherits no Y lockout from the last one's empty gun. MW2's
+	// is written only by its out-of-ammo change (0x5A0865), which a dead
+	// player never reaches (0x5A07E7), and no MW2 life starts within 750ms
+	// of a death, so this changes nothing MW2 could show.
+	cg.weaponForcedSelectTime = 0;
 
 	// select the weapon the server says we are using
 	cg.weaponSelect = cg.snap->ps.weapon;

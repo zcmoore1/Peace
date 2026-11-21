@@ -1,5 +1,7 @@
 /* Unused rendering/sound boundaries needed by Windows linkers before dead-code
- * stripping. A selection test reaching any of them must fail immediately. */
+ * stripping. A selection test reaching any of them must fail immediately.
+ * A test that links the real cg_event.c defines MASTERKEY_STUBS_REAL_EVENTS:
+ * the four marked are then that file's handlers and the test's killcam. */
 vmCvar_t cg_brassTime;
 vmCvar_t cg_drawGun;
 centity_t cg_entities[MAX_GENTITIES];
@@ -28,14 +30,22 @@ void CG_BubbleTrail( vec3_t start, vec3_t end, float spacing ) { abort(); }
 void CG_DrawBigStringColor( int x, int y, const char *s, vec4_t color ) { abort(); }
 void CG_DrawPic( float x, float y, float width, float height, qhandle_t hShader ) { abort(); }
 int CG_DrawStrlen( const char *str ) { abort(); }
+#ifndef MASTERKEY_STUBS_REAL_EVENTS
 void CG_EntityEvent( centity_t *cent, vec3_t position ) { abort(); }
+#endif
 void QDECL CG_Error( const char *msg, ... ) { abort(); }	/* noreturn: cg_local.h's prototype */
+#ifndef MASTERKEY_STUBS_REAL_EVENTS
 qboolean CG_EventPlayerView( const centity_t *cent ) { abort(); }
+#endif
 float *CG_FadeColor( int startMsec, int totalMsec ) { abort(); }
 void CG_ImpactMark( qhandle_t markShader, const vec3_t origin, const vec3_t dir, float orientation, float r, float g, float b, float a, qboolean alphaFade, float radius, qboolean temporary ) { abort(); }
+#ifndef MASTERKEY_STUBS_REAL_EVENTS
 qboolean CG_Killcam_Active( void ) { abort(); }
+#endif
 localEntity_t *CG_MakeExplosion( vec3_t origin, vec3_t dir, qhandle_t hModel, qhandle_t shader, int msec, qboolean isSprite ) { abort(); }
+#ifndef MASTERKEY_STUBS_REAL_EVENTS
 void CG_PainEvent( centity_t *cent, int health ) { abort(); }
+#endif
 void CG_ParticleExplosion (char *animStr, vec3_t origin, vec3_t vel, int duration, int sizeStart, int sizeEnd) { abort(); }
 int CG_PointContents( const vec3_t point, int passEntityNum ) { abort(); }
 void CG_PositionRotatedEntityOnTag( refEntity_t *entity, const refEntity_t *parent, qhandle_t parentModel, char *tagName ) { abort(); }

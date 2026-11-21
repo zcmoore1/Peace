@@ -44,6 +44,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	STEP_TIME			200
 #define	PAIN_TWITCH_TIME	200
 #define	WEAPON_SELECT_TIME	1400
+// MW2's Y lockout after an out-of-ammo change from a gun that is not an
+// underbarrel (CG_OutOfAmmoChange 0x5A084C-0x5A0865): the event's change,
+// which forces no cycle, takes iw4x.exe's 750 at 0x798524 (a forced cycle's
+// 1500 at 0x798528 has no caller here). Code, not weapon data.
+#define	CG_EMPTY_SWITCH_LOCKOUT	750
 #define	ITEM_SCALEUP_TIME	1000
 #define	ZOOM_TIME			150
 // MW2's invalid-command hint (CG_SetInvalidCmdHint 0x587230, CG_DrawInvalidCmdHint
@@ -665,6 +670,10 @@ typedef struct {
 	int			itemPickupBlendTime;	// the pulse around the crosshair is timed separately
 
 	int			weaponSelectTime;
+	// MW2's weaponForcedSelectTime (cg+0x7300C): CG_OutOfAmmoChange holds Y
+	// and weapprev off until this time (CG_EMPTY_SWITCH_LOCKOUT; refused
+	// while cg.time is below it, WeaponCycleAllowed 0x59D5CD).
+	int			weaponForcedSelectTime;
 	int			reloadStartTime;		// cg.time when WEAPON_RELOADING began, 0 when not reloading
 	modelPose_t	weaponPose;			// blended skeletal pose for the viewmodel, built each frame by cg_anim.c
 	int			weaponAnimation;

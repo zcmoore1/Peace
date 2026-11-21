@@ -24,7 +24,7 @@ cl %flags% /Feout\build\masterkey-tests\empty-switch.exe dev\tests\empty_switch_
 if errorlevel 1 goto fail
 out\build\masterkey-tests\empty-switch.exe
 if errorlevel 1 goto fail
-cl %flags% /Feout\build\masterkey-tests\trigger.exe dev\tests\trigger_test.c code\cgame\cg_event.c code\cgame\cg_playerstate.c dev\tests\pickup_pmove_driver.c %game% %common% /link /OPT:REF
+cl %flags% /Feout\build\masterkey-tests\trigger.exe dev\tests\trigger_test.c code\cgame\cg_event.c code\cgame\cg_playerstate.c dev\tests\pickup_pmove_driver.c %game% %common% code\qcommon\msg.c code\qcommon\huffman.c /link /OPT:REF
 if errorlevel 1 goto fail
 out\build\masterkey-tests\trigger.exe
 if errorlevel 1 goto fail

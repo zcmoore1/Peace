@@ -1253,6 +1253,59 @@ static void TestHeldTriggerGrab(int dt) {
         }
         CHECK(ps.weaponTime == BG_LADDER_DROP_TIME && fired[WP_SHOTGUN] == 1 && Attached());
     }
+    /* The knife's own end under the lock: no Y, so the command names the
+     * SPAS throughout and the knife pressed in its shot ends with the pull
+     * spent. MW2's lock readies MELEE_FIRE before every check (0x578B2A-
+     * 0x578B39), none of MeleeEnd's quick raise, and its change check takes
+     * READY with time and no delay (0x578C0A-0x578C47), so a ladder grabbed
+     * during the knife drops the gun on the knife's last think: READY, then
+     * the drop, on that think. The drop comes before the rechamber check
+     * (0x44C4D7), so the pump stays owed. */
+    QuickReset(WP_FRAG, dt);
+    move.cmd.buttons = BUTTON_ATTACK; QuickTick(dt);
+    CHECK(fired[WP_SHOTGUN] == 1 && ps.weaponShotCount == 1 && ps.weaponstate == WEAPON_FIRING);
+    move.cmd.buttons = BUTTON_ATTACK | BUTTON_MELEE; QuickTick(dt);
+    CHECK(ps.weapon == WP_KNIFE && (ps.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN)));
+    move.cmd.buttons = BUTTON_ATTACK;
+    GrabWithAction(dt);
+    for (t = 0; t < 5000 && ps.weapon == WP_KNIFE; t += dt) {
+        CHECK(Attached() && !LadderHasHands());
+        QuickTick(dt);
+    }
+    CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_DROPPING && (ps.stats[STAT_LADDER] & LADDER_HOLSTER));
+    CHECK(ps.weaponTime == BG_LADDER_DROP_TIME && !(ps.weaponAction & WA_TYPE_MASK) && fired[WP_KNIFE] == 1);
+    CHECK((ps.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN)) && fired[WP_SHOTGUN] == 1 && Attached());
+}
+/* Peace's ladder holster takes no held-trigger lock (PM_LockGun leaves out
+ * LADDER_HOLSTER). This pins Peace's current behaviour, a departure from MW2
+ * that waits for the owner ("Ladder tuning" in dev/MW2_DIFFERENCES.md): MW2's
+ * ladder drop is a weapon change to weapon 0 with the command still naming
+ * the gun (CheckForChangeWeapon's ladder branch, 0x578C72), so with the
+ * trigger held from a single-shot gun's shot, the pull spent, its
+ * WeaponTimeAdjust locks the drop as it runs out (0x578ABC-0x578AE6) and the
+ * drop hangs until a release. Here the drop finishes on its own time, the
+ * trigger still down, and the pull stays spent (the ladder never touches the
+ * count). */
+static void TestHeldTriggerHolster(int dt) {
+    int t, k, drop = (BG_LADDER_DROP_TIME + dt - 1) / dt;
+    QuickReset(WP_FRAG, dt);
+    move.cmd.buttons = BUTTON_ATTACK; QuickTick(dt);
+    CHECK(fired[WP_SHOTGUN] == 1 && ps.weaponShotCount == 1);
+    for (t = 0; t < 5000 && !(ps.weaponstate == WEAPON_READY && ps.weaponTime == 1 &&
+         !(ps.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN))); t += dt) QuickTick(dt);
+    CHECK(t < 5000 && ps.weaponstate == WEAPON_READY && ps.weaponTime == 1 && fired[WP_SHOTGUN] == 1);
+    VectorSet(ps.origin, 111, 0, 180); VectorClear(ps.velocity);
+    ps.groundEntityNum = ENTITYNUM_NONE;
+    QuickTick(dt);
+    CHECK(Attached() && ps.weaponstate == WEAPON_DROPPING && (ps.stats[STAT_LADDER] & LADDER_HOLSTER));
+    CHECK(ps.weaponTime == BG_LADDER_DROP_TIME && drop >= 1);
+    for (k = 1; k < drop; k++) {
+        QuickTick(dt);
+        CHECK(ps.weaponstate == WEAPON_DROPPING && ps.weaponTime == BG_LADDER_DROP_TIME - k * dt);
+    }
+    QuickTick(dt);
+    CHECK(ps.weaponstate == WEAPON_LADDER && ps.weapon == WP_SHOTGUN && Attached());
+    CHECK((move.cmd.buttons & BUTTON_ATTACK) && ps.weaponShotCount == 1 && fired[WP_SHOTGUN] == 1);
 }
 int main(void) {
     int checksum, i;
@@ -1267,6 +1320,7 @@ int main(void) {
         TestLadderPush(steps[i]);
         TestOffhandGrab(steps[i]);
         TestHeldTriggerGrab(steps[i]);
+        TestHeldTriggerHolster(steps[i]);
         TestBottomExit(steps[i]);
         TestPredictionReplay(steps[i]);
     }

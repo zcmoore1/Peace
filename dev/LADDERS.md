@@ -69,7 +69,16 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
   or OFFHAND_END, which the change check, its ladder branch included, refuses
   (0x578BC9-0x578BF2). (The knife's quick raise that ends under a held
   trigger's lock is READY on that think already, 0x578B25-0x578B39, so the drop
-  starts on it.) Jump off first and there is no ladder drop at all.
+  starts on it; so does the knife's own end under the lock, which is READY
+  with no quick raise, 0x578B2A-0x578B39.) Jump off first and there is no
+  ladder drop at all.
+- The ladder holster itself takes no held-trigger lock (`PM_LockGun`): with
+  the trigger held from a single-shot gun's shot, its pull spent, the drop
+  still finishes on its time. MW2's ladder drop is a weapon change to weapon 0
+  with the command still naming the gun (0x578C72), so its lock holds the drop
+  until the trigger is let go. That departure waits for the owner ("Ladder
+  tuning" in `dev/MW2_DIFFERENCES.md`); `ladder_test.c`'s
+  `TestHeldTriggerHolster` pins today's behaviour.
 - The original reload helpers, swap helpers, note runner and their non-ladder
   ordering are unchanged. A ladder just owns the weapon while the hands are busy.
   Leaving raises the selected weapon using the existing deploy logic/timing.

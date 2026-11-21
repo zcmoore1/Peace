@@ -209,10 +209,12 @@ source for MW2 behaviour; the owner rejects it.
   YY's return, the gun's return after equipment (MW2's offhand states are
   never locked, 0x578A94), a reload; the count is the hand's, so a
   single-shot gun swapped to with the trigger still down from another's shot
-  waits in its raise. With the trigger held from a last round, nothing is
-  locked (no round): with a reserve the reload starts out of the shot on its
-  last think, the action owed (MW2's `CheckFiringAmmo`, 0x5770C0), and with
-  nothing anywhere and nowhere to go it dry-fires there (below). Never add a
+  waits in its raise. With the trigger down on the last think of a last
+  round's shot (let go and pulled again in the shot is the same: a level
+  test), nothing is locked (no round): with a reserve the reload starts out of
+  the shot on that think, the action owed (MW2's `CheckFiringAmmo`,
+  0x5770C0), and with nothing anywhere and nowhere to go it dry-fires there
+  (below). Never add a
   semi-auto flag, a trigger-release latch or a weapon-named branch: the
   count, the fire type and the time are the whole rule.
 - **The bolt cancel is the reload cancel.** `WNOTE_BOLT_CLOSED` on the fire
@@ -232,11 +234,15 @@ source for MW2 behaviour; the owner rejects it.
   reload's delayed action, or MW2's dry fire clears it. The dry fire is MW2's
   `PM_Weapon_CheckFiringAmmo` (0x576FE0), which clears the rechamber
   (`BG_ClearRechamber`, 0x577094) whenever it dry-fires a gun with no round in
-  its magazine and none in reserve; it only ever finds a debt when the trigger
-  is held from that gun's last round through the shot's last think, with no
-  gun to go to: the gun dry-fires on that think, out of the shot, and never
-  works the action. (Out of READY it never has one: step 4d starts the action
-  first.) A gun that reaches `WEAPON_READY`
+  its magazine and none in reserve; it only ever finds a debt on the last
+  think of that gun's last round's shot (`PM_ShotOver`), when the trigger is
+  down on that think and no change begins on it (no gun to go to). MW2's fire
+  is a level test of the trigger (`ShouldBeFiring`, 0x576CC0), so a trigger
+  let go during the shot and pulled again by that think dry-fires as one held
+  throughout: the gun dry-fires on that think, out of the shot, and never
+  works the action. With the trigger up on that think the shot ends READY and
+  step 4d starts the action on the next, before any pull can dry-fire. (Out of
+  READY it never has one: step 4d starts the action first.) A gun that reaches `WEAPON_READY`
   with its bit set re-enters `WEAPON_BOLTING` (step 4d) on the next think
   that finds it READY, from the action's own start, the open note: the whole
   action, never from where it was and never the shot again, exactly as a
@@ -477,8 +483,9 @@ source for MW2 behaviour; the owner rejects it.
   (MW2's `BG_SwitchWeaponsIfEmpty`, 0x576320) and on a dry pull, which starts
   no shot and puts `BG_DRY_FIRE_TIME` (500) on the lock, so a held trigger
   clicks again each time it runs out (`PM_Weapon_CheckFiringAmmo`, 0x576FE0).
-  Held from the last round's shot with nowhere to go, the click comes on the
-  shot's last think, out of the shot: the gun stays FIRING (no change until
+  With the trigger down on the last round's shot's last think (held, or let go
+  and pulled again in the shot) and nowhere to go, the click comes on that
+  think, out of the shot: the gun stays FIRING (no change until
   the 500 has run out, 0x578C31), shows its idle (`BG_DryFiring`) and its
   action is forgiven (An open action is a debt); each click re-arms the 750ms
   Y lockout below, so Y waits for the trigger to be let go.
@@ -529,7 +536,14 @@ source for MW2 behaviour; the owner rejects it.
   nothing, and on that think it is in hand and ready, its prepare unplayed:
   MW2's switch sends OFFHAND_PREPARE to OffHandHold, 0x5792DA), and comes
   back to an empty hand (`WA_LEFT_EMPTY`, MW2's OffHandEnd with weapon 0), a
-  Semtex cancel's included, so the gun then comes up on its ordinary raise. Old plain weapon IDs are supported for bots/tools. Neither
+  Semtex cancel's included, so the gun then comes up on its ordinary raise.
+  The knife out of an empty hand is Peace's own (MW2's knife is the gun's
+  melee, and its knife check needs the weapon's melee damage, 0x5776E0): it
+  goes back to the empty hand as MW2's MeleeEnd goes with no knife model to
+  raise, `PM_Weapon_Idle` on the knife's last think (0x578DF3-0x578DF7: READY,
+  no time, no delay), so the think after is an ordinary READY think, with no
+  OFFHAND_END delay: a knife, a gun asked for and equipment are all taken on
+  it, equipment's prepare played. Old plain weapon IDs are supported for bots/tools. Neither
   inventory replacement nor a delayed pickup event may overwrite Y intent.
   First deployment is pending until the instance is drawn, then consumed on
   start; normal holster/YY/sprint retention may interrupt it. No CAN state.
@@ -610,7 +624,9 @@ source for MW2 behaviour; the owner rejects it.
   bolt is still open: a press before `WNOTE_BOLT_CLOSED` is lost. Nor on any
   think a weapon delay runs out (`PM_WeaponDelayEnds`, MW2's delayedAction,
   which its knife check refuses, 0x5776ED): a reload's round or its settle of
-  an owed action, or the bolt's close; the press is lost, and the round seats
+  an owed action, the bolt's close, or the think equipment's return to an
+  empty hand ends (OFFHAND_END's one-think delay, a state the check refuses
+  as well, 0x5776AE-0x5776B6); the press is lost, and the round seats
   or the action is paid. The close note of a reload's end is none (MW2's
   RELOAD_END has no delay, 0x5785EB-0x578606): the knife is taken on it.
   A knife or grenade pressed during a gun's fire lock, or on the READY think
@@ -721,13 +737,15 @@ source for MW2 behaviour; the owner rejects it.
   held trigger's lock, below, is READY to that check, which takes it
   (0x578C0A-0x578C47): a ladder grabbed then drops the gun on that think; a
   queued swap never meets the lock, whose command names the gun.) An empty
-  hand's return is MW2's one-think
+  hand's return from equipment is MW2's one-think
   OFFHAND_END (`OffHandEnd` with weapon 0, 0x577A1A-0x577A2A), so a gun
   selected meanwhile is drawn two thinks after the hand empties; that one
   think's delay is a weapon delay (`PM_WeaponDelayEnds`), so equipment pressed
   on it comes out with no empty-hand drop (step 2c, MW2's path A), and with no
   use hint, straight out, is in hand and ready on it (MW2's switch runs on the
-  OFFHAND_PREPARE its offhand check left: OffHandHold, 0x5792DA -> 0x577920).
+  OFFHAND_PREPARE its offhand check left: OffHandHold, 0x5792DA -> 0x577920),
+  and a knife pressed on it is lost. The knife's own return to an empty hand
+  has no such think (Pickup does not own selection, above).
   So YY never cancels a recovery draw, and a Semtex cancel can never reset a
   fire lock for free. A grenade pressed during the draw starts the next one,
   as MW2 lets one come out of the gun's return, but a knife pressed while a
@@ -914,9 +932,12 @@ source for MW2 behaviour; the owner rejects it.
   clears it — except during a quick action, from the press through the
   recovery draw, where it is not read at all (MW2's reload check skips melee
   and offhand) — and a gun that is reloading when the command begins drops it
-  (MW2's rule). Peace's own rule: the trigger may fire on the command a reload
+  (MW2's rule). Peace's own rule: the trigger may fire on the think a reload
   ends, so a held trigger and reload alternate (MW2's reload's last think fires
-  nothing, and a held trigger fires on the think after: one command later). The trigger stops a
+  nothing, and a held trigger fires on the think after: one pmove step later,
+  which is the next command at any rate up to 66ms commands; a longer command
+  is split into steps of at most 66ms, MW2's `Pmove` 0x4CFF4A as Peace's, and
+  the step after can be in the same command). The trigger stops a
   segmented reload as MW2's does: asked by a fresh press (in the start only
   past 0.4 of it, `PM_Weapon_CheckForReload` 0x578750-0x5787AD) or by a
   trigger down as a segment ends (0x5783DE-0x5783FC, 0x578564-0x578582), the
@@ -1302,22 +1323,29 @@ the held trigger through the real `Pmove` and the client's selection at 8, 16
 and 33ms commands: the lock on the SPAS, the M300 and the Masterkey (the
 action from the shot's last command, no shot while held, the release), full
 auto, what releases the lock (YY, a grenade's return, a swap with the count
-at its limit), the last round held (the reload out of the shot, the dry fire
-with nowhere to go), the knife's end, and the reload's stop.
+at its limit), the shot count's cap at 4 through YY within one pull (each
+count through the real codec), the last round held (the reload out of the
+shot, the dry fire with nowhere to go), the knife's end (from an empty hand,
+nothing to lock), and the reload's stop.
 
 `dev/tests/run-masterkey.sh` (and `.cmd`) also builds `state_end_test.c`:
 what the think a weapon state ends does, MW2's `ProcessHand` (0x579450),
 through the real `Pmove` at 8, 16 and 33ms commands for the SPAS, the M300 and
-the Machinegun. The sprint-out's last think readies the gun and is over (the
+the Machinegun. The sprint-out's last think readies the gun, with no time
+over, and is over (the
 shot, an owed action and an empty magazine's reload come on the next; a reload
 press is taken on it); a sprint on again in the sprint-out waits for its end; a
-swap queued behind the knife's or equipment's return, or an empty hand's,
-begins the think after it ends, while equipment pressed then comes out; YY
+swap queued behind the knife's or equipment's return, or an empty hand's
+after equipment, begins the think after it ends, while equipment pressed then comes out; YY
 while sprinting is READY on its think, working an owed action first; a gun
-with no fire clip reloads the think after its last round's lock with the
+with no fire clip (the Machinegun, the M16 rifle) reloads the think after its
+last round's lock with the
 trigger up; equipment pressed on the knife's hit, or on the think an empty
-hand's return ends, is prepared on that think (with no use hint, out of the
-empty hand, it is in hand and ready on it; a think later its prepare plays);
+hand's return from equipment ends, is prepared on that think (with no use
+hint, out of the empty hand, it is in hand and ready on it; a think later its
+prepare plays), and a knife pressed there is lost; the knife's own return to
+an empty hand has no such think (a knife, a gun asked for and equipment are
+all taken on the think after it);
 a knife pressed on a reload's round or settle is lost while the round seats
 or the pump is paid, and one pressed on the SPAS's or M300's reload end's
 close note is taken (MW2's RELOAD_END has no delay). The held trigger at
@@ -1332,7 +1360,10 @@ begun a new pull, ends unlocked. Only buttons are pressed, and every time is
 read from the tables or from the lock pmove stamped. `ladder_test.c`'s
 `TestHeldTriggerGrab` grabs a ladder during the knife's quick raise: ended
 under the held trigger's lock it is READY, and the ladder drop starts on that
-think; let go, on the think after.
+think; let go, on the think after. Grabbed during the knife itself, its own
+end under the lock is READY and the drop, on the knife's last think.
+`TestHeldTriggerHolster` pins Peace's ladder holster, which takes no lock (a
+departure waiting for the owner: MW2's drop hangs under a held trigger).
 
 `dev/tests/run-loadouts.cmd` (or `.sh`) checks class validation/persistence,
 modulo selection, same-update YY firing, reload/pull-out cancellation, tap/hold

@@ -19,11 +19,14 @@
  * trigger down as a segment ends, and each segment starts afresh (0x575E20).
  *
  * The test presses buttons and sets ammunition. Every time it compares
- * against is read from the game's tables. */
+ * against is read from the game's tables. The shot count also goes through
+ * the real playerstate codec (code/qcommon/msg.c). */
 #define MASTERKEY_STUBS_REAL_EVENTS
 #include "../../code/cgame/cg_weapons.c"
 #include "masterkey_selection_stubs.h"
 #include "../../code/game/bg_m16_data.h"
+#include "../../code/qcommon/qcommon.h"
+cvar_t *cl_shownet;
 
 cg_t cg;
 cgs_t cgs;
@@ -308,6 +311,53 @@ static void TestHeldShot(void) {
 	}
 }
 
+/* The shot count's cap: MW2's StartFiring adds one for every shot but a
+ * full-auto one, at most to 4 (min(count + 1, 4), 0x576FBA-0x576FC5), and
+ * only a crossing with the trigger up, a reload or a fresh burst press zeroes
+ * it. YY lets a locked gun fire again within the same pull (PM_Weapon_Idle
+ * zeroes the time and keeps the count, 0x5777CE), so the SPAS fired, held
+ * through its action into the lock and YY'd again and again with the trigger
+ * never let go counts 1, 2, 3 and 4 and then stays at 4. Each count goes
+ * through the real codec in its three bits (MW2's netfield 0x742600,
+ * {0x200, 3}); let go, the next crossing ends the pull. */
+static int WireShotCount(void) {
+	byte data[MAX_MSGLEN]; msg_t msg; playerState_t zero, decoded;
+	memset(&zero, 0, sizeof(zero));
+	MSG_Init(&msg, data, sizeof(data)); MSG_WriteDeltaPlayerstate(&msg, &zero, PS);
+	CHECK(!msg.overflowed); MSG_BeginReading(&msg);
+	MSG_ReadDeltaPlayerstate(&msg, &zero, &decoded);
+	return decoded.weaponShotCount;
+}
+static void TestShotCountCap(void) {
+	static const int rates[] = { 8, 16, 33 };
+	int i, n, f, pulls = BG_SHOT_COUNT_MAX + 2;
+	CHECK(BG_SHOT_COUNT_MAX == 4 && BG_WeaponMagSize(WP_SHOTGUN) > pulls);
+	for (i = 0; i < 3; i++) {
+		msec = rates[i];
+		Setup(&spas); Cycle(&spas);
+		Frame(BUTTON_ATTACK, 0);
+		for (n = 1; n <= pulls; n++) {
+			CHECK(shots == n && PS->weaponstate == WEAPON_FIRING);
+			CHECK(PS->weaponShotCount == (n < BG_SHOT_COUNT_MAX ? n : BG_SHOT_COUNT_MAX));
+			CHECK(WireShotCount() == PS->weaponShotCount);
+			/* held through the action, into the lock */
+			for (f = 0; f < 5000 && !(PS->weaponstate == WEAPON_READY && PS->weaponTime == 1 && !Owes(&spas)); f++)
+				Frame(BUTTON_ATTACK, 0);
+			CHECK(f < 5000 && shots == n && PS->weaponShotCount == (n < BG_SHOT_COUNT_MAX ? n : BG_SHOT_COUNT_MAX));
+			/* YY, the trigger still down: the gun fires on the YY think */
+			Frame(BUTTON_ATTACK, IN_Y);
+			Frame(BUTTON_ATTACK, IN_Y);
+			CHECK(PS->weapon == WP_SHOTGUN && PS->weaponstate == WEAPON_DROPPING && shots == n);
+			Frame(BUTTON_ATTACK, 0);
+		}
+		CHECK(shots == pulls + 1 && PS->weaponstate == WEAPON_FIRING && PS->weaponShotCount == BG_SHOT_COUNT_MAX);
+		CHECK(WireShotCount() == BG_SHOT_COUNT_MAX);
+		/* let go: the shot's end, a crossing with the trigger up, ends the pull */
+		Idle(shotEnd);
+		CHECK(PS->weaponstate == WEAPON_READY && PS->weaponShotCount == 0 && WireShotCount() == 0);
+	}
+}
+
 /* (2) Full auto keeps firing while held: the machinegun (m4_mp) and the M16,
  * Peace's placeholder automatic; neither counts its shots. Each shot is given
  * its whole time (MW2's StartFiring, 0x576E9C-0x576E9F) on the think the last
@@ -571,6 +621,42 @@ static void TestKnifeEnd(void) {
 	}
 }
 
+/* The knife from an empty hand, the trigger held with the pull spent: the
+ * knife's end asks the lock about the gun the knife was written over (MW2's
+ * knife is the gun's own MELEE states, 0x578B2A-0x578B39), and there is none,
+ * the hand was empty (PM_LockGun, WA_LEFT_EMPTY): nothing is locked, though
+ * the active slot's gun is commanded, loaded and its pull spent. The knife
+ * goes back to the empty hand and the gun is drawn on the next think (the
+ * knife stamps no delay to wait out, MeleeEnd 0x578D80), where its raise ends
+ * under the lock, the count being the hand's. The hand is emptied as a
+ * pickup's take leaves it (the test sets it). */
+static void TestKnifeFromAnEmptyHand(void) {
+	static const int rates[] = { 8, 16, 33 };
+	int i, draw;
+	for (i = 0; i < 3; i++) {
+		msec = rates[i];
+		Setup(&spas); Cycle(&spas);
+		Frame(BUTTON_ATTACK, 0); Hold(EndFrom(shotEnd) + 1);
+		CHECK(PS->weaponstate == WEAPON_READY && PS->weaponTime == 1 && PS->weaponShotCount == 1 && shots == 1);
+		PS->weapon = WP_NONE; PS->weaponTime = 0; snapshot.ps = *PS;
+		CHECK(Selected(&spas) && Rounds(&spas) > 0 && !Owes(&spas));
+		Frame(BUTTON_ATTACK | BUTTON_MELEE, 0);
+		CHECK(PS->weapon == WP_KNIFE && (PS->weaponAction & WA_LEFT_EMPTY) && BG_RequestedWeapon(PS, cmdValue) == WP_SHOTGUN);
+		Hold(Frames(BG_MELEE_TIME) - 1);
+		CHECK(PS->weapon == WP_KNIFE && PS->weaponstate == WEAPON_FIRING && shots == 2);	/* the hit */
+		Frame(BUTTON_ATTACK, 0);	/* the knife's end */
+		CHECK(PS->weapon == WP_NONE && PS->weaponstate == WEAPON_READY && PS->weaponTime == 0);
+		CHECK(PS->weaponShotCount == 1 && shots == 2);
+		Frame(BUTTON_ATTACK, 0);
+		draw = BG_WeaponDrawTime(PS);
+		CHECK(PS->weapon == WP_SHOTGUN && PS->weaponstate == WEAPON_RAISING && PS->weaponTime == draw && draw > msec);
+		Hold(Frames(draw));
+		CHECK(PS->weaponstate == WEAPON_RAISING && PS->weaponTime == 1 && shots == 2);
+		Frame(0, 0);
+		CHECK(PS->weaponstate == WEAPON_READY && PS->weaponShotCount == 0 && shots == 2);
+	}
+}
+
 /* (5) A segmented reload and the trigger: MW2 asks it to stop and lets the
  * segment it is in play out with its round, then the end; a press counts in
  * the loop at once and in the start only past 0.4 of it (0x578670), and a
@@ -717,10 +803,12 @@ static void TestFireTypes(void) {
 int main(void) {
 	TestFireTypes();
 	TestHeldShot();
+	TestShotCountCap();
 	TestFullAuto();
 	TestLockReleases();
 	TestLastRoundHeld();
 	TestKnifeEnd();
+	TestKnifeFromAnEmptyHand();
 	TestReloadInterrupt();
 	printf("PASS: %i held-trigger checks\n", checks);
 	return 0;

@@ -81,8 +81,13 @@ store explicit choices, so changing `cg_sight` will not overwrite them. The acti
 perk mask is a predicted/replayed playerstate field. The current build (MW2's
 event rings: four playerstate events and every entity's own ring, with the
 view kick's cgame import and client-side bullets, MW2's spawn class speed and
-stance, the M16's per-instance underbarrel ammunition, MW2's mode switch and
-its frozen flag) uses protocol **91**, game **-20**. Protocol 90 / game -19
+stance, the M16's per-instance underbarrel ammunition, MW2's mode switch, its
+frozen flag and its held trigger) uses protocol **92**, game **-21**. Protocol
+92 / game -21 added MW2's held trigger: the shot count `weaponShotCount` (3
+bits, MW2's netfield 0x742600), the trigger's last step `WA_ATTACK_HELD` in
+`weaponAction` (now 11 bits) and the segmented reload's stop request
+`PWF_RELOAD_INTERRUPT` in `weapFlags` (now 3 bits). Protocol 91 / game -20
+added the frozen flag (`pm_flags` 19 bits), protocol 90 / game -19
 added the mode switch, protocol 89 / game -18 the underbarrel
 fields, protocol 88 / game -17 added stance, protocol 87 / game -16 added
 `moveClass`, protocol 86 / game -15 added the event rings, protocol 85 / game -14

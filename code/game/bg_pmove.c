@@ -3234,11 +3234,16 @@ int BG_WeaponFireLength( int weapon ) {
 }
 
 /* Each gun's MW2 fireType (its weapons/mp file), for the guns that stand for an
-   MW2 one; the rest, Quake 3's own guns and equipment, fire as they always did,
-   which is MW2's full auto (MW2's offhands are never counted, and its knife is
-   the gun's own melee, so the gun's type decides the knife's end). The M16
-   rifle is Peace's placeholder automatic, not m16_shotgun_mp's 3-round burst;
-   the generated guns take it from their weapon.json. */
+   MW2 one; the rest, Quake 3's own guns and equipment, are MW2's full auto,
+   never counted or locked (MW2's offhands are never counted, and its knife is
+   the gun's own melee, so the gun's type decides the knife's end). Full auto
+   is not quite how the Quake 3 guns always fired: like every gun's, their shot
+   is given its whole time (the fire path's overshoot drop, MW2's 578b71), so
+   a held one fires every ceil(time / msec) thinks where it used to average its
+   time: the lightning gun's 50ms every 2 commands at 33ms, the plasma gun's
+   100ms every 4. The M16 rifle is Peace's placeholder automatic, not
+   m16_shotgun_mp's 3-round burst; the generated guns take it from their
+   weapon.json. */
 static const int bg_weaponFireType[MAX_WEAPONS] = {
 	/* WP_NONE            */ BG_FIRE_FULLAUTO,
 	/* WP_GAUNTLET        */ BG_FIRE_FULLAUTO,
@@ -4633,7 +4638,10 @@ MW2's meleeDelay (MeleeInit arms it as the weapon delay, 577581-577599; its
 hit, MeleeFire, comes on the think it runs out); and an empty hand's return
 from equipment, MW2's OffHandEnd with weapon 0, which stamps no raise but a
 one-think delay in OFFHAND_END (577a1a-577a2a): it runs out on the think
-after the hand empties, the think the latch clears.
+after the hand empties, the think the latch clears. Not the knife's return to
+an empty hand: MW2's knife ends in MeleeEnd, which stamps no delay
+(578dc3, or PM_Weapon_Idle's 5777d8 with no knife model to raise), so no
+think after it is a delay think (see PM_UpdateWeaponAction).
 Read once the clocks have run.
 ===============
 */
@@ -4641,7 +4649,8 @@ static qboolean PM_WeaponDelayEnds( int oldElapsed ) {
 	const bg_weaponNote_t *n;
 
 	if ( pm->ps->weapon == WP_NONE ) {
-		return pm->ps->weaponstate == WEAPON_READY &&
+		int action = pm->ps->weaponAction & WA_TYPE_MASK;
+		return pm->ps->weaponstate == WEAPON_READY && ( action == WA_LETHAL || action == WA_TACTICAL ) &&
 			( pm->ps->weaponAction & ( WA_FIRED | WA_LEFT_EMPTY ) ) == ( WA_FIRED | WA_LEFT_EMPTY );
 	}
 	if ( BG_QuickActionInPlace( pm->ps->weapon ) && pm->ps->weaponstate == WEAPON_RAISING ) {
@@ -4964,10 +4973,19 @@ static void PM_UpdateWeaponAction( void ) {
 		// under the held trigger's lock is READY already (PM_WeaponTimeAdjust:
 		// MW2's lock readies MELEE_END before every check, 578b25-578b39), so
 		// its change check takes that think (578c0a-578c47): no recoveryEnds.
+		// Nor the knife's return to an empty hand, which is Peace's own (MW2
+		// always has a gun under its knife): with no gun to raise it is
+		// MW2's MeleeEnd with no knife model, PM_Weapon_Idle on the knife's
+		// last think (578df3-578df7: READY, no time, no delay, 5777c7-5777d8),
+		// so the think after is an ordinary READY think, no delay running out
+		// on it (PM_WeaponDelayEnds) and nothing refused: a knife pressed on
+		// it comes out, a gun asked for is drawn, equipment comes out as from
+		// any empty hand.
 		if ( (action & WA_FIRED) && !BG_IsActionWeapon( pm->ps->weapon ) &&
 			((pm->ps->weaponstate != WEAPON_RAISING && pm->ps->weaponstate != WEAPON_DROPPING) ||
 			 (pm->ps->weaponstate == WEAPON_RAISING && pm->ps->weaponTime <= 0) || yyReturn) ) {
-			if ( pm->ps->weaponstate == WEAPON_RAISING || pm->ps->weapon == WP_NONE ) pml.recoveryEnds = qtrue;
+			if ( pm->ps->weaponstate == WEAPON_RAISING ||
+			     ( pm->ps->weapon == WP_NONE && ( action & WA_TYPE_MASK ) != WA_MELEE ) ) pml.recoveryEnds = qtrue;
 			action = 0;
 		}
 		// Only a gun the Semtex left is recovered before a queued slot. An
@@ -4992,7 +5010,9 @@ static void PM_UpdateWeaponAction( void ) {
 			// rest of the cycle short. Nor on any think a weapon delay runs out
 			// (5776ed-5776f2: MW2 passes its knife check the think's
 			// delayedAction, 44c4e3-44c4fc): on a reload's round or its settle
-			// the press is lost and the round seats or the action is paid.
+			// the press is lost and the round seats or the action is paid, and
+			// on the think equipment's return to an empty hand ends (its
+			// OFFHAND_END, refused by its state as well, 5776ae-5776b6).
 			// Equipment pressed with the knife wins: MW2 checks its offhands first.
 			qboolean boltOpen = pm->ps->weaponstate == WEAPON_BOLTING &&
 				( pm->ps->stats[STAT_UNCHAMBERED] & ( 1 << pm->ps->weapon ) );
@@ -5884,7 +5904,8 @@ static void PM_Weapon( void ) {
 	//    swap already going down finishes, and so does a knife or grenade
 	//    already asked for, which are no weapon change in MW2. Nor on the
 	//    think the return from a knife or equipment ends, the gun's quick
-	//    raise or an empty hand's one think (pml.recoveryEnds): MW2's change
+	//    raise or, after equipment, an empty hand's one think
+	//    (pml.recoveryEnds): MW2's change
 	//    check refuses MELEE_END and OFFHAND_END whatever their time
 	//    (578bc9-578bf2), so a swap queued behind it begins from READY on the
 	//    next think; equipment pressed on that think is no weapon change and
@@ -6014,8 +6035,13 @@ static void PM_Weapon( void ) {
 	//     empty magazine's reload all wait for the next think, from READY. A
 	//     reload asked for on this think is taken: MW2's reload check runs
 	//     before the switch and takes the sprint states (575e8e-575ea8).
+	//     Either end leaves no time over: MW2's crossing drops what the time
+	//     overshot by (WeaponTimeAdjust, 578b71), and the switch's
+	//     Sprint_State_Loop and PM_Weapon_Idle zero it again (577f82,
+	//     5777ce-5777d8).
 	if ( pm->ps->weaponstate == WEAPON_SPRINT_IN && pm->ps->weaponTime <= 0 ) {
 		pm->ps->weaponstate    = WEAPON_SPRINTING;
+		pm->ps->weaponTime     = 0;
 		pm->ps->weaponAnimTime = -1;			// any interrupted reload is gone
 		pm->ps->pm_flags      &= ~PMF_PENDING_MAG;
 		PM_StartTorsoAnim( TORSO_STAND );
@@ -6023,6 +6049,7 @@ static void PM_Weapon( void ) {
 	}
 	if ( pm->ps->weaponstate == WEAPON_SPRINT_OUT && pm->ps->weaponTime <= 0 ) {
 		pm->ps->weaponstate    = WEAPON_READY;
+		pm->ps->weaponTime     = 0;
 		// Releasing sprint before the lower-in finished leaves the abandoned
 		// reload's clock parked at a stale positive value. It is inert (the
 		// clock only advances while RELOADING, so no note can cross), but park

@@ -107,7 +107,9 @@ static void IntoTheCarry(int gun, int shoot) {
 	buttons = BUTTON_SPRINT; Frame(); buttons = 0;	/* a tap: MW2's sprint latches */
 	CHECK(ps.pm_flags & PMF_SPRINTING);
 	for (t = 0; t < 10000 && ps.weaponstate != WEAPON_SPRINTING; t += msec) Frame();
-	CHECK(ps.weaponstate == WEAPON_SPRINTING && Owes(gun) == owed);
+	/* no time over: MW2's crossing drops the overshoot (0x578B71) and
+	   Sprint_State_Loop zeroes the time again (0x577F82) */
+	CHECK(ps.weaponstate == WEAPON_SPRINTING && ps.weaponTime == 0 && Owes(gun) == owed);
 }
 /* Run the sprint-out stamped on the last command to the think before its
  * last, checking it holds every think. */
@@ -121,7 +123,9 @@ static void ThroughTheSprintOut(int gun) {
 }
 
 /* D1. SPRINT_DROP's last think: MW2's switch makes the gun READY in
- * PM_Weapon_Idle (0x5793D8 entry 25 -> 0x579279 -> 0x5777A0) and the think
+ * PM_Weapon_Idle (0x5793D8 entry 25 -> 0x579279 -> 0x5777A0), with no time
+ * over (the crossing dropped the overshoot, 0x578B71, and PM_Weapon_Idle
+ * zeroes weaponTime and weaponDelay, 0x5777CE-0x5777D8), and the think
  * is over. The rechamber check ran first and starts nothing out of
  * SPRINT_DROP (0x575B77), the auto reload refuses the sprint states
  * (0x578872-0x57887A), and nothing fires: an owed pump or bolt, the shot and
@@ -135,7 +139,7 @@ static void TestSprintOutEnds(int gun) {
 		forward = 0; Frame();
 		ThroughTheSprintOut(gun);
 		Frame();
-		CHECK(ps.weaponstate == WEAPON_READY && ps.weaponAnimTime == -1 && Owes(gun));
+		CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && ps.weaponAnimTime == -1 && Owes(gun));
 		Frame();
 		CHECK(ps.weaponstate == WEAPON_BOLTING && ps.weaponAnimTime == Open(gun));
 		CHECK(ps.weaponTime == ActionLength(gun) && fired[gun] == 1);
@@ -147,7 +151,7 @@ static void TestSprintOutEnds(int gun) {
 	ThroughTheSprintOut(gun);
 	CHECK(fired[gun] == 0);
 	Frame();
-	CHECK(ps.weaponstate == WEAPON_READY && fired[gun] == 0);
+	CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && fired[gun] == 0);
 	Frame();
 	CHECK(ps.weaponstate == WEAPON_FIRING && fired[gun] == 1);
 	/* the last round went in the sprint: the empty gun reloads the think after */
@@ -309,6 +313,78 @@ static void TestStraightOutOfTheReturn(int gun) {
 	}
 }
 
+/* A knife pressed on the think after equipment's return to an empty hand is
+ * lost, as in MW2: that think is OFFHAND_END (state 21) with weapon 0, whose
+ * one-think delay runs out on it (OffHandEnd, 0x577A1A-0x577A2A), and MW2's
+ * knife check refuses the offhand states (0x5776AE-0x5776B6) and any think a
+ * delay runs out on (0x5776ED). A think later the hand is READY with no delay,
+ * and the knife comes out. */
+static void TestKnifeAfterTheReturn(int gun) {
+	int late, t, lethal;
+	for (late = 0; late < 2; late++) {
+		Setup(gun, Other(gun));
+		ps.weapon = WP_NONE; ps.cursorHintEntIndex = ENTITYNUM_NONE;
+		stale = 1;	/* the hand stays empty once the throw is over */
+		lethal = BG_LethalWeapon(&ps);
+		buttons = BUTTON_LETHAL; Frame(); buttons = 0;
+		CHECK(ps.weapon == lethal && (ps.weaponAction & WA_LEFT_EMPTY));
+		for (t = 0; t < 20000 && ps.weapon != WP_NONE; t += msec) Frame();
+		CHECK(ps.weapon == WP_NONE && ps.weaponstate == WEAPON_READY && fired[lethal] == 1);	/* E */
+		if (late) Frame();
+		buttons = BUTTON_MELEE; Frame(); buttons = 0;	/* E+1, or E+2 */
+		if (late) {
+			CHECK(ps.weapon == WP_KNIFE && ps.weaponstate == WEAPON_RAISING && ps.weaponTime == BG_MELEE_DELAY);
+			CHECK((ps.weaponAction & (WA_TYPE_MASK | WA_FIRED | WA_LEFT_EMPTY)) == (WA_MELEE | WA_LEFT_EMPTY));
+			continue;
+		}
+		CHECK(ps.weapon == WP_NONE && ps.weaponstate == WEAPON_READY && !(ps.weaponAction & WA_TYPE_MASK));
+		Frame();	/* and the press is gone */
+		CHECK(ps.weapon == WP_NONE && !(ps.weaponAction & WA_TYPE_MASK) && fired[WP_KNIFE] == 0);
+	}
+}
+
+/* The knife's return to an empty hand is Peace's own: MW2 always has a gun
+ * under its knife. Its knife ends in MeleeEnd, which stamps no weapon delay:
+ * MELEE_END for the gun's quickRaiseTime with weaponDelay 0 (0x578DAD-
+ * 0x578DC3), or, with no knife model to raise, PM_Weapon_Idle at once
+ * (0x578DF3-0x578DF7: READY, no time, no delay, 0x5777C7-0x5777D8). With no
+ * gun to raise Peace's knife ends in that Idle: the hand empty and READY on
+ * the knife's last think, and the think after an ordinary READY think, with
+ * no delay running out on it and in no state MW2's knife check refuses (it
+ * refuses a delay think and the melee and offhand states, 0x577693-0x5776F2,
+ * this think none of them). So a knife pressed there comes out, a gun asked for all
+ * along is drawn there, and equipment with no use hint comes straight out of
+ * the empty hand and plays its prepare. (Equipment's own return to an empty
+ * hand is OFFHAND_END's one-think delay: TestReturnEnds, TestKnifeAfterTheReturn.) */
+static void TestKnifeBackToAnEmptyHand(int gun) {
+	int what, t;
+	for (what = 0; what < 3; what++) {
+		Setup(gun, Other(gun));
+		ps.weapon = WP_NONE; ps.cursorHintEntIndex = ENTITYNUM_NONE;
+		stale = what != 1;	/* 1: the gun asked for all along */
+		buttons = BUTTON_MELEE; Frame(); buttons = 0;
+		CHECK(ps.weapon == WP_KNIFE && ps.weaponstate == WEAPON_RAISING && (ps.weaponAction & WA_LEFT_EMPTY));
+		for (t = 0; t < 20000 && ps.weapon != WP_NONE; t += msec) Frame();
+		/* E: the knife's last think, the hand empty and READY */
+		CHECK(ps.weapon == WP_NONE && ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && fired[WP_KNIFE] == 1);
+		CHECK((ps.weaponAction & (WA_TYPE_MASK | WA_FIRED | WA_LEFT_EMPTY)) == (WA_MELEE | WA_FIRED | WA_LEFT_EMPTY));
+		if (what == 0) {
+			buttons = BUTTON_MELEE; Frame(); buttons = 0;	/* E+1 */
+			CHECK(ps.weapon == WP_KNIFE && ps.weaponstate == WEAPON_RAISING && ps.weaponTime == BG_MELEE_DELAY);
+			CHECK((ps.weaponAction & (WA_TYPE_MASK | WA_FIRED | WA_LEFT_EMPTY)) == (WA_MELEE | WA_LEFT_EMPTY));
+		} else if (what == 1) {
+			Frame();	/* E+1 */
+			CHECK(ps.weapon == gun && ps.weaponstate == WEAPON_RAISING && ps.weaponTime == BG_WeaponDrawTime(&ps));
+			CHECK(!(ps.weaponAction & (WA_TYPE_MASK | WA_LEFT_EMPTY)));
+		} else {
+			CHECK(ps.ammo[WP_FLASH] > 0 && BG_WeaponRaiseTime(WP_FLASH) > msec);
+			buttons = BUTTON_TACTICAL; Frame(); buttons = 0;	/* E+1 */
+			CHECK(ps.weapon == WP_FLASH && (ps.weaponAction & (WA_TYPE_MASK | WA_FIRED | WA_LEFT_EMPTY)) == (WA_TACTICAL | WA_LEFT_EMPTY));
+			CHECK(ps.weaponstate == WEAPON_RAISING && ps.weaponTime == BG_WeaponRaiseTime(WP_FLASH) && prepared[WP_FLASH] == 1);
+		}
+	}
+}
+
 /* D4. YY while sprinting: MW2's double-tap cancel is in its change check,
  * after its sprint check (0x44C4CA, 0x44C4D7), which refused the drop
  * (0x5780C6). So the YY think is READY: an owed action starts on it
@@ -346,7 +422,8 @@ static void TestYYWhileSprinting(int gun) {
  * reload refuses FIRING (0x57886D) and its trigger-up ShouldBeFiring only
  * readies the gun (0x576D99-0x576DA3), so the reload is the think after; a
  * held trigger reloads on that think, through FireWeapon's ammo check
- * (0x5770C0-0x5770C9). */
+ * (0x5770C0-0x5770C9). The machinegun (m4_mp) and the M16 rifle, Peace's
+ * placeholder automatic; the Quake 3 guns with a magazine go the same way. */
 static void TestLastRoundEnds(int gun) {
 	int held, k, lock;
 	for (held = 0; held < 2; held++) {
@@ -654,10 +731,13 @@ int main(void) {
 			TestSprintAgainInTheSprintOut(guns[g]);
 			TestReturnEnds(guns[g]);
 			TestStraightOutOfTheReturn(guns[g]);
+			TestKnifeAfterTheReturn(guns[g]);
+			TestKnifeBackToAnEmptyHand(guns[g]);
 			TestYYWhileSprinting(guns[g]);
 			TestEquipmentOnTheHit(guns[g]);
 		}
 		TestLastRoundEnds(WP_MACHINEGUN);
+		TestLastRoundEnds(WP_M16);
 		TestKnifeOnADelay(WP_SHOTGUN);
 		TestKnifeOnADelay(WP_M40A3);
 		TestKnifeOnTheEndsNote(WP_SHOTGUN);

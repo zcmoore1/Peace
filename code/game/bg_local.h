@@ -61,7 +61,6 @@ typedef struct {
 	int			previous_waterlevel;
 
 	vec3_t		ladderNormal;
-	qboolean	ladderGrabbed;	// contact this think, even if we immediately jump off
 	qboolean	jumped;			// a jump left the ground this think
 
 	// This think's copy of the command's rightmove, which MW2's sprint strafe

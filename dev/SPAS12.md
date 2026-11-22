@@ -6,7 +6,10 @@
   vertices, skin weights and animation frames are preserved.
 - Normal holster takes **829ms** and draw **1075ms** (YY cancels the draw), and grabbing a ladder
   still uses the shared 100ms holster. YY and reload-note cancellation retain
-  their existing shared state-machine behavior.
+  their existing shared state-machine behavior. With the trigger held from a
+  shot, that holster hangs for as long as it is held (MW2's lock), and jumping
+  off still holding fires at once, or starts the pump the shot still owes,
+  with no raise (`dev/LADDERS.md`).
   These normal swap lengths match the [MW2 multiplayer SPAS weapon data](https://github.com/FreeTheTech101/IW4-Dump-Files/blob/master/weapons/mp/spas12_mp).
   The existing custom first deployment includes a pump/check and takes 1708ms;
   it is separate from the normal raise.

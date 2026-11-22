@@ -216,6 +216,7 @@ static void TestJump(int dt) {
 
 static void TestBottomExit(int dt) {
     float bottom;
+    int t;
     Reset(111, 0, 100);
     Tick(dt);
     CHECK(Attached());
@@ -245,10 +246,17 @@ static void TestBottomExit(int dt) {
     Reset(111, 0, 35);
     ps.velocity[2] = -200;
     Tick(1);
-    CHECK(Attached());
-    Run(300, dt);
+    CHECK(Attached() && ps.weaponstate == WEAPON_DROPPING && (ps.stats[STAT_LADDER] & LADDER_HOLSTER));
+    /* The floor is reached inside the holster: the gun is back on the command
+     * the ladder lets go, with no raise (MW2's cancel of a drop the command
+     * still names, 0x578D00-0x578D41). */
+    for (t = 0; t < 300 && Attached(); t += dt) {
+        CHECK(ps.weaponstate == WEAPON_DROPPING && (ps.stats[STAT_LADDER] & LADDER_HOLSTER));
+        Tick(dt);
+    }
     CHECK(!Attached() && ps.groundEntityNum == ENTITYNUM_WORLD);
-    Run(BG_WeaponRaiseTime(WP_SHOTGUN) + BG_LADDER_DROP_TIME, dt);
+    CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && !(ps.stats[STAT_LADDER] & LADDER_HOLSTER));
+    Run(300, dt);
     CHECK(!Attached() && ps.weaponstate == WEAPON_READY);
 }
 
@@ -258,7 +266,7 @@ static int Note(int weapon, int seq, weaponNote_t kind) {
     CHECK(0);
     return 0;
 }
-static void WeaponTick(int dt) { pml.msec = dt; PM_Weapon(); pml.ladderGrabbed = qfalse; }
+static void WeaponTick(int dt) { pml.msec = dt; PM_Weapon(); }
 static void TestWeaponOrdering(void) {
     int weapon, offset;
     for (weapon = WP_MACHINEGUN; weapon <= WP_SHOTGUN; weapon++) {
@@ -1211,6 +1219,131 @@ static void TestStepRules(void) {
     }
     move.cmd.forwardmove = 0;
 }
+/* MW2's ladder with the trigger held, through the real Pmove on the shipped
+ * ladder BSP. Its ladder drop is an ordinary weapon change to weapon 0 with the
+ * gun still in hand and still named by the command (CheckForChangeWeapon's
+ * ladder branch, 0x578C72-0x578C78 into 0x578C54-0x578C67), so:
+ *  - it waits out a shot like any change (the gate, 0x578C0A-0x578C41) and
+ *    comes before the rechamber check (0x44C4D7): grabbed in the shot it
+ *    begins on the shot's last think and the action stays owed;
+ *  - the held trigger's lock takes its crossing (WeaponTimeAdjust
+ *    0x578A94-0x578AE6: the pull spent, the command naming the gun, a round
+ *    in it) and keeps it a drop with weaponTime 1 (0x578B25-0x578B28), every
+ *    think, for as long as the trigger is held; it ends only at 0
+ *    (ProcessHand 0x579474, FinishWeaponChange 0x576370: weapon 0, here
+ *    WEAPON_LADDER), so only once the trigger is let go;
+ *  - the think the ladder is left with the drop unfinished it is an ordinary
+ *    drop of the gun the command names, which MW2's double-tap cancel makes
+ *    READY with no time (0x578D00-0x578D41, PM_Weapon_Idle 0x5777C7-0x5777D8):
+ *    no raise of any length. The rest of that think is the READY gun's: an
+ *    owed pump or bolt starts (CheckForRechamber from READY, 0x575B77), or
+ *    the held trigger fires (ShouldBeFiring, a level test, 0x576CC0).
+ * Every command number below is worked out from the game's own tables. */
+typedef struct { int gun, dt, open, close, len, F, B, E, H; } held_t;
+static int Thinks(int ms, int dt) { return (ms + dt - 1) / dt; }
+static held_t Held(int gun, int dt) {
+    held_t h;
+    h.gun = gun; h.dt = dt;
+    h.open = PM_ShotLength(gun);                    /* MW2's fireTime: the shot ends at the open note */
+    h.close = Note(gun, ASEQ_FIRE, WNOTE_BOLT_CLOSED);
+    h.len = BG_WeaponFireLength(gun);
+    CHECK(h.open > 0 && h.close > h.open && h.len > h.close);
+    h.F = Thinks(h.open, dt);                       /* the shot's last think; held, the action starts on it */
+    h.B = h.F + Thinks(h.close - h.open, dt);       /* the bolt's think */
+    h.E = h.F + Thinks(h.len - h.open, dt);         /* the action's last think: READY under the lock */
+    h.H = Thinks(BG_LADDER_DROP_TIME, dt);          /* the holster's crossing, counted from its first think */
+    return h;
+}
+static qboolean Owed(int gun) { return (ps.stats[STAT_UNCHAMBERED] & (1 << gun)) != 0; }
+static qboolean Holstering(void) { return (ps.stats[STAT_LADDER] & LADDER_HOLSTER) != 0; }
+/* The gun in the first slot, in hand and ready, on the floor away from the
+ * ladder (the Masterkey as the M16's other mode), a frag and a flash with it. */
+static void HeldReset(int gun, int dt) {
+    bg_class_t cl = *BG_Class(0);
+    int t;
+    Reset(-150, 0, 24.125f);
+    cl.slot[0] = BG_BaseWeapon(gun);
+    cl.slot[1] = cl.slot[0] == WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN;
+    cl.lethal = WP_FRAG; cl.lethalCount = BG_ClassEquipmentCount(WP_FRAG);
+    CHECK(BG_ValidateClass(&cl));
+    BG_ApplyClass(&ps, &cl);
+    memset(fired, 0, sizeof(fired)); suicides = 0;
+    move.cmd.weapon = gun;
+    for (t = 0; t < 5000 && !(t >= 200 && ps.weapon == gun && ps.weaponstate == WEAPON_READY); t += dt) QuickTick(dt);
+    CHECK(!Attached() && ps.groundEntityNum == ENTITYNUM_WORLD && !ps.weaponAction);
+    CHECK(ps.weapon == gun && ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && !ps.weaponShotCount);
+    CHECK(ps.ammo[gun] > 2 && !Owed(gun));
+}
+/* The shot on command 0, the trigger held from it. Returns the time a shot is
+ * stamped with. */
+static int HeldShot(const held_t *h) {
+    HeldReset(h->gun, h->dt);
+    move.cmd.buttons = BUTTON_ATTACK; QuickTick(h->dt);
+    CHECK(fired[h->gun] == 1 && ps.weaponShotCount == 1 && ps.weaponstate == WEAPON_FIRING);
+    CHECK(ps.weaponAnimTime == 0 && Owed(h->gun) && ps.weaponTime > 0);
+    return ps.weaponTime;
+}
+static void HeldTo(const held_t *h, int *n, int target) { while (*n < target) { QuickTick(h->dt); ++*n; } }
+/* Into contact: the next command's weapon think is the first to find the ladder. */
+static void ToLadder(void) {
+    VectorSet(ps.origin, 111, 0, 180); VectorClear(ps.velocity);
+    ps.groundEntityNum = ENTITYNUM_NONE;
+}
+static void HeldGrab(const held_t *h, int *n) { ToLadder(); QuickTick(h->dt); ++*n; CHECK(Attached()); }
+/* A fresh press of jump: the push off the ladder, on this command. */
+static void HeldJump(const held_t *h, int *n) {
+    move.cmd.upmove = 127; QuickTick(h->dt); move.cmd.upmove = 0; ++*n;
+    CHECK(!Attached() && !Holstering() && ps.velocity[0] < 0 && ps.velocity[2] > 0 && ps.jumpLand == -1);
+}
+/* Hung: the gun in hand, still a drop, weaponTime 1, and down on screen. */
+static void CheckHung(const held_t *h, qboolean owed, int shots) {
+    CHECK(Attached() && ps.weapon == h->gun && ps.weaponstate == WEAPON_DROPPING && Holstering());
+    CHECK(ps.weaponTime == 1 && BG_LadderHolsterDown(&ps) && BG_HolsterTime(&ps) == BG_LADDER_DROP_TIME);
+    CHECK(fired[h->gun] == shots && ps.weaponShotCount == 1 && Owed(h->gun) == owed);
+    CHECK((move.cmd.buttons & BUTTON_ATTACK) && !(ps.weaponAction & WA_TYPE_MASK));
+}
+/* The holster began on this command; hold the trigger through it and for ms
+ * more. It goes down over its own time and never ends. */
+static void HeldHang(const held_t *h, int *n, qboolean owed, int ms) {
+    int k, t;
+    CHECK(Attached() && ps.weapon == h->gun && ps.weaponstate == WEAPON_DROPPING && Holstering());
+    CHECK(ps.weaponTime == BG_LADDER_DROP_TIME && BG_HolsterTime(&ps) == BG_LADDER_DROP_TIME);
+    CHECK(Owed(h->gun) == owed && ps.weaponShotCount == 1 && fired[h->gun] == 1);
+    for (k = 1; k < h->H; k++) {
+        HeldTo(h, n, *n + 1);
+        CHECK(Attached() && ps.weaponstate == WEAPON_DROPPING && Holstering() && ps.weapon == h->gun);
+        CHECK(ps.weaponTime == BG_LADDER_DROP_TIME - k * h->dt && ps.weaponTime > 0);
+    }
+    HeldTo(h, n, *n + 1); CheckHung(h, owed, 1);      /* the crossing: MW2's lock, not weapon 0 */
+    for (t = 0; t < ms; t += h->dt) { HeldTo(h, n, *n + 1); CheckHung(h, owed, 1); }
+}
+/* The owed action, started on command j0 from READY (MW2's rechamber: the
+ * whole action from its open note), the trigger still down: the bolt and the
+ * end on their commands, then READY under the lock, and no shot. */
+static void HeldAction(const held_t *h, int *n, int shots) {
+    int j0 = *n, bolt = j0 + Thinks(h->close - h->open, h->dt), end = j0 + Thinks(h->len - h->open, h->dt);
+    CHECK(ps.weapon == h->gun && ps.weaponstate == WEAPON_BOLTING && ps.weaponAnimSeq == ASEQ_FIRE);
+    CHECK(ps.weaponAnimTime == h->open && ps.weaponTime == h->len - h->open && Owed(h->gun));
+    CHECK(fired[h->gun] == shots && !Holstering() && !Attached());
+    while (*n < end) {
+        HeldTo(h, n, *n + 1);
+        CHECK(Owed(h->gun) == (*n < bolt) && fired[h->gun] == shots);
+        CHECK(ps.weaponstate == (*n < end ? WEAPON_BOLTING : WEAPON_READY));
+    }
+    CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 1);
+    HeldTo(h, n, *n + Thinks(300, h->dt));
+    CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 1 && fired[h->gun] == shots);
+}
+/* The gun's draw from the empty hands of WEAPON_LADDER, begun on this
+ * command: its length, read from the game. */
+static int HeldRaise(const held_t *h) {
+    int raise = ps.weaponTime;
+    CHECK(ps.weapon == h->gun && ps.weaponstate == WEAPON_RAISING && raise == BG_WeaponDrawTime(&ps));
+    CHECK(raise == BG_WeaponRaiseTime(h->gun) || raise == BG_WeaponFirstRaiseTime(h->gun));
+    CHECK(raise > BG_LADDER_DROP_TIME && !Holstering() && !Attached());
+    return raise;
+}
+
 /* The gun's quick raise after the knife, ended under the held trigger's
  * lock: on the think that raise's time runs out with the trigger down, the
  * gun's pull spent (the SPAS's shot), the command naming the gun and a round
@@ -1275,39 +1408,404 @@ static void TestHeldTriggerGrab(int dt) {
     CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_DROPPING && (ps.stats[STAT_LADDER] & LADDER_HOLSTER));
     CHECK(ps.weaponTime == BG_LADDER_DROP_TIME && !(ps.weaponAction & WA_TYPE_MASK) && fired[WP_KNIFE] == 1);
     CHECK((ps.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN)) && fired[WP_SHOTGUN] == 1 && Attached());
-}
-/* Peace's ladder holster takes no held-trigger lock (PM_LockGun leaves out
- * LADDER_HOLSTER). This pins Peace's current behaviour, a departure from MW2
- * that waits for the owner ("Ladder tuning" in dev/MW2_DIFFERENCES.md): MW2's
- * ladder drop is a weapon change to weapon 0 with the command still naming
- * the gun (CheckForChangeWeapon's ladder branch, 0x578C72), so with the
- * trigger held from a single-shot gun's shot, the pull spent, its
- * WeaponTimeAdjust locks the drop as it runs out (0x578ABC-0x578AE6) and the
- * drop hangs until a release. Here the drop finishes on its own time, the
- * trigger still down, and the pull stays spent (the ladder never touches the
- * count). */
-static void TestHeldTriggerHolster(int dt) {
-    int t, k, drop = (BG_LADDER_DROP_TIME + dt - 1) / dt;
-    QuickReset(WP_FRAG, dt);
-    move.cmd.buttons = BUTTON_ATTACK; QuickTick(dt);
-    CHECK(fired[WP_SHOTGUN] == 1 && ps.weaponShotCount == 1);
-    for (t = 0; t < 5000 && !(ps.weaponstate == WEAPON_READY && ps.weaponTime == 1 &&
-         !(ps.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN))); t += dt) QuickTick(dt);
-    CHECK(t < 5000 && ps.weaponstate == WEAPON_READY && ps.weaponTime == 1 && fired[WP_SHOTGUN] == 1);
-    VectorSet(ps.origin, 111, 0, 180); VectorClear(ps.velocity);
-    ps.groundEntityNum = ENTITYNUM_NONE;
-    QuickTick(dt);
-    CHECK(Attached() && ps.weaponstate == WEAPON_DROPPING && (ps.stats[STAT_LADDER] & LADDER_HOLSTER));
-    CHECK(ps.weaponTime == BG_LADDER_DROP_TIME && drop >= 1);
-    for (k = 1; k < drop; k++) {
-        QuickTick(dt);
-        CHECK(ps.weaponstate == WEAPON_DROPPING && ps.weaponTime == BG_LADDER_DROP_TIME - k * dt);
+    /* That drop then hangs under the same lock, and the jump gives the gun
+     * back to start the pump it still owes (TestHeldTriggerHolster). */
+    {
+        held_t h = Held(WP_SHOTGUN, dt);
+        int n = 0;
+        HeldHang(&h, &n, qtrue, 1000);
+        HeldJump(&h, &n);
+        HeldAction(&h, &n, 1);
     }
-    QuickTick(dt);
-    /* no time over: the holster is no state the lock takes, so its crossing
-     * drops the overshoot (0x578B71) */
-    CHECK(ps.weaponstate == WEAPON_LADDER && ps.weapon == WP_SHOTGUN && Attached() && ps.weaponTime == 0);
-    CHECK((move.cmd.buttons & BUTTON_ATTACK) && ps.weaponShotCount == 1 && fired[WP_SHOTGUN] == 1);
+}
+/* The grab after the action (nothing owed): the holster hangs for ms, and
+ * then one of four ways off. */
+enum { OFF_JUMP_HELD, OFF_LET_GO_ON_LADDER, OFF_LET_GO_ON_JUMP, OFF_JUMP_IN_HOLSTER };
+static void HeldAfterAction(int gun, int dt, int ms, int off) {
+    held_t h = Held(gun, dt);
+    int n = 0, stamp = HeldShot(&h), raise, k;
+    HeldTo(&h, &n, h.F);
+    CHECK(ps.weaponstate == WEAPON_BOLTING && ps.weaponAnimTime == h.open && ps.weaponTime == h.len - h.open);
+    HeldTo(&h, &n, h.B - 1); CHECK(Owed(gun));
+    HeldTo(&h, &n, h.B); CHECK(!Owed(gun));
+    HeldTo(&h, &n, h.E - 1); CHECK(ps.weaponstate == WEAPON_BOLTING);
+    HeldTo(&h, &n, h.E); CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 1 && !Owed(gun));
+    HeldTo(&h, &n, h.E + 2); CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 1 && fired[gun] == 1);
+    HeldGrab(&h, &n);
+    if (off == OFF_JUMP_IN_HOLSTER) {
+        /* still going down: the same cancel, the shot on the jump's command */
+        CHECK(h.H >= 2 && ps.weaponstate == WEAPON_DROPPING && Holstering() && ps.weaponTime == BG_LADDER_DROP_TIME);
+        HeldJump(&h, &n);
+        CHECK(fired[gun] == 2 && ps.weaponstate == WEAPON_FIRING && ps.weaponTime == stamp && ps.weaponShotCount == 2);
+        return;
+    }
+    HeldHang(&h, &n, qfalse, ms);
+    switch (off) {
+    case OFF_JUMP_HELD:
+        /* the shot is on the jump's own command: no raise, however long the hang */
+        HeldJump(&h, &n);
+        CHECK(fired[gun] == 2 && ps.weapon == gun && ps.weaponstate == WEAPON_FIRING);
+        CHECK(ps.weaponTime == stamp && ps.weaponAnimTime == 0 && ps.weaponShotCount == 2 && Owed(gun));
+        /* and that shot is the pull's last: its action, then the lock */
+        HeldTo(&h, &n, n + h.F); HeldAction(&h, &n, 2);
+        break;
+    case OFF_LET_GO_ON_LADDER:
+        /* the drop ends on the command the trigger is let go: empty hands */
+        move.cmd.buttons = 0; HeldTo(&h, &n, n + 1);
+        CHECK(Attached() && ps.weaponstate == WEAPON_LADDER && ps.weapon == gun && ps.weaponTime == 0);
+        CHECK(!Holstering() && !BG_LadderHolsterDown(&ps) && ps.weaponShotCount == 0 && ps.weaponAnimTime == -1);
+        /* a new pull does nothing there */
+        move.cmd.buttons = BUTTON_ATTACK;
+        for (k = 0; k < Thinks(500, dt); k++) {
+            HeldTo(&h, &n, n + 1);
+            CHECK(Attached() && ps.weaponstate == WEAPON_LADDER && fired[gun] == 1 && ps.weaponShotCount == 0);
+        }
+        /* and the way back is the gun's whole raise; the pull was ended, so
+         * nothing hangs it and the held trigger fires the command after */
+        HeldJump(&h, &n); raise = HeldRaise(&h);
+        for (k = 1; k < Thinks(raise, dt); k++) {
+            HeldTo(&h, &n, n + 1);
+            CHECK(ps.weaponstate == WEAPON_RAISING && ps.weaponTime == raise - k * dt && fired[gun] == 1);
+        }
+        HeldTo(&h, &n, n + 1); CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && fired[gun] == 1);
+        HeldTo(&h, &n, n + 1); CHECK(ps.weaponstate == WEAPON_FIRING && fired[gun] == 2 && ps.weaponShotCount == 1);
+        break;
+    case OFF_LET_GO_ON_JUMP:
+        /* let go on the jump's own command: the gun is READY on it, the pull over */
+        move.cmd.buttons = 0; HeldJump(&h, &n);
+        CHECK(ps.weapon == gun && ps.weaponstate == WEAPON_READY && ps.weaponTime == 0);
+        CHECK(ps.weaponShotCount == 0 && fired[gun] == 1);
+        move.cmd.buttons = BUTTON_ATTACK; HeldTo(&h, &n, n + 1);
+        CHECK(fired[gun] == 2 && ps.weaponstate == WEAPON_FIRING && ps.weaponTime == stamp);
+        break;
+    }
+}
+/* The grab during the shot and during the action. where: 0 in the shot, 1 in
+ * the action before the bolt, 2 on the bolt's own think, 3 the think after
+ * the bolt, 4 the think before the bolt's. */
+static void HeldGrabDuring(int gun, int dt, int where, int ms) {
+    held_t h = Held(gun, dt);
+    int n = 0, stamp = HeldShot(&h), raise, k;
+    switch (where) {
+    case 0:
+        /* MW2's change check refuses a shot with time left (0x578C31): the
+         * gun stays up and FIRING on the ladder until the shot's last think */
+        CHECK(h.F >= 2);
+        HeldGrab(&h, &n);
+        for (;;) {
+            CHECK(Attached() && ps.weapon == gun && ps.weaponstate == WEAPON_FIRING && !Holstering());
+            CHECK(fired[gun] == 1 && n < h.F);
+            if (n == h.F - 1) break;
+            HeldTo(&h, &n, n + 1);
+        }
+        /* ...and on it the drop takes the lock's READY before the action can
+         * start (the change check comes first, 0x44C4D7): owed */
+        HeldTo(&h, &n, h.F);
+        CHECK(ps.weaponAnimTime == h.open);
+        HeldHang(&h, &n, qtrue, ms);
+        break;
+    case 1:
+    case 4:
+        /* RECHAMBERING passes the gate (0x578C2C): the drop begins on the
+         * grab's command and the bolt is never taken. The think before the
+         * bolt's is no different: the empty hands of the bolt's own think
+         * (below) are one think wide. */
+        if (h.B - h.F < 2) return;      /* the bolt is the action's first think after it starts */
+        HeldTo(&h, &n, where == 1 ? h.F : h.B - 2); CHECK(ps.weaponstate == WEAPON_BOLTING);
+        HeldGrab(&h, &n); CHECK(where == 1 ? n < h.B : n == h.B - 1);
+        HeldHang(&h, &n, qtrue, ms);
+        break;
+    case 2:
+        /* On the bolt's own think the delayed action finishes the drop begun
+         * on it (MW2's path A, 0x579474, 0x57928C): empty hands at once, the
+         * action owed. This drop never had a crossing, so nothing hangs. */
+        HeldTo(&h, &n, h.B - 1); CHECK(ps.weaponstate == WEAPON_BOLTING && Owed(gun));
+        HeldGrab(&h, &n); CHECK(n == h.B);
+        for (k = 0; k <= Thinks(ms, dt); k++) {
+            CHECK(Attached() && ps.weaponstate == WEAPON_LADDER && ps.weapon == gun && ps.weaponTime == 0);
+            CHECK(Owed(gun) && !Holstering() && ps.weaponShotCount == 1 && fired[gun] == 1);
+            if (k < Thinks(ms, dt)) HeldTo(&h, &n, n + 1);
+        }
+        /* The one way a held trigger pays a raise, in MW2 as here: the gun
+         * is drawn, and the draw's crossing is the lock's (0x578B25-0x578B28). */
+        HeldJump(&h, &n); raise = HeldRaise(&h);
+        for (k = 1; k < Thinks(raise, dt); k++) {
+            HeldTo(&h, &n, n + 1);
+            CHECK(ps.weaponstate == WEAPON_RAISING && ps.weaponTime == raise - k * dt);
+        }
+        for (k = 0; k < Thinks(300, dt); k++) {
+            HeldTo(&h, &n, n + 1);
+            CHECK(ps.weaponstate == WEAPON_RAISING && ps.weaponTime == 1 && fired[gun] == 1 && Owed(gun));
+        }
+        move.cmd.buttons = 0; HeldTo(&h, &n, n + 1);
+        CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && ps.weaponShotCount == 0);
+        HeldTo(&h, &n, n + 1);
+        CHECK(ps.weaponstate == WEAPON_BOLTING && ps.weaponAnimTime == h.open && ps.weaponTime == h.len - h.open);
+        return;
+    default:
+        /* a think later the bolt is paid, and the rest of the action is given up */
+        HeldTo(&h, &n, h.B); CHECK(!Owed(gun));
+        HeldGrab(&h, &n);
+        HeldHang(&h, &n, qfalse, ms);
+        break;
+    }
+    HeldJump(&h, &n);
+    if (where == 3) {
+        CHECK(fired[gun] == 2 && ps.weaponstate == WEAPON_FIRING && ps.weaponTime == stamp && ps.weaponShotCount == 2);
+        return;
+    }
+    /* owed: the pump or bolt starts on the jump's command, from READY, whole */
+    HeldAction(&h, &n, 1);
+    move.cmd.buttons = 0; HeldTo(&h, &n, n + 1);
+    CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && ps.weaponShotCount == 0);
+    move.cmd.buttons = BUTTON_ATTACK; HeldTo(&h, &n, n + 1);
+    CHECK(fired[gun] == 2 && ps.weaponstate == WEAPON_FIRING && ps.weaponTime == stamp);
+}
+/* Full auto is never locked (ShotLimitReached, 0x5769E9): grabbed while
+ * firing, the drop begins on the running shot's crossing instead of the next
+ * shot and ends on its time, the trigger still down. Left after it, the gun is
+ * raised and fires the command after the raise; left inside it, the same
+ * cancel, and the held trigger fires on that command. */
+static void TestFullAutoLadder(int dt) {
+    const int gun = WP_MACHINEGUN;
+    held_t h;
+    int n, stamp, shot, raise, k, inside;
+    CHECK(BG_WeaponFireType(gun) == BG_FIRE_FULLAUTO);
+    h.gun = gun; h.dt = dt; h.H = Thinks(BG_LADDER_DROP_TIME, dt);
+    for (inside = 0; inside < 2; inside++) {
+        HeldReset(gun, dt); n = 0;
+        move.cmd.buttons = BUTTON_ATTACK; QuickTick(dt);
+        CHECK(fired[gun] == 1 && ps.weaponstate == WEAPON_FIRING && ps.weaponShotCount == 0);
+        stamp = ps.weaponTime; shot = Thinks(stamp, dt);
+        CHECK(stamp > 0 && shot >= 2);
+        HeldGrab(&h, &n);
+        for (;;) {
+            CHECK(Attached() && ps.weaponstate == WEAPON_FIRING && !Holstering() && fired[gun] == 1);
+            CHECK(ps.weaponTime == stamp - n * dt && n < shot);
+            if (n == shot - 1) break;
+            HeldTo(&h, &n, n + 1);
+        }
+        HeldTo(&h, &n, shot);
+        CHECK(Attached() && ps.weapon == gun && ps.weaponstate == WEAPON_DROPPING && Holstering());
+        CHECK(ps.weaponTime == BG_LADDER_DROP_TIME && fired[gun] == 1);
+        if (inside) {
+            CHECK(h.H >= 2);
+            HeldJump(&h, &n);
+            CHECK(fired[gun] == 2 && ps.weaponstate == WEAPON_FIRING && ps.weaponTime == stamp);
+            continue;
+        }
+        for (k = 1; k < h.H; k++) {
+            HeldTo(&h, &n, n + 1);
+            CHECK(ps.weaponstate == WEAPON_DROPPING && Holstering() && ps.weaponTime == BG_LADDER_DROP_TIME - k * dt);
+        }
+        HeldTo(&h, &n, n + 1);
+        CHECK(Attached() && ps.weaponstate == WEAPON_LADDER && ps.weapon == gun && ps.weaponTime == 0 && !Holstering());
+        CHECK(!BG_LadderHolsterDown(&ps));
+        for (k = 0; k < Thinks(1000, dt); k++) {
+            HeldTo(&h, &n, n + 1);
+            CHECK(Attached() && ps.weaponstate == WEAPON_LADDER && fired[gun] == 1);
+        }
+        HeldJump(&h, &n); raise = HeldRaise(&h);
+        HeldTo(&h, &n, n + Thinks(raise, dt) - 1); CHECK(ps.weaponstate == WEAPON_RAISING && fired[gun] == 1);
+        HeldTo(&h, &n, n + 1); CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && fired[gun] == 1);
+        HeldTo(&h, &n, n + 1); CHECK(ps.weaponstate == WEAPON_FIRING && fired[gun] == 2 && ps.weaponTime == stamp);
+    }
+}
+/* The trigger up. A ladder left inside the holster gives the gun back on that
+ * command whatever the trigger (MW2's cancel reads no button): READY, and an
+ * owed action starts on it. One touched and jumped off on a single think is
+ * never found by the weapon think at all (MW2's jump clears PMF_LADDER before
+ * PM_Weapon, Jump_PushOffLadder 0x56DB85): nothing is put down, and a trigger
+ * down on that command fires. */
+static void TestLadderLeftInHolster(int dt) {
+    held_t h = Held(WP_SHOTGUN, dt);
+    int n, pressed;
+    /* nothing owed */
+    HeldReset(h.gun, dt); n = 0;
+    HeldGrab(&h, &n);
+    CHECK(h.H >= 2 && ps.weaponstate == WEAPON_DROPPING && Holstering() && ps.weaponTime == BG_LADDER_DROP_TIME);
+    HeldJump(&h, &n);
+    CHECK(ps.weapon == h.gun && ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && ps.weaponAnimTime == -1);
+    move.cmd.buttons = BUTTON_ATTACK; HeldTo(&h, &n, n + 1);
+    CHECK(fired[h.gun] == 1 && ps.weaponstate == WEAPON_FIRING);
+    /* a tapped shot, the ladder grabbed in it: the drop begins on the shot's
+     * last think, its trigger up (the pull ends there), and the pump is owed */
+    n = 0; HeldShot(&h);
+    move.cmd.buttons = 0;
+    HeldGrab(&h, &n);
+    HeldTo(&h, &n, h.F - 1); CHECK(ps.weaponstate == WEAPON_FIRING && !Holstering() && Attached());
+    HeldTo(&h, &n, h.F);
+    CHECK(ps.weaponstate == WEAPON_DROPPING && Holstering() && ps.weaponTime == BG_LADDER_DROP_TIME);
+    CHECK(Owed(h.gun) && ps.weaponShotCount == 0);
+    HeldJump(&h, &n);
+    CHECK(ps.weaponstate == WEAPON_BOLTING && ps.weaponAnimTime == h.open && ps.weaponTime == h.len - h.open);
+    /* and with the trigger up the holster simply runs out on the ladder */
+    HeldReset(h.gun, dt); n = 0;
+    HeldGrab(&h, &n);
+    HeldTo(&h, &n, n + h.H - 1); CHECK(ps.weaponstate == WEAPON_DROPPING && Holstering());
+    HeldTo(&h, &n, n + 1); CHECK(ps.weaponstate == WEAPON_LADDER && ps.weaponTime == 0 && !Holstering());
+    /* the grab and the jump on one command */
+    for (pressed = 0; pressed < 2; pressed++) {
+        HeldReset(h.gun, dt); n = 0;
+        ToLadder();
+        move.cmd.buttons = pressed ? BUTTON_ATTACK : 0;
+        move.cmd.upmove = 127; QuickTick(dt); move.cmd.upmove = 0;
+        CHECK(!Attached() && ps.velocity[0] < 0 && ps.velocity[2] > 0 && ps.jumpLand == -1);
+        CHECK(!Holstering() && ps.weapon == h.gun && fired[h.gun] == pressed);
+        CHECK(ps.weaponstate == (pressed ? WEAPON_FIRING : WEAPON_READY));
+    }
+}
+/* Every way off is the same cancel (MW2's PM_CheckLadderMove clears PMF_LADDER
+ * before PM_Weapon for the top, the bottom and a turn away, as the jump does):
+ * climbed off the top with the trigger still held from the shot, the gun fires
+ * on the command the ladder lets go of, with no raise. */
+static void TestHeldTopExit(int dt) {
+    held_t h = Held(WP_SHOTGUN, dt);
+    int n = 0, stamp = HeldShot(&h), t;
+    HeldTo(&h, &n, h.E + 2);
+    VectorSet(ps.origin, 111, 0, 300); VectorClear(ps.velocity);
+    ps.groundEntityNum = ENTITYNUM_NONE;
+    HeldTo(&h, &n, n + 1); CHECK(Attached());
+    HeldHang(&h, &n, qfalse, 500);
+    move.cmd.forwardmove = 127;
+    for (t = 0; t < 1000 && Attached(); t += dt) {
+        CheckHung(&h, qfalse, 1);
+        HeldTo(&h, &n, n + 1);
+    }
+    move.cmd.forwardmove = 0;
+    CHECK(t > 0 && t < 1000 && !Attached() && !Holstering() && ps.origin[2] > 300 && ps.jumpLand != -1);
+    CHECK(fired[h.gun] == 2 && ps.weapon == h.gun && ps.weaponstate == WEAPON_FIRING);
+    CHECK(ps.weaponTime == stamp && ps.weaponShotCount == 2);
+}
+/* What else the leaving command asks for, the holster hung (MW2's order:
+ * the offhand check, the change check with its cancel, the reload check, the
+ * knife check, 0x44C4D1-0x44C4FC). */
+static void TestLadderLeavingCommand(int dt) {
+    held_t h = Held(WP_SHOTGUN, dt);
+    const int other = WP_MACHINEGUN;
+    int n, k, raise, left;
+    for (k = 0; k < 5; k++) {
+        n = 0; HeldShot(&h);
+        HeldTo(&h, &n, h.E + 1);
+        HeldGrab(&h, &n);
+        HeldHang(&h, &n, qfalse, 400);
+        switch (k) {
+        case 0:
+            /* the knife: the cancel has readied the gun first, so it comes out */
+            move.cmd.buttons |= BUTTON_MELEE; HeldJump(&h, &n);
+            CHECK(ps.weapon == WP_KNIFE && (ps.weaponAction & WA_TYPE_MASK) == WA_MELEE && fired[h.gun] == 1);
+            break;
+        case 1:
+            /* equipment: its check comes first and takes the drop as it is
+             * (OffHandInit keeps a running drop's time, the hung 1), so
+             * nothing is cancelled and the frag is in hand on the next command */
+            move.cmd.buttons |= BUTTON_LETHAL; HeldJump(&h, &n);
+            CHECK(ps.weapon == h.gun && ps.weaponstate == WEAPON_DROPPING && ps.weaponTime == 1);
+            CHECK((ps.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == WA_LETHAL && fired[h.gun] == 1);
+            HeldTo(&h, &n, n + 1);
+            CHECK(ps.weapon == WP_FRAG && ps.weaponstate == WEAPON_RAISING && fired[h.gun] == 1);
+            break;
+        case 2:
+            /* a reload: taken from the cancel's READY, and it ends the pull */
+            CHECK(ps.ammo[h.gun] < BG_WeaponMagSize(h.gun) && ps.ammoReserve[h.gun] > 0);
+            move.cmd.buttons |= BUTTON_RELOAD; HeldJump(&h, &n);
+            CHECK(ps.weapon == h.gun && ps.weaponstate == WEAPON_RELOADING && ps.weaponShotCount == 0 && fired[h.gun] == 1);
+            break;
+        case 3:
+            /* Y on the ladder (Peace sends it there; MW2's client does not,
+             * 0x59D590): the command names another gun, so the lock lets go
+             * (0x578AC4) and the drop ends on that command, the pull still
+             * spent; leaving raises the gun named */
+            move.cmd.weapon = other; HeldTo(&h, &n, n + 1);
+            CHECK(Attached() && ps.weaponstate == WEAPON_LADDER && ps.weapon == h.gun && ps.weaponTime == 0);
+            CHECK(ps.weaponShotCount == 1 && !Holstering());
+            HeldJump(&h, &n);
+            CHECK(ps.weapon == other && ps.weaponstate == WEAPON_RAISING && ps.weaponTime == BG_WeaponDrawTime(&ps));
+            break;
+        default:
+            /* Y on the jump's own command: no cancel, the drop is over (the
+             * lock let go) and the other gun is raised on that command */
+            move.cmd.weapon = other; HeldJump(&h, &n);
+            CHECK(ps.weapon == other && ps.weaponstate == WEAPON_RAISING && ps.weaponTime == BG_WeaponDrawTime(&ps));
+            CHECK(fired[h.gun] == 1);
+            break;
+        }
+    }
+    /* Y inside the running holster, then the jump: the drop is no longer the
+     * ladder's and is not cancelled (the command names another gun); it runs
+     * out the time it had and the other gun is raised with its own draw. The
+     * Masterkey, whose last draw was the alt switch's, is the same: the drop
+     * it leaves is no mode change (no 0ms alt drop, no alt raise). */
+    for (k = 0; k < 2; k++) {
+        h.gun = k ? WP_MASTERKEY : WP_SHOTGUN;
+        HeldReset(h.gun, dt); n = 0;
+        if (k) CHECK(ps.weaponDraw == WDRAW_ALT);
+        HeldGrab(&h, &n);
+        CHECK(h.H >= 2 && ps.weaponstate == WEAPON_DROPPING && Holstering() && ps.weaponTime == BG_LADDER_DROP_TIME);
+        move.cmd.weapon = other; HeldJump(&h, &n);
+        left = BG_LADDER_DROP_TIME - dt;
+        CHECK(ps.weapon == h.gun && ps.weaponstate == WEAPON_DROPPING && ps.weaponTime == left && left > 0);
+        CHECK(ps.weaponDraw != WDRAW_ALT && BG_HolsterTime(&ps) == BG_WeaponDropTime(h.gun));
+        HeldTo(&h, &n, n + Thinks(left, dt) - 1); CHECK(ps.weapon == h.gun && ps.weaponstate == WEAPON_DROPPING);
+        HeldTo(&h, &n, n + 1);
+        raise = ps.weaponTime;
+        CHECK(ps.weapon == other && ps.weaponstate == WEAPON_RAISING && ps.weaponDraw != WDRAW_ALT);
+        CHECK(raise == BG_WeaponDrawTime(&ps) && (raise == BG_WeaponRaiseTime(other) || raise == BG_WeaponFirstRaiseTime(other)));
+    }
+}
+/* The hang and the cancel are playerstate alone (the drop, the ladder's mark,
+ * weaponTime 1, the shot count): replayed from a snapshot taken in the hang,
+ * a client predicts what the server ran. */
+static void TestHeldPredictionReplay(int dt) {
+    held_t h = Held(WP_SHOTGUN, dt);
+    playerState_t start, expected;
+    int n = 0, i, j, jump = Thinks(700, dt);
+    HeldShot(&h);
+    HeldTo(&h, &n, h.E + 1);
+    HeldGrab(&h, &n);
+    HeldHang(&h, &n, qfalse, 300);
+    start = ps;
+    for (j = 0; j < 2; j++) {
+        ps = start;
+        /* Simulate signed-short stat snapshot serialization. */
+        for (i = 0; i < MAX_STATS; i++) ps.stats[i] = (short)ps.stats[i];
+        memset(fired, 0, sizeof(fired));
+        for (i = 0; i < jump + Thinks(400, dt); i++) {
+            move.cmd.upmove = i == jump ? 127 : 0;
+            QuickTick(dt);
+            if (i < jump) CHECK(ps.weaponstate == WEAPON_DROPPING && ps.weaponTime == 1 && !fired[h.gun]);
+            if (i == jump) CHECK(fired[h.gun] == 1 && ps.weaponstate == WEAPON_FIRING && !Attached());
+        }
+        move.cmd.upmove = 0;
+        if (!j) expected = ps;
+        else CHECK(memcmp(&expected, &ps, sizeof(ps)) == 0);
+    }
+}
+/* This test pinned Peace's old ladder holster, which took no lock, finished on
+ * its time with the trigger held and cost the whole raise on leaving. It now
+ * pins MW2's: the SPAS, the M300 and the Masterkey, Single Shot in MW2's
+ * files, the pull spent and the trigger never let go. Held on the ladder for
+ * no time, for 3 seconds or for 10, the gun is back on the jump's command. */
+static void TestHeldTriggerHolster(int dt) {
+    const int guns[] = { WP_SHOTGUN, WP_M40A3, WP_MASTERKEY };
+    const int holds[] = { 0, 3000, 10000 };
+    int g, k, where;
+    for (g = 0; g < ARRAY_LEN(guns); g++) {
+        CHECK(BG_WeaponFireType(guns[g]) == BG_FIRE_SINGLESHOT);
+        for (k = 0; k < ARRAY_LEN(holds); k++) {
+            HeldAfterAction(guns[g], dt, holds[k], OFF_JUMP_HELD);
+            HeldGrabDuring(guns[g], dt, 0, holds[k]);
+        }
+        HeldAfterAction(guns[g], dt, 500, OFF_LET_GO_ON_LADDER);
+        HeldAfterAction(guns[g], dt, 500, OFF_LET_GO_ON_JUMP);
+        HeldAfterAction(guns[g], dt, 0, OFF_JUMP_IN_HOLSTER);
+        for (where = 1; where <= 4; where++) HeldGrabDuring(guns[g], dt, where, 3000);
+    }
+    TestFullAutoLadder(dt);
+    TestLadderLeftInHolster(dt);
+    TestHeldTopExit(dt);
+    TestLadderLeavingCommand(dt);
+    TestHeldPredictionReplay(dt);
 }
 int main(void) {
     int checksum, i;

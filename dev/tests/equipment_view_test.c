@@ -13,6 +13,48 @@ static weaponInfo_t weapon;
 void QDECL Com_Printf(const char *fmt,...) { (void)fmt; }
 void QDECL CG_Printf(const char *fmt,...) { (void)fmt; }
 void QDECL Com_Error(int code,const char *fmt,...) { (void)code; (void)fmt; abort(); }
+/* What the real CG_AddViewWeapon links beyond the equipment's own picture
+ * (TestLadderView): the gun's table and cvars, and a renderer that draws
+ * frames (no model poses here: the layers' frame path). The rest is only
+ * linked because CG_RegisterWeapon and the gun's effects name it, and is never
+ * reached. */
+weaponInfo_t cg_weapons[MAX_WEAPONS];
+itemInfo_t cg_items[MAX_ITEMS];
+centity_t cg_entities[MAX_GENTITIES];
+vmCvar_t cg_drawGun, cg_gun_frame, cg_gun_x, cg_gun_y, cg_gun_z;
+vmCvar_t cg_noProjectileTrail, cg_brassTime, cg_oldPlasma, cg_trueLightning;
+qboolean trap_R_BuildModelPose(qhandle_t model,int frame,int oldframe,float blend,modelPose_t *out) {
+ (void)model; (void)frame; (void)oldframe; (void)blend; (void)out; return qfalse;
+}
+void trap_R_BlendModelPoses(modelPose_t *out,const modelPose_t *a,float wa,const modelPose_t *b,float wb) {
+ (void)out; (void)a; (void)wa; (void)b; (void)wb; abort();
+}
+void CG_Sights_Apply(int gun,refEntity_t *hand) { (void)gun; (void)hand; }
+qboolean CG_Sights_HideViewModel(void) { return qfalse; }
+void CG_Sights_AddOptic(int gun,const refEntity_t *hand) { (void)gun; (void)hand; }
+void CG_Sights_Register(int gun,const char *path) { (void)gun; (void)path; abort(); }
+void QDECL CG_Error(const char *fmt,...) { (void)fmt; abort(); }
+qhandle_t trap_R_RegisterModel(const char *name) { (void)name; abort(); return 0; }
+qhandle_t trap_R_RegisterShader(const char *name) { (void)name; abort(); return 0; }
+sfxHandle_t trap_S_RegisterSound(const char *name,qboolean compressed) { (void)name; (void)compressed; abort(); return 0; }
+void trap_R_ModelBounds(clipHandle_t model,vec3_t mins,vec3_t maxs) { (void)model; (void)mins; (void)maxs; abort(); }
+void trap_R_AddLightToScene(const vec3_t o,float i,float r,float g,float b) { (void)o;(void)i;(void)r;(void)g;(void)b; abort(); }
+void trap_S_AddLoopingSound(int n,const vec3_t o,const vec3_t v,sfxHandle_t sfx) { (void)n;(void)o;(void)v;(void)sfx; abort(); }
+void trap_S_StartSound(vec3_t o,int n,int channel,sfxHandle_t sfx) { (void)o;(void)n;(void)channel;(void)sfx; abort(); }
+int CG_PointContents(const vec3_t point,int pass) { (void)point; (void)pass; abort(); return 0; }
+void CG_Trace(trace_t *tr,const vec3_t a,const vec3_t mins,const vec3_t maxs,const vec3_t b,int skip,int mask) {
+ (void)tr;(void)a;(void)mins;(void)maxs;(void)b;(void)skip;(void)mask; abort();
+}
+void CG_BubbleTrail(vec3_t a,vec3_t b,float spacing) { (void)a; (void)b; (void)spacing; abort(); }
+localEntity_t *CG_AllocLocalEntity(void) { abort(); return NULL; }
+localEntity_t *CG_SmokePuff(const vec3_t at,const vec3_t vel,float radius,float r,float g,float b,float a,
+ float duration,int startTime,int fadeInTime,int leFlags,qhandle_t hShader) {
+ (void)at;(void)vel;(void)radius;(void)r;(void)g;(void)b;(void)a;(void)duration;(void)startTime;
+ (void)fadeInTime;(void)leFlags;(void)hShader; abort(); return NULL;
+}
+void CG_PositionRotatedEntityOnTag(refEntity_t *entity,const refEntity_t *parent,qhandle_t parentModel,char *tagName) {
+ (void)entity;(void)parent;(void)parentModel;(void)tagName; abort();
+}
 void trap_SnapVector(float *v) { int i; for(i=0;i<3;i++) v[i]=rintf(v[i]); }
 int trap_FS_FOpenFile(const char *path,fileHandle_t *handle,fsMode_t mode) {
  long size; (void)mode; input=fopen(path,"rb"); CHECK(input!=NULL);
@@ -148,6 +190,101 @@ static void TestGameplay(void) {
   else CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING && ps.weaponTime==BG_WeaponQuickRaiseTime(WP_SHOTGUN));
  }
 }
+/* The real CG_AddViewWeapon on a ladder, with the SPAS's own clips, the real
+ * layers and the real PM_Weapon at 8ms (the ladder's mark set and cleared as a
+ * grab and a jump leave it; ladder_test.c drives the real ladder). The holster
+ * lowers the gun 24 units over its own time on top of its drop clip. Run out,
+ * the gun is not drawn: in WEAPON_LADDER, and just the same in a holster hung
+ * under the held trigger's lock, however long (MW2's drop animation has played
+ * out and holds its last frame, the gun stowed; the state is still the drop).
+ * The layers keep running under it. Left with the trigger still down, the gun
+ * is drawn in hand on that frame, firing; let go on that command, it is READY
+ * at once and drawn coming home from the bottom, never snapped up. */
+#define VIEW_GUN 3
+static pmove_t view;
+static playerState_t viewPs;
+static void ViewBegin(void) {
+ bg_class_t cl=*BG_Class(0); int t;
+ cl.slot[0]=WP_SHOTGUN; cl.slot[1]=WP_M40A3;
+ memset(&viewPs,0,sizeof(viewPs)); memset(&view,0,sizeof(view)); BG_ApplyClass(&viewPs,&cl);
+ viewPs.stats[STAT_HEALTH]=100; viewPs.weapon=WP_SHOTGUN; viewPs.weaponstate=WEAPON_READY;
+ view.ps=&viewPs; view.cmd.weapon=BG_SlotCommand(&viewPs,SLOT_PRIMARY);
+ CG_WeapAnim_Reset();
+ for(t=0;t<400;t+=8) PickupWeaponStep(&view,8);
+ CHECK(viewPs.weapon==WP_SHOTGUN && viewPs.weaponstate==WEAPON_READY && viewPs.weaponTime==0);
+}
+/* One 8ms command, then one rendered frame. Returns how low the gun was drawn
+ * below where it is carried, or -1 when no gun was drawn at all. */
+static float ViewStep(void) {
+ playerState_t before;
+ view.cmd.serverTime+=8; PickupWeaponStep(&view,8);
+ before=viewPs; cg.time+=8; cg.frametime=8; draws=0; CG_AddViewWeapon(&viewPs);
+ CHECK(!memcmp(&before,&viewPs,sizeof(before)) && draws<=1);
+ if(!draws) return -1;
+ CHECK(rendered[0].hModel==VIEW_GUN && rendered[0].renderfx==(RF_DEPTHHACK|RF_FIRST_PERSON|RF_MINLIGHT));
+ CHECK(rendered[0].origin[0]==0 && rendered[0].origin[1]==0 && rendered[0].origin[2]<=0);
+ CHECK(fabs(rendered[0].origin[2]+24*CG_WeapAnim_LadderLower())<.001f);
+ return -rendered[0].origin[2];
+}
+static void TestLadderView(void) {
+ float low,last; int way,t,n;
+ memset(cg_weapons,0,sizeof(cg_weapons));
+ cg_weapons[WP_SHOTGUN].registered=qtrue; cg_weapons[WP_SHOTGUN].viewModel=VIEW_GUN;
+ CG_WeapAnim_RegisterClips(WP_SHOTGUN,VIEW_GUN,"assets/baseq3/models/weapons2/spas12/view.cfg");
+ cg_drawGun.integer=1; VectorClear(cg.refdef.vieworg); AxisClear(cg.refdef.viewaxis);
+ /* 0: hung, the jump with the trigger held. 1: hung, the trigger let go on the
+  * jump's command. 2: hung, let go on the ladder. 3: the trigger never down. */
+ for(way=0;way<4;way++) {
+  ViewBegin();
+  CHECK(ViewStep()==0);
+  if(way<3) {
+   view.cmd.buttons=BUTTON_ATTACK;
+   for(t=0;t<10000 && !(viewPs.weaponstate==WEAPON_READY && viewPs.weaponTime==1 &&
+    !(viewPs.stats[STAT_UNCHAMBERED]&(1<<WP_SHOTGUN)));t+=8) CHECK(ViewStep()==0);
+   CHECK(t<10000 && viewPs.weaponShotCount==1);
+  }
+  viewPs.stats[STAT_LADDER]|=LADDER_ATTACHED;	/* PM_CheckLadder's grab, ahead of PM_Weapon */
+  last=ViewStep();
+  CHECK(viewPs.weaponstate==WEAPON_DROPPING && (viewPs.stats[STAT_LADDER]&LADDER_HOLSTER) && last==0);
+  for(n=0;viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime>1;n++) {
+   low=ViewStep();
+   if(viewPs.weaponstate!=WEAPON_DROPPING || viewPs.weaponTime<=1) break;
+   CHECK(low>last && fabs(low-24*(1.0f-(float)viewPs.weaponTime/BG_LADDER_DROP_TIME))<.001f);
+   last=low;
+  }
+  CHECK(n>=8 && last>20 && low==-1);	/* all the way down, then out of view */
+  if(way==3) {
+   CHECK(viewPs.weaponstate==WEAPON_LADDER && viewPs.weapon==WP_SHOTGUN);
+   for(t=0;t<1000;t+=8) CHECK(ViewStep()==-1 && viewPs.weaponstate==WEAPON_LADDER);
+   continue;
+  }
+  for(t=0;t<3000;t+=8) {
+   CHECK(viewPs.weapon==WP_SHOTGUN && viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==1);
+   CHECK(BG_LadderHolsterDown(&viewPs) && CG_WeapAnim_LadderLower()>=.99f);	/* the layers ran on, hidden */
+   CHECK(ViewStep()==-1);
+  }
+  if(way==2) {
+   view.cmd.buttons=0;
+   CHECK(ViewStep()==-1 && viewPs.weaponstate==WEAPON_LADDER && !BG_LadderHolsterDown(&viewPs));
+   for(t=0;t<1000;t+=8) CHECK(ViewStep()==-1 && viewPs.weaponstate==WEAPON_LADDER);
+   continue;
+  }
+  viewPs.stats[STAT_LADDER]&=~LADDER_ATTACHED;	/* the jump: PM_LadderMove's, ahead of PM_Weapon */
+  if(way==0) {
+   CHECK(ViewStep()==0 && viewPs.weaponstate==WEAPON_FIRING && viewPs.weaponShotCount==2);
+   for(t=0;t<100;t+=8) CHECK(ViewStep()==0);
+   continue;
+  }
+  view.cmd.buttons=0; low=ViewStep();
+  CHECK(viewPs.weaponstate==WEAPON_READY && viewPs.weaponTime==0 && low>22 && low<=24);
+  for(n=0;low>0 && n<64;n++) {
+   last=low; low=ViewStep();
+   CHECK(viewPs.weaponstate==WEAPON_READY && low>=0 && low<=last && last-low<4);
+  }
+  CHECK(low==0 && n>=8 && n*8<=300);
+ }
+ CG_WeapAnim_RegisterClips(WP_SHOTGUN,0,NULL);
+}
 int main(void) {
  FILE *file=fopen("assets/baseq3/models/weapons2/throwingknife/knife_hand.md3","rb");
  char name[64];int offset,i;
@@ -162,6 +299,7 @@ int main(void) {
  CG_WeapAnim_RegisterClips(WP_THROWING_KNIFE,2,"assets/baseq3/models/weapons2/throwingknife/throw.cfg");
  CG_WeapAnim_RegisterClips(WP_KNIFE,2,"assets/baseq3/models/weapons2/throwingknife/melee.cfg");
  TestHeld(WP_THROWING_KNIFE);TestHeld(WP_SEMTEX);TestSlash();TestGameplay();
- printf("PASS: %i equipment/slash pose, tag, hit/release/cancel and gameplay-immutability checks\n",checks);
+ TestLadderView();
+ printf("PASS: %i equipment/slash pose, tag, hit/release/cancel, ladder view and gameplay-immutability checks\n",checks);
  return 0;
 }

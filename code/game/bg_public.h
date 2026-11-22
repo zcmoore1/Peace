@@ -481,6 +481,7 @@ int  BG_WeaponReloadSegLength( int weapon, int seq );
 int  BG_ReloadTime( const playerState_t *ps, int authoredTime );
 int  BG_ReloadSegmentTime( const playerState_t *ps, int seq );
 int  BG_HolsterTime( const playerState_t *ps );	// the holster this player is doing right now
+qboolean BG_LadderHolsterDown( const playerState_t *ps );	// a ladder's holster run out, hung under the trigger's lock (picture only)
 int  BG_WeaponFireLength( int weapon );		// 0 = no modelled fire animation
 qboolean BG_ShotAwaitsAction( const playerState_t *ps );	// READY between a shot and its action (picture only)
 qboolean BG_DryFiring( const playerState_t *ps );	// MW2's held dry fire: FIRING with no fire clip running (picture only)

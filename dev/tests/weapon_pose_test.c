@@ -232,6 +232,7 @@ static void TestOwnership(weapAnimDef_t *def) {
    CHECK(CG_WeapAnim_HoldsDrop());
    CHECK(retained->clip==clip && retained->weight==1 && retained->targetWeight==1);
    CHECK(cg_weapLayers[LAYER_MOVE].weight==0 && cg_weapLayers[LAYER_SPRINT].weight==0);
+   CHECK(CG_WeapAnim_LadderLower()==0);	/* a retained picture keeps its pose: no ladder lowering under it */
   }
   /* Even a short source stays the owner for arbitrarily long holsters.
    * Authored one-shots clamp; authored loops keep moving. */
@@ -1465,6 +1466,146 @@ static void TestModeSwitchPicture(void) {
  Update(def,&ps,1); CHECK(cg_weapLayers[LAYER_MOVE].clip==WANIM_RAISE);
 }
 
+/* MW2's ladder with the trigger held, as the picture shows it, through the real
+ * PM_Weapon at 8ms (the ladder's mark is PM_CheckLadder's, set and cleared here
+ * as a grab and a jump leave it; ladder_test.c drives the real ladder and pins
+ * the commands). The holster takes the gun down its drop clip and a further
+ * lowering over its own time. Hung under the lock (weaponTime 1 on every
+ * think) the picture stays at the drop's end, neither stopped part-way nor
+ * back up, and the gun is out of view there (BG_LadderHolsterDown: MW2's drop
+ * animation is started once and holds its last frame, 0x576149, 0x59B5E0).
+ * Left with the trigger still down the gun is in hand at once, already firing
+ * or being pumped: nothing was on screen to flow from, and MW2 starts that
+ * animation with no blend. Left with the trigger let go it is READY at once
+ * and only the picture comes home, up the drop it went down, the lowering
+ * with it: YY flows, it never snaps. Out of a holster still on screen a shot
+ * takes the picture from the pose shown, and a drop that runs on toward
+ * another gun keeps its lowering to its end. */
+enum { LADDER_PIC_SHOT, LADDER_PIC_ACTION, LADDER_PIC_LET_GO, LADDER_PIC_SHOT_INSIDE, LADDER_PIC_UP_INSIDE,
+ LADDER_PIC_OTHER_GUN, LADDER_PIC_WAYS };
+static void TestLadderHeldPicture(weapAnimDef_t *def,int gun) {
+ animLayer_t *base=&cg_weapLayers[LAYER_BASE],*move=&cg_weapLayers[LAYER_MOVE];
+ float drop=CG_WeapAnim_ClipLength(def,WANIM_DROP),fire=CG_WeapAnim_ClipLength(def,WANIM_FIRE);
+ float last,lower,from,step,held;
+ int open=PickupNoteTime(gun,ASEQ_FIRE,WNOTE_BOLT_OPEN),way,t,n;
+ CHECK(drop>0 && fire>0 && open>0 && BG_WeaponFireType(gun)==BG_FIRE_SINGLESHOT);
+ for(way=0;way<LADDER_PIC_WAYS;way++) {
+  qboolean hung=way==LADDER_PIC_SHOT || way==LADDER_PIC_ACTION || way==LADDER_PIC_LET_GO;
+  FlowBeginWith(gun); FlowSlot(SLOT_SECONDARY);
+  for(t=0;t<10000 && !(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_READY && move->weight==0);t+=8) FlowStep();
+  CHECK(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_READY && CG_WeapAnim_LadderLower()==0);
+  if(way!=LADDER_PIC_UP_INSIDE && way!=LADDER_PIC_OTHER_GUN) {
+   flow.cmd.buttons=BUTTON_ATTACK; FlowStep();
+   CHECK(flowPs.weaponstate==WEAPON_FIRING && flowPs.weaponShotCount==1 && base->clip==WANIM_FIRE);
+   if(way==LADDER_PIC_ACTION) {
+    /* grabbed in the shot: the gun stays up and firing until the shot's last
+     * think, where the holster takes the lock's READY and the action is owed */
+    flowPs.stats[STAT_LADDER]|=LADDER_ATTACHED;
+    for(t=0;t<10000 && flowPs.weaponstate==WEAPON_FIRING;t+=8) {
+     CHECK(base->clip==WANIM_FIRE && move->weight==0 && CG_WeapAnim_LadderLower()==0 && !BG_LadderHolsterDown(&flowPs));
+     FlowStep();
+    }
+    CHECK(flowPs.stats[STAT_UNCHAMBERED]&(1<<gun));
+   } else {
+    for(t=0;t<10000 && !(flowPs.weaponstate==WEAPON_READY && flowPs.weaponTime==1 &&
+     !(flowPs.stats[STAT_UNCHAMBERED]&(1<<gun)));t+=8) FlowStep();
+    for(t=0;t<200;t+=8) FlowStep();	/* the action's release has left the picture */
+    CHECK(flowPs.weaponstate==WEAPON_READY && flowPs.weaponTime==1 && CG_WeapAnim_ReturnWeight()==0);
+   }
+  }
+  if(way!=LADDER_PIC_ACTION) { flowPs.stats[STAT_LADDER]|=LADDER_ATTACHED; FlowStep(); }
+  CHECK(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_DROPPING && (flowPs.stats[STAT_LADDER]&LADDER_HOLSTER));
+  CHECK(flowPs.weaponTime==BG_LADDER_DROP_TIME && BG_HolsterTime(&flowPs)==BG_LADDER_DROP_TIME);
+  CHECK(move->clip==WANIM_DROP && move->fit==MOVE_FIT_FORWARD && move->targetWeight==1);
+  CHECK(CG_WeapAnim_LadderLower()==0 && !BG_LadderHolsterDown(&flowPs) && !CG_WeapAnim_HoldsDrop());
+  /* down over the holster's own time: the clip and the lowering together */
+  last=move->time; lower=0;
+  while(flowPs.weaponTime>(hung ? 1 : BG_LADDER_DROP_TIME/2)) {
+   FlowStep();
+   CHECK(flowPs.weaponstate==WEAPON_DROPPING && (flowPs.stats[STAT_LADDER]&LADDER_HOLSTER) && move->clip==WANIM_DROP);
+   CHECK(move->time>=last-.01f && CG_WeapAnim_LadderLower()>=lower);
+   CHECK(fabs(CG_WeapAnim_LadderLower()-(1.0f-(float)flowPs.weaponTime/BG_LADDER_DROP_TIME))<.001f);
+   CHECK(fabs(move->time-drop*(1.0f-(float)flowPs.weaponTime/BG_LADDER_DROP_TIME))<.01f);
+   last=move->time; lower=CG_WeapAnim_LadderLower();
+  }
+  CHECK(move->weight==1 && lower>.4f);
+  if(hung) {
+   /* the lock's 1, every think, for as long as the trigger is held: stowed */
+   CHECK((flow.cmd.buttons&BUTTON_ATTACK) && flowPs.weaponShotCount==1);
+   CHECK(lower>=.99f && last>=drop*.98f);
+   for(t=0;t<3000;t+=8) {
+    FlowStep();
+    CHECK(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_DROPPING && flowPs.weaponTime==1);
+    CHECK(BG_LadderHolsterDown(&flowPs) && cg_ladderStowed);
+    CHECK(move->clip==WANIM_DROP && move->fit==MOVE_FIT_FORWARD && move->weight==1 && move->targetWeight==1);
+    CHECK(fabs(move->time-last)<.01f && CG_WeapAnim_LadderLower()==lower);
+   }
+  }
+  flowPs.stats[STAT_LADDER]&=~LADDER_ATTACHED;	/* the jump: PM_LadderMove's, ahead of PM_Weapon */
+  switch(way) {
+  case LADDER_PIC_SHOT:
+   FlowStep();
+   CHECK(flowPs.weaponstate==WEAPON_FIRING && flowPs.weaponShotCount==2 && flowPs.weaponAnimTime==0);
+   CHECK(base->clip==WANIM_FIRE && base->weight==1 && base->time==0 && CG_WeapAnim_ReturnWeight()==0);
+   CHECK(move->weight==0 && cg_weapLayers[LAYER_RETAINED].weight==0 && CG_WeapAnim_LadderLower()==0);
+   FlowStep();
+   CHECK(move->weight==0 && CG_WeapAnim_LadderLower()==0 && base->clip==WANIM_FIRE);
+   break;
+  case LADDER_PIC_ACTION:
+   FlowStep();
+   CHECK(flowPs.weaponstate==WEAPON_BOLTING && flowPs.weaponAnimTime==open && flowPs.weaponShotCount==1);
+   CHECK(base->clip==WANIM_FIRE && base->weight==1 && CG_WeapAnim_ReturnWeight()==0);
+   CHECK(fabs(base->time-(float)open/BG_WeaponFireLength(gun)*fire)<.01f);
+   CHECK(move->weight==0 && cg_weapLayers[LAYER_RETAINED].weight==0 && CG_WeapAnim_LadderLower()==0);
+   break;
+  case LADDER_PIC_LET_GO:
+  case LADDER_PIC_UP_INSIDE:
+   flow.cmd.buttons=0; FlowStep();
+   CHECK(flowPs.weaponstate==WEAPON_READY && flowPs.weaponTime==0 && flowPs.weaponShotCount==0);
+   CHECK(!(flowPs.stats[STAT_LADDER]&LADDER_HOLSTER) && !BG_LadderHolsterDown(&flowPs));
+   CHECK(move->clip==WANIM_DROP && move->fit==MOVE_FIT_RETURN && move->weight==1 && move->returnTo==0);
+   from=move->returnFrom; CHECK(fabs(from-last)<.01f && from>0 && move->returnLength>0);
+   /* no faster than the drop clip itself comes home (smoothstep's 1.5x peak) */
+   step=lower*8*1.5f/move->returnLength+.001f;
+   CHECK(CG_WeapAnim_LadderLower()>=lower-step && CG_WeapAnim_LadderLower()<=lower);
+   for(held=8,n=0;move->targetWeight>0 && held<=MOVE_RETURN_MS+16;held+=8,n++) {
+    CHECK(fabs(CG_WeapAnim_LadderLower()-lower*move->time/from)<.001f);
+    last=CG_WeapAnim_LadderLower(); FlowStep();
+    CHECK(flowPs.weaponstate==WEAPON_READY && move->clip==WANIM_DROP);
+    CHECK(CG_WeapAnim_LadderLower()<=last && last-CG_WeapAnim_LadderLower()<=step);
+   }
+   CHECK(move->targetWeight==0 && CG_WeapAnim_LadderLower()==0 && fabs(move->time)<.01f && n>=4);
+   break;
+  case LADDER_PIC_SHOT_INSIDE:
+   FlowStep();
+   CHECK(flowPs.weaponstate==WEAPON_FIRING && flowPs.weaponShotCount==2 && base->clip==WANIM_FIRE);
+   /* the holster was on screen: the shot takes the picture from that pose */
+   CHECK(move->targetWeight==0 && move->weight>.5f && move->weight<1);
+   CHECK(CG_WeapAnim_LadderLower()>0 && CG_WeapAnim_LadderLower()<lower);
+   for(t=0;t<48;t+=8) {
+    last=CG_WeapAnim_LadderLower(); held=move->weight; FlowStep();
+    CHECK(CG_WeapAnim_LadderLower()<=last && move->weight<=held);
+   }
+   CHECK(move->weight==0 && CG_WeapAnim_LadderLower()==0);
+   break;
+  default:
+   /* Y on the leaving command: the drop is no longer the ladder's and runs out
+    * the time it had toward the other gun, its picture and its lowering kept */
+   FlowSlot(SLOT_PRIMARY); FlowStep();
+   CHECK(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_DROPPING && !(flowPs.stats[STAT_LADDER]&LADDER_HOLSTER));
+   CHECK(flowPs.weaponTime>0 && BG_HolsterTime(&flowPs)==BG_WeaponDropTime(gun));
+   for(n=0;flowPs.weapon==gun && n<100;n++) {
+    CHECK(flowPs.weaponstate==WEAPON_DROPPING && move->clip==WANIM_DROP && move->weight==1);
+    CHECK(move->time>=last-.01f && CG_WeapAnim_LadderLower()==lower);
+    last=move->time; FlowStep();
+   }
+   CHECK(n>=2 && flowPs.weapon==WP_MACHINEGUN && flowPs.weaponstate==WEAPON_RAISING && CG_WeapAnim_LadderLower()==0);
+   break;
+  }
+  flow.cmd.buttons=0;
+ }
+}
+
 int main(void) {
  playerState_t ps;
  const int states[]={WEAPON_READY,WEAPON_FIRING,WEAPON_BOLTING};
@@ -1495,6 +1636,7 @@ int main(void) {
  TestReloadPerk(def,WP_SHOTGUN);
  TestFlow(def); TestKnifePicture(def); TestKeptHolster(def);
  TestRestampLower(def,WP_SHOTGUN); TestRetainedKeptHolster(); TestSnapshotRestamp(def);
+ TestLadderHeldPicture(def,WP_SHOTGUN);
  TestShortDropKept();
  TestSprintFlow(def);
  TestSprintAfterTheCycle(WP_SHOTGUN);
@@ -1509,6 +1651,7 @@ int main(void) {
  CG_WeapAnim_RegisterClips(WP_M40A3,2,"assets/baseq3/models/weapons2/m40a3/view.cfg");
  def=&bg_weapAnimDefs[WP_M40A3];
  TestRestampLower(def,WP_M40A3);
+ TestLadderHeldPicture(def,WP_M40A3);
  TestSprint(def,WP_M40A3); TestFirstDraw(def,WP_M40A3);
  TestSprintReturnLikeExit(def,WP_M40A3,"assets/baseq3/models/weapons2/m40a3/view.iqm");
  TestSprintReturnUnmoved(WP_M40A3,"assets/baseq3/models/weapons2/m40a3/view.iqm");

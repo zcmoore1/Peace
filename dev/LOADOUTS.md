@@ -253,7 +253,9 @@ OffHandHold and the throw assign theirs, 0x577934, 0x578F82), and goes away in
 through: the latch holds until the gun is fully back. Empty equipment does nothing; a ladder
 grab takes nothing from a knife or grenade under way (a frag cooks on): the ladder drop waits for
 the gun's quick raise, as MW2's ladder drop is a weapon change, and nothing new starts on the
-ladder. Every knife and grenade defers a Y until the gun it
+ladder. (That same change waits out a shot, hangs under the held trigger's lock and is cancelled
+back to the gun, with no raise, when the ladder is left before it ends: `dev/LADDERS.md`.)
+Every knife and grenade defers a Y until the gun it
 left is fully back on its quick raise, and the swap begins on the think after
 (MW2's CheckForChangeWeapon refuses that raise's last think too); YY cannot
 cancel that raise. The Semtex's hold/release and pre-throw cancel (MW2's: in

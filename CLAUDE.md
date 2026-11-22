@@ -185,7 +185,7 @@ source for MW2 behaviour; the owner rejects it.
   adds to, capped at 4, 0x576F93-0x576FC5, and a reload zeroes, 0x575EFE), the
   command still naming the gun and a round in its magazine, the gun's time
   becomes 1 (0x578AE6): the shot's end, the action's end and the knife's end
-  leave the gun READY, any other state (a raise, the sprint-out) keeps its
+  leave the gun READY, any other state (a raise, the sprint-out, the ladder's holster) keeps its
   state, and the 1 runs out on the next think, which asks again. A think that
   asks with the trigger up zeroes the count. So the SPAS, the M300 (as the
   Intervention) and the Masterkey, Single Shot in MW2's files, are READY
@@ -204,7 +204,7 @@ source for MW2 behaviour; the owner rejects it.
   after the crossing dropped the overshoot, 0x578B71): held, it fires every
   ceil(fireTime / msec) thinks. That crossing drops the overshoot in every
   state the lock does not take, not only before a shot: a raise (the quick
-  raises included), the ladder's holster and equipment's prepare all end with
+  raises included), a ladder's holster the lock does not take and equipment's prepare all end with
   no time over (MW2 never leaves a weaponTime below 0), and the state after
   each starts its whole time. (The knife's time is MW2's one meleeTime from
   the press, so its draw's overshoot carries into it: its draw is MW2's
@@ -302,6 +302,44 @@ source for MW2 behaviour; the owner rejects it.
   (shoot, Y, Y, X inside the shot) is the same either way. Never let the
   fire clock run from the shot into the action: a gun whose bolt is 1ms in
   would pay its pump on the very think a waiting swap begins, and swap free.
+- **The ladder's holster is MW2's weapon change to weapon 0 (owner's rule: MW2's
+  behaviour; the gun goes down with the trigger held, and comes back at once
+  when the ladder is left still holding it, however long it was held).** MW2's
+  ladder takes the gun with an ordinary change to weapon 0, the gun still in
+  `ps->weapon` and still named by the command (`CheckForChangeWeapon`'s ladder
+  branch, 0x578C72-0x578C78 into 0x578C54-0x578C67). Three things follow from
+  that, and they are the whole rule. It is behind the change gate
+  (0x578C0A-0x578C41): `PM_LadderWeapon` begins the holster only through
+  `PM_WeaponChangeOpen`, so a ladder grabbed during a shot takes the gun on
+  the shot's last think and its action stays owed, and only on a think the
+  weapon code finds the ladder held (a grab and a jump on one command put
+  nothing down: MW2's jump clears PMF_LADDER before `PM_Weapon`, 0x56DB85). The
+  held trigger's lock takes its crossing like any other state's
+  (`PM_LockGun`; MW2 0x578A94-0x578AE6) and keeps it a drop with weaponTime 1
+  (0x578B25-0x578B28); a drop ends only at 0 (the ladder's block in
+  `PM_Weapon`; MW2's `ProcessHand` 0x579474, `FinishWeaponChange` 0x576370), so
+  with the pull spent, the command naming the gun and a round in it the
+  holster never ends while the trigger stays down, and the command the
+  trigger is let go ends it (`WEAPON_LADDER`, the count 0). And the think the
+  ladder is found left with the holster unfinished, `PM_LadderLeft` clears its
+  mark before any check reads it: what is left is an ordinary drop, which the
+  existing YY cancel readies when the command names the gun in hand (MW2's
+  double-tap cancel, 0x578D00-0x578D41, `PM_Weapon_Idle` 0x5777C7-0x5777D8),
+  with no raise, and which runs out its time and raises the gun named
+  otherwise. The rest of that think is the READY gun's: step 4d starts an owed
+  pump or bolt, whole, or the held trigger fires (the lock was only the time).
+  The one path that pays a raise with the trigger held is MW2's too: a ladder
+  grabbed on the bolt's own think has its drop finished by that delayed action
+  at once (step 2c, MW2's path A), the hands empty, and the raise after
+  leaving waits under the lock. `BG_LADDER_DROP_TIME` stays 100 (owner's call;
+  MW2's path never reads the length). cgame draws a holster that has run out
+  and hangs as it draws `WEAPON_LADDER`, the gun out of view
+  (`BG_LadderHolsterDown`, picture only: pmove never reads it), brings a
+  cancelled one home up its drop clip with the gun READY, the 24-unit lowering
+  with it, and has the gun in hand at once when a shot or the action takes it
+  out of a hung one. Never add a trigger test, a timer or a weapon id to any
+  of this, never let the lock skip the holster again, and never raise the gun
+  on a path the cancel covers.
 - **Clip frame ranges are data.** They live in the `.cfg` beside the model and
   are read by `CG_WeapAnim_RegisterClips`. Re-exporting a model must never mean
   editing C, and no weapon may be named in that loader.
@@ -1271,7 +1309,11 @@ source for MW2 behaviour; the owner rejects it.
   Ladder contact stamps `BG_LADDER_DROP_TIME` before the unchanged note pass;
   its destination completes before queued ammo fill, just like a normal holster.
   Like any weapon change it waits for a latched quick action (MW2's
-  CheckForChangeWeapon refuses the melee and offhand states). Never add a
+  CheckForChangeWeapon refuses the melee and offhand states) and for a shot's
+  last think, hangs under the held trigger's lock, and is cancelled when the
+  ladder is left before it ends ("The ladder's holster is MW2's weapon change
+  to weapon 0", above): all of it is these same bits, `weaponstate` and
+  `weaponTime`, so nothing was added to the wire. Never add a
   reload/NAC-specific ladder branch. See `dev/LADDERS.md`.
 
 ## Weapon animation assets
@@ -1390,8 +1432,27 @@ read from the tables or from the lock pmove stamped. `ladder_test.c`'s
 under the held trigger's lock it is READY, and the ladder drop starts on that
 think; let go, on the think after. Grabbed during the knife itself, its own
 end under the lock is READY and the drop, on the knife's last think.
-`TestHeldTriggerHolster` pins Peace's ladder holster, which takes no lock (a
-departure waiting for the owner: MW2's drop hangs under a held trigger).
+That drop then hangs, and the jump starts the pump it owes.
+`TestHeldTriggerHolster`, which pinned Peace's old holster (no lock, always
+the raise on leaving), now pins MW2's ladder with the trigger held, through
+the real Pmove on the ladder BSP at 8, 16, 33 and 66ms, every command worked
+out from the tables: the SPAS, the M300 and the Masterkey hung with the pull
+spent for no time, 3 seconds and 10 (`BG_LadderHolsterDown` throughout) and
+the jump's own command firing (chambered) or starting the whole action
+(owed); the grab in the shot (the drop on its last think), before the bolt
+(the think before the bolt's too), on the bolt's own think (empty hands at
+once, and the raise that then waits under the lock) and the think after it;
+the trigger let go on the ladder (`WEAPON_LADDER` on that command, the raise
+on leaving, no hang) and on the jump's command; the jump inside the holster;
+a full-auto gun never hung and firing on out of a
+holster left (`TestFullAutoLadder`); a holster left with the trigger up, and
+the grab and the jump on one command, which puts nothing down
+(`TestLadderLeftInHolster`); the top climbed off with the trigger held, the
+shot on the command the ladder lets go (`TestHeldTopExit`: every way off is
+the same cancel); the leaving command's knife, frag, reload and Y,
+and a Masterkey's holster left toward another gun, no mode change
+(`TestLadderLeavingCommand`); and a hang and its cancel replayed from a
+snapshot (`TestHeldPredictionReplay`).
 
 `dev/tests/run-loadouts.cmd` (or `.sh`) checks class validation/persistence,
 modulo selection, same-update YY firing, reload/pull-out cancellation, tap/hold
@@ -1435,6 +1496,15 @@ fire clip played across the shot's READY think with no release eased over it
 (`TestShotPictureAcrossReady`), through the real `PM_Weapon`, which is why the
 pose test links
 `pickup_pmove_driver.c`.
+`TestLadderHeldPicture` is the ladder's holster under the held trigger: down
+its drop clip and the lowering over its own time, held at the drop's end and
+stowed for 3 seconds of the lock, then in hand at once into the shot or the
+action, home up the drop with the trigger let go (the lowering following the
+clip, never a snap), crossfaded from the pose shown out of a holster still on
+screen, and kept to its end toward another gun. `equipment_view_test.c`'s
+`TestLadderView` draws the same through the real `CG_AddViewWeapon`: lowered
+24 units over the holster, not drawn in `WEAPON_LADDER` or hung, the layers
+running on under it.
 The glide return is compared frame by frame with the ordinary sprint exit
 from the same posture (carry, loop, exit under way, partial entry), in both
 rendering paths, for SPAS and M300.

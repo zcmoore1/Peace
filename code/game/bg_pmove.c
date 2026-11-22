@@ -1068,7 +1068,6 @@ static void PM_CheckLadder( void ) {
 	pm->ps->stats[STAT_LADDER] = (state & LADDER_HOLSTER) | LADDER_ATTACHED |
 		((ANGLE2SHORT( angles[YAW] ) >> 4) << LADDER_YAW_SHIFT);
 	if ( !(state & LADDER_ATTACHED) ) {
-		pml.ladderGrabbed = qtrue;
 		// Kill only motion into/away from the face. Vertical and sideways
 		// momentum survive contact, including an airborne or falling grab.
 		VectorMA( pm->ps->velocity, -DotProduct( pm->ps->velocity, pml.ladderNormal ),
@@ -3575,6 +3574,26 @@ int BG_HolsterTime( const playerState_t *ps ) {
 	return BG_WeaponDropTime( ps->weapon );
 }
 
+/*
+==============
+BG_LadderHolsterDown
+
+The ladder's holster has run its time and only the held trigger's lock keeps
+it a drop (PM_WeaponTimeAdjust re-arms weaponTime 1 on every think, for as
+long as the trigger stays down). MW2 starts its quick-drop animation once,
+when the drop begins (PM_BeginWeaponChange, 576149), and a finished one-shot
+holds its last frame (WeaponRunXModelAnims, 59b5e0), so the gun went down in
+the drop's time and stays down, stowed, however long the state hangs. Picture
+only: cgame draws it as it draws WEAPON_LADDER, the look a ladder has with the
+trigger let go. Pmove never reads it: the state is still the drop, the gun
+still in hand.
+==============
+*/
+qboolean BG_LadderHolsterDown( const playerState_t *ps ) {
+	return ( ps->stats[STAT_LADDER] & LADDER_HOLSTER ) && ps->weaponstate == WEAPON_DROPPING &&
+		ps->weaponTime <= 1;
+}
+
 // MW2's alt switch times. They are its data and are never raised to the swap
 // floor: a mode change puts no gun down.
 int BG_WeaponAltDropTime( int weapon ) {
@@ -5387,11 +5406,26 @@ static void PM_FinishWeaponChange( void ) {
 // knife's quick raise that ends under the held trigger's lock is READY to that
 // check already (PM_WeaponTimeAdjust, 578b25-578b39), which takes READY with
 // time and no delay (578c0a-578c47): the drop starts on that think.
+//
+// The holster is MW2's ladder drop, an ordinary weapon change to weapon 0
+// with the command still naming the gun (CheckForChangeWeapon's ladder
+// branch, 578c72-578c78 into 578c54-578c67: PM_BeginWeaponChange( pm, 0,
+// quick )). So it is behind the change gate like a swap (578c0a-578c41,
+// PM_WeaponChangeOpen): a ladder grabbed during a shot takes the gun on the
+// shot's last think, not before, and leaves its action owed (the drop comes
+// before the rechamber check, 44c4d7). It begins only on a think the weapon
+// code finds the ladder held: MW2's PM_Weapon reads PMF_LADDER as the move
+// left it, and a jump off on the grab's own think has cleared it by then
+// (Jump_PushOffLadder, 56db85), so that think drops nothing. It ends only at
+// weaponTime 0 (FinishWeaponChange on a ladder makes the weapon 0, 576388:
+// WEAPON_LADDER), which the held trigger's lock never lets it reach
+// (PM_LockGun). And it is the ladder's only while the ladder is held
+// (PM_LadderLeft).
 static qboolean PM_LadderWeapon( void ) {
 	int state = pm->ps->stats[STAT_LADDER];
-	if ( ((state & LADDER_ATTACHED) || pml.ladderGrabbed) &&
+	if ( (state & LADDER_ATTACHED) &&
 		!( pm->ps->weaponAction & WA_TYPE_MASK ) && !pml.recoveryEnds &&
-		!(state & LADDER_HOLSTER) && pm->ps->weaponstate != WEAPON_LADDER ) {
+		!(state & LADDER_HOLSTER) && pm->ps->weaponstate != WEAPON_LADDER && PM_WeaponChangeOpen() ) {
 		pm->ps->stats[STAT_LADDER] |= LADDER_HOLSTER;
 		pm->ps->weaponstate = WEAPON_DROPPING;
 		pm->ps->weaponTime = BG_LADDER_DROP_TIME;
@@ -5404,6 +5438,38 @@ static qboolean PM_LadderWeapon( void ) {
 	}
 	return (pm->ps->stats[STAT_LADDER] & LADDER_HOLSTER) ||
 		pm->ps->weaponstate == WEAPON_LADDER;
+}
+
+/*
+===============
+PM_LadderLeft
+
+A ladder's holster still going down, or hung under the held trigger's lock,
+on a think that finds the ladder left. Nothing in MW2's drop remembers the
+ladder: every think on it takes the ladder branch again, where
+PM_BeginWeaponChange returns for a running drop (575f96-575fb1), and the first
+think with PMF_LADDER clear does not take it (578c72-578c78). What is left is
+an ordinary drop of the gun in hand: with the command still naming that gun
+MW2's double-tap cancel makes it READY with no time on that think
+(578d00-578d41, PM_Weapon_Idle 5777c7-5777d8), the cancel YY takes, with no
+raise anywhere on it; with the command naming another gun the drop runs out
+its time and raises that one (575f96, 57928c). So the mark goes here, before
+any check of the think reads it, and the rest is the code a swap's drop has
+already: an owed pump or bolt starts from that READY on that think (step 4d),
+a held trigger fires (the lock was only the time), a knife pressed on it comes
+out and equipment takes the drop.
+
+The drop it leaves is no mode change either, whatever the gun's last draw was.
+===============
+*/
+static void PM_LadderLeft( void ) {
+	if ( !( pm->ps->stats[STAT_LADDER] & LADDER_HOLSTER ) || ( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) ) {
+		return;
+	}
+	pm->ps->stats[STAT_LADDER] &= ~LADDER_HOLSTER;
+	if ( pm->ps->weaponDraw == WDRAW_ALT ) {
+		pm->ps->weaponDraw = WDRAW_NORMAL;
+	}
 }
 
 /*
@@ -5452,7 +5518,9 @@ The gun MW2's held-trigger lock asks about (5789dd-578ae1): the gun in hand,
 or, at the knife's end, the gun the knife was written over (MW2's knife is the
 gun's own melee states, MELEE_FIRE). Equipment, the gun going down for it and
 the gun's quick raise after it are MW2's offhand states, which it never locks
-(578a94). Nor the ladder's holster, which is Peace's own.
+(578a94). The ladder's holster is asked like any other state: it is MW2's drop
+to weapon 0 with the gun still in hand and still named by the command
+(578c54-578c67), so the lock takes it and keeps it a drop (578b25-578b28).
 ===============
 */
 static int PM_LockGun( void ) {
@@ -5463,8 +5531,7 @@ static int PM_LockGun( void ) {
 		}
 		return BG_ActiveSlotWeapon( pm->ps );
 	}
-	if ( BG_IsActionWeapon( pm->ps->weapon ) || action == WA_LETHAL || action == WA_TACTICAL ||
-	     ( pm->ps->stats[STAT_LADDER] & LADDER_HOLSTER ) ) {
+	if ( BG_IsActionWeapon( pm->ps->weapon ) || action == WA_LETHAL || action == WA_TACTICAL ) {
 		return WP_NONE;
 	}
 	return pm->ps->weapon;
@@ -5490,6 +5557,12 @@ that asks with the trigger up ends the pull: its count goes back to 0
 (578b51-578b67). Any crossing the lock does not take drops what the time
 overshot by (578b71): MW2 never leaves a weaponTime below 0, and every state
 that follows assigns its own whole time.
+
+The ladder's holster is one of the states that keep their state with the 1: it
+is MW2's drop to weapon 0, the gun still in hand (PM_LadderWeapon), and a drop
+ends only at 0 (step 3 and the ladder's block; MW2's ProcessHand, 579474). So
+it never ends, however long the trigger is held, and the gun stays in hand for
+PM_LadderLeft to give back.
 
 The lock is only ever that time, so whatever zeroes the time lets the gun
 fire: YY's return, a grenade's, a change or a reload (MW2's PM_Weapon_Idle
@@ -5907,6 +5980,9 @@ static void PM_Weapon( void ) {
 	// check of the think (PM_Weapon_WeaponTimeAdjust, 44c42b).
 	attackBefore = ( pm->ps->weaponAction & WA_ATTACK_HELD ) != 0;
 	PM_WeaponTimeAdjust( oldWeaponTime );
+	// The ladder left with its holster unfinished: an ordinary drop from here,
+	// before any check reads it (MW2's change check finds no PMF_LADDER, 578c72).
+	PM_LadderLeft();
 
 	heldBefore = ( pm->ps->weaponAction & WA_HELD_MASK ) >> WA_HELD_SHIFT;
 	// MW2 latches its delayedAction here, after the timers and before every

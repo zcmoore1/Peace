@@ -1545,8 +1545,14 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		return;
 	}
 	// No climbing-hand asset yet. Occupied hands hide the gun, never change
-	// gameplay state or decide whether a reload is real.
-	if ( ps->weaponstate == WEAPON_LADDER ) {
+	// gameplay state or decide whether a reload is real. A holster that has
+	// run its time and hangs under the held trigger's lock is the same
+	// picture: MW2's drop animation played out and holds its last frame, the
+	// gun stowed, for as long as the trigger is held (BG_LadderHolsterDown).
+	// The state is still the drop and the gun still in hand: pmove gives it
+	// back on the think the ladder is left, and the layers below, kept
+	// running, carry the picture on from the drop's end.
+	if ( ps->weaponstate == WEAPON_LADDER || BG_LadderHolsterDown( ps ) ) {
 		// Keep picture-only layers advancing while hidden, so leaving a long
 		// hang cannot resume a drop/sprint pose frozen on the contact frame.
 		if ( cg_weapons[ps->weapon].viewModel ) {
@@ -1611,12 +1617,9 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		hand.renderfx = RF_DEPTHHACK | RF_FIRST_PERSON | RF_MINLIGHT;
 		AnglesToAxis( angles, hand.axis );
 		CG_WeapAnim_Apply( ps, &hand, cg.frametime );
-		if ((ps->stats[STAT_LADDER] & LADDER_HOLSTER) && !CG_WeapAnim_HoldsDrop()) {
-			float fraction = 1.0f - (float)ps->weaponTime / BG_LADDER_DROP_TIME;
-			if (fraction < 0) fraction = 0;
-			if (fraction > 1) fraction = 1;
-			VectorMA(hand.origin, -24.0f*fraction, cg.refdef.viewaxis[2], hand.origin);
-		}
+		// The ladder holster's own lowering: down over the holster's time, and
+		// eased back when pmove gives the gun back (CG_WeapAnim_LadderLower).
+		VectorMA(hand.origin, -24.0f*CG_WeapAnim_LadderLower(), cg.refdef.viewaxis[2], hand.origin);
 		if ( cg_gun_frame.integer ) {
 			hand.frame = hand.oldframe = cg_gun_frame.integer;
 			hand.backlerp = 0;

@@ -3614,11 +3614,29 @@ the drop's time and stays down, stowed, however long the state hangs. Picture
 only: cgame draws it as it draws WEAPON_LADDER, the look a ladder has with the
 trigger let go. Pmove never reads it: the state is still the drop, the gun
 still in hand.
+
+A holster still running passes through weaponTime 1 by itself whenever a step
+lands on it (100 - 9 * 11, 100 - 3 * 33), so the time alone does not say it has
+hung. The lock does: the trigger down on the last command, the pull's shots
+all fired and a round in the clip (PM_WeaponTimeAdjust's conditions, as far as
+the playerState carries them; the command's gun is not in it). With those the
+next think keeps it; without them it is a holster in its last millisecond,
+still drawn.
 ==============
 */
 qboolean BG_LadderHolsterDown( const playerState_t *ps ) {
-	return ( ps->stats[STAT_LADDER] & LADDER_HOLSTER ) && ps->weaponstate == WEAPON_DROPPING &&
-		ps->weaponTime <= 1;
+	int gun = ps->weapon, fireType;
+	if ( !( ps->stats[STAT_LADDER] & LADDER_HOLSTER ) || ps->weaponstate != WEAPON_DROPPING ||
+	     ps->weaponTime > 1 || gun <= WP_NONE || gun >= MAX_WEAPONS ) {
+		return qfalse;
+	}
+	// the gun's fire type by its slot's committed mode, as the lock reads it
+	fireType = BG_WeaponFireType( gun );
+	if ( BG_HasSelector( ps, gun ) && ( ps->slotFlags[ps->stats[STAT_ACTIVE_SLOT]] & BG_GUN_AUTO ) ) {
+		fireType = BG_FIRE_FULLAUTO;
+	}
+	return ( ps->weaponAction & WA_ATTACK_HELD ) && BG_ShotLimitReached( fireType, ps->weaponShotCount ) &&
+		ps->ammo[gun] > 0;
 }
 
 // MW2's alt switch times. They are its data and are never raised to the swap

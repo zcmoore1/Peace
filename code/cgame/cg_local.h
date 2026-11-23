@@ -1457,6 +1457,7 @@ void     CG_WeapAnim_Init( void );
 void     CG_WeapAnim_Reset( void );
 qboolean CG_WeapAnim_HoldsDrop( void );
 float    CG_WeapAnim_LadderLower( void );
+qboolean CG_WeapAnim_LadderStowed( const playerState_t *ps );
 qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec );
 qboolean CG_WeapAnim_Apply( playerState_t *ps, refEntity_t *entity, int msec );
 

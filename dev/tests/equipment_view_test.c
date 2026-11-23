@@ -67,8 +67,10 @@ void trap_FS_FCloseFile(fileHandle_t handle) { (void)handle; fclose(input); }
 void trap_R_AddRefEntityToScene(const refEntity_t *entity) {
  CHECK(draws<2); rendered[draws++]=*entity;
 }
+#define VIEW_HANDS 5	/* the hands a gun with no view model hangs on: tag_weapon at their origin */
 int trap_R_LerpTag(orientation_t *tag,clipHandle_t model,int start,int end,float fraction,const char *name) {
  int i,j;
+ if(model==VIEW_HANDS) { CHECK(!strcmp(name,"tag_weapon")); memset(tag,0,sizeof(*tag)); AxisClear(tag->axis); return 1; }
  CHECK(model==2 && !strcmp(name,"tag_weapon"));
  CHECK(start>=0 && end>=0 && start<frameCount && end<frameCount && fraction>=0 && fraction<=1);
  if(!hasGrip) { CHECK(start==0 && end==0); return 0; }
@@ -201,64 +203,82 @@ static void TestGameplay(void) {
  * is drawn in hand on that frame, firing; let go on that command, it is READY
  * at once and drawn coming home from the bottom, never snapped up. */
 #define VIEW_GUN 3
+#define VIEW_WORLD_GUN 4	/* the world model a gun with no view model is drawn with */
 static pmove_t view;
 static playerState_t viewPs;
+static int viewGun=WP_SHOTGUN,viewHandle=VIEW_GUN;
 static void ViewBegin(void) {
  bg_class_t cl=*BG_Class(0); int t;
- cl.slot[0]=WP_SHOTGUN; cl.slot[1]=WP_M40A3;
+ cl.slot[0]=viewGun; cl.slot[1]=WP_M40A3; cl.lethal=WP_FRAG; cl.lethalCount=1;
  memset(&viewPs,0,sizeof(viewPs)); memset(&view,0,sizeof(view)); BG_ApplyClass(&viewPs,&cl);
- viewPs.stats[STAT_HEALTH]=100; viewPs.weapon=WP_SHOTGUN; viewPs.weaponstate=WEAPON_READY;
+ viewPs.stats[STAT_HEALTH]=100; viewPs.weapon=viewGun; viewPs.weaponstate=WEAPON_READY;
  view.ps=&viewPs; view.cmd.weapon=BG_SlotCommand(&viewPs,SLOT_PRIMARY);
+ cg.predictedPlayerEntity.currentState.weapon=viewGun;	/* CG_AddPlayerWeapon draws the entity's gun */
  CG_WeapAnim_Reset();
  for(t=0;t<400;t+=8) PickupWeaponStep(&view,8);
- CHECK(viewPs.weapon==WP_SHOTGUN && viewPs.weaponstate==WEAPON_READY && viewPs.weaponTime==0);
+ CHECK(viewPs.weapon==viewGun && viewPs.weaponstate==WEAPON_READY && viewPs.weaponTime==0);
 }
-/* One 8ms command, then one rendered frame. Returns how low the gun was drawn
+/* One command, then one rendered frame. Returns how low the gun was drawn
  * below where it is carried, or -1 when no gun was drawn at all. */
-static float ViewStep(void) {
+static float ViewStepMs(int msec) {
  playerState_t before;
- view.cmd.serverTime+=8; PickupWeaponStep(&view,8);
- before=viewPs; cg.time+=8; cg.frametime=8; draws=0; CG_AddViewWeapon(&viewPs);
+ view.cmd.serverTime+=msec; PickupWeaponStep(&view,msec);
+ before=viewPs; cg.time+=msec; cg.frametime=msec; draws=0; CG_AddViewWeapon(&viewPs);
  CHECK(!memcmp(&before,&viewPs,sizeof(before)) && draws<=1);
  if(!draws) return -1;
- CHECK(rendered[0].hModel==VIEW_GUN && rendered[0].renderfx==(RF_DEPTHHACK|RF_FIRST_PERSON|RF_MINLIGHT));
+ CHECK(rendered[0].hModel==viewHandle && rendered[0].renderfx==(RF_DEPTHHACK|RF_FIRST_PERSON|RF_MINLIGHT));
  CHECK(rendered[0].origin[0]==0 && rendered[0].origin[1]==0 && rendered[0].origin[2]<=0);
  CHECK(fabs(rendered[0].origin[2]+24*CG_WeapAnim_LadderLower())<.001f);
  return -rendered[0].origin[2];
 }
+static float ViewStep(void) { return ViewStepMs(8); }
+/* The trigger held from the SPAS's shot until the pull is spent and the action
+ * done: READY under the lock. */
+static void ViewSpendPull(void) {
+ int t;
+ view.cmd.buttons=BUTTON_ATTACK;
+ for(t=0;t<10000 && !(viewPs.weaponstate==WEAPON_READY && viewPs.weaponTime==1 &&
+  !(viewPs.stats[STAT_UNCHAMBERED]&(1<<WP_SHOTGUN)));t+=8) CHECK(ViewStep()==0);
+ CHECK(t<10000 && viewPs.weaponShotCount==1);
+}
 static void TestLadderView(void) {
- float low,last; int way,t,n;
+ float low,last,shown,down; int way,t,n;
  memset(cg_weapons,0,sizeof(cg_weapons));
  cg_weapons[WP_SHOTGUN].registered=qtrue; cg_weapons[WP_SHOTGUN].viewModel=VIEW_GUN;
  CG_WeapAnim_RegisterClips(WP_SHOTGUN,VIEW_GUN,"assets/baseq3/models/weapons2/spas12/view.cfg");
  cg_drawGun.integer=1; VectorClear(cg.refdef.vieworg); AxisClear(cg.refdef.viewaxis);
+ viewGun=WP_SHOTGUN; viewHandle=VIEW_GUN;
  /* 0: hung, the jump with the trigger held. 1: hung, the trigger let go on the
-  * jump's command. 2: hung, let go on the ladder. 3: the trigger never down. */
- for(way=0;way<4;way++) {
+  * jump's command. 2: hung, let go on the ladder. 3: the trigger never down.
+  * 4: as 1, and the ladder grabbed again while the gun is still coming home.
+  * 5: the trigger never down, the ladder left inside the holster and grabbed
+  * again inside the return. */
+ for(way=0;way<6;way++) {
   ViewBegin();
   CHECK(ViewStep()==0);
-  if(way<3) {
-   view.cmd.buttons=BUTTON_ATTACK;
-   for(t=0;t<10000 && !(viewPs.weaponstate==WEAPON_READY && viewPs.weaponTime==1 &&
-    !(viewPs.stats[STAT_UNCHAMBERED]&(1<<WP_SHOTGUN)));t+=8) CHECK(ViewStep()==0);
-   CHECK(t<10000 && viewPs.weaponShotCount==1);
-  }
+  if(way<3 || way==4) ViewSpendPull();
   viewPs.stats[STAT_LADDER]|=LADDER_ATTACHED;	/* PM_CheckLadder's grab, ahead of PM_Weapon */
   last=ViewStep();
   CHECK(viewPs.weaponstate==WEAPON_DROPPING && (viewPs.stats[STAT_LADDER]&LADDER_HOLSTER) && last==0);
   for(n=0;viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime>1;n++) {
+   if(way==5 && viewPs.weaponTime<=BG_LADDER_DROP_TIME/2) break;
    low=ViewStep();
    if(viewPs.weaponstate!=WEAPON_DROPPING || viewPs.weaponTime<=1) break;
    CHECK(low>last && fabs(low-24*(1.0f-(float)viewPs.weaponTime/BG_LADDER_DROP_TIME))<.001f);
    last=low;
   }
-  CHECK(n>=8 && last>20 && low==-1);	/* all the way down, then out of view */
+  if(way==5) CHECK(n>=4 && last>10 && last<16);	/* part-way down, on screen */
+  else CHECK(n>=8 && last>20 && low==-1);	/* all the way down, then out of view */
   if(way==3) {
    CHECK(viewPs.weaponstate==WEAPON_LADDER && viewPs.weapon==WP_SHOTGUN);
    for(t=0;t<1000;t+=8) CHECK(ViewStep()==-1 && viewPs.weaponstate==WEAPON_LADDER);
+   /* the ladder left with the hands empty: the gun's raise, its own clip,
+    * with none of the ladder's lowering under it */
+   viewPs.stats[STAT_LADDER]&=~LADDER_ATTACHED;
+   for(t=0;t<200;t+=8) CHECK(ViewStep()==0 && viewPs.weaponstate==WEAPON_RAISING);
    continue;
   }
-  for(t=0;t<3000;t+=8) {
+  for(t=0;way!=5 && t<3000;t+=8) {
    CHECK(viewPs.weapon==WP_SHOTGUN && viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==1);
    CHECK(BG_LadderHolsterDown(&viewPs) && CG_WeapAnim_LadderLower()>=.99f);	/* the layers ran on, hidden */
    CHECK(ViewStep()==-1);
@@ -276,14 +296,168 @@ static void TestLadderView(void) {
    continue;
   }
   view.cmd.buttons=0; low=ViewStep();
-  CHECK(viewPs.weaponstate==WEAPON_READY && viewPs.weaponTime==0 && low>22 && low<=24);
-  for(n=0;low>0 && n<64;n++) {
+  if(way==5) CHECK(viewPs.weaponstate==WEAPON_READY && viewPs.weaponTime==0 && low>last-4 && low<=last);
+  else CHECK(viewPs.weaponstate==WEAPON_READY && viewPs.weaponTime==0 && low>22 && low<=24);
+  for(n=0;low>0 && n<64 && !(way>=4 && n==3);n++) {
    last=low; low=ViewStep();
    CHECK(viewPs.weaponstate==WEAPON_READY && low>=0 && low<=last && last-low<4);
   }
-  CHECK(low==0 && n>=8 && n*8<=300);
+  if(way<4) { CHECK(low==0 && n>=8 && n*8<=300); continue; }
+  /* Grabbed again while the gun is still coming home: the new holster takes
+   * it down from where it is on screen, over its own time, and no frame moves
+   * it more than that holster's step. (It never starts again from the top.) */
+  shown=low; down=(24-shown)*8/BG_LADDER_DROP_TIME+.001f;
+  CHECK(n==3 && shown>(way==5 ? 8 : 20) && shown<24);
+  viewPs.stats[STAT_LADDER]|=LADDER_ATTACHED; low=ViewStep();
+  CHECK(viewPs.weaponstate==WEAPON_DROPPING && (viewPs.stats[STAT_LADDER]&LADDER_HOLSTER));
+  CHECK(viewPs.weaponTime==BG_LADDER_DROP_TIME && low==shown);
+  for(n=0,last=low;;n++) {
+   low=ViewStep();
+   if(viewPs.weaponstate!=WEAPON_DROPPING) break;
+   CHECK(low>=last && low-last<=down);
+   CHECK(fabs(low-(shown+(24-shown)*(1.0f-(float)viewPs.weaponTime/BG_LADDER_DROP_TIME)))<.001f);
+   last=low;
+  }
+  /* the trigger is up: it runs out, the hands empty, nothing drawn; and the
+   * ladder left on the next command draws the raise with no lowering */
+  CHECK(n>=8 && last>22 && low==-1 && viewPs.weaponstate==WEAPON_LADDER);
+  viewPs.stats[STAT_LADDER]&=~LADDER_ATTACHED;
+  for(t=0;t<200;t+=8) CHECK(ViewStep()==0 && viewPs.weaponstate==WEAPON_RAISING);
  }
+}
+/* The edges of "run out and hung" (BG_LadderHolsterDown, CG_WeapAnim_LadderStowed),
+ * through the real PM_Weapon and CG_AddViewWeapon. */
+static void TestLadderViewEdges(void) {
+ float low; int t,n;
+ /* A holster still running passes through weaponTime 1 by itself when a step
+  * lands on it (11ms commands: 100 - 9 * 11). With the trigger up that is a
+  * holster in its last millisecond, still drawn; the next command empties the
+  * hands. */
+ CHECK((BG_LADDER_DROP_TIME-1)%11==0);
+ ViewBegin(); CHECK(ViewStep()==0);
+ viewPs.stats[STAT_LADDER]|=LADDER_ATTACHED;
+ CHECK(ViewStepMs(11)==0 && viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==BG_LADDER_DROP_TIME);
+ for(n=0;viewPs.weaponTime>1 && n<64;n++) low=ViewStepMs(11);
+ CHECK(n==(BG_LADDER_DROP_TIME-1)/11 && viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==1);
+ CHECK((viewPs.stats[STAT_LADDER]&LADDER_HOLSTER) && !BG_LadderHolsterDown(&viewPs) && low>23);
+ CHECK(ViewStepMs(11)==-1 && viewPs.weaponstate==WEAPON_LADDER);
+ /* With the trigger held and the pull spent the lock keeps that 1 on the
+  * next think: it has run out, the gun out of view. */
+ ViewBegin(); CHECK(ViewStep()==0); ViewSpendPull();
+ viewPs.stats[STAT_LADDER]|=LADDER_ATTACHED;
+ CHECK(ViewStepMs(11)==0 && viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==BG_LADDER_DROP_TIME);
+ for(n=0;viewPs.weaponTime>1 && n<64;n++) low=ViewStepMs(11);
+ CHECK(n==(BG_LADDER_DROP_TIME-1)/11 && viewPs.weaponTime==1 && BG_LadderHolsterDown(&viewPs) && low==-1);
+ for(t=0;t<110;t+=11) CHECK(ViewStepMs(11)==-1 && viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==1);
+ /* The same pull, the trigger let go inside the holster (no crossing has asked
+  * about it yet, so the pull's count still stands): nothing will keep that 1,
+  * and the holster's last millisecond is drawn. */
+ ViewBegin(); CHECK(ViewStep()==0); ViewSpendPull();
+ viewPs.stats[STAT_LADDER]|=LADDER_ATTACHED;
+ CHECK(ViewStepMs(11)==0 && viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==BG_LADDER_DROP_TIME);
+ view.cmd.buttons=0;
+ for(n=0;viewPs.weaponTime>1 && n<64;n++) low=ViewStepMs(11);
+ CHECK(viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==1 && viewPs.weaponShotCount==1);
+ CHECK(!(viewPs.weaponAction&WA_ATTACK_HELD) && !BG_LadderHolsterDown(&viewPs) && low>23);
+ CHECK(ViewStepMs(11)==-1 && viewPs.weaponstate==WEAPON_LADDER && viewPs.weaponShotCount==0);
+ ViewBegin(); CHECK(ViewStep()==0); ViewSpendPull();
+ viewPs.stats[STAT_LADDER]|=LADDER_ATTACHED;
+ CHECK(ViewStepMs(11)==0 && viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==BG_LADDER_DROP_TIME);
+ for(n=0;viewPs.weaponTime>1 && n<64;n++) ViewStepMs(11);
+ for(t=0;t<110;t+=11) CHECK(ViewStepMs(11)==-1 && viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==1);
+ /* Equipment pressed on the command the ladder is left, out of that hang: it
+  * takes the drop as it is, its last 1ms, with the ladder's mark gone (MW2's
+  * OffHandInit keeps a running drop's time), and is prepared on the next
+  * command. The gun, stowed through the hang, is not drawn for that think. */
+ viewPs.stats[STAT_LADDER]&=~LADDER_ATTACHED; view.cmd.buttons=BUTTON_ATTACK|BUTTON_LETHAL;
+ CHECK(viewPs.ammo[WP_FRAG]>0);
+ low=ViewStep();
+ CHECK(viewPs.weapon==WP_SHOTGUN && viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==1);
+ CHECK(!(viewPs.stats[STAT_LADDER]&LADDER_HOLSTER) && (viewPs.weaponAction&WA_TYPE_MASK)==WA_LETHAL);
+ CHECK(!BG_LadderHolsterDown(&viewPs) && CG_WeapAnim_LadderStowed(&viewPs) && low==-1);
+ view.cmd.serverTime+=8; PickupWeaponStep(&view,8);
+ CHECK(viewPs.weapon==WP_FRAG && viewPs.weaponstate==WEAPON_RAISING && !CG_WeapAnim_LadderStowed(&viewPs));
+ /* An ordinary swap's drop is no ladder's holster: with the same trigger held
+  * from the same spent pull it is drawn to its end, its last millisecond
+  * included (4ms commands reach it: the SPAS's drop is 829). */
+ CHECK((BG_WeaponDropTime(WP_SHOTGUN)-1)%4==0);
+ ViewBegin(); CHECK(ViewStep()==0); ViewSpendPull();
+ view.cmd.weapon=BG_SlotCommand(&viewPs,SLOT_SECONDARY);
+ CHECK(ViewStepMs(4)==0 && viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==BG_WeaponDropTime(WP_SHOTGUN));
+ for(n=0;viewPs.weaponTime>1 && n<1000;n++) CHECK(ViewStepMs(4)==0 && viewPs.weapon==WP_SHOTGUN);
+ CHECK(viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==1 && viewPs.weaponShotCount==1);
+ CHECK((viewPs.weaponAction&WA_ATTACK_HELD) && !(viewPs.stats[STAT_LADDER]&LADDER_HOLSTER));
+ CHECK(!BG_LadderHolsterDown(&viewPs) && !CG_WeapAnim_LadderStowed(&viewPs));
+ view.cmd.serverTime+=4; PickupWeaponStep(&view,4);
+ CHECK(viewPs.weapon==WP_M40A3 && viewPs.weaponstate==WEAPON_RAISING);
  CG_WeapAnim_RegisterClips(WP_SHOTGUN,0,NULL);
+}
+/* A gun with no view model (the machinegun and the Quake 3 guns: the world
+ * model on the hands' tag_weapon, no clips) has only the holster's 24-unit
+ * lowering for a picture. It is the same eased value: down over the holster's
+ * time, and when pmove gives the gun back with the holster unfinished it comes
+ * home over the move layer's short fade, never in one frame; a ladder grabbed
+ * again meanwhile takes it down from where it is. Run out, the gun is not
+ * drawn, and it is back at rest when the ladder is left (it has no raise). */
+static void TestLadderPlainGun(void) {
+ float low,last,shown,down; int n,t;
+ memset(cg_weapons,0,sizeof(cg_weapons));
+ cg_weapons[WP_MACHINEGUN].registered=qtrue; cg_weapons[WP_MACHINEGUN].weaponModel=VIEW_WORLD_GUN;
+ cg_weapons[WP_MACHINEGUN].handsModel=VIEW_HANDS;
+ viewGun=WP_MACHINEGUN; viewHandle=VIEW_WORLD_GUN;
+ ViewBegin(); CHECK(ViewStep()==0);
+ viewPs.stats[STAT_LADDER]|=LADDER_ATTACHED; last=ViewStep();
+ CHECK(viewPs.weaponstate==WEAPON_DROPPING && (viewPs.stats[STAT_LADDER]&LADDER_HOLSTER) && last==0);
+ while(viewPs.weaponTime>BG_LADDER_DROP_TIME/2) {
+  low=ViewStep();
+  CHECK(low>last && fabs(low-24*(1.0f-(float)viewPs.weaponTime/BG_LADDER_DROP_TIME))<.001f);
+  last=low;
+ }
+ CHECK(last>10 && last<16);
+ /* left inside the holster, the trigger up: READY at once, the gun coming home */
+ viewPs.stats[STAT_LADDER]&=~LADDER_ATTACHED; low=ViewStep();
+ CHECK(viewPs.weaponstate==WEAPON_READY && viewPs.weaponTime==0 && low<last && low>last-6 && low>5);
+ /* grabbed again on the next command: down from where it is */
+ shown=low; down=(24-shown)*8/BG_LADDER_DROP_TIME+.001f;
+ viewPs.stats[STAT_LADDER]|=LADDER_ATTACHED; low=ViewStep();
+ CHECK(viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==BG_LADDER_DROP_TIME && low==shown);
+ for(n=0,last=low;;n++) {
+  low=ViewStep();
+  if(viewPs.weaponstate!=WEAPON_DROPPING) break;
+  CHECK(low>=last && low-last<=down);
+  CHECK(fabs(low-(shown+(24-shown)*(1.0f-(float)viewPs.weaponTime/BG_LADDER_DROP_TIME)))<.001f);
+  last=low;
+ }
+ CHECK(n>=8 && last>22 && low==-1 && viewPs.weaponstate==WEAPON_LADDER);
+ for(t=0;t<200;t+=8) CHECK(ViewStep()==-1 && viewPs.weaponstate==WEAPON_LADDER);
+ /* the ladder left with the hands empty: at rest at once, nothing of the lowering left */
+ viewPs.stats[STAT_LADDER]&=~LADDER_ATTACHED;
+ CHECK(ViewStep()==0 && viewPs.weaponstate==WEAPON_RAISING);
+ for(t=0;t<400;t+=8) CHECK(ViewStep()==0);
+ CHECK(viewPs.weaponstate==WEAPON_READY);
+ /* the whole way home out of a holster left at its bottom: several frames, none of them a jump */
+ viewPs.stats[STAT_LADDER]|=LADDER_ATTACHED; last=ViewStep();
+ while(viewPs.weaponTime>8) { low=ViewStep(); CHECK(low>last); last=low; }
+ CHECK(viewPs.weaponstate==WEAPON_DROPPING && last>21);
+ viewPs.stats[STAT_LADDER]&=~LADDER_ATTACHED;
+ for(n=0,low=last;low>0 && n<64;n++) {
+  last=low; low=ViewStep();
+  CHECK(viewPs.weaponstate==WEAPON_READY && low>=0 && low<last && last-low<6);
+ }
+ CHECK(low==0 && n>=4 && n*8<=100);
+ /* Full auto is never locked: firing, the holster begins at the running shot's
+  * end, and its last millisecond (11ms commands) is drawn with the trigger down
+  * (a full-auto shot is not counted toward the pull). */
+ ViewBegin(); CHECK(ViewStep()==0);
+ view.cmd.buttons=BUTTON_ATTACK; CHECK(ViewStepMs(11)==0 && viewPs.weaponstate==WEAPON_FIRING);
+ viewPs.stats[STAT_LADDER]|=LADDER_ATTACHED;
+ for(n=0;viewPs.weaponstate==WEAPON_FIRING && n<64;n++) CHECK(ViewStepMs(11)==0);
+ CHECK(viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==BG_LADDER_DROP_TIME);
+ for(n=0;viewPs.weaponTime>1 && n<64;n++) low=ViewStepMs(11);
+ CHECK(viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==1 && (viewPs.weaponAction&WA_ATTACK_HELD));
+ CHECK(viewPs.weaponShotCount==0 && viewPs.ammo[WP_MACHINEGUN]>0 && !BG_LadderHolsterDown(&viewPs) && low>23);
+ CHECK(ViewStepMs(11)==-1 && viewPs.weaponstate==WEAPON_LADDER);
+ viewGun=WP_SHOTGUN; viewHandle=VIEW_GUN;
 }
 int main(void) {
  FILE *file=fopen("assets/baseq3/models/weapons2/throwingknife/knife_hand.md3","rb");
@@ -299,7 +473,7 @@ int main(void) {
  CG_WeapAnim_RegisterClips(WP_THROWING_KNIFE,2,"assets/baseq3/models/weapons2/throwingknife/throw.cfg");
  CG_WeapAnim_RegisterClips(WP_KNIFE,2,"assets/baseq3/models/weapons2/throwingknife/melee.cfg");
  TestHeld(WP_THROWING_KNIFE);TestHeld(WP_SEMTEX);TestSlash();TestGameplay();
- TestLadderView();
+ TestLadderView(); TestLadderViewEdges(); TestLadderPlainGun();
  printf("PASS: %i equipment/slash pose, tag, hit/release/cancel, ladder view and gameplay-immutability checks\n",checks);
  return 0;
 }

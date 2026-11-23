@@ -1560,12 +1560,17 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	// gun stowed, for as long as the trigger is held (BG_LadderHolsterDown).
 	// The state is still the drop and the gun still in hand: pmove gives it
 	// back on the think the ladder is left, and the layers below, kept
-	// running, carry the picture on from the drop's end.
-	if ( ps->weaponstate == WEAPON_LADDER || BG_LadderHolsterDown( ps ) ) {
+	// running, carry the picture on from the drop's end. It stays stowed for
+	// what is left of that drop when equipment takes it on the leaving
+	// command (CG_WeapAnim_LadderStowed).
+	if ( ps->weaponstate == WEAPON_LADDER || CG_WeapAnim_LadderStowed( ps ) ) {
 		// Keep picture-only layers advancing while hidden, so leaving a long
 		// hang cannot resume a drop/sprint pose frozen on the contact frame.
-		if ( cg_weapons[ps->weapon].viewModel ) {
-			CG_WeapAnim_BuildPose( ps, cg_weapons[ps->weapon].viewModel, cg.frametime );
+		// A gun with no view model has only the holster's lowering there
+		// (below), and it runs on the same way.
+		if ( ps->weapon > WP_NONE && ps->weapon < MAX_WEAPONS ) {
+			CG_WeapAnim_BuildPose( ps, cg_weapons[ps->weapon].viewModel ? cg_weapons[ps->weapon].viewModel :
+				cg_weapons[ps->weapon].weaponModel, cg.frametime );
 		}
 		return;
 	}
@@ -1611,14 +1616,6 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	VectorMA( hand.origin, cg_gun_x.value, cg.refdef.viewaxis[0], hand.origin );
 	VectorMA( hand.origin, cg_gun_y.value, cg.refdef.viewaxis[1], hand.origin );
 	VectorMA( hand.origin, cg_gun_z.value, cg.refdef.viewaxis[2], hand.origin );
-	// A short universal lowering works for the placeholder MD3s too, and does
-	// not take animation-layer ownership away from the existing still-swap rule.
-	if ( !weapon->viewModel && (ps->stats[STAT_LADDER] & LADDER_HOLSTER) ) {
-		float fraction = 1.0f - (float)ps->weaponTime / BG_LADDER_DROP_TIME;
-		if ( fraction < 0 ) fraction = 0;
-		if ( fraction > 1 ) fraction = 1;
-		VectorMA( hand.origin, -24.0f * fraction, cg.refdef.viewaxis[2], hand.origin );
-	}
 
 	if ( weapon->viewModel ) {
 		refEntity_t flash;
@@ -1725,6 +1722,15 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		hand.oldframe = CG_MapTorsoToWeaponFrame( ci, cent->pe.torso.oldFrame );
 		hand.backlerp = cent->pe.torso.backlerp;
 		hand.pose = NULL;
+	}
+	// A short universal lowering works for the placeholder MD3s too, and does
+	// not take animation-layer ownership away from the existing still-swap rule.
+	// It is the same eased value the view models take, read once the layers
+	// have run for this frame (CG_WeapAnim_BuildPose above): down over the
+	// holster's time from where it is on screen, and coming home, never
+	// snapped, when pmove gives the gun back with the holster unfinished.
+	if ( !weapon->viewModel ) {
+		VectorMA( hand.origin, -24.0f * CG_WeapAnim_LadderLower(), cg.refdef.viewaxis[2], hand.origin );
 	}
 
 	hand.renderfx = RF_DEPTHHACK | RF_FIRST_PERSON | RF_MINLIGHT;

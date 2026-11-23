@@ -1109,9 +1109,9 @@ static void TestTacticalInsertion(void) {
  /* appended after the throwing knife in both numberings, inside the wire's
   * 5-bit weapon and 32-bit masks; everything that classifies equipment knows it */
 #ifdef MISSIONPACK
- CHECK(WP_THROWING_KNIFE==19 && WP_TACTICAL_INSERTION==20 && WP_NUM_WEAPONS==23);
+ CHECK(WP_THROWING_KNIFE==19 && WP_TACTICAL_INSERTION==20 && WP_G19==23 && WP_NUM_WEAPONS==24);
 #else
- CHECK(WP_THROWING_KNIFE==16 && WP_TACTICAL_INSERTION==17 && WP_NUM_WEAPONS==20);
+ CHECK(WP_THROWING_KNIFE==16 && WP_TACTICAL_INSERTION==17 && WP_G19==20 && WP_NUM_WEAPONS==21);
 #endif
  CHECK(WP_TACTICAL_INSERTION==WP_THROWING_KNIFE+1 && WP_NUM_WEAPONS<=MAX_WEAPONS && WP_NUM_WEAPONS<=32);
  CHECK(BG_IsActionWeapon(WP_TACTICAL_INSERTION) && BG_OffhandHeldToThrow(WP_TACTICAL_INSERTION));
@@ -2844,7 +2844,67 @@ static void TestHeldThroughRespawn(void) {
   CHECK((ps.weaponAction&WA_TYPE_MASK)==actions[i]);
  }
 }
+static void TestG19Selector(void) {
+ bg_class_t cl=*BG_Class(0), decoded;
+ char serialized[BG_CLASS_STRING_SIZE];
+ bg_weaponInstance_t gun;
+ entityState_t item;
+ int dir, phase, slice, elapsed;
+ const int slices[]={1,8,16,33};
+ cl.slot[0]=WP_G19; cl.slot[1]=WP_SHOTGUN; cl.attachments[0]=BG_ATTACHMENT_SWITCH; cl.attachments[1]=0;
+ CHECK(BG_SerializeClass(&cl,serialized,sizeof(serialized)) && BG_ParseClass(serialized,&decoded));
+ CHECK(decoded.slot[0]==WP_G19 && decoded.attachments[0]==BG_ATTACHMENT_SWITCH);
+ cl.attachments[1]=BG_ATTACHMENT_SWITCH; CHECK(!BG_ValidateClass(&cl)); cl.attachments[1]=0;
+
+ Ready(WP_G19,WP_SHOTGUN);
+ move.cmd.buttons=BUTTON_SELECTFIRE|BUTTON_ATTACK; Run(550);
+ CHECK(!BG_HasSelector(&ps, ps.weapon) && ps.weaponstate==WEAPON_READY && fired[WP_G19]==1);
+ move.cmd.buttons=0; Step(1); move.cmd.buttons=BUTTON_ATTACK; Step(1); CHECK(fired[WP_G19]==2);
+
+ Ready(WP_G19,WP_SHOTGUN); BG_ApplyClass(&ps,&cl);
+ move.cmd.buttons=BUTTON_ADS|BUTTON_SELECTFIRE; PM_CheckADS(); Step(1);
+ CHECK(ps.weaponstate==WEAPON_SELECTING && ps.weaponAnimSeq==ASEQ_SELECT_AUTO && (ps.pm_flags&PMF_ADS));
+ Run(G19_CLICK_MS-1); CHECK(!(ps.slotFlags[0]&BG_GUN_AUTO));
+ PM_CheckADS(); CHECK(ps.pm_flags&PMF_ADS); Step(1); CHECK(ps.slotFlags[0]&BG_GUN_AUTO);
+ Run(G19_SWITCH_MS+5); CHECK(ps.weaponstate==WEAPON_READY && (ps.slotFlags[0]&BG_GUN_AUTO));
+ move.cmd.buttons=BUTTON_ATTACK; Run(2*G19_FIRE_MS+1); CHECK(fired[WP_G19]==3);
+ move.cmd.buttons=0; Run(G19_FIRE_MS); move.cmd.buttons=BUTTON_SELECTFIRE; Step(1);
+ CHECK(ps.weaponAnimSeq==ASEQ_SELECT_SEMI);
+ move.cmd.buttons=BUTTON_SPRINT; SprintStep(1);
+ CHECK((ps.pm_flags&PMF_SPRINTING) && ps.weaponstate==WEAPON_SELECTING && ps.weaponAnimTime==1);
+ Run(G19_CLICK_MS-1); CHECK(!(ps.slotFlags[0]&BG_GUN_AUTO));
+ Run(G19_SWITCH_MS-G19_CLICK_MS+1); CHECK(ps.weaponstate==WEAPON_SPRINT_IN);
+ SprintMove(0,0,0,1); Run(BG_WeaponSprintOutTime(WP_G19)); CHECK(ps.weaponstate==WEAPON_READY);
+ move.cmd.buttons=BUTTON_ATTACK; Run(500); CHECK(fired[WP_G19]==4);
+
+ // Identify the command crossing the click rather than assuming a frame rate.
+ // Early and late swaps stamp exactly the idle gun's normal drop, in both directions.
+ for(dir=0;dir<2;dir++) for(slice=0;slice<ARRAY_LEN(slices);slice++) for(phase=-1;phase<=1;phase++) {
+  int step=slices[slice], cross=(G19_CLICK_MS+step-1)/step, drop;
+  Ready(WP_G19,WP_SHOTGUN); BG_ApplyClass(&ps,&cl); Toggle(); Step(step); drop=ps.weaponTime;
+  CHECK(ps.weaponstate==WEAPON_DROPPING && drop==G19_DROP_MS);
+  Ready(WP_G19,WP_SHOTGUN); BG_ApplyClass(&ps,&cl); if(dir) ps.slotFlags[0]|=BG_GUN_AUTO;
+  move.cmd.buttons=BUTTON_SELECTFIRE; Step(step); move.cmd.buttons=0;
+  for(elapsed=1;elapsed<cross+phase;elapsed++) Step(step);
+  Toggle(); Step(step);
+  if(phase==0) CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);
+  else CHECK(ps.weapon==WP_G19 && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==drop);
+  CHECK(!!(ps.slotFlags[0]&BG_GUN_AUTO)==(dir^(phase==1)));
+  Returned(); Toggle(); Returned(); CHECK(ps.weapon==WP_G19 && ps.weaponAnimTime==-1);
+  CHECK(!!(ps.slotFlags[0]&BG_GUN_AUTO)==(dir^(phase==1)));
+  move.cmd.buttons=BUTTON_SELECTFIRE; Step(step); CHECK(ps.weaponstate==WEAPON_SELECTING && ps.weaponAnimTime==0);
+ }
+ // A dropped fitted gun keeps its mode; unloaded or foreign attachment masks cannot grant auto.
+ memset(&item,0,sizeof(item)); item.eType=ET_ITEM; item.modelindex=BG_FindItemForWeapon(WP_G19)-bg_itemlist;
+ item.modelindex2=1; item.generic1=BG_ATTACHMENT_SWITCH; item.otherEntityNum2=BG_GUN_AUTO;
+ CHECK(BG_WeaponItem(&item,&gun) && (gun.flags&BG_GUN_AUTO));
+ BG_PutSlot(&ps,1,&gun); CHECK(ps.slotFlags[1]&BG_GUN_AUTO);
+ item.generic1=0; CHECK(BG_WeaponItem(&item,&gun) && !(gun.flags&BG_GUN_AUTO));
+ gun.flags|=BG_GUN_AUTO; BG_PutSlot(&ps,1,&gun); CHECK(!(ps.slotFlags[1]&BG_GUN_AUTO));
+}
+
 int main(void) {
+ TestG19Selector();
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
  TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestNoSwapInQuickAction(); TestSemtexCancelKeepsLock(); TestThrowingKnife(); TestTacticalInsertion(); TestHoldThrowsBeforeCancel(); TestFragCook(); TestSeaLion(); TestLethalFromEmptyHand(); TestKnifeOutOfReload(); TestKnifeOutOfReloadSettle(); TestKnifeOutOfAction(); TestKnifeInKnife(); TestMeleeNoDrop(); TestKnifeTimeline(); TestRecovery();
  TestMovementScale(); TestWalkMatchesMW2(); TestClassSpeeds(); TestSprintStrafe(); TestPitchClamp(); TestBodyHeights(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestAirSprintSwap(); TestHeldThroughRespawn(); TestFrozen();

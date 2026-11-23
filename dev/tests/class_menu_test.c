@@ -137,6 +137,12 @@ int main(void) {
  Key(K_PAD0_DPAD_LEFT); CHECK(Menu_ItemAtCursor(&classEdit.menu)==&classEdit.gun[0]);
  Key(K_PAD0_DPAD_DOWN); CHECK(Menu_ItemAtCursor(&classEdit.menu)==&classEdit.attachment[0]);
  Key(K_PAD0_DPAD_UP);
+ ChooseWeapon(0,WP_G19);
+ Activate(&classEdit.attachment[0]);
+ CHECK(classPicker.count==2 && !strcmp(Option(&classPicker,BG_ATTACHMENT_SWITCH)->title,"Select Fire"));
+ Activate(Option(&classPicker,BG_ATTACHMENT_SWITCH));
+ CHECK(classEdit.draft.attachments[0]==BG_ATTACHMENT_SWITCH && BG_ValidateClass(&classEdit.draft));
+ Key(K_ESCAPE);
  ChooseWeapon(0,WP_M40A3);
  CHECK(!classEdit.draft.attachments[0]);
  CHECK(!strcmp(saved,vars[Find("peace_class_0")].value) && !strcmp(active,vars[Find("peace_loadout")].value));

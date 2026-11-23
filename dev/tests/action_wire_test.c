@@ -8,7 +8,8 @@
  * Protocol 91 widens pm_flags for MW2's PMF_FROZEN (bit 18).
  * Protocol 92 is MW2's held trigger: weaponShotCount (MW2's netfield 0x742600, 3 bits), the
  * trigger's last step in weaponAction (WA_ATTACK_HELD, eleven bits) and the reload's stop
- * request in weapFlags (PWF_RELOAD_INTERRUPT, three bits). */
+ * request in weapFlags (PWF_RELOAD_INTERRUPT, three bits).
+ * Protocol 93 carries the selector button, its animation direction and each slot's committed mode. */
 #include "../../code/qcommon/q_shared.h"
 #include "../../code/qcommon/qcommon.h"
 #include "../../code/game/bg_public.h"
@@ -168,18 +169,19 @@ int main(void) {
   to.stats[PS_STAT_WEAPONS]=(1<<14)|(1<<17)|(1<<(MAX_WEAPONS-1));
   to.stats[PS_STAT_UNCHAMBERED]=(1<<15)|(1<<18)|(1<<(MAX_WEAPONS-1));
   to.ammo[17]=2; to.ammo[MAX_WEAPONS-1]=3; to.ammoReserve[MAX_WEAPONS-1]=99;
-  to.weapon=3; to.weaponstate=2; to.weaponTime=37;
+  to.weapon=(j&1)?WP_G19:3; to.weaponstate=(j&1)?WEAPON_SELECTING:2; to.weaponTime=37;
   to.weaponDraw=j%3; to.slotAmmo[0]=7; to.slotAmmo[1]=2;
   to.slotReserve[0]=29; to.slotReserve[1]=40;
-  to.slotAttachments[0]=i&1; to.slotAttachments[1]=j&1;
-  to.slotFlags[0]=i&31; to.slotFlags[1]=j&31; /* generation, mode and both chamber debts */
+  to.slotAttachments[0]=i&3; to.slotAttachments[1]=j&3;
+  to.slotFlags[0]=i&63; to.slotFlags[1]=j&63; /* generation, mode and both chamber debts */
   to.slotAltAmmo[0]=i&3; to.slotAltAmmo[1]=j&3;
   to.slotAltReserve[0]=i&15; to.slotAltReserve[1]=j&15;
   { const int hints[4]={0,37,ENTITYNUM_WORLD,ENTITYNUM_NONE}; to.cursorHintEntIndex=hints[(i+j)&3]; }
   from.cursorHint=i%CURSOR_HINT_COUNT; to.cursorHint=j%CURSOR_HINT_COUNT;	/* every hint type, from every other */
   to.pickupTarget=1023; to.pickupSerial=2147483000; to.pickupTime=1000;
   to.pickupSlot=j&1; to.pickupHeld=j&3;
-  from.weapFlags=i&7; to.weapFlags=j&7;	/* PWF_USE_RELOAD, PWF_SPRINT_RELEASE and PWF_RELOAD_INTERRUPT */
+  from.weapFlags=i&15; to.weapFlags=j&15;
+  from.weaponAnimSeq=i%6; to.weaponAnimSeq=j%6;
   from.weaponShotCount=i%(BG_SHOT_COUNT_MAX+1); to.weaponShotCount=j%(BG_SHOT_COUNT_MAX+1);
   /* MW2's jump and sprint state: an airborne jump (-1), the longest landing
    * slowdown, the full jump wait, a fractional take-off height, the meter. */
@@ -199,7 +201,7 @@ int main(void) {
   CHECK(decoded.stats[PS_STAT_WEAPONS]==to.stats[PS_STAT_WEAPONS]);
   CHECK(decoded.stats[PS_STAT_UNCHAMBERED]==to.stats[PS_STAT_UNCHAMBERED]);
   CHECK(decoded.ammo[17]==2 && decoded.ammo[MAX_WEAPONS-1]==3 && decoded.ammoReserve[MAX_WEAPONS-1]==99);
-  CHECK(decoded.weapon==3 && decoded.weaponstate==2 && decoded.weaponTime==37);
+  CHECK(decoded.weapon==to.weapon && decoded.weaponstate==to.weaponstate && decoded.weaponTime==37);
   CHECK(decoded.weaponDraw==to.weaponDraw && decoded.slotAmmo[0]==7 && decoded.slotAmmo[1]==2);
   CHECK(decoded.slotReserve[0]==29 && decoded.slotReserve[1]==40);
   CHECK(decoded.slotFlags[0]==to.slotFlags[0] && decoded.slotFlags[1]==to.slotFlags[1]);
@@ -209,6 +211,7 @@ int main(void) {
   CHECK(decoded.pickupTarget==1023 && decoded.pickupSerial==to.pickupSerial && decoded.pickupTime==1000);
   CHECK(decoded.pickupSlot==to.pickupSlot && decoded.pickupHeld==to.pickupHeld);
   CHECK(decoded.weapFlags==to.weapFlags && decoded.weaponShotCount==to.weaponShotCount);
+  CHECK(decoded.weaponAnimSeq==to.weaponAnimSeq);
   CHECK(decoded.jumpLand==to.jumpLand && decoded.jumpWait==to.jumpWait);
   CHECK(decoded.jumpOriginZ==to.jumpOriginZ && decoded.sprintUsed==to.sprintUsed);
   CHECK(decoded.cursorHintEntIndex==to.cursorHintEntIndex);
@@ -219,10 +222,10 @@ int main(void) {
   * Tactical Insertion types, the top one included, each from every other.
   * Protocol 85 adds grenadeTimeLeft; protocol 87 adds moveClass, 88 stance,
   * and 89 the underbarrel inventory fields. */
- CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==92);
+ CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==93);
  /* MW2's shot count in its three bits: every value it takes (to BG_SHOT_COUNT_MAX, MW2's cap
   * of 4) and the rest of the field, each from every other and alone in a delta; and the three
-  * weapFlags bits, PWF_RELOAD_INTERRUPT the top one */
+  * low weapFlags bits used by the trigger and reload. */
  CHECK(BG_SHOT_COUNT_MAX==4 && PWF_RELOAD_INTERRUPT==4 && PWF_SPRINT_RELEASE==2 && PWF_USE_RELOAD==1);
  for(i=0;i<8;i++) for(j=0;j<8;j++) {
   memset(&from,0,sizeof(from)); to=from; from.weaponShotCount=i; to.weaponShotCount=j;

@@ -288,7 +288,8 @@ char	*modNames[] = {
 	"MOD_JUICED",
 #endif
 	"MOD_GRAPPLE",
-	"MOD_M40A3"
+	"MOD_M40A3",
+	"MOD_G19"
 };
 
 #ifdef MISSIONPACK

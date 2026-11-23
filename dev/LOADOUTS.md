@@ -46,10 +46,8 @@ are unchanged.
   It is not a mute-all perk: shots, reloads, jump sounds, heavier landing impacts
   and entering/leaving water still behave normally.
 - Second Nature unlocks a second optional attachment slot **on each gun**.
-  Without it the class editor allows one. The current optional attachment
-  roster contains only Red dot, so a distinct two-attachment combination is
-  not yet available. The M300's integral scope does not consume a slot and
-  does not support a red dot. No fictional attachment is added to fill the slot.
+  By default the editor allows one. The G19 accepts Select Fire. Other
+  compatible guns accept Red dot. The M300 has an integral scope.
 - Lightweight is MW2's (`_perkfunctions.gsc` setLightWeight): **x1.07 on the
   class speed**, so on the ground only (running, sprinting, crouching, aiming
   and wading). The air, ladders, swimming, the jump, gravity, knockback, the
@@ -82,7 +80,9 @@ perk mask is a predicted/replayed playerstate field. The current build (MW2's
 event rings: four playerstate events and every entity's own ring, with the
 view kick's cgame import and client-side bullets, MW2's spawn class speed and
 stance, the M16's per-instance underbarrel ammunition, MW2's mode switch, its
-frozen flag and its held trigger) uses protocol **92**, game **-21**. Protocol
+frozen flag and its held trigger) uses protocol **93**, game **-22**.
+Protocol 93 adds the select-fire button latch, two animation sequences and the
+committed mode of each inventory slot. Protocol
 92 / game -21 added MW2's held trigger: the shot count `weaponShotCount` (3
 bits, MW2's netfield 0x742600), the trigger's last step `WA_ATTACK_HELD` in
 `weaponAction` (now 11 bits) and the segmented reload's stop request
@@ -108,7 +108,8 @@ in archived cvars; this is local persistence, not cloud account synchronization.
 | Action | Console | Updated Xbox config |
 | --- | --- | --- |
 | Class select | `ui_classes` or `class` in a match | D-pad left |
-| Class editor | `ui_createclass` | D-pad right |
+| Class editor | `ui_createclass` | Pause → Edit Loadout |
+| G19 Select Fire | `+selectfire` (keyboard H) | D-pad right |
 | Choose/menu navigation | Arrow keys, Enter, Escape | D-pad/left stick, A, B |
 | Edit highlighted custom class | E | X |
 | Name entry | Keyboard | Keep the default name or use a keyboard |
@@ -124,6 +125,16 @@ In a match, press Escape and choose **CHANGE CLASS**, or enter `class` in the
 console. Highlight a saved class and activate it with Enter/A or a mouse click
 to equip it and resume the match. `class 4` directly selects the first saved custom
 class. The new loadout arrives on the next spawn (next round in S&D), not instantly.
+
+### G19 Select Fire
+
+In Edit Loadout, choose **Pistols → G19** in either slot and equip **Select Fire**
+under Attachments. The G19 starts in semi-auto. Tap D-pad Right or H from the hip
+or while aiming. The HUD changes at the click, 240 ms into the 400 ms animation.
+Starting a sprint lets the animation finish before the gun lowers. Swapping on
+the command that crosses the click takes the next gun out immediately and keeps
+the old mode. An earlier or later swap uses the normal holster. Returning to the
+G19 starts the next switch from the beginning.
 
 ## YY behavior
 

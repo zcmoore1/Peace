@@ -2434,7 +2434,7 @@ static void CG_DrawWeaponPickup(void) {
 		ps->pickupHeld == 2 || CG_SNDUseInRange() ||
 		!BG_WeaponItem(&cg_entities[ps->pickupTarget].currentState, &gun)) return;
 	Com_sprintf(prompt, sizeof(prompt), "Hold RELOAD: %s%s",
-		BG_FindItemForWeapon(gun.weapon)->pickup_name, gun.attachments & BG_ATTACHMENT_REDDOT ? " + Red Dot" : "");
+		BG_FindItemForWeapon(gun.weapon)->pickup_name, gun.attachments & BG_ATTACHMENT_SWITCH ? " + Select Fire" : (gun.attachments & BG_ATTACHMENT_REDDOT ? " + Red Dot" : ""));
 	CG_DrawSmallString(320 - CG_DrawStrlen(prompt) * SMALLCHAR_WIDTH / 2, 300, prompt, 1);
 	if (ps->pickupTime > 0) {
 		CG_FillRect(220, 320, 200, 5, back);
@@ -2493,7 +2493,7 @@ static void CG_DrawLoadoutHud( void ) {
 				cg.weaponSelectAlternate;
 			Com_sprintf( line, sizeof( line ), "%s%s  %i / %i",
 				( i == SLOT_PRIMARY ) ? "1" : "2",
-				alternate ? " MK" : "",
+				(gun.attachments & BG_ATTACHMENT_SWITCH) ? ((gun.flags & BG_GUN_AUTO) ? " AUTO" : " SEMI") : (alternate ? " MK" : ""),
 				alternate ? gun.altAmmo : gun.ammo, alternate ? gun.altReserve : gun.reserve );
 		} else {
 			Com_sprintf( line, sizeof( line ), "%s  --",
@@ -2559,6 +2559,7 @@ static void CG_DrawWeaponDebug( void ) {
 		case WEAPON_READY:		stateName = "READY";	break;
 		case WEAPON_RAISING:	stateName = "RAISING";	break;
 		case WEAPON_DROPPING:	stateName = "DROPPING";	break;
+		case WEAPON_SELECTING: stateName = "SELECTING"; break;
 		case WEAPON_LADDER:		stateName = "LADDER";	break;
 		case WEAPON_FIRING:		stateName = "FIRING";	break;
 		case WEAPON_RELOADING:	stateName = "RELOADING";break;
@@ -2581,8 +2582,7 @@ static void CG_DrawWeaponDebug( void ) {
 	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;
 
 	Com_sprintf( line, sizeof( line ), "seq: %s  elapsed: %i  pend: %s",
-		( ps->weaponAnimSeq == RSEQ_START ) ? "START" :
-		( ps->weaponAnimSeq == RSEQ_LOOP )  ? "LOOP"  : "END",
+		CG_WeaponSequenceName( ps->weaponAnimSeq ),
 		ps->weaponAnimTime,
 		( ps->pm_flags & PMF_PENDING_MAG ) ? "YES" : "no" );
 	CG_DrawSmallString( 8, y, line, 1.0f ); y += SMALLCHAR_HEIGHT;

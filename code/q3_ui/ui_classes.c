@@ -40,7 +40,7 @@ typedef struct {
 enum { CLASS_CATEGORIES, CLASS_WEAPONS, CLASS_LETHAL, CLASS_TACTICAL,
 	CLASS_PERKS, CLASS_ATTACHMENTS };
 enum { CATEGORY_RIFLES, CATEGORY_SNIPERS, CATEGORY_SHOTGUNS,
-	CATEGORY_LAUNCHERS, CATEGORY_ENERGY, CATEGORY_COUNT };
+	CATEGORY_LAUNCHERS, CATEGORY_ENERGY, CATEGORY_PISTOLS, CATEGORY_COUNT };
 
 typedef struct {
 	menuframework_s menu;
@@ -69,14 +69,14 @@ static classDiscard_t classDiscard;
 
 /* Pointer/word-only tables also retain their layout in q3asm. */
 static const char *categoryNames[] = {
-	"Assault rifles", "Sniper rifles", "Shotguns", "Launchers", "Energy weapons"
+	"Assault rifles", "Sniper rifles", "Shotguns", "Launchers", "Energy weapons", "Pistols"
 };
 static const char *categoryDescriptions[] = {
 	"Automatic fire for an all-purpose loadout.",
 	"Scoped and precision weapons for deliberate shots.",
 	"Close-range weapons with a wide pellet spread.",
 	"Explosive projectiles for splash damage.",
-	"Beam and energy projectile weapons."
+	"Beam and energy projectile weapons.", "Sidearms."
 };
 static const char *slotNames[] = { "PRIMARY", "SECONDARY" };
 static vec4_t classBackground = {0.035f, 0.045f, 0.05f, 1};
@@ -229,6 +229,7 @@ static const char *UI_ClassEquipmentName( int weapon ) {
 
 static int UI_ClassWeaponCategory( int weapon ) {
 	switch ( weapon ) {
+	case WP_G19: return CATEGORY_PISTOLS;
 	case WP_MACHINEGUN: case WP_M16: return CATEGORY_RIFLES;
 	case WP_M40A3: case WP_RAILGUN: return CATEGORY_SNIPERS;
 	case WP_SHOTGUN: return CATEGORY_SHOTGUNS;
@@ -242,6 +243,7 @@ static const char *UI_ClassWeaponDescription( int weapon ) {
 	case WP_MACHINEGUN: return "Automatic rifle. A flexible choice for sustained fire.";
 	case WP_M16: return "Automatic rifle prototype with a pump-action Masterkey. Separate rifle and shotgun ammunition.";
 	case WP_SHOTGUN: return "Semi-automatic shotgun. Load shells individually for close-range fights.";
+	case WP_G19: return "One shot per press. Equip Select Fire to switch between semi-auto and full-auto.";
 	case WP_M40A3: return "Bolt-action sniper rifle with an integral scope. No optional attachments.";
 	case WP_RAILGUN: return "Single-shot precision weapon with a long recovery between shots.";
 	case WP_ROCKET_LAUNCHER: return "Direct-fire explosive rockets. Watch your distance from the blast.";

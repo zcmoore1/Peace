@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // perform the server side effects of a weapon firing
 
 #include "g_local.h"
+#include "bg_g19_data.h"
 
 static	float	s_quadFactor;
 static	vec3_t	forward, right, up;
@@ -934,6 +935,9 @@ void FireWeapon( gentity_t *ent ) {
 		break;
 	case WP_LIGHTNING:
 		Weapon_LightningFire( ent );
+		break;
+	case WP_G19:
+		Bullet_Fire( ent, G19_DAMAGE, MOD_G19 );
 		break;
 	case WP_SHOTGUN:
 	case WP_MASTERKEY:

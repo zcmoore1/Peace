@@ -5,7 +5,7 @@
  * commands, the real playerstate and entity events and the real
  * CG_FireWeapon. Both trace the same world (bullets_world.c).
  *
- * Checked, for every hitscan gun (machinegun, SPAS, railgun, lightning gun,
+ * Checked, for every hitscan gun in this suite (machinegun, G19, SPAS, railgun, lightning gun,
  * M300, and the chaingun in missionpack):
  *  - the server sends no impact, tracer, blast or beam for a shot, and its
  *    damage is what it always was (7 a bullet, 5 in team games, 10 a pellet,
@@ -37,6 +37,7 @@
  */
 #include "../../code/qcommon/q_shared.h"
 #include "../../code/game/bg_public.h"
+#include "../../code/game/bg_g19_data.h"
 #include "bullets_world.h"
 #include "bullets.h"
 
@@ -53,6 +54,7 @@ static int Damage( int weapon, int gametype ) {
 	switch ( weapon ) {
 	case WP_MACHINEGUN: return gametype == GT_TEAM ? 5 : 7;
 	case WP_SHOTGUN: return 10;
+	case WP_G19: return G19_DAMAGE;
 	case WP_RAILGUN: return 100;
 	case WP_LIGHTNING: return 8;
 	case WP_M40A3: return 100;
@@ -268,7 +270,7 @@ static void Run( const run_t *r ) {
 	}
 }
 
-static const int guns[] = { WP_MACHINEGUN, WP_SHOTGUN, WP_RAILGUN, WP_LIGHTNING, WP_M40A3
+static const int guns[] = { WP_MACHINEGUN, WP_G19, WP_SHOTGUN, WP_RAILGUN, WP_LIGHTNING, WP_M40A3
 #ifdef MISSIONPACK
 	, WP_CHAINGUN
 #endif

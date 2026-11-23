@@ -1,0 +1,71 @@
+{
+  "description": "Peace G19 prototype; timings are gameplay tuning in milliseconds.",
+  "mag_size": 15,
+  "reserve": 45,
+  "damage": 35,
+  "raise_ms": 550,
+  "drop_ms": 449,
+  "quick_raise_ms": 250,
+  "fire_ms": 125,
+  "reload_ms": 1500,
+  "mag_in_ms": 1100,
+  "sprint_in_ms": 300,
+  "sprint_loop_ms": 600,
+  "sprint_out_ms": 300,
+  "draw": [
+    {
+      "t": 0,
+      "gun_offset": [
+        2,
+        0,
+        -18
+      ],
+      "gun_angles": [
+        0,
+        -65,
+        0
+      ]
+    },
+    {
+      "t": 0.3,
+      "gun_offset": [
+        0.5,
+        0,
+        -5
+      ],
+      "gun_angles": [
+        0,
+        -24,
+        0
+      ]
+    },
+    {
+      "t": 0.7,
+      "gun_offset": [
+        0,
+        0,
+        0.25
+      ],
+      "gun_angles": [
+        0,
+        3,
+        0
+      ]
+    },
+    {
+      "t": 1,
+      "gun_offset": [
+        0,
+        0,
+        0
+      ],
+      "gun_angles": [
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "click_ms": 240,
+  "switch_ms": 400
+}

@@ -28,6 +28,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "bg_local.h"
 #include "bg_m40a3_data.h"
 #include "bg_m16_data.h"
+#include "bg_g19_data.h"
 
 pmove_t		*pm;
 pml_t		pml;
@@ -3057,6 +3058,7 @@ static const int bg_weaponMagSize[MAX_WEAPONS] = {
 	1,		// WP_TACTICAL_INSERTION (one in hand)
 	M16_MAG_SIZE,
 	MASTERKEY_MAG_SIZE,
+	G19_MAG_SIZE, // WP_G19
 };
 
 // ---------------------------------------------------------------------------
@@ -3225,7 +3227,8 @@ static const bg_weaponAnimSeg_t bg_weaponFire[MAX_WEAPONS] = {
 	/* WP_THROWING_KNIFE  */ { 0, bgnotes_none },
 	/* WP_TACTICAL_INSERTION */ { 0, bgnotes_none },
 	/* WP_M16             */ { 0, bgnotes_none },
-	/* WP_MASTERKEY       */ { MASTERKEY_FIRE_MS, bgnotes_masterkey_fire }
+	/* WP_MASTERKEY       */ { MASTERKEY_FIRE_MS, bgnotes_masterkey_fire },
+	{ 0, bgnotes_none }, // WP_G19
 };
 
 int BG_WeaponFireLength( int weapon ) {
@@ -3268,12 +3271,22 @@ static const int bg_weaponFireType[MAX_WEAPONS] = {
 	/* WP_THROWING_KNIFE  */ BG_FIRE_FULLAUTO,
 	/* WP_TACTICAL_INSERTION */ BG_FIRE_FULLAUTO,
 	/* WP_M16             */ M16_FIRE_TYPE,
-	/* WP_MASTERKEY       */ MASTERKEY_FIRE_TYPE	/* m16_shotgun_attach_mp: Single Shot */
+	/* WP_MASTERKEY       */ MASTERKEY_FIRE_TYPE,	/* m16_shotgun_attach_mp: Single Shot */
+	/* WP_G19             */ BG_FIRE_SINGLESHOT
 };
 
 int BG_WeaponFireType( int weapon ) {
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return BG_FIRE_FULLAUTO;
 	return bg_weaponFireType[weapon];
+}
+
+/* The held-trigger lock also asks about the gun under a melee action. */
+static int PM_SlotFireType( int weapon ) {
+	if ( BG_HasSelector( pm->ps, weapon ) &&
+	     ( pm->ps->slotFlags[pm->ps->stats[STAT_ACTIVE_SLOT]] & BG_GUN_AUTO ) ) {
+		return BG_FIRE_FULLAUTO;
+	}
+	return BG_WeaponFireType( weapon );
 }
 
 /* MW2's ShotLimitReached (5769e0): whether this pull of the trigger has fired
@@ -3294,6 +3307,13 @@ qboolean BG_ShotLimitReached( int fireType, int shotCount ) {
 		return qfalse;
 	}
 }
+
+static const bg_weaponNote_t bgnotes_g19_mag[] = {
+	{ G19_MAG_IN_MS, WNOTE_MAG_IN, -1 }, { 0, WNOTE_NONE, 0 }
+};
+static const bg_weaponNote_t bgnotes_g19_switch[] = {
+	{ G19_CLICK_MS, WNOTE_SELECTOR, 0 }, { 0, WNOTE_NONE, 0 }
+};
 
 static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
 	/* WP_NONE            */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
@@ -3327,6 +3347,7 @@ static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
 	/* WP_MASTERKEY       */ { { { MASTERKEY_RELOAD_START_MS, bgnotes_masterkey_start },
 	                             { MASTERKEY_RELOAD_LOOP_MS, bgnotes_masterkey_loop },
 	                             { MASTERKEY_RELOAD_END_MS, bgnotes_none } }, qtrue },
+	{ { SEG_NONE, { G19_RELOAD_MS, bgnotes_g19_mag }, SEG_NONE } }, // WP_G19
 };
 
 // Holster / deploy lengths. Always stamped on a weapon change - never 0, so a
@@ -3358,6 +3379,7 @@ static const int bg_weaponDropTime[MAX_WEAPONS] = {
 	BG_RAPID_DROP_TIME,	// WP_THROWING_KNIFE
 	BG_RAPID_DROP_TIME,	// WP_TACTICAL_INSERTION
 	M16_DROP_MS, MASTERKEY_DROP_MS,	// MW2's m16_shotgun_mp 449, m16_shotgun_attach_mp 829
+	G19_DROP_MS, // WP_G19
 };
 
 static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
@@ -3385,6 +3407,7 @@ static const int bg_weaponRaiseTime[MAX_WEAPONS] = {
 	BG_THROWING_KNIFE_PULL_MS,	// WP_THROWING_KNIFE: throwingknife_mp holdFireTime 0, in hand on the press
 	BG_INSERTION_IGNITE_MS,	// WP_TACTICAL_INSERTION: flare_mp's holdFireTime, the ignite
 	M16_RAISE_MS, MASTERKEY_RAISE_MS,	// MW2's m16_shotgun_mp 750, m16_shotgun_attach_mp 829
+	G19_RAISE_MS, // WP_G19
 };
 
 // MW2's quickDropTime and quickRaiseTime (its weapon files): the gun going
@@ -3403,6 +3426,7 @@ static const int bg_weaponQuickDropTime[MAX_WEAPONS] = {
 	250,	// WP_THROWING_KNIFE
 	250,	// WP_TACTICAL_INSERTION
 	250, 250, // M16 / Masterkey (MW2's m16_shotgun_mp, m16_shotgun_attach_mp)
+	250, // WP_G19
 };
 static const int bg_weaponQuickRaiseTime[MAX_WEAPONS] = {
 	250,	// WP_NONE
@@ -3424,6 +3448,7 @@ static const int bg_weaponQuickRaiseTime[MAX_WEAPONS] = {
 	250,	// WP_THROWING_KNIFE
 	250,	// WP_TACTICAL_INSERTION
 	750, 750, // M16 / Masterkey (MW2's m16_shotgun_mp, m16_shotgun_attach_mp)
+	G19_QUICK_RAISE_MS, // WP_G19
 };
 
 // MW2's altDropTime and altRaiseTime (its weapon files): one gun changing firing
@@ -3491,7 +3516,8 @@ static const int bg_weaponSprintInTime[MAX_WEAPONS] = {
 	250, 250, 250,
 #endif
 	150, 150, 150, 150, M40_SPRINT_IN_MS, 150, 150,
-	M16_SPRINT_IN_MS, MASTERKEY_SPRINT_IN_MS
+	M16_SPRINT_IN_MS, MASTERKEY_SPRINT_IN_MS,
+	G19_SPRINT_IN_MS, // WP_G19
 };
 static const int bg_weaponSprintOutTime[MAX_WEAPONS] = {
 	180, 180, 250, 250, 300, 300, 250, 300, 250, 350, 150,
@@ -3499,7 +3525,8 @@ static const int bg_weaponSprintOutTime[MAX_WEAPONS] = {
 	300, 300, 300,
 #endif
 	180, 180, 180, 180, M40_SPRINT_OUT_MS, 180, 180,
-	M16_SPRINT_OUT_MS, MASTERKEY_SPRINT_OUT_MS
+	M16_SPRINT_OUT_MS, MASTERKEY_SPRINT_OUT_MS,
+	G19_SPRINT_OUT_MS, // WP_G19
 };
 
 int BG_WeaponSprintInTime( int weapon ) {
@@ -3754,6 +3781,7 @@ void BG_PutSlot(playerState_t *ps, int slot, const bg_weaponInstance_t *gun) {
 	ps->slotAltReserve[slot] = alternate ? MAX(0, MIN(gun->altReserve, BG_WeaponMaxReserve(alternate))) : 0;
 	ps->slotFlags[slot] = (ps->slotFlags[slot] & BG_GUN_GENERATION) |
 		(gun->flags & (BG_GUN_FIRST_DRAW | BG_GUN_UNCHAMBERED |
+			(ps->slotAttachments[slot] & BG_ATTACHMENT_SWITCH ? BG_GUN_AUTO : 0) |
 			(alternate ? BG_GUN_ALTERNATE | BG_GUN_ALT_UNCHAMBERED : 0)));
 	BG_LoadSlots(ps);
 	BG_RebuildWeaponMask(ps);
@@ -3797,6 +3825,7 @@ qboolean BG_WeaponItem(const entityState_t *item, bg_weaponInstance_t *gun) {
 		gun->ammo = item->time2 & 65535;
 		gun->reserve = (unsigned int)item->time2 >> 16;
 		gun->flags |= item->otherEntityNum2 & BG_GUN_UNCHAMBERED;
+		if (gun->attachments & BG_ATTACHMENT_SWITCH) gun->flags |= item->otherEntityNum2 & BG_GUN_AUTO;
 		if (alternate) {
 			gun->altAmmo = item->weaponAltAmmo;
 			gun->altReserve = item->weaponAltReserve;
@@ -3923,6 +3952,7 @@ static const int bg_weaponMaxReserve[MAX_WEAPONS] = {
 	0,		// WP_THROWING_KNIFE
 	0,		// WP_TACTICAL_INSERTION
 	M16_RESERVE, MASTERKEY_RESERVE,
+	G19_RESERVE, // WP_G19
 };
 
 int BG_WeaponMaxReserve( int weapon ) {
@@ -3958,6 +3988,7 @@ static const int bg_weaponSpread[MAX_WEAPONS] = {
 	0,		// WP_THROWING_KNIFE
 	0,		// WP_TACTICAL_INSERTION
 	200, 0, // rifle spread; underbarrel uses the shared pellet pattern
+	180, // WP_G19
 };
 
 static const float bg_weaponAdsSpreadScale[MAX_WEAPONS] = {
@@ -3965,7 +3996,8 @@ static const float bg_weaponAdsSpreadScale[MAX_WEAPONS] = {
 #ifdef MISSIONPACK
 	.15f, .15f, .15f,
 #endif
-	.15f, .15f, .15f, .15f, M40_ADS_SPREAD_SCALE, .15f, .15f, .15f, .15f
+	.15f, .15f, .15f, .15f, M40_ADS_SPREAD_SCALE, .15f, .15f, .15f, .15f,
+	.05f, // WP_G19
 };
 
 // Aimed through an overlay scope rather than over the sights (MW2's
@@ -4414,6 +4446,7 @@ static const bg_weaponNote_t *PM_SegNotes( int weapon, int seq ) {
 	// Selected by which SEGMENT is playing, deliberately not by weaponstate.
 	// By the time the notes run, step 1 may already have flipped the state to
 	// DROPPING - and the note that makes that holster free still has to land.
+	if (weapon == WP_G19 && (seq == ASEQ_SELECT_AUTO || seq == ASEQ_SELECT_SEMI)) return bgnotes_g19_switch;
 	if ( seq == ASEQ_FIRE ) {
 		n = bg_weaponFire[weapon].notes;
 		return n ? n : bgnotes_none;
@@ -4573,19 +4606,23 @@ PM_Weapon commits those effects after transitions have had a chance to finish.
 The returned chamber completion lives only for this think, like its note.
 ===============
 */
-static qboolean PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
+static qboolean PM_RunWeaponNotes( int oldElapsed, int newElapsed, qboolean *selectorClick ) {
 	const bg_weaponNote_t *n;
 	qboolean chamberClosed = qfalse;
 
 	n = PM_SegNotes( pm->ps->weapon, pm->ps->weaponAnimSeq );
 
 	for ( ; n->note != WNOTE_NONE; n++ ) {
-		int noteTime = pm->ps->weaponAnimSeq == ASEQ_FIRE ? n->time : BG_ReloadTime(pm->ps, n->time);
+		int noteTime = pm->ps->weaponAnimSeq >= ASEQ_FIRE ? n->time : BG_ReloadTime(pm->ps, n->time);
 		if ( !( oldElapsed < noteTime && newElapsed >= noteTime ) ) {
 			continue;
 		}
 
 		switch ( n->note ) {
+		case WNOTE_SELECTOR:
+			*selectorClick = qtrue;
+			pm->ps->weaponTime = 0;
+			break;
 		case WNOTE_MAG_OUT:
 			PM_AddEvent( EV_RELOAD );
 			break;
@@ -5506,7 +5543,7 @@ static void PM_WeaponTimeAdjust( int oldTime ) {
 	}
 	gun = PM_LockGun();
 	if ( gun <= WP_NONE || gun >= MAX_WEAPONS || !( pm->cmd.buttons & BUTTON_ATTACK ) ||
-	     !BG_ShotLimitReached( BG_WeaponFireType( gun ), pm->ps->weaponShotCount ) ||
+	     !BG_ShotLimitReached( PM_SlotFireType( gun ), pm->ps->weaponShotCount ) ||
 	     BG_RequestedWeapon( pm->ps, pm->cmd.weapon ) != gun ||
 	     BG_RequestedSlot( pm->ps, pm->cmd.weapon ) != pm->ps->stats[STAT_ACTIVE_SLOT] ||
 	     !pm->ps->ammo[gun] ) {
@@ -5785,6 +5822,12 @@ static void PM_Weapon( void ) {
 	qboolean chamberClosed = qfalse;
 	qboolean reloadSettled = qfalse;
 	qboolean yyReturned = qfalse;
+	qboolean selectorClick = qfalse;
+	int buttons = (pm->ps->pm_flags & PMF_FROZEN) ? pm_rawButtons : pm->cmd.buttons;
+	qboolean selectorPress = (pm->cmd.buttons & BUTTON_SELECTFIRE) && !(pm->ps->weapFlags & PWF_SELECTOR_HELD);
+
+	if (buttons & BUTTON_SELECTFIRE) pm->ps->weapFlags |= PWF_SELECTOR_HELD;
+	else pm->ps->weapFlags &= ~PWF_SELECTOR_HELD;
 
 	// don't allow attack until all buttons are up
 	if ( pm->ps->pm_flags & PMF_RESPAWNED ) {
@@ -5864,7 +5907,8 @@ static void PM_Weapon( void ) {
 	// have already flipped us to DROPPING and the mag-in note still has to land.
 	if ( ( pm->ps->weaponstate == WEAPON_RELOADING ||
 	       pm->ps->weaponstate == WEAPON_FIRING ||
-	       pm->ps->weaponstate == WEAPON_BOLTING ) &&
+	       pm->ps->weaponstate == WEAPON_BOLTING ||
+	       pm->ps->weaponstate == WEAPON_SELECTING ) &&
 	     pm->ps->weaponAnimTime >= 0 ) {
 		pm->ps->weaponAnimTime += pml.msec;		// no clamp - overshoot carries
 		// ...but not from the shot into the action. MW2's shot ends READY on
@@ -5990,7 +6034,8 @@ static void PM_Weapon( void ) {
 	//     returns the gun lower it (its double-tap cancel comes after this
 	//     check, 44c4d7).
 	if ( !ladderWeapon && !yyReturned && pm->ps->weaponstate != WEAPON_DROPPING && pm->ps->weaponstate != WEAPON_RAISING &&
-	     pm->ps->weaponstate != WEAPON_FIRING && pm->ps->weaponstate != WEAPON_BOLTING ) {
+	     pm->ps->weaponstate != WEAPON_FIRING && pm->ps->weaponstate != WEAPON_BOLTING &&
+	     pm->ps->weaponstate != WEAPON_SELECTING ) {
 		if ( pm->ps->pm_flags & PMF_SPRINTING ) {
 			if ( pm->ps->weaponstate != WEAPON_SPRINT_IN &&
 			     pm->ps->weaponstate != WEAPON_SPRINTING &&
@@ -6010,7 +6055,7 @@ static void PM_Weapon( void ) {
 	//    reload's mag-in note still has to land on this think for the race to
 	//    exist at all. MAG_IN zeroes the lock the holster just stamped.
 	if ( pm->ps->weaponAnimTime >= 0 ) {
-		chamberClosed = PM_RunWeaponNotes( oldElapsed, pm->ps->weaponAnimTime );
+		chamberClosed = PM_RunWeaponNotes( oldElapsed, pm->ps->weaponAnimTime, &selectorClick );
 	}
 	// 2b. The reload's delayed action on a gun that owes its pump or bolt lands
 	//     like any note: the lock goes on that think, so a holster stamped in
@@ -6111,6 +6156,21 @@ static void PM_Weapon( void ) {
 	//    sprint lock.)
 	//    Still RELOADING afterwards: the settle note has not arrived yet, and
 	//    the state alone is what keeps the gun from firing during the tail.
+	// The ordinary holster finish above gets first claim on the click's released lock.
+	if (pm->ps->weaponstate == WEAPON_SELECTING) {
+		if (selectorClick) {
+			int *flags = &pm->ps->slotFlags[pm->ps->stats[STAT_ACTIVE_SLOT]];
+			if (pm->ps->weaponAnimSeq == ASEQ_SELECT_AUTO) *flags |= BG_GUN_AUTO;
+			else *flags &= ~BG_GUN_AUTO;
+			PM_AddEvent(EV_WEAPON_NOTETRACK);
+		}
+		if (pm->ps->weaponAnimTime >= G19_SWITCH_MS) {
+			pm->ps->weaponstate = WEAPON_READY;
+			pm->ps->weaponAnimTime = -1;
+			pm->ps->weaponTime = 0;
+		}
+		return;
+	}
 	if ( chamberClosed || reloadSettled ) {
 		pm->ps->stats[STAT_UNCHAMBERED] &= ~( 1 << pm->ps->weapon );
 	}
@@ -6312,6 +6372,16 @@ static void PM_Weapon( void ) {
 			return;
 		}
 	}
+	if (selectorPress && BG_HasSelector( pm->ps, pm->ps->weapon ) &&
+	    !(pm->ps->weaponAction & WA_TYPE_MASK) &&
+	    (pm->ps->weaponstate == WEAPON_READY || pm->ps->weaponstate == WEAPON_FIRING)) {
+		pm->ps->weaponAnimSeq = (pm->ps->slotFlags[pm->ps->stats[STAT_ACTIVE_SLOT]] & BG_GUN_AUTO)
+			? ASEQ_SELECT_SEMI : ASEQ_SELECT_AUTO;
+		pm->ps->weaponstate = WEAPON_SELECTING;
+		pm->ps->weaponTime = G19_SWITCH_MS;
+		pm->ps->weaponAnimTime = 0;
+		return;
+	}
 	// check for fire
 	if ( !(pm->cmd.buttons & BUTTON_ATTACK) && PM_ActionWeapon() != pm->ps->weapon ) {
 		if ( !reload ) {
@@ -6397,7 +6467,7 @@ static void PM_Weapon( void ) {
 	}
 	// The shot counts toward this pull of the trigger, but a full-auto one
 	// (MW2's PM_Weapon_StartFiring, 576f93-576fc5, capped at 4).
-	if ( BG_WeaponFireType( pm->ps->weapon ) != BG_FIRE_FULLAUTO &&
+	if ( PM_SlotFireType( pm->ps->weapon ) != BG_FIRE_FULLAUTO &&
 	     pm->ps->weaponShotCount < BG_SHOT_COUNT_MAX ) {
 		pm->ps->weaponShotCount++;
 	}
@@ -6444,6 +6514,9 @@ static void PM_Weapon( void ) {
 		break;
 	case WP_MACHINEGUN:
 		addTime = 100;
+		break;
+	case WP_G19:
+		addTime = G19_FIRE_MS;
 		break;
 	case WP_M16:
 		addTime = M16_FIRE_MS;

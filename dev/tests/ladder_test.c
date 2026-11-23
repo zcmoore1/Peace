@@ -1936,11 +1936,11 @@ static void TestSwapDropOnLadder(int dt) {
  *    empty on that command, as a swap on the click's command is instant; the
  *    mode is not committed, because the ladder's block ends the think first;
  *  - grabbed after the click, the mode is the new one already and stays. */
-static void G19Reset(int dt) {
+static void G19ResetWith(int dt, int other) {
     bg_class_t cl = *BG_Class(0);
     int t;
     Reset(-150, 0, 24.125f);
-    cl.slot[0] = WP_G19; cl.slot[1] = WP_MACHINEGUN;
+    cl.slot[0] = WP_G19; cl.slot[1] = other;
     cl.attachments[0] = BG_ATTACHMENT_SWITCH; cl.attachments[1] = 0;
     cl.lethal = WP_FRAG; cl.lethalCount = BG_ClassEquipmentCount(WP_FRAG);
     CHECK(BG_ValidateClass(&cl));
@@ -1952,6 +1952,7 @@ static void G19Reset(int dt) {
     CHECK(ps.weapon == WP_G19 && ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && !ps.weaponShotCount);
     CHECK(BG_HasSelector(&ps, WP_G19) && !(ps.slotFlags[SLOT_PRIMARY] & BG_GUN_AUTO) && ps.ammo[WP_G19] > 4);
 }
+static void G19Reset(int dt) { G19ResetWith(dt, WP_MACHINEGUN); }
 static qboolean G19Auto(void) { return (ps.slotFlags[SLOT_PRIMARY] & BG_GUN_AUTO) != 0; }
 /* The selector, pressed on command 0 of the count. */
 static void G19Select(int dt, int seq) {
@@ -2029,6 +2030,39 @@ static void TestG19Ladder(int dt) {
         HeldTo(&h, &n, n + 1); CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && fired[gun] == 1);
         HeldTo(&h, &n, n + 1); CHECK(ps.weaponstate == WEAPON_FIRING && fired[gun] == 2 && G19Auto());
     }
+    /* auto, with a pull's count standing at 1: the SPAS's shot, the trigger
+     * never let go, and Y to the G19 in auto. Its raise ends unlocked (the
+     * lock reads the slot's mode), it fires on (a full-auto shot is not
+     * counted, and no crossing has found the trigger up), and on a ladder its
+     * holster's last millisecond, where a command lands on it, is no hang:
+     * BG_LadderHolsterDown reads the mode as the lock does. */
+    G19ResetWith(dt, WP_SHOTGUN); n = 0;
+    G19Select(dt, ASEQ_SELECT_AUTO);
+    HeldTo(&h, &n, done);
+    CHECK(ps.weaponstate == WEAPON_READY && G19Auto());
+    move.cmd.weapon = WP_SHOTGUN;
+    for (k = 0; k < Thinks(5000, dt) && !(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_READY); k++) QuickTick(dt);
+    CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_READY && !ps.weaponShotCount);
+    move.cmd.buttons = BUTTON_ATTACK; QuickTick(dt);
+    CHECK(fired[WP_SHOTGUN] == 1 && ps.weaponShotCount == 1);
+    move.cmd.weapon = gun;
+    for (k = 0; k < Thinks(10000, dt) && fired[gun] < 2; k++) QuickTick(dt);
+    CHECK(ps.weapon == gun && fired[gun] == 2 && ps.weaponstate == WEAPON_FIRING && G19Auto());
+    CHECK(ps.weaponShotCount == 1 && fired[WP_SHOTGUN] == 1);
+    n = 0; HeldGrab(&h, &n);
+    for (k = 0; k < 64 && ps.weaponstate == WEAPON_FIRING; k++) HeldTo(&h, &n, n + 1);
+    CHECK(Attached() && ps.weaponstate == WEAPON_DROPPING && Holstering() && ps.weaponTime == BG_LADDER_DROP_TIME);
+    for (k = 1, way = 0; k < h.H; k++) {
+        HeldTo(&h, &n, n + 1);
+        CHECK(ps.weaponstate == WEAPON_DROPPING && Holstering() && ps.weaponTime == BG_LADDER_DROP_TIME - k * dt);
+        CHECK((ps.weaponAction & WA_ATTACK_HELD) && ps.weaponShotCount == 1 && ps.ammo[gun] > 0);
+        CHECK(!BG_LadderHolsterDown(&ps));
+        if (ps.weaponTime == 1) way = 1;
+    }
+    CHECK(way == ((BG_LADDER_DROP_TIME - 1) % dt == 0));
+    HeldTo(&h, &n, n + 1);
+    CHECK(Attached() && ps.weapon == gun && ps.weaponstate == WEAPON_LADDER && ps.weaponTime == 0);
+    move.cmd.buttons = 0;
     /* The ladder grabbed during the mode switch: found by the weapon think the
      * command before the click's, on it, and the command after it. */
     for (phase = -1; phase <= 1; phase++) for (way = 0; way < 2; way++) {
@@ -2075,6 +2109,39 @@ static void TestG19Ladder(int dt) {
         CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && G19Auto() == (phase > 0) && !fired[gun]);
     }
 }
+/* The lock needs a round in the clip (0x578AD0-0x578AE1). The SPAS's last
+ * round fired and the trigger never let go: the dry fire keeps the gun up on
+ * the ladder until its time runs out (MW2's gate, 0x578C31), then the holster
+ * runs out its own time whatever the trigger. Its last millisecond, where a
+ * command lands on it (33ms: 100 - 3 * 33), is no hang, in pmove or in the
+ * picture (BG_LadderHolsterDown), and the hands are empty on the next. */
+static void TestEmptyClipHolster(int dt) {
+    held_t h = Held(WP_SHOTGUN, dt);
+    int n = 0, k, landed = 0;
+    HeldReset(h.gun, dt);
+    ps.ammo[h.gun] = 1; ps.ammoReserve[h.gun] = 0;     /* down to its last round */
+    move.cmd.buttons = BUTTON_ATTACK; QuickTick(dt);
+    CHECK(fired[h.gun] == 1 && ps.ammo[h.gun] == 0 && ps.weaponShotCount == 1);
+    HeldTo(&h, &n, Thinks(1500, dt));
+    CHECK(ps.weaponstate == WEAPON_FIRING && BG_DryFiring(&ps) && ps.weaponShotCount == 1 && fired[h.gun] == 1);
+    HeldGrab(&h, &n);
+    for (k = 0; k < Thinks(700, dt) && !Holstering(); k++) {
+        CHECK(Attached() && ps.weaponstate == WEAPON_FIRING && ps.weaponTime > 0);
+        HeldTo(&h, &n, n + 1);
+    }
+    CHECK(Attached() && ps.weaponstate == WEAPON_DROPPING && Holstering() && ps.weaponTime == BG_LADDER_DROP_TIME);
+    for (k = 1; k < h.H; k++) {
+        HeldTo(&h, &n, n + 1);
+        CHECK(ps.weaponstate == WEAPON_DROPPING && Holstering() && ps.weaponTime == BG_LADDER_DROP_TIME - k * dt);
+        CHECK((ps.weaponAction & WA_ATTACK_HELD) && ps.weaponShotCount == 1 && !ps.ammo[h.gun]);
+        CHECK(!BG_LadderHolsterDown(&ps));
+        if (ps.weaponTime == 1) landed = 1;
+    }
+    CHECK(landed == ((BG_LADDER_DROP_TIME - 1) % dt == 0));
+    HeldTo(&h, &n, n + 1);
+    CHECK(Attached() && ps.weapon == h.gun && ps.weaponstate == WEAPON_LADDER && ps.weaponTime == 0 && fired[h.gun] == 1);
+    move.cmd.buttons = 0;
+}
 /* This test pinned Peace's old ladder holster, which took no lock, finished on
  * its time with the trigger held and cost the whole raise on leaving. It now
  * pins MW2's: the SPAS, the M300 and the Masterkey, Single Shot in MW2's
@@ -2100,6 +2167,7 @@ static void TestHeldTriggerHolster(int dt) {
     TestHeldTopExit(dt);
     TestLadderLeavingCommand(dt);
     TestSwapDropOnLadder(dt);
+    TestEmptyClipHolster(dt);
     TestG19Ladder(dt);
     TestHeldPredictionReplay(dt);
 }

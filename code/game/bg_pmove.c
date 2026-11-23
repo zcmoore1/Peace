@@ -5353,7 +5353,8 @@ static void PM_BeginWeaponChange( int weapon ) {
 	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
 		// Already going down. If where we are going now has a quicker holster,
 		// finish as that one (a ladder is no such place: it leaves a running
-		// drop its time, PM_LadderKeepsDrop). Shortened only, never lengthened. A drop a pickup's take
+		// drop its time, PM_LadderKeepsDrop). Shortened only, never
+		// lengthened. A drop a pickup's take
 		// emptied keeps running to its end (MW2's BeginWeaponChange returns
 		// for any drop before it looks at the weapon); only a quick action
 		// asked for out of it takes its own time.

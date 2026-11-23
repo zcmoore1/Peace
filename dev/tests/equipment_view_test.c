@@ -17,7 +17,9 @@ void QDECL Com_Error(int code,const char *fmt,...) { (void)code; (void)fmt; abor
  * (TestLadderView): the gun's table and cvars, and a renderer that draws
  * frames (no model poses here: the layers' frame path). The rest is only
  * linked because CG_RegisterWeapon and the gun's effects name it, and is never
- * reached. */
+ * reached. Everything cg_weapons.c names is defined here, so the test links
+ * without dead-section removal as well (MSVC resolves symbols before it
+ * discards unreferenced functions; ladder_test.c does the same). */
 weaponInfo_t cg_weapons[MAX_WEAPONS];
 itemInfo_t cg_items[MAX_ITEMS];
 centity_t cg_entities[MAX_GENTITIES];
@@ -55,6 +57,37 @@ localEntity_t *CG_SmokePuff(const vec3_t at,const vec3_t vel,float radius,float 
 void CG_PositionRotatedEntityOnTag(refEntity_t *entity,const refEntity_t *parent,qhandle_t parentModel,char *tagName) {
  (void)entity;(void)parent;(void)parentModel;(void)tagName; abort();
 }
+vmCvar_t cg_tracerChance, cg_tracerWidth, cg_tracerLength, cg_railTrailTime, cg_oldRocket, cg_oldRail;
+void trap_CM_BoxTrace(trace_t *tr,const vec3_t a,const vec3_t b,const vec3_t mins,const vec3_t maxs,clipHandle_t model,int mask) {
+ (void)tr;(void)a;(void)b;(void)mins;(void)maxs;(void)model;(void)mask; abort();
+}
+void trap_CM_TransformedBoxTrace(trace_t *tr,const vec3_t a,const vec3_t b,const vec3_t mins,const vec3_t maxs,
+ clipHandle_t model,int mask,const vec3_t origin,const vec3_t angles) {
+ (void)tr;(void)a;(void)b;(void)mins;(void)maxs;(void)model;(void)mask;(void)origin;(void)angles; abort();
+}
+clipHandle_t trap_CM_TempBoxModel(const vec3_t mins,const vec3_t maxs) { (void)mins; (void)maxs; abort(); return 0; }
+void trap_R_SetColor(const float *rgba) { (void)rgba; abort(); }
+void trap_R_AddPolyToScene(qhandle_t shader,int numVerts,const polyVert_t *verts) { (void)shader;(void)numVerts;(void)verts; abort(); }
+void trap_SendConsoleCommand(const char *text) { (void)text; abort(); }
+void CG_DrawPic(float x,float y,float w,float h,qhandle_t shader) { (void)x;(void)y;(void)w;(void)h;(void)shader; abort(); }
+void CG_DrawBigStringColor(int x,int y,const char *text,vec4_t color) { (void)x;(void)y;(void)text;(void)color; abort(); }
+int CG_DrawStrlen(const char *text) { (void)text; abort(); return 0; }
+float *CG_FadeColor(int start,int total) { (void)start; (void)total; abort(); return NULL; }
+const char *CG_Argv(int arg) { (void)arg; abort(); return ""; }
+void CG_Bleed(vec3_t origin,int entity) { (void)origin; (void)entity; abort(); }
+void CG_ImpactMark(qhandle_t shader,const vec3_t origin,const vec3_t dir,float orientation,float r,float g,float b,float a,
+ qboolean alphaFade,float radius,qboolean temporary) {
+ (void)shader;(void)origin;(void)dir;(void)orientation;(void)r;(void)g;(void)b;(void)a;(void)alphaFade;(void)radius;
+ (void)temporary; abort();
+}
+localEntity_t *CG_MakeExplosion(vec3_t origin,vec3_t dir,qhandle_t model,qhandle_t shader,int msec,qboolean sprite) {
+ (void)origin;(void)dir;(void)model;(void)shader;(void)msec;(void)sprite; abort(); return NULL;
+}
+void CG_ParticleExplosion(char *anim,vec3_t origin,vec3_t vel,int duration,int sizeStart,int sizeEnd) {
+ (void)anim;(void)origin;(void)vel;(void)duration;(void)sizeStart;(void)sizeEnd; abort();
+}
+void CG_ShotHitVolumes(trace_t *tr,const vec3_t start,const vec3_t end,int skip) { (void)tr;(void)start;(void)end;(void)skip; abort(); }
+qboolean CG_EventPlayerView(const centity_t *cent) { (void)cent; abort(); return qfalse; }
 void trap_SnapVector(float *v) { int i; for(i=0;i<3;i++) v[i]=rintf(v[i]); }
 int trap_FS_FOpenFile(const char *path,fileHandle_t *handle,fsMode_t mode) {
  long size; (void)mode; input=fopen(path,"rb"); CHECK(input!=NULL);

@@ -573,15 +573,18 @@ static void TestKeptHolster(weapAnimDef_t *def) {
  }
  CHECK(last>=drop*.95f);
 }
-/* YY flows, never snaps (owner's rule): a lock pmove restamps LOWER inside a
- * running holster (a ladder grab) moves the drop or reversed draw on by one
- * frame of the old fit, then runs to the new lock's end, never ahead to its
- * pose. (Y back with the knife on one command restamps nothing: the knife is
- * out on that command, TestMeleeNoDrop in the loadout suite.) */
-static void TestRestampLower(weapAnimDef_t *def,int gun) {
+/* A ladder grabbed inside a running holster restamps nothing: MW2's
+ * PM_BeginWeaponChange returns for a drop already running (0x575F96-0x575FB1),
+ * so the swap's drop, or the draw it reversed, keeps its time and its fit. The
+ * picture runs on at the same rate to the drop's own end, never skipped ahead
+ * and never stalled, with none of the ladder holster's lowering under it; at
+ * that end the hands are the ladder's (FinishWeaponChange on a ladder, 0x576388:
+ * WEAPON_LADDER) and the gun is out of view. (This test pinned Peace's old
+ * restamp of that drop as the 100ms ladder holster.) */
+static void TestLadderKeepsDrop(weapAnimDef_t *def,int gun) {
  animLayer_t *move=&cg_weapLayers[LAYER_MOVE];
  float len,step,last;
- int reversed,t;
+ int reversed,t,lock,fit;
  for(reversed=0;reversed<2;reversed++) {
   FlowBeginWith(gun); FlowSlot(SLOT_SECONDARY);
   for(t=0;t<10000 && !(flowPs.weapon==gun && (reversed ? flowPs.weaponstate==WEAPON_RAISING &&
@@ -591,16 +594,21 @@ static void TestRestampLower(weapAnimDef_t *def,int gun) {
   CHECK(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_DROPPING && BG_HolsterTime(&flowPs)==BG_WeaponDropTime(gun));
   CHECK(move->fit==(reversed ? MOVE_FIT_REVERSE : MOVE_FIT_FORWARD) && move->weight==1);
   len=CG_WeapAnim_ClipLength(def,move->clip); step=8*len/BG_WeaponDropTime(gun)*1.02f+.01f; last=move->time;
+  fit=move->fit; lock=flowPs.weaponTime;
   flowPs.stats[STAT_LADDER]|=LADDER_ATTACHED;	/* PM_CheckLadder's grab, ahead of PM_Weapon */
   FlowStep();
-  CHECK(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_DROPPING &&
-   BG_HolsterTime(&flowPs)==BG_LADDER_DROP_TIME);
-  CHECK(fabs(move->time-last)<=step && (reversed ? move->time<=last+.01f : move->time>=last-.01f));
+  CHECK(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_DROPPING && flowPs.weaponTime==lock-8);
+  CHECK(!(flowPs.stats[STAT_LADDER]&LADDER_HOLSTER) && BG_HolsterTime(&flowPs)==BG_WeaponDropTime(gun));
+  CHECK(fabs(move->time-last)<=step && (reversed ? move->time<last : move->time>last));
   while(flowPs.weaponstate==WEAPON_DROPPING && flowPs.weapon==gun) {
-   last=move->time; FlowStep();
-   if(flowPs.weaponstate==WEAPON_DROPPING && flowPs.weapon==gun)
-    CHECK(reversed ? move->time<=last+.01f : move->time>=last-.01f);
+   last=move->time; lock=flowPs.weaponTime; FlowStep();
+   if(flowPs.weaponstate==WEAPON_DROPPING && flowPs.weapon==gun) {
+    CHECK(flowPs.weaponTime==lock-8 && !(flowPs.stats[STAT_LADDER]&LADDER_HOLSTER) && move->fit==fit);
+    CHECK(fabs(move->time-last)<=step && (reversed ? move->time<=last+.01f : move->time>=last-.01f));
+    CHECK(CG_WeapAnim_LadderLower()==0 && !BG_LadderHolsterDown(&flowPs) && !CG_WeapAnim_LadderStowed(&flowPs));
+   }
   }
+  CHECK(lock<=8 && flowPs.weapon==gun && flowPs.weaponstate==WEAPON_LADDER && CG_WeapAnim_LadderLower()==0);
   CHECK(reversed ? last<=len*.1f : last>=len*.9f);
  }
 }
@@ -1693,7 +1701,7 @@ int main(void) {
  TestFirstDraw(def,WP_SHOTGUN);
  TestReloadPerk(def,WP_SHOTGUN);
  TestFlow(def); TestKnifePicture(def); TestKeptHolster(def);
- TestRestampLower(def,WP_SHOTGUN); TestRetainedKeptHolster(); TestSnapshotRestamp(def);
+ TestLadderKeepsDrop(def,WP_SHOTGUN); TestRetainedKeptHolster(); TestSnapshotRestamp(def);
  TestLadderHeldPicture(def,WP_SHOTGUN);
  TestShortDropKept();
  TestSprintFlow(def);
@@ -1708,7 +1716,7 @@ int main(void) {
  TestKnifePullPicture();
  CG_WeapAnim_RegisterClips(WP_M40A3,2,"assets/baseq3/models/weapons2/m40a3/view.cfg");
  def=&bg_weapAnimDefs[WP_M40A3];
- TestRestampLower(def,WP_M40A3);
+ TestLadderKeepsDrop(def,WP_M40A3);
  TestLadderHeldPicture(def,WP_M40A3);
  TestSprint(def,WP_M40A3); TestFirstDraw(def,WP_M40A3);
  TestSprintReturnLikeExit(def,WP_M40A3,"assets/baseq3/models/weapons2/m40a3/view.iqm");

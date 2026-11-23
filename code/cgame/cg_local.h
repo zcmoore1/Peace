@@ -423,6 +423,7 @@ typedef struct weaponInfo_s {
 
 	qhandle_t		handsModel;			// MD3 parent; quick-action hands also draw their mesh
 	qhandle_t		weaponModel;
+	qhandle_t		selectorModel[2];  // fitted semi/auto resting poses, same skeleton and clips
 	qhandle_t		viewModel;			// optional IQM with the arms and the gun in one skeleton; when
 										// set it IS the first-person view, drawn instead of hands+gun
 	qhandle_t		barrelModel;
@@ -1602,6 +1603,7 @@ void CG_DrawTourneyScoreboard( void );
 // cg_consolecmds.c
 //
 qboolean CG_ConsoleCommand( void );
+const char *CG_WeaponSequenceName( int seq );
 void CG_InitConsoleCommands( void );
 
 //

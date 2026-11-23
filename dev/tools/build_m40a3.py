@@ -50,7 +50,7 @@ def channels(p, angles=(0, 0, 0), s=1): return (*p, *quat(angles), s, s, s)
 
 
 class Mesh:
-    def __init__(self): self.parts = {}
+    def __init__(self, origin=ORIGIN): self.parts = {}; self.origin = origin
 
     def face(self, mat, joint, points, uv=None):
         # The authoring geometry is outward CCW; only the exporter reverses it.
@@ -61,7 +61,7 @@ class Mesh:
         for i, p in enumerate(points):
             st = uv[i] if uv else ((i in (1, 2)), (i >= 2))
             if mat!='flash': st = tuple(tile[k]*.5+.025+.45*st[k] for k in range(2))
-            vertices.append((add(p, ORIGIN), n, st, joint))
+            vertices.append((add(p, self.origin), n, st, joint))
         triangles.extend((start, start+i, start+i+1) for i in range(1, len(points)-1))
 
     def loft(self, mat, rings, joint=0, sides=16, caps=True):
@@ -231,15 +231,15 @@ def surface_parts(mesh):
         if faces: yield mat,joint,out,faces
 
 
-def iqm(mesh, animations):
+def iqm(mesh, animations, nodes=NODES, shader_prefix="peace/m40_", source="assets/source/m40a3/weapon.json"):
     text = bytearray(b'\0')
     def label(s):
         start = len(text); text.extend(s.encode()+b'\0'); return start
-    joints = [label(n) for n,_,_ in NODES]
+    joints = [label(n) for n,_,_ in nodes]
     vertices, triangles, meshes = [], [], []
     for index,(mat,joint,v,tris) in enumerate(surface_parts(mesh)):
         first = len(vertices)
-        meshes.append((label(mat+'_'+str(index)),label('peace/m40_'+mat),first,len(v),len(triangles),len(tris)))
+        meshes.append((label(mat+'_'+str(index)),label(shader_prefix+mat),first,len(v),len(triangles),len(tris)))
         vertices.extend(v); triangles.extend(tuple(first+i for i in tri) for tri in tris)
     frames, anims, cfg = [], [], []
     for name,poses,fps,loop in animations:
@@ -247,7 +247,7 @@ def iqm(mesh, animations):
         cfg.append(f'{name} {len(frames)} {len(poses)} {fps:.8g} {int(loop)}')
         frames.extend(poses)
     offsets, scales, masks = [], [], []
-    for j in range(len(NODES)):
+    for j in range(len(nodes)):
         lo = [min(f[j][k] for f in frames) for k in range(10)]
         hi = [max(f[j][k] for f in frames) for k in range(10)]
         s = [(b-a)/65535 if b-a>1e-7 else 0 for a,b in zip(lo,hi)]
@@ -269,25 +269,25 @@ def iqm(mesh, animations):
         (4,'4B',4,[(v[3],0,0,0) for v in vertices]),(5,'4B',4,[(255,0,0,0)]*len(vertices))]:
         arrays.append((kind,0,1 if 'B' in fmt else 7,size,append(rows('<'+fmt,values))))
     oa=append(rows('<5I',arrays)); otr=append(rows('<3I',[(a,c,b) for a,b,c in triangles]))
-    oj=append(rows('<Ii10f',[(joints[i],parent,*channels(p)) for i,(_,parent,p) in enumerate(NODES)]))
-    op=append(rows('<iI20f',[(parent,masks[i],*offsets[i],*scales[i]) for i,(_,parent,_) in enumerate(NODES)]))
+    oj=append(rows('<Ii10f',[(joints[i],parent,*channels(p)) for i,(_,parent,p) in enumerate(nodes)]))
+    op=append(rows('<iI20f',[(parent,masks[i],*offsets[i],*scales[i]) for i,(_,parent,_) in enumerate(nodes)]))
     oan=append(rows('<3IfI',anims)); of=append(packed)
     ob=append(rows('<8f',[(-80,-80,-80,80,80,80,120,140)]*len(frames)))
     h=(2,len(blob),0,len(text),ot,len(meshes),om,6,len(vertices),oa,len(triangles),otr,0,
-       len(NODES),oj,len(NODES),op,len(anims),oan,len(frames),sum(m.bit_count() for m in masks),of,ob,0,0,0,0)
+       len(nodes),oj,len(nodes),op,len(anims),oan,len(frames),sum(m.bit_count() for m in masks),of,ob,0,0,0,0)
     blob[:124]=struct.pack('<16s27I',b'INTERQUAKEMODEL\0',*h)
-    return bytes(blob), ('// Generated from assets/source/m40a3/weapon.json\n'+'\n'.join(cfg)+'\n').encode()
+    return bytes(blob), ('// Generated from '+source+'\n'+'\n'.join(cfg)+'\n').encode()
 
 
-def md3(mesh):
+def md3(mesh, shader_prefix="peace/m40_", center=add(ORIGIN,(8,0,0)), muzzle=(26,0,.5), name="Peace original M40A3 inspired rifle"):
     surfaces=[]; points=[]
     for index,(mat,joint,vertices,tris) in enumerate(surface_parts(mesh)):
         # World item: no arms, no transient cartridge, centered along its length.
-        pts=[sub(v[0],add(ORIGIN,(8,0,0))) for v in vertices]; points.extend(pts)
+        pts=[sub(v[0],center) for v in vertices]; points.extend(pts)
         st=108+len(tris)*12+68; xyz=st+len(vertices)*8; size=xyz+len(vertices)*8
         data=bytearray(struct.pack('<4s64s10i',b'IDP3',(mat+'_'+str(index)).encode(),0,1,1,len(vertices),len(tris),108,108+len(tris)*12,st,xyz,size))
         data+=b''.join(struct.pack('<3i',a,c,b) for a,b,c in tris)
-        data+=struct.pack('<64si',('peace/m40_'+mat).encode(),0)
+        data+=struct.pack('<64si',(shader_prefix+mat).encode(),0)
         data+=b''.join(struct.pack('<2f',*v[2]) for v in vertices)
         for p,vertex in zip(pts,vertices):
             n=vertex[1]; polar=round(math.acos(max(-1,min(1,n[2])))*255/math.tau)&255
@@ -296,9 +296,9 @@ def md3(mesh):
         assert len(data)==size; surfaces.append(data)
     lo=[min(p[i] for p in points) for i in range(3)]; hi=[max(p[i] for p in points) for i in range(3)]
     # tag_flash is used by the ordinary third-person weapon path too.
-    tag=struct.pack('<64s12f',b'tag_flash',26,0,.5,1,0,0,0,1,0,0,0,1)
+    tag=struct.pack('<64s12f',b'tag_flash',*muzzle,1,0,0,0,1,0,0,0,1)
     start=164+len(tag); size=start+sum(map(len,surfaces))
-    return struct.pack('<4si64s9i',b'IDP3',15,b'Peace original M40A3 inspired rifle',0,1,1,len(surfaces),0,108,164,start,size)+struct.pack('<10f16s',*lo,*hi,0,0,0,40,b'idle')+tag+b''.join(surfaces)
+    return struct.pack('<4si64s9i',b'IDP3',15,name.encode(),0,1,1,len(surfaces),0,108,164,start,size)+struct.pack('<10f16s',*lo,*hi,0,0,0,40,b'idle')+tag+b''.join(surfaces)
 
 
 def tga(width,height,pixel):

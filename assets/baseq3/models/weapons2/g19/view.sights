@@ -1,0 +1,4 @@
+// Eye behind the rear notch, clear of the near plane.
+iron 5 -3 -1.46 0 0 0
+timing 150 150
+zoomfov 50

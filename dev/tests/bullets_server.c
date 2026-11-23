@@ -50,7 +50,7 @@ int bs_markCount, bs_shotTraces, bs_volumeHits, bs_midLegShots;
 bwMark_t bs_damage[BW_MAX_MARKS];
 int bs_damageCount, bs_bulletHealth[BS_CLIENTS];
 static qboolean BS_BulletWeapon( int weapon ) {
- return weapon==WP_MACHINEGUN || weapon==WP_SHOTGUN || weapon==WP_M40A3
+ return weapon==WP_MACHINEGUN || weapon==WP_G19 || weapon==WP_SHOTGUN || weapon==WP_M40A3
 #ifdef MISSIONPACK
   || weapon==WP_CHAINGUN
 #endif
@@ -102,7 +102,7 @@ void trap_Trace(trace_t *t,const vec3_t start,const vec3_t mins,const vec3_t max
 /* every bullet's and pellet's damage, as the real bullet code dealt it */
 void __real_G_Damage(gentity_t *targ,gentity_t *inflictor,gentity_t *attacker,vec3_t dir,vec3_t point,int damage,int dflags,int mod);
 void __wrap_G_Damage(gentity_t *targ,gentity_t *inflictor,gentity_t *attacker,vec3_t dir,vec3_t point,int damage,int dflags,int mod) {
- if(point && (mod==MOD_MACHINEGUN || mod==MOD_SHOTGUN || mod==MOD_M40A3
+ if(point && (mod==MOD_MACHINEGUN || mod==MOD_G19 || mod==MOD_SHOTGUN || mod==MOD_M40A3
 #ifdef MISSIONPACK
   || mod==MOD_CHAINGUN
 #endif

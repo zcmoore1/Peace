@@ -1006,7 +1006,7 @@ gentity_t *G_DropWeapon(gentity_t *owner, int slot) {
 	item->s.clientNum = owner->s.number;
 	item->s.generic1 = gun.attachments;
 	item->s.time2 = (gun.ammo & 65535) | ((unsigned int)gun.reserve << 16);
-	item->s.otherEntityNum2 = gun.flags & (BG_GUN_UNCHAMBERED | BG_GUN_ALTERNATE | BG_GUN_ALT_UNCHAMBERED);
+	item->s.otherEntityNum2 = gun.flags & (BG_GUN_AUTO | BG_GUN_UNCHAMBERED | BG_GUN_ALTERNATE | BG_GUN_ALT_UNCHAMBERED);
 	item->s.weaponAltAmmo = gun.altAmmo;
 	item->s.weaponAltReserve = gun.altReserve;
 	item->s.apos.trType = TR_STATIONARY;

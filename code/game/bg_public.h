@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-21"
+#define	GAME_VERSION		BASEGAME "-22"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			(-40)
@@ -212,7 +212,8 @@ typedef enum {
 						// mag-in note) collapses the transition
 	WEAPON_SPRINTING,	// gun is down; cannot fire
 	WEAPON_SPRINT_OUT,	// bringing the gun back up
-	WEAPON_LADDER		// hands occupied; entered through WEAPON_DROPPING
+	WEAPON_LADDER,		// hands occupied; entered through WEAPON_DROPPING
+	WEAPON_SELECTING
 } weaponstate_t;
 
 // A quick action borrows the existing holster/deploy/fire states, but is never
@@ -368,7 +369,8 @@ typedef enum {
 	WNOTE_BOLT_OPEN,	// shot is away, the action starts opening
 	WNOTE_MAG_OUT,		// sound only
 	WNOTE_MAG_IN,		// gameplay: queue the clip fill and clear the busy lock
-	WNOTE_BOLT_CLOSED	// pump/bolt guns: identical meaning to MAG_IN
+	WNOTE_BOLT_CLOSED,	// pump/bolt guns: identical meaning to MAG_IN
+	WNOTE_SELECTOR
 } weaponNote_t;
 
 typedef struct {
@@ -388,9 +390,9 @@ typedef enum {
 	RSEQ_COUNT,
 	// The fire cycle is an animation with notes on it exactly like a reload
 	// segment, so it rides in the same field rather than growing a second one.
-	// ps->weaponAnimSeq goes over the wire in 2 bits and this is the last value
-	// that fits; a fifth would have to widen it in msg.c.
-	ASEQ_FIRE = RSEQ_COUNT
+	// Non-reload actions share the three-bit sequence field.
+	ASEQ_FIRE = RSEQ_COUNT,
+	ASEQ_SELECT_AUTO, ASEQ_SELECT_SEMI
 } reloadSeq_t;
 
 typedef struct {
@@ -678,6 +680,7 @@ typedef enum {
 	WP_M16,                // rifle with an integral underbarrel shotgun (one inventory instance)
 	WP_MASTERKEY,          // M16 alternate firing mode, never a separate loadout slot
 
+	WP_G19,
 	WP_NUM_WEAPONS
 } weapon_t;
 
@@ -701,6 +704,8 @@ typedef enum {
 #define BG_SLOT_ALTERNATE (2 * SLOT_COUNT)
 #define BG_IS_SLOT_COMMAND(s) ((s) >= BG_SLOT_COMMAND && (s) < BG_SLOT_COMMAND + 4 * SLOT_COUNT)
 #define BG_ATTACHMENT_REDDOT 1
+#define BG_ATTACHMENT_SWITCH 2
+qboolean BG_HasSelector(const playerState_t *ps, int weapon);
 #define BG_MAX_CLASS_ATTACHMENTS 2
 #define BG_ATTACHMENTS_LEGACY 256 // version-2 class encoding of cg_sight fallback
 int BG_AttachmentTypeCount( void );
@@ -712,6 +717,7 @@ int BG_WeaponAttachmentMask(int weapon);
 #define BG_GUN_GENERATION 4	// slotFlags only: flipped each time a pickup replaces the slot
 #define BG_GUN_ALTERNATE 8   // the instance's last selected firing mode
 #define BG_GUN_ALT_UNCHAMBERED 16
+#define BG_GUN_AUTO 32  // committed selector position of this inventory instance
 #define BG_PICKUP_RANGE 128.0f	// MW2's player_useRadius, eye to item
 // MW2's Player_ActivateHoldCmd, one rule for every hold-to-use usable, the
 // throwing knife and the floor gun alike, in ms from the press: a use from
@@ -780,6 +786,7 @@ void BG_BeginWeaponDraw(playerState_t *ps);
 // (PM_Weapon_CheckForReload 578724-5787ad, FinishReloadStart 5783de-5783fc,
 // FinishReload 578564-578582). Only ever set while reloading.
 #define PWF_RELOAD_INTERRUPT 4
+#define PWF_SELECTOR_HELD 8   // select-fire button was down on the previous step
 // MW2's sprint time (player_sprintTime 4s; a start needs player_sprintMinTime
 // 1s left). Used while sprinting, refilled 1:1 while not (playerState_t.sprintUsed).
 #define BG_SPRINT_TIME        4000
@@ -1219,7 +1226,8 @@ typedef enum {
 	MOD_JUICED,
 #endif
 	MOD_GRAPPLE,
-	MOD_M40A3
+	MOD_M40A3,
+	MOD_G19
 } meansOfDeath_t;
 
 

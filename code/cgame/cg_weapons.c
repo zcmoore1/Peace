@@ -623,7 +623,8 @@ static const char *cg_viewModelBase[WP_NUM_WEAPONS] = {
 	"",                                 // WP_THROWING_KNIFE (MD3 hand and tagged knife)
 	"",                                 // WP_TACTICAL_INSERTION (placeholder: the flash's legacy hands and grenade)
 	"models/weapons2/m16/view",          // WP_M16
-	"models/weapons2/m16/masterkey"      // WP_MASTERKEY (the same gun, its underbarrel mode)
+	"models/weapons2/m16/masterkey",     // WP_MASTERKEY (the same gun, its underbarrel mode)
+	"models/weapons2/g19/view"           // WP_G19
 };
 
 /*
@@ -747,6 +748,14 @@ void CG_RegisterWeapon( int weaponNum ) {
 	}
 
 	switch ( weaponNum ) {
+	case WP_G19:
+		weaponInfo->selectorModel[0] = trap_R_RegisterModel("models/weapons2/g19/semi.iqm");
+		weaponInfo->selectorModel[1] = trap_R_RegisterModel("models/weapons2/g19/auto.iqm");
+		weaponInfo->flashSound[0] = trap_S_RegisterSound("sound/weapons/g19/fire.wav", qfalse);
+		weaponInfo->flashModel = trap_R_RegisterModel("models/weapons2/m40a3/world_flash.md3");
+		MAKERGB( weaponInfo->flashDlightColor, 1, .8f, .45f );
+		cgs.media.bulletExplosionShader = trap_R_RegisterShader("bulletExplosion");
+		break;
 	case WP_M40A3:
 		MAKERGB( weaponInfo->flashDlightColor, 1, 0.8f, 0.45f );
 		weaponInfo->flashSound[0] = trap_S_RegisterSound("sound/weapons/m40a3/fire.wav", qfalse);
@@ -1614,6 +1623,10 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	if ( weapon->viewModel ) {
 		refEntity_t flash;
 		hand.hModel = weapon->viewModel;
+		if (BG_HasSelector(ps, ps->weapon)) {
+			qhandle_t fitted = weapon->selectorModel[!!(ps->slotFlags[ps->stats[STAT_ACTIVE_SLOT]] & BG_GUN_AUTO)];
+			if (fitted) hand.hModel = fitted;
+		}
 		hand.renderfx = RF_DEPTHHACK | RF_FIRST_PERSON | RF_MINLIGHT;
 		AnglesToAxis( angles, hand.axis );
 		CG_WeapAnim_Apply( ps, &hand, cg.frametime );
@@ -3172,6 +3185,7 @@ void CG_FireBullets( centity_t *cent, int weapon ) {
 	cgShot_t	shot;
 
 	switch ( weapon ) {
+	case WP_G19:
 	case WP_MACHINEGUN:
 	case WP_M16:
 	case WP_SHOTGUN:

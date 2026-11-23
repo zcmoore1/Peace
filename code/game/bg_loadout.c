@@ -17,7 +17,7 @@ static bg_class_t bg_classes[ARRAY_LEN(presets)];
 static qboolean classesReady;
 
 static const struct { int mask; const char *name; } attachmentTypes[] = {
-	{ 0, "None" }, { BG_ATTACHMENT_REDDOT, "Red dot" }
+	{ 0, "None" }, { BG_ATTACHMENT_REDDOT, "Red dot" }, { BG_ATTACHMENT_SWITCH, "Select Fire" }
 };
 int BG_AttachmentTypeCount( void ) { return ARRAY_LEN(attachmentTypes); }
 int BG_AttachmentType( int index ) {
@@ -32,7 +32,7 @@ static const bg_perkDef_t perks[BG_PERK_COUNT] = {
 	{ "Quick Reload", "Half reload time. Swap and bolt speeds are unchanged.", 50, 1, 100 },
 	{ "9 Lives", "Landing cannot damage you. Other damage is unchanged.", 100, 1, 100 },
 	{ "Inaudible", "Silent running and wading footsteps for everyone.", 100, 1, 100 },
-	{ "Second Nature", "Two attachments per gun. Only red dots are available so far.", 100, 2, 100 },
+	{ "Second Nature", "Allows up to two compatible attachments per gun.", 100, 2, 100 },
 	// MW2's Lightweight (_perkfunctions.gsc setLightWeight): moveSpeedScaler
 	// 1.07, which multiplies the class speed, so it is the walk's alone.
 	{ "Lightweight", "7% faster on the ground. Air, ladder, swim and weapon speeds unchanged.", 100, 1, 107 }
@@ -228,7 +228,8 @@ static const struct { int weapon; const char *name; int attachments; int moveCla
 	{WP_PLASMAGUN, "Plasma gun", BG_ATTACHMENT_REDDOT, MOVECLASS_NONE, 1.0f},
 	{WP_BFG, "BFG", BG_ATTACHMENT_REDDOT, MOVECLASS_NONE, 1.0f},
 	{WP_M40A3, "M300 Praetorian", 0, MOVECLASS_SNIPER, 1.0f},
-	{WP_M16, "M16 + Masterkey", 0, MOVECLASS_RIFLE, 1.0f}
+	{WP_M16, "M16 + Masterkey", 0, MOVECLASS_RIFLE, 1.0f},
+	{WP_G19, "G19", BG_ATTACHMENT_SWITCH, MOVECLASS_PISTOL, 1.0f}
 };
 
 int BG_WeaponAttachmentMask(int weapon) {
@@ -395,6 +396,12 @@ qboolean BG_SerializeClass( const bg_class_t *loadout, char *text, int size ) {
 	if ( size <= (int)strlen(result) ) return qfalse;
 	Q_strncpyz(text, result, size);
 	return qtrue;
+}
+
+qboolean BG_HasSelector(const playerState_t *ps, int weapon) {
+	int slot = ps->stats[STAT_ACTIVE_SLOT];
+	return slot >= 0 && slot < SLOT_COUNT && weapon == WP_G19 &&
+		ps->stats[STAT_SLOT_PRIMARY + slot] == weapon && (ps->slotAttachments[slot] & BG_ATTACHMENT_SWITCH);
 }
 
 // Weapon IDs need not be adjacent. Cycle the TWO SLOT INDICES modulo the slot

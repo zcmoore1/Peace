@@ -480,6 +480,7 @@ static const char *CG_PD_StateName( int st ) {
 	case WEAPON_READY:			return "READY";
 	case WEAPON_RAISING:		return "RAISING";
 	case WEAPON_DROPPING:		return "DROPPING";
+	case WEAPON_SELECTING: return "SELECTING";
 	case WEAPON_LADDER:		return "LADDER";
 	case WEAPON_FIRING:			return "FIRING";
 	case WEAPON_BOLTING:         return "BOLTING";
@@ -491,12 +492,14 @@ static const char *CG_PD_StateName( int st ) {
 	}
 }
 
-static const char *CG_PD_SeqName( int seq ) {
+const char *CG_WeaponSequenceName( int seq ) {
 	switch ( seq ) {
 	case RSEQ_START:	return "START";
 	case RSEQ_LOOP:		return "LOOP";
 	case RSEQ_END:		return "END";
-	case ASEQ_FIRE:      return "FIRE";
+	case ASEQ_FIRE:        return "FIRE";
+	case ASEQ_SELECT_AUTO: return "SELECT_AUTO";
+	case ASEQ_SELECT_SEMI: return "SELECT_SEMI";
 	default:			return "?";
 	}
 }
@@ -531,7 +534,7 @@ static void CG_PeaceDump_f( void ) {
 	CG_Printf( "weapon   %i   state %s   wTime %i\n",
 		w, CG_PD_StateName( ps->weaponstate ), ps->weaponTime );
 	CG_Printf( "anim     elapsed %i   seq %s   pendingMag %s\n",
-		ps->weaponAnimTime, CG_PD_SeqName( ps->weaponAnimSeq ),
+		ps->weaponAnimTime, CG_WeaponSequenceName( ps->weaponAnimSeq ),
 		( ps->pm_flags & PMF_PENDING_MAG ) ? "YES" : "no" );
 	CG_Printf( "flags    sprint %s  ads %s  ducked %s  prone %s  crawlStopped %s\n",
 		( ps->pm_flags & PMF_SPRINTING ) ? "Y" : "n",
@@ -556,6 +559,8 @@ static void CG_PeaceDump_f( void ) {
 			ps->proneDirection, ps->proneDirectionPitch, ps->proneTorsoPitch );
 	}
 
+	if (BG_HasSelector(ps, ps->weapon)) CG_Printf("selector %s, action elapsed %i ms\n",
+		(ps->slotFlags[ps->stats[STAT_ACTIVE_SLOT]] & BG_GUN_AUTO) ? "AUTO" : "SEMI", ps->weaponAnimTime);
 	CG_Printf( "slots    primary %i   secondary %i   active %i\n",
 		ps->stats[STAT_SLOT_PRIMARY], ps->stats[STAT_SLOT_SECONDARY],
 		ps->stats[STAT_ACTIVE_SLOT] );
@@ -635,7 +640,7 @@ static void CG_PeaceDump_f( void ) {
 		LADDER_FACING( ps->stats[STAT_LADDER] ), BG_LADDER_DROP_TIME );
 
 	for ( i = 0; i < RSEQ_COUNT; i++ ) {
-		CG_Printf( "reload   %-5s len %4i  notes:", CG_PD_SeqName( i ), BG_ReloadSegmentTime(ps, i) );
+		CG_Printf( "reload   %-5s len %4i  notes:", CG_WeaponSequenceName( i ), BG_ReloadSegmentTime(ps, i) );
 		n = rl->seg[i].notes;
 		if ( !n || n->note == WNOTE_NONE ) {
 			CG_Printf( " (none)" );

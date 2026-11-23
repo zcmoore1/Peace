@@ -1288,6 +1288,7 @@ typedef struct playerState_s {
 #define BUTTON_LETHAL		65536			// throw lethal equipment (bit 16)
 #define BUTTON_TACTICAL		131072			// throw tactical equipment (bit 17)
 #define BUTTON_USE			262144			// hold to pick up / interact (bit 18)
+#define BUTTON_SELECTFIRE BUTTON_ALTFIRE
 #define BUTTON_ALTFIRE		524288			// underbarrel / alt weapon toggle (bit 19)
 #define BUTTON_WEAPON_SWAP   1048576         // selection intent, even when cancelling equipment
 #define BUTTON_USE_RELOAD    2097152         // MW2's +usereload (bit 21): use, else reload; the server asks for the reload

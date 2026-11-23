@@ -1181,16 +1181,14 @@ source for MW2 behaviour; the owner rejects it.
   (21/22 in missionpack; `WP_NUM_WEAPONS` 20 / 23). The
   networked `ps.weapon` is 5 bits, so no weapon may pass 31. Other
   stats remain signed int16: their bit 15 must stay unused.
-- `weaponAnimSeq` — **full.** 2 bits in `msg.c`; all four values are taken
-  (`RSEQ_START/LOOP/END` + `ASEQ_FIRE`). A fifth animation segment has to widen
-  the field.
-- `weaponstate` — 4 bits, 10 of 16 values used, including `WEAPON_LADDER`.
+- `weaponAnimSeq` uses 3 bits for three reload segments, fire and the two G19 selector directions.
+- `weaponstate` — 4 bits, including `WEAPON_LADDER` and `WEAPON_SELECTING`.
 - `weaponAction` — a separate 11-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
   swap edge latch, post-throw recovery, `WA_LEFT_EMPTY`, and `WA_ATTACK_HELD`
   (the last step's trigger, MW2's `pm->oldcmd`, for a reload's fresh press;
-  written every step and kept through a freeze). Protocol 92 (GAME_VERSION
-  -21) requires client, server and all modules rebuilt together. Older
+  written every step and kept through a freeze). Protocol 93 (GAME_VERSION
+  -22) requires client, server and all modules rebuilt together. Older
   builds/demos are incompatible.
 - `weaponShotCount` — MW2's `weapState[hand].weaponShotCount` (ps+0x200, its
   netfield's 3 bits, 0x742600): the shots of this pull of the trigger, 0 to
@@ -1200,7 +1198,8 @@ source for MW2 behaviour; the owner rejects it.
   of drop before it (MW2's RAISING_ALTSWITCH and DROPPING_ALT states).
 - Slot caches/attachments/flags, first draw, and pickup target/serial/hold are
   explicit playerstate net fields, not extra `stats[]` or `pm_flags` bits.
-  `weapFlags` (MW2's name; 3 bits since protocol 92) carries `PWF_USE_RELOAD`,
+  Protocol 93 uses six bits per slot for the flags, including `BG_GUN_AUTO`.
+  `weapFlags` uses four bits for `PWF_SELECTOR_HELD`, `PWF_USE_RELOAD`,
   the server's use/reload request, `PWF_SPRINT_RELEASE` and
   `PWF_RELOAD_INTERRUPT` (MW2's RELOAD_START_INTERUPT and RELOADING_INTERUPT,
   set only while reloading). None is a clock, and none is rebased. Protocol 80 adds `jumpLand` (signed 12 bits),
@@ -1295,8 +1294,8 @@ source for MW2 behaviour; the owner rejects it.
   catalog's `movementPercent` 107), which only the ground walk (and its wading
   clamp) reads; never the air, a ladder, swimming, the jump or the bob, and
   never by mutating `ps.speed`, jump impulse or timers.
-  Second Nature raises the per-gun class attachment limit to two. Only Red dot
-  is implemented so far; the capacity rule must not invent other attachments.
+  Second Nature raises the per-gun class attachment limit to two. The G19
+  supports Select Fire and other compatible guns support Red dot.
   Pickup instances keep their own attachments regardless of the looter's perks.
   Class format 2 stores attachment masks; format 1 retains `cg_sight` fallback.
   Run `dev/tests/run-perks.sh` and the loadout suite after perk changes.

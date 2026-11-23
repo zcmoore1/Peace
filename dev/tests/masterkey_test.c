@@ -4,6 +4,7 @@
 #define main ExistingPickupTests
 #include "weapon_pickup_test.c"
 #undef main
+#include "../../code/game/bg_m16_data.h"	/* the rifle's ammunition, from weapon.json */
 
 static void TestAttachedInventory(void) {
  playerState_t *state=Reset();
@@ -29,9 +30,18 @@ static void TestAttachedInventory(void) {
  BG_GetSlot(state,0,&taken);
  CHECK(taken.ammo==11 && taken.reserve==81 && taken.altAmmo==1 && taken.altReserve==12);
  CHECK((taken.flags&(BG_GUN_ALTERNATE|BG_GUN_ALT_UNCHAMBERED))==gun.flags);
+ /* The rifle's reserve fills to MW2's maxAmmo (m16_shotgun_mp), past what the
+  * gun is given with: its startAmmo less the magazine that fills first. */
+ CHECK(BG_WeaponMaxReserve(WP_M16)==M16_RESERVE && BG_WeaponStartReserve(WP_M16)==M16_START_AMMO-M16_MAG_SIZE);
+ CHECK(BG_WeaponStartReserve(WP_M16)>0 && BG_WeaponStartReserve(WP_M16)<M16_RESERVE && 81<M16_RESERVE);
+ CHECK(BG_WeaponStartReserve(WP_MASTERKEY)==BG_WeaponMaxReserve(WP_MASTERKEY));
  CHECK(Pickup_Weapon(item,&g_entities[0])!=0);
  BG_GetSlot(state,0,&taken);
- CHECK(taken.reserve==120 && taken.altReserve==16 && taken.ammo==11 && taken.altAmmo==1);
+ CHECK(taken.reserve==MIN(M16_RESERVE,81+17+59) && taken.reserve>BG_WeaponStartReserve(WP_M16));
+ CHECK(taken.altReserve==16 && taken.ammo==11 && taken.altAmmo==1);
+ CHECK(Pickup_Weapon(item,&g_entities[0])!=0);
+ BG_GetSlot(state,0,&taken);
+ CHECK(taken.reserve==M16_RESERVE && taken.altReserve==16 && taken.ammo==11 && taken.altAmmo==1);
 
  /* A use pickup replaces the latched slot, preserves payload and invalidates
   * only that instance's previous command generation. */
@@ -96,9 +106,18 @@ static void TestModes(void) {
  ModeReady(qfalse);
  CHECK(ps.ammo[WP_M16]==30 && ps.ammo[WP_MASTERKEY]==4 && ps.ammoReserve[WP_MASTERKEY]==16);
  move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0;
- CHECK(fired[WP_M16]==1 && ps.ammo[WP_M16]==29 && ps.ammo[WP_MASTERKEY]==4);
+ CHECK(fired[WP_M16]==1 && ps.ammo[WP_M16]==M16_MAG_SIZE-1 && ps.ammo[WP_MASTERKEY]==4);
  CHECK(!(ps.stats[STAT_UNCHAMBERED]&(1<<WP_M16)));
- Run(M16_FIRE_MS);
+ /* The rifle is m16_shotgun_mp's 3-Round Burst: a tap fires all three (MW2's
+  * BurstFirePending, 576a70, fires with the trigger up, 576d4a), and the mode
+  * switch asked for inside the burst waits for it (MW2 skips its change check
+  * while a burst is pending, 44c444, and refuses FIRING with time left,
+  * 578c31): it begins on the think the last shot's time runs out, the
+  * cooldown's first (578939-5789cd). */
+ CHECK(BG_WeaponFireType(WP_M16)==BG_FIRE_BURST3 && BG_ShotLimitReached(BG_FIRE_BURST3,3) && !BG_ShotLimitReached(BG_FIRE_BURST3,2));
+ move.cmd.weapon=BG_WeaponCommand(&ps,0,qtrue);
+ Run(3*M16_FIRE_MS-1);
+ CHECK(fired[WP_M16]==3 && ps.ammo[WP_M16]==M16_MAG_SIZE-3 && ps.weapon==WP_M16 && ps.weaponstate==WEAPON_FIRING);
  /* MW2's alt switch. Its drop is the gun's altDropTime, which MW2's data makes
   * 0: the mode changes on the think it is asked for, and the new mode's
   * altRaiseTime is the whole cost. */
@@ -116,7 +135,7 @@ static void TestModes(void) {
  CHECK(ps.weapon==WP_MASTERKEY && BG_ActiveSlotWeapon(&ps)==WP_MASTERKEY);
  CHECK(ps.stats[STAT_SLOT_PRIMARY]==WP_M16 && ps.stats[STAT_SLOT_SECONDARY]==WP_SHOTGUN);
  move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0;
- CHECK(fired[WP_MASTERKEY]==1 && ps.ammo[WP_MASTERKEY]==3 && ps.ammo[WP_M16]==29);
+ CHECK(fired[WP_MASTERKEY]==1 && ps.ammo[WP_MASTERKEY]==3 && ps.ammo[WP_M16]==M16_MAG_SIZE-3);
  CHECK(ps.stats[STAT_UNCHAMBERED]&(1<<WP_MASTERKEY));
  Run(MASTERKEY_FIRE_MS);
  CHECK(!(ps.stats[STAT_UNCHAMBERED]&(1<<WP_MASTERKEY)));
@@ -128,7 +147,7 @@ static void TestModes(void) {
  move.cmd.weapon=BG_SlotCommand(&ps,1); FinishSelection();
  CHECK(ps.weapon==WP_SHOTGUN);
  move.cmd.weapon=BG_SlotCommand(&ps,0); FinishSelection();
- CHECK(ps.weapon==WP_MASTERKEY && ps.ammo[WP_MASTERKEY]==3 && ps.ammo[WP_M16]==29);
+ CHECK(ps.weapon==WP_MASTERKEY && ps.ammo[WP_MASTERKEY]==3 && ps.ammo[WP_M16]==M16_MAG_SIZE-3);
  /* The change to the other slot out of the underbarrel is its own drop. */
  move.cmd.weapon=BG_WeaponCommand(&ps,1,qfalse); Step(1);
  CHECK(ps.weapon==WP_MASTERKEY && ps.weaponstate==WEAPON_DROPPING && ps.weaponDraw!=WDRAW_ALT);
@@ -248,7 +267,8 @@ static void TestNoteTransitions(void) {
   else CHECK(ps.weapon==WP_MASTERKEY && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==MASTERKEY_DROP_MS);
   CHECK(ps.ammo[WP_MASTERKEY]==(offset>0?2:1));
   CHECK(ps.ammoReserve[WP_MASTERKEY]==(offset>0?15:16));
-  CHECK(ps.ammo[WP_M16]==30 && ps.ammoReserve[WP_M16]==120);
+  /* the rifle untouched: its magazine, and the reserve it was given with (MW2's startAmmo less a magazine) */
+  CHECK(ps.ammo[WP_M16]==M16_MAG_SIZE && ps.ammoReserve[WP_M16]==M16_START_AMMO-M16_MAG_SIZE);
 
   ModeReady(qtrue); ps.ammo[WP_MASTERKEY]=1;
   move.cmd.buttons=BUTTON_RELOAD; Step(1); move.cmd.buttons=0;

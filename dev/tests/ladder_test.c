@@ -1781,6 +1781,257 @@ static void TestHeldPredictionReplay(int dt) {
         else CHECK(memcmp(&expected, &ps, sizeof(ps)) == 0);
     }
 }
+/* MW2's burst gun on the ladder: the M16 rifle (m16_shotgun_mp, a 3-Round
+ * Burst). Nothing here is the rifle's own or the ladder's own; it is the rules
+ * above meeting the burst's, read from MW2's code and watched by nobody in a
+ * running MW2:
+ *  - while a burst is pending MW2 runs no change check, the ladder's branch
+ *    included (PM_Weapon, 0x44C444-0x44C4B3; BurstFirePending 0x576A70), so a
+ *    ladder grabbed inside a burst takes nothing from it: its other shots
+ *    leave by themselves, a shot's time apart, whatever the trigger does;
+ *  - the last shot's crossing is the burst's cooldown, READY with time on it
+ *    (WeaponTimeAdjust 0x578939-0x5789CD), which the change gate takes
+ *    (0x578C0A-0x578C47): the drop begins on that think, its time in the
+ *    cooldown's place;
+ *  - with the trigger held since the burst's first shot the pull is spent
+ *    (ShotLimitReached 0x5769E0: the count at the burst's limit), so the
+ *    drop's crossing is the lock's and it hangs like a single-shot gun's, for
+ *    as long as the trigger is held;
+ *  - the jump's cancel zeroes the time with no crossing (PM_Weapon_Idle,
+ *    0x5777C7-0x5777D8), so nothing has reset the count: no burst is pending
+ *    (the count is at its limit), the held trigger fires ONE round
+ *    (ShouldBeFiring, 0x576CC0) and StartFiring counts it past the limit
+ *    (0x576FB7-0x576FC5: 3 to 4, its cap). That round's crossing is the
+ *    cooldown again, and the cooldown's the lock: nothing more until a
+ *    release, and the next pull is a whole burst;
+ *  - the trigger let go ends the pull at the drop's crossing (0x578B51-
+ *    0x578B67) and the drop finishes: empty hands, and leaving costs the
+ *    raise. A fresh press made inside the burst (UpdatePendingTriggerPull,
+ *    0x576AD0) does the same with the trigger down (the pending pull keeps
+ *    the lock off, 0x5789DD, and ends the pull, 0x578B55); the pull it
+ *    latched is a whole burst on the command after the raise. A press made
+ *    with the gun put away latches nothing (0x576AD3: weapon 0).
+ * Every command number is worked out from the game's own tables. */
+enum { BURST_HELD, BURST_TAPPED, BURST_PRESSED_AGAIN };
+typedef struct { held_t h; int c, cool, limit, n; } burst_t;
+static burst_t Burst(int dt) {
+    const int type = BG_WeaponFireType(WP_M16);
+    burst_t b;
+    memset(&b, 0, sizeof(b));
+    b.h.gun = WP_M16; b.h.dt = dt; b.h.H = Thinks(BG_LADDER_DROP_TIME, dt);
+    b.c = Thinks(M16_FIRE_MS, dt);                  /* the commands a shot takes */
+    b.cool = Thinks(BG_BURST_FIRE_COOLDOWN, dt);    /* ... and the cooldown */
+    for (b.limit = 1; !BG_ShotLimitReached(type, b.limit); b.limit++) CHECK(b.limit < BG_SHOT_COUNT_MAX);
+    CHECK(type != BG_FIRE_FULLAUTO && b.limit > 1 && b.limit < BG_SHOT_COUNT_MAX);
+    CHECK(BG_WeaponFireLength(WP_M16) == 0 && b.cool >= 2);
+    return b;
+}
+static qboolean Latched(void) { return (ps.weapFlags & PWF_PENDING_PULL) != 0; }
+/* The trigger on a burst's command: held from the first shot, let go after its
+ * command, or let go for command 1 and down again from command 2 (a fresh
+ * press inside the burst). */
+static int BurstButtons(int mode, int cmd) {
+    return (mode == BURST_TAPPED || (mode == BURST_PRESSED_AGAIN && cmd == 1)) ? 0 : BUTTON_ATTACK;
+}
+/* The pull, on command 0, on the floor. */
+static void BurstPull(burst_t *b) {
+    HeldReset(WP_M16, b->h.dt); b->n = 0;
+    move.cmd.buttons = BUTTON_ATTACK; QuickTick(b->h.dt);
+    CHECK(fired[WP_M16] == 1 && ps.weaponShotCount == 1 && ps.weaponstate == WEAPON_FIRING);
+    CHECK(ps.weaponTime == M16_FIRE_MS && ps.weaponAnimTime == -1 && BG_BurstFirePending(&ps) && !Latched());
+}
+/* The burst's commands up to `to` (its last is limit * c - 1): the other shots
+ * leave on c, 2c, ... whatever the trigger does, the gun is in its shot, and
+ * no ladder takes it. */
+static void BurstTo(burst_t *b, int mode, int to) {
+    CHECK(to < b->limit * b->c);
+    while (b->n < to) {
+        int cmd = b->n + 1;
+        move.cmd.buttons = BurstButtons(mode, cmd);
+        QuickTick(b->h.dt); b->n = cmd;
+        CHECK(ps.weapon == WP_M16 && ps.weaponstate == WEAPON_FIRING && !Holstering());
+        CHECK(fired[WP_M16] == 1 + cmd / b->c && ps.weaponShotCount == fired[WP_M16]);
+        CHECK(BG_BurstFirePending(&ps) == (fired[WP_M16] < b->limit));
+        if (cmd % b->c == 0) CHECK(ps.weaponTime == M16_FIRE_MS);
+        CHECK(Latched() == (mode == BURST_PRESSED_AGAIN && cmd >= 2));
+    }
+}
+/* The ladder's drop began on this command, the burst's shots all fired. */
+static void BurstDropBegan(const burst_t *b) {
+    CHECK(Attached() && ps.weapon == WP_M16 && ps.weaponstate == WEAPON_DROPPING && Holstering());
+    CHECK(ps.weaponTime == BG_LADDER_DROP_TIME && BG_HolsterTime(&ps) == BG_LADDER_DROP_TIME);
+    CHECK(fired[WP_M16] == b->limit && ps.weaponShotCount == b->limit && !BG_BurstFirePending(&ps));
+}
+/* ... and goes down over its own time: the commands before its crossing. */
+static void BurstDropRuns(burst_t *b) {
+    int k;
+    for (k = 1; k < b->h.H; k++) {
+        QuickTick(b->h.dt);
+        CHECK(Attached() && ps.weapon == WP_M16 && ps.weaponstate == WEAPON_DROPPING && Holstering());
+        CHECK(ps.weaponTime == BG_LADDER_DROP_TIME - k * b->h.dt && ps.weaponTime > 0);
+        CHECK(fired[WP_M16] == b->limit && ps.weaponShotCount == b->limit);
+    }
+}
+/* Hung: the rifle in hand, still a drop, weaponTime 1, the count at its limit. */
+static void BurstHung(const burst_t *b) {
+    CHECK(Attached() && ps.weapon == WP_M16 && ps.weaponstate == WEAPON_DROPPING && Holstering());
+    CHECK(ps.weaponTime == 1 && BG_LadderHolsterDown(&ps) && BG_HolsterTime(&ps) == BG_LADDER_DROP_TIME);
+    CHECK(fired[WP_M16] == b->limit && ps.weaponShotCount == b->limit && !BG_BurstFirePending(&ps));
+    CHECK((move.cmd.buttons & BUTTON_ATTACK) && !(ps.weaponAction & WA_TYPE_MASK) && !Latched());
+}
+/* Empty hands on the ladder: the drop finished, the pull ended. */
+static void BurstPutAway(const burst_t *b) {
+    CHECK(Attached() && ps.weapon == WP_M16 && ps.weaponstate == WEAPON_LADDER && ps.weaponTime == 0);
+    CHECK(!Holstering() && ps.weaponShotCount == 0 && fired[WP_M16] == b->limit && !BG_BurstFirePending(&ps));
+}
+/* A whole burst from a press on the next command, `before` rounds fired so far. */
+static void BurstWhole(burst_t *b, int before) {
+    int k;
+    move.cmd.buttons = BUTTON_ATTACK; QuickTick(b->h.dt);
+    CHECK(fired[WP_M16] == before + 1 && ps.weaponShotCount == 1 && ps.weaponstate == WEAPON_FIRING && !Latched());
+    move.cmd.buttons = 0;
+    for (k = 1; k < b->limit * b->c; k++) QuickTick(b->h.dt);
+    CHECK(fired[WP_M16] == before + b->limit && ps.weaponShotCount == b->limit && ps.weaponstate == WEAPON_FIRING);
+}
+/* The jump's command, the trigger still held from the burst's first shot: the
+ * rifle is back with no raise and has fired one round, the count past the
+ * burst's limit and no burst pending. Then that round's time, the cooldown,
+ * and the lock; let go, the next pull is a whole burst. */
+static void BurstRound(burst_t *b) {
+    const int dt = b->h.dt, shots = b->limit + 1;
+    int k;
+    CHECK(fired[WP_M16] == shots && ps.weapon == WP_M16 && ps.weaponstate == WEAPON_FIRING);
+    CHECK(ps.weaponTime == M16_FIRE_MS && ps.weaponShotCount == shots && !BG_BurstFirePending(&ps) && !Latched());
+    for (k = 1; k < b->c; k++) { QuickTick(dt); CHECK(ps.weaponstate == WEAPON_FIRING && fired[WP_M16] == shots); }
+    QuickTick(dt);
+    CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == BG_BURST_FIRE_COOLDOWN && fired[WP_M16] == shots);
+    for (k = 1; k < b->cool; k++) {
+        QuickTick(dt);
+        CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == BG_BURST_FIRE_COOLDOWN - k * dt && ps.weaponTime > 0);
+    }
+    for (k = 0; k < Thinks(600, dt); k++) {
+        QuickTick(dt);
+        CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 1 && ps.weaponShotCount == shots && fired[WP_M16] == shots);
+    }
+    move.cmd.buttons = 0; QuickTick(dt);
+    CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && ps.weaponShotCount == 0);
+    BurstWhole(b, shots);
+}
+/* Off the ladder with the gun put away: the rifle's whole raise, nothing fired
+ * in it or on its last command. Returns on that command. */
+static void BurstRaise(burst_t *b) {
+    int raise, k;
+    HeldJump(&b->h, &b->n); raise = HeldRaise(&b->h);
+    for (k = 1; k < Thinks(raise, b->h.dt); k++) {
+        QuickTick(b->h.dt);
+        CHECK(ps.weaponstate == WEAPON_RAISING && ps.weaponTime == raise - k * b->h.dt && fired[WP_M16] == b->limit);
+    }
+    QuickTick(b->h.dt);
+    CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && fired[WP_M16] == b->limit && ps.weaponShotCount == 0);
+}
+static void TestHeldTriggerBurst(int dt) {
+    const int holds[] = { 0, 3000, 10000 };
+    burst_t b = Burst(dt);
+    int k, t, where;
+
+    /* The trigger held from the burst's first shot, the ladder grabbed inside
+     * the burst, hung for no time, 3 seconds or 10, and the jump off still
+     * holding: one round on the jump's own command. */
+    for (k = 0; k < ARRAY_LEN(holds); k++) {
+        BurstPull(&b);
+        ToLadder(); BurstTo(&b, BURST_HELD, 1); CHECK(Attached());
+        while (b.n < b.limit * b.c - 1) { BurstTo(&b, BURST_HELD, b.n + 1); CHECK(Attached()); }
+        QuickTick(dt);      /* the last shot's crossing: the cooldown's think, and the drop's first */
+        BurstDropBegan(&b);
+        BurstDropRuns(&b);
+        QuickTick(dt); BurstHung(&b);       /* the drop's crossing: MW2's lock, not weapon 0 */
+        for (t = 0; t < holds[k]; t += dt) { QuickTick(dt); BurstHung(&b); }
+        HeldJump(&b.h, &b.n);
+        BurstRound(&b);
+    }
+    /* The jump inside the running drop: the same cancel, the same one round. */
+    CHECK(b.h.H >= 2);
+    BurstPull(&b);
+    ToLadder(); BurstTo(&b, BURST_HELD, b.limit * b.c - 1); CHECK(Attached());
+    QuickTick(dt); BurstDropBegan(&b);
+    HeldJump(&b.h, &b.n);
+    BurstRound(&b);
+    /* Grabbed after the burst: in the cooldown (READY with time, which the
+     * change gate takes) and under the lock that follows it. The drop begins
+     * on the grab's command, hangs, and the jump fires the one round. */
+    for (where = 0; where < 2; where++) {
+        BurstPull(&b); BurstTo(&b, BURST_HELD, b.limit * b.c - 1);
+        QuickTick(dt);
+        CHECK(!Attached() && ps.weaponstate == WEAPON_READY && ps.weaponTime == BG_BURST_FIRE_COOLDOWN);
+        CHECK(fired[WP_M16] == b.limit && ps.weaponShotCount == b.limit);
+        if (where) {
+            for (k = 1; k < b.cool; k++) QuickTick(dt);
+            CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime > 0);
+            for (k = 0; k < 3; k++) {
+                QuickTick(dt);
+                CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 1 && ps.weaponShotCount == b.limit);
+            }
+        }
+        ToLadder(); QuickTick(dt);
+        BurstDropBegan(&b);
+        BurstDropRuns(&b);
+        QuickTick(dt); BurstHung(&b);
+        for (t = 0; t < 1000; t += dt) { QuickTick(dt); BurstHung(&b); }
+        HeldJump(&b.h, &b.n);
+        BurstRound(&b);
+    }
+    /* Hung, and the trigger let go on the ladder: the drop ends on that
+     * command. A new pull there fires nothing and latches nothing (the gun is
+     * put away); held to the jump and through the raise, it is a whole burst
+     * on the command after the raise. */
+    BurstPull(&b);
+    ToLadder(); BurstTo(&b, BURST_HELD, b.limit * b.c - 1); CHECK(Attached());
+    QuickTick(dt); BurstDropBegan(&b);
+    BurstDropRuns(&b);
+    QuickTick(dt); BurstHung(&b);
+    for (t = 0; t < 500; t += dt) { QuickTick(dt); BurstHung(&b); }
+    move.cmd.buttons = 0; QuickTick(dt);
+    BurstPutAway(&b); CHECK(!Latched());
+    move.cmd.buttons = BUTTON_ATTACK;
+    for (t = 0; t < 500; t += dt) { QuickTick(dt); BurstPutAway(&b); CHECK(!Latched()); }
+    BurstRaise(&b);
+    QuickTick(dt);
+    CHECK(fired[WP_M16] == b.limit + 1 && ps.weaponShotCount == 1 && ps.weaponstate == WEAPON_FIRING);
+    for (k = 1; k < b.limit * b.c; k++) QuickTick(dt);
+    CHECK(fired[WP_M16] == 2 * b.limit && ps.weaponShotCount == b.limit);
+    /* The trigger let go after the first shot: the burst plays out on the
+     * ladder by itself, the drop begins on the last shot's crossing and ends
+     * on its own (the pull ends there, the trigger up), and leaving raises
+     * the gun; nothing is instant. */
+    BurstPull(&b);
+    ToLadder(); BurstTo(&b, BURST_TAPPED, b.limit * b.c - 1); CHECK(Attached());
+    QuickTick(dt); BurstDropBegan(&b);
+    BurstDropRuns(&b);
+    QuickTick(dt); BurstPutAway(&b);
+    for (t = 0; t < 500; t += dt) { QuickTick(dt); BurstPutAway(&b); }
+    BurstRaise(&b);
+    QuickTick(dt); CHECK(ps.weaponstate == WEAPON_READY && fired[WP_M16] == b.limit);
+    BurstWhole(&b, b.limit);
+    /* A fresh press inside the burst, held from there: the pending pull keeps
+     * the lock off the drop's crossing and ends the pull, so the drop ends
+     * with the trigger down; the pull it latched is a whole burst on the
+     * command after the raise, whose first shot clears it (0x576FB0). */
+    CHECK(b.limit * b.c - 1 >= 2);
+    BurstPull(&b);
+    ToLadder(); BurstTo(&b, BURST_PRESSED_AGAIN, b.limit * b.c - 1); CHECK(Attached() && Latched());
+    QuickTick(dt); BurstDropBegan(&b); CHECK(Latched());
+    BurstDropRuns(&b);
+    QuickTick(dt); BurstPutAway(&b);
+    CHECK(Latched() && (move.cmd.buttons & BUTTON_ATTACK));
+    for (t = 0; t < 500; t += dt) { QuickTick(dt); BurstPutAway(&b); CHECK(Latched()); }
+    BurstRaise(&b);
+    CHECK(Latched());
+    QuickTick(dt);
+    CHECK(fired[WP_M16] == b.limit + 1 && ps.weaponShotCount == 1 && ps.weaponstate == WEAPON_FIRING && !Latched());
+    for (k = 1; k < b.limit * b.c; k++) QuickTick(dt);
+    CHECK(fired[WP_M16] == 2 * b.limit && ps.weaponShotCount == b.limit);
+    move.cmd.buttons = 0;
+}
 /* This test pinned Peace's old ladder holster, which took no lock, finished on
  * its time with the trigger held and cost the whole raise on leaving. It now
  * pins MW2's: the SPAS, the M300 and the Masterkey, Single Shot in MW2's
@@ -1821,6 +2072,7 @@ int main(void) {
         TestOffhandGrab(steps[i]);
         TestHeldTriggerGrab(steps[i]);
         TestHeldTriggerHolster(steps[i]);
+        TestHeldTriggerBurst(steps[i]);
         TestBottomExit(steps[i]);
         TestPredictionReplay(steps[i]);
     }

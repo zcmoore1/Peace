@@ -129,6 +129,22 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
   mechanism of the bolt cancel and the Moni), so the hands are empty before
   any crossing could hang it. It is one think wide; a think earlier or later
   the gun is back at once.
+- A grab inside a burst takes nothing from it. MW2 runs no change check, its
+  ladder branch included, while a burst is pending (iw4x.exe
+  0x44C444-0x44C4B3), so the M16 rifle's burst plays out on the ladder, its
+  other shots leaving by themselves, and the drop begins on the think the last
+  shot's time runs out, the burst cooldown's first (the change gate refuses a
+  shot with time left, 0x578C31, and takes the cooldown's READY;
+  `PM_LadderWeapon`'s `pml.burstPending`; `burst_test.c`'s `TestLadder`). With
+  the trigger held since the burst's first shot the pull is spent like a
+  single-shot gun's, so that drop hangs under the lock for as long as it is
+  held, and the jump off, still holding, gives the gun back on its own command
+  and fires **one round**: the cancel zeroes the time with no crossing, so the
+  count is still 3, a burst is not pending, and the shot makes it 4; its
+  cooldown follows, then the lock (0x578D00-0x578D56, 0x576FB7-0x576FC5,
+  0x578939-0x5789CD; `ladder_test.c`'s `TestHeldTriggerBurst`). Let go on the
+  ladder, or pressed afresh there (the pending pull keeps the lock off,
+  0x5789DD), the drop finishes and leaving raises the gun.
 - The original reload helpers, swap helpers, note runner and their non-ladder
   ordering are unchanged. A ladder just owns the weapon while the hands are busy.
   Leaving with the drop ended (`WEAPON_LADDER`) raises the selected weapon using

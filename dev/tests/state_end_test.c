@@ -641,10 +641,15 @@ static void TestYYWhileSprinting(int gun) {
  * reload refuses FIRING (0x57886D) and its trigger-up ShouldBeFiring only
  * readies the gun (0x576D99-0x576DA3), so the reload is the think after; a
  * held trigger reloads on that think, through FireWeapon's ammo check
- * (0x5770C0-0x5770C9). The machinegun (m4_mp) and the M16 rifle, Peace's
- * placeholder automatic; the Quake 3 guns with a magazine go the same way. */
+ * (0x5770C0-0x5770C9). The machinegun (m4_mp); the Quake 3 guns with a
+ * magazine go the same way. A burst gun (the M16 rifle, m16_shotgun_mp's
+ * 3-Round Burst) is READY in its cooldown at the top of that think, its burst
+ * ended by the empty clip (0x576A8A, 0x578939-0x5789CD), and the auto reload
+ * takes that READY gun on that same think (0x578845-0x578889), the trigger up
+ * or down; the reload begins a new pull (0x575EFE). */
 static void TestLastRoundEnds(int gun) {
-	int held, k, lock;
+	int held, k, lock, type = BG_WeaponFireType(gun);
+	qboolean burst = type >= BG_FIRE_BURST2 && type <= BG_FIRE_BURST4;
 	for (held = 0; held < 2; held++) {
 		Setup(gun, Other(gun)); ps.ammo[gun] = 1;
 		CHECK(BG_WeaponFireLength(gun) <= 0 && ps.ammoReserve[gun] > 0);
@@ -654,8 +659,9 @@ static void TestLastRoundEnds(int gun) {
 		if (!held) buttons = 0;
 		for (k = 1; k < Thinks(lock); k++) { Frame(); CHECK(ps.weaponstate == WEAPON_FIRING); }
 		Frame();
-		if (held) {
+		if (held || burst) {
 			CHECK(ps.weaponstate == WEAPON_RELOADING && ps.weaponAnimTime == 0);
+			CHECK(ps.weaponTime == BG_ReloadSegmentTime(&ps, ps.weaponAnimSeq) && ps.weaponShotCount == 0);
 			continue;
 		}
 		CHECK(ps.weaponstate == WEAPON_READY && ps.ammo[gun] == 0);

@@ -3557,6 +3557,26 @@ void BotAimAtEnemy(bot_state_t *bs) {
 
 /*
 ==================
+BotPullTrigger
+
+The trigger, worked as a player must work it. MW2's fire is a level test of
+the trigger, and a trigger kept down after the pull's shots have all left (a
+Single Shot gun's one, a burst gun's burst) fires nothing more until it has
+been let go (PM_WeaponTimeAdjust's lock). So a bot that pressed on its last
+think lets go on this one once the count says the pull is spent
+(BG_TriggerNeedsRelease, by the gun in hand's fire type, never its id), and
+presses again on the next. A full-auto gun is simply held.
+==================
+*/
+void BotPullTrigger(bot_state_t *bs) {
+	if (BG_TriggerNeedsRelease(&bs->cur_ps, (bs->lastucmd.buttons & BUTTON_ATTACK) != 0)) {
+		return;
+	}
+	trap_EA_Attack(bs->client);
+}
+
+/*
+==================
 BotCheckAttack
 ==================
 */
@@ -3666,11 +3686,11 @@ void BotCheckAttack(bot_state_t *bs) {
 	//if fire has to be release to activate weapon
 	if (wi.flags & WFL_FIRERELEASED) {
 		if (bs->flags & BFL_ATTACKED) {
-			trap_EA_Attack(bs->client);
+			BotPullTrigger(bs);
 		}
 	}
 	else {
-		trap_EA_Attack(bs->client);
+		BotPullTrigger(bs);
 	}
 	bs->flags ^= BFL_ATTACKED;
 }
@@ -3748,7 +3768,7 @@ void BotMapScripts(bot_state_t *bs) {
 			bs->ideal_viewangles[YAW] = AngleMod(bs->ideal_viewangles[YAW]);
 			//
 			if (InFieldOfVision(bs->viewangles, 20, bs->ideal_viewangles)) {
-				trap_EA_Attack(bs->client);
+				BotPullTrigger(bs);
 			}
 		}
 	}

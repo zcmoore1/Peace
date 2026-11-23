@@ -29,6 +29,8 @@ extern int bs_volumeHits;		/* shots a hit volume past a box stopped (D7) */
 extern int bs_midLegShots;		/* bullets fired from an eye between two stances */
 extern bwMark_t bs_damage[BW_MAX_MARKS];	/* the real bullet code's G_Damage points, in order */
 extern int bs_damageCount, bs_bulletHealth[BS_CLIENTS];	/* and the health each player lost to them */
+extern float bs_markRange[BW_MAX_MARKS];	/* each mark's distance from its shot's start */
+extern int bs_damageDealt[BW_MAX_MARKS];	/* the health each of bs_damage took */
 
 /* client: bullets_client.c, one cgame at a time */
 void BC_Reset( int clientNum );

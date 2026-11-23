@@ -1,6 +1,7 @@
 /* Exercise the actual sight parser, transform and optic projection headlessly. */
 #include "../../code/cgame/cg_sights.c"
 #include "../../code/game/bg_m40a3_data.h"	/* the M300's zoom, from weapon.json */
+#include "../../code/game/bg_m16_data.h"	/* the M16 rifle's and the Masterkey's zoom, from weapon.json */
 
 cg_t cg;
 cgs_t cgs;
@@ -461,7 +462,9 @@ static void TestAttachedSights(void) {
 		CHECK(!cg_sights[weapons[i]].scopeShader);
 		cg.predictedPlayerState.weapon=weapons[i];
 		cg.adsFrac=1;
-		NEAR(CG_Sights_ZoomFov(weapons[i]),64.8f);
+		/* each mode's own zoom, from weapon.json through the generated header:
+		   the rifle's is MW2's adsZoomFov (m16_shotgun_mp) */
+		NEAR(CG_Sights_ZoomFov(weapons[i]),i ? MASTERKEY_ADS_ZOOM_FOV : M16_ADS_ZOOM_FOV);
 		memset(&hand,0,sizeof(hand)); AxisClear(hand.axis);
 		CG_Sights_Apply(weapons[i],&hand);
 		for(j=0;j<2;j++) {

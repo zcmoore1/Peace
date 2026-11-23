@@ -49,8 +49,10 @@ bwMark_t bs_marks[BW_MAX_MARKS];
 int bs_markCount, bs_shotTraces, bs_volumeHits, bs_midLegShots;
 bwMark_t bs_damage[BW_MAX_MARKS];
 int bs_damageCount, bs_bulletHealth[BS_CLIENTS];
+float bs_markRange[BW_MAX_MARKS];	/* each mark's distance from its shot's start, as the engine traced it */
+int bs_damageDealt[BW_MAX_MARKS];	/* the health each recorded damage took */
 static qboolean BS_BulletWeapon( int weapon ) {
- return weapon==WP_MACHINEGUN || weapon==WP_G19 || weapon==WP_SHOTGUN || weapon==WP_M40A3
+ return weapon==WP_MACHINEGUN || weapon==WP_G19 || weapon==WP_SHOTGUN || weapon==WP_M40A3 || weapon==WP_M16
 #ifdef MISSIONPACK
   || weapon==WP_CHAINGUN
 #endif
@@ -94,7 +96,8 @@ void trap_Trace(trace_t *t,const vec3_t start,const vec3_t mins,const vec3_t max
    if(eye!=DEFAULT_VIEWHEIGHT && eye!=CROUCH_VIEWHEIGHT && eye!=PRONE_VIEWHEIGHT) bs_midLegShots++;	/* a shot on an eye leg */
   }
   if(bs_markCount<BW_MAX_MARKS && hit.entityNum!=ENTITYNUM_NONE && !(hit.surfaceFlags&SURF_NOIMPACT)) {
-   bwMark_t *m=&bs_marks[bs_markCount++];
+   bwMark_t *m=&bs_marks[bs_markCount];
+   bs_markRange[bs_markCount++]=Distance(start,hit.endpos);
    VectorCopy(hit.endpos,m->point); m->entityNum=hit.entityNum; m->flesh=hit.entityNum<MAX_CLIENTS;
   }
  }
@@ -108,9 +111,10 @@ void __wrap_G_Damage(gentity_t *targ,gentity_t *inflictor,gentity_t *attacker,ve
 #endif
   ) && bs_damageCount<BW_MAX_MARKS) {
   int before=targ->health;
-  bwMark_t *m=&bs_damage[bs_damageCount++];
+  bwMark_t *m=&bs_damage[bs_damageCount];
   VectorCopy(point,m->point); m->entityNum=targ->s.number; m->flesh=1;
   __real_G_Damage(targ,inflictor,attacker,dir,point,damage,dflags,mod);
+  bs_damageDealt[bs_damageCount++]=before-targ->health;
   if(targ->s.number<BS_CLIENTS) bs_bulletHealth[targ->s.number]+=before-targ->health;
   return;
  }

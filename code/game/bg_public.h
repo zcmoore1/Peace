@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-22"
+#define	GAME_VERSION		BASEGAME "-23"
 
 #define	DEFAULT_GRAVITY		800
 #define	GIB_HEALTH			(-40)
@@ -267,6 +267,12 @@ typedef enum {
 	BG_FIRE_DOUBLEBARREL	// "Double Barrel"
 } bg_fireType_t;
 #define BG_SHOT_COUNT_MAX         4
+// MW2's burst cooldown, the dvar player_burstFireCooldown (registered 44921b,
+// default 0.2s, which no rawfile changes; read only at 578981): on the think a
+// burst gun's shot runs out with no burst pending, the gun is READY with this
+// much on its time (PM_Weapon_WeaponTimeAdjust, 578939-5789cd), whatever the
+// trigger does.
+#define BG_BURST_FIRE_COOLDOWN    200
 // MW2's offhand prepare, holdFireTime (weapon data, the IW4 dump's
 // weapons/mp files): OffHandPrepare (577800) locks the offhand for it, and the
 // offhand waits in HOLD for its release once it is over. The frag, flash and
@@ -477,6 +483,7 @@ void Pmove (pmove_t *pmove);
 
 int  BG_WeaponMagSize( int weapon );
 int  BG_WeaponMaxReserve( int weapon );
+int  BG_WeaponStartReserve( int weapon );	// the reserve a gun is given with: MW2's startAmmo less a magazine
 int  BG_WeaponReloadTime( int weapon );		// nominal single-pass length (start+loop+end)
 const bg_weaponReload_t *BG_WeaponReload( int weapon );
 int  BG_WeaponReloadSegLength( int weapon, int seq );
@@ -488,7 +495,11 @@ int  BG_WeaponFireLength( int weapon );		// 0 = no modelled fire animation
 qboolean BG_ShotAwaitsAction( const playerState_t *ps );	// READY between a shot and its action (picture only)
 qboolean BG_DryFiring( const playerState_t *ps );	// MW2's held dry fire: FIRING with no fire clip running (picture only)
 int  BG_WeaponFireType( int weapon );		// bg_fireType_t: MW2's fireType
+int  BG_SlotFireType( const playerState_t *ps, int weapon );	// ... by the slot's selector: semi the gun's own, auto full auto
 qboolean BG_ShotLimitReached( int fireType, int shotCount );	// MW2's ShotLimitReached (5769e0)
+qboolean BG_BurstFirePending( const playerState_t *ps );	// MW2's BurstFirePending (576a70)
+qboolean BG_TriggerNeedsRelease( const playerState_t *ps, qboolean held );	// a bot's trigger: let go between pulls
+int  BG_BulletDamage( int weapon, float dist, int damage );	// MW2's Bullet_GetDamage (5d5220): the range falloff of a gun with MW2 damage data
 int  BG_WeaponDropTime( int weapon );		// holster length, never 0
 int  BG_WeaponRaiseTime( int weapon );		// deploy length, never 0 for a gun; an offhand's holdFireTime
 int  BG_WeaponQuickDropTime( int weapon );	// MW2's quickDropTime: going away for a grenade
@@ -787,6 +798,13 @@ void BG_BeginWeaponDraw(playerState_t *ps);
 // FinishReload 578564-578582). Only ever set while reloading.
 #define PWF_RELOAD_INTERRUPT 4
 #define PWF_SELECTOR_HELD 8   // select-fire button was down on the previous step
+// MW2's pending trigger pull, weapState[hand].weapHandFlags bit 0 (ps+0x1fc,
+// 1 bit on its wire): a fresh press of the trigger with a burst gun
+// (PM_Weapon_UpdatePendingTriggerPull, 576ad0). A set bit keeps the held
+// trigger's lock off and starts a new pull on the think the gun's time runs
+// out (PM_Weapon_WeaponTimeAdjust, 5789dd, 578b55); only the first shot of a
+// pull clears it (PM_Weapon_StartFiring, 576fb0).
+#define PWF_PENDING_PULL 16
 // MW2's sprint time (player_sprintTime 4s; a start needs player_sprintMinTime
 // 1s left). Used while sprinting, refilled 1:1 while not (playerState_t.sprintUsed).
 #define BG_SPRINT_TIME        4000

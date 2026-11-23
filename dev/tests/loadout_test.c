@@ -82,7 +82,9 @@ static void TestClasses(void) {
    (1<<WP_KNIFE)|(1<<WP_FRAG)|(1<<WP_FLASH)|
    ((BG_AlternateWeapon(cl.slot[0]) || BG_AlternateWeapon(cl.slot[1])) ? (1<<WP_MASTERKEY) : 0)));
   CHECK(ps.ammo[cl.slot[0]]==BG_WeaponMagSize(cl.slot[0]));
-  CHECK(ps.ammoReserve[cl.slot[1]]==BG_WeaponMaxReserve(cl.slot[1]));
+  /* the reserve a gun is given with: its whole reserve, or MW2's startAmmo less a magazine */
+  CHECK(ps.ammoReserve[cl.slot[1]]==BG_WeaponStartReserve(cl.slot[1]));
+  CHECK(BG_WeaponStartReserve(cl.slot[1])>0 && BG_WeaponStartReserve(cl.slot[1])<=BG_WeaponMaxReserve(cl.slot[1]));
   CHECK(ps.ammo[WP_KNIFE]==-1);
   CHECK(ps.weaponAction==0 && ps.weaponTime==0 && ps.weaponAnimTime==-1);
   /* Even with active slot/snapshot frozen, every pair wraps back. */
@@ -2005,11 +2007,14 @@ static void TestActionOutOfShot(void) {
   CHECK(!!(ps.stats[STAT_UNCHAMBERED]&(1<<gun))==owed);
   if(!buttons[b]) {
    /* The shot of a gun with a worked action is over at its open note (MW2's
-    * fireTime), and the swap begins on that think, before the action can. */
+    * fireTime), and the swap begins on that think, before the action can.
+    * A burst gun's (the M16 rifle, m16_shotgun_mp) waits for the burst: MW2
+    * runs no change check while one is pending (0x44C444-0x44C4B3), so the
+    * swap begins on the think the last shot's time runs out. */
    int shot=Note(gun,ASEQ_FIRE,WNOTE_BOLT_OPEN);
    Toggle();
    for(t=0;t<12000 && ps.weaponstate!=WEAPON_DROPPING;t++) {
-    locked=ps.weaponstate==WEAPON_FIRING && (shot>=0 ? ps.weaponAnimTime+1<shot : ps.weaponTime>1);
+    locked=ps.weaponstate==WEAPON_FIRING && (shot>=0 ? ps.weaponAnimTime+1<shot : ps.weaponTime>1 || BG_BurstFirePending(&ps));
     Step(1);
     CHECK(!locked || ps.weaponstate!=WEAPON_DROPPING);
     CHECK(locked || ps.weaponstate==WEAPON_DROPPING);
@@ -2017,6 +2022,15 @@ static void TestActionOutOfShot(void) {
    CHECK(t>1 && ps.weapon==gun && ps.weaponTime==BG_WeaponDropTime(gun));
    CHECK(shot<0 || (ps.weaponAnimTime==shot && (ps.stats[STAT_UNCHAMBERED]&(1<<gun))));
    continue;
+  }
+  /* Inside a burst MW2 runs no melee or offhand check either (0x44C444-
+   * 0x44C4B3: burst_test.c presses there, and the press is lost), so a burst
+   * gun's knife or grenade is pressed in its last shot's fire lock: the rest
+   * of the burst leaves by itself first, the trigger let go. */
+  if(BG_BurstFirePending(&ps)) {
+   for(t=0;t<12000 && BG_BurstFirePending(&ps);t++) Step(1);
+   CHECK(fired[gun]>1 && BG_ShotLimitReached(BG_WeaponFireType(gun),fired[gun]) && !BG_ShotLimitReached(BG_WeaponFireType(gun),fired[gun]-1));
+   CHECK(ps.weaponstate==WEAPON_FIRING && ps.weaponTime>1);
   }
   move.cmd.buttons=buttons[b]; Step(1); move.cmd.buttons=0;
   if(b) CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_HolsterTime(&ps) &&

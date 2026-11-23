@@ -12,9 +12,9 @@
  * at a shot's, an action's or the knife's end, any other state kept, asked
  * again every think until the trigger is let go. The SPAS, the M300 (as the
  * Intervention) and the Masterkey are single shot in MW2's files; the
- * machinegun (m4_mp) is full auto and the M16 rifle Peace's placeholder
- * automatic, each shot given its whole time (0x576E9C, the overshoot dropped
- * at 0x578B71). A segmented reload stops at the end of the segment it is in,
+ * machinegun (m4_mp) is full auto, each shot given its whole time (0x576E9C,
+ * the overshoot dropped at 0x578B71). The M16 rifle is m16_shotgun_mp's
+ * 3-round burst, which burst_test.c drives. A segmented reload stops at the end of the segment it is in,
  * asked by a fresh press (in the start only past 0.4 of it, 0x578670) or a
  * trigger down as a segment ends, and each segment starts afresh (0x575E20).
  *
@@ -358,25 +358,27 @@ static void TestShotCountCap(void) {
 	}
 }
 
-/* (2) Full auto keeps firing while held: the machinegun (m4_mp) and the M16,
- * Peace's placeholder automatic; neither counts its shots. Each shot is given
+/* (2) Full auto keeps firing while held: the machinegun (m4_mp), which does
+ * not count its shots (MW2's StartFiring counts every type but full auto,
+ * 0x576F93). Each shot is given
  * its whole time (MW2's StartFiring, 0x576E9C-0x576E9F) on the think the last
  * one's ran out, what that overshot by dropped (0x578B71): a shot every
- * Frames(fire time) commands. */
+ * Frames(fire time) commands. (The M16 rifle was held here too while it was
+ * Peace's placeholder automatic; it is MW2's 3-round burst now, 0x576A70 and
+ * 0x5789DD: burst_test.c.) */
 static void TestFullAuto(void) {
 	static const int rates[] = { 8, 16, 33 };
-	int i, g;
-	for (i = 0; i < 3; i++) for (g = 0; g < 2; g++) {
-		int weapon = g ? WP_M16 : WP_MACHINEGUN, n, cmd, period, fireTime, last = 0;
+	int i;
+	for (i = 0; i < 3; i++) {
+		int weapon = WP_MACHINEGUN, n, cmd, period, fireTime, last = 0;
 		msec = rates[i];
-		n = Frames(10 * M16_FIRE_MS);
-		if (g) SetupClass(WP_M16, WP_SHOTGUN, 0, qfalse);
-		else SetupClass(WP_MACHINEGUN, WP_SHOTGUN, 0, qfalse);
+		SetupClass(WP_MACHINEGUN, WP_SHOTGUN, 0, qfalse);
 		CHECK(PS->weapon == weapon && !BG_ShotLimitReached(BG_WeaponFireType(weapon), BG_SHOT_COUNT_MAX));
 		Frame(BUTTON_ATTACK, 0);
 		fireTime = PS->weaponTime;	/* the game's own: the first shot's from 0 */
 		CHECK(shots == 1 && fireTime > 0 && fireTime % msec);
 		period = Frames(fireTime);
+		n = Frames(10 * fireTime);
 		for (cmd = 1; cmd <= n; cmd++) {
 			Frame(BUTTON_ATTACK, 0);
 			CHECK(raised[EV_FIRE_WEAPON] == (cmd % period == 0));
@@ -386,7 +388,6 @@ static void TestFullAuto(void) {
 		/* the overshoot is gone wherever the command's length does not divide
 		   the fire time: the shot's time is whole, not what the last one left */
 		CHECK(last % period == 0 && PS->weaponTime == fireTime - (n - last) * msec);
-		if (g) CHECK(period == Frames(M16_FIRE_MS));
 	}
 }
 
@@ -806,7 +807,7 @@ static void TestFireTypes(void) {
 	}
 	CHECK(BG_WeaponFireType(WP_SHOTGUN) == BG_FIRE_SINGLESHOT && BG_WeaponFireType(WP_M40A3) == BG_FIRE_SINGLESHOT);
 	CHECK(BG_WeaponFireType(WP_MASTERKEY) == BG_FIRE_SINGLESHOT && BG_WeaponFireType(WP_MACHINEGUN) == BG_FIRE_FULLAUTO);
-	CHECK(BG_WeaponFireType(WP_ROCKET_LAUNCHER) == BG_FIRE_FULLAUTO && BG_WeaponFireType(WP_M16) == BG_FIRE_FULLAUTO);
+	CHECK(BG_WeaponFireType(WP_ROCKET_LAUNCHER) == BG_FIRE_FULLAUTO && BG_WeaponFireType(WP_M16) == BG_FIRE_BURST3);	/* m16_shotgun_mp */
 	CHECK(BG_WeaponFireType(WP_KNIFE) == BG_FIRE_FULLAUTO && BG_WeaponFireType(WP_FRAG) == BG_FIRE_FULLAUTO);
 }
 

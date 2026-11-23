@@ -109,16 +109,20 @@ in degrees per second; the centre speed is in degrees per second squared.
 | `WP_SHOTGUN` | spas12_mp | 85..95 | -45..45 | 1000 | 85..95 | -45..45 | 1000 |
 | `WP_ROCKET_LAUNCHER` | rpg_mp = at4_mp | 100..150 | -50..-80 | 1500 | 20..95 | -10..30 | 2500 |
 | `WP_M40A3` (M300) | cheytac_mp (Intervention) | 80..100 | -50..-55 | 500 | 30..85 | 70..-75 | 500 |
+| `WP_M16` (the rifle) | m16_shotgun_mp | -30..60 | 45..-45 | 1500 | -30..60 | 45..-45 | 1500 |
 | frag, flash, Semtex, throwing knife, TI | frag_grenade_mp, flash_grenade_mp, semtex_mp, throwingknife_mp, flare_mp | 0 | 0 | 0 | 0 | 0 | 0 |
 
 - **The table.** It is `bg_viewKick` in `bg_pmove.c`, keyed by weapon and
   never positional. The M300's row comes from `assets/source/m40a3/weapon.json`
-  through `dev/tools/build_m40a3.py`.
+  through `dev/tools/build_m40a3.py`, the M16 rifle's from
+  `assets/source/m16/weapon.json` through `dev/tools/build_m16.py`. Each shot
+  of the rifle's burst is its own fire event, so each one kicks.
 - **No MW2 counterpart, so no view kick.** These guns have no row: the
   gauntlet, grenade launcher, lightning gun, railgun, plasma gun, BFG and
   grappling hook, plus missionpack's nailgun, prox launcher and chaingun. Their
   shots kick nothing, and their centre speed is MW2's no-def 2400, as is
-  `WP_NONE`'s.
+  `WP_NONE`'s. The Masterkey has no row yet either (MW2's
+  `m16_shotgun_attach_mp` has one; its data is not taken yet).
 - **The knife has no row.** MW2 has no knife weapon.
 - **Parts of MW2's formula that never apply here.**
   - Reduced kick: every gun above has ReducedKickBullets 0 and fireDelay 0.

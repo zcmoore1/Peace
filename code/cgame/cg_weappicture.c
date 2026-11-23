@@ -120,11 +120,19 @@ static const entityState_t *CG_WeapPicture_Item( int serverTime ) {
 	return replayItems[slot].serverTime == serverTime ? replayItems[slot].item : NULL;
 }
 
-// Did the corrected prediction keep the gun action the picture began at 'shot'?
-static qboolean CG_WeapPicture_PredictionKept( int shot ) {
+// Did the corrected prediction keep the gun action the picture began at 'shot'
+// and was showing ('shown', the picture's state before this frame's commands)?
+static qboolean CG_WeapPicture_PredictionKept( int shot, const playerState_t *shown ) {
 	if ( replayShot == shot ) return qtrue;
 	if ( shot <= replayBase.commandTime ) {
-		// Begun before the snapshot: the server's own state there must show it.
+		// Begun before the snapshot: the server's own state there must show
+		// it. It must show that action, not another one: a reload you were
+		// shown is kept only by a server that is reloading, and a shot only
+		// by one in a shot or its pump or bolt. A server still in an earlier
+		// shot when the reload you saw began never began that reload.
+		if ( ( shown->weaponstate == WEAPON_RELOADING ) != ( replayBase.weaponstate == WEAPON_RELOADING ) ) {
+			return qfalse;
+		}
 		return CG_WeapPicture_GunAction( &replayBase );
 	}
 	return qfalse;
@@ -204,7 +212,7 @@ void CG_WeapPicture_Update( const playerState_t *predicted, const pmove_t *model
 	if ( !picDetached ) {
 		if ( CG_WeapPicture_Same( &pic, predicted ) ) {
 			CG_WeapPicture_Follow( predicted );
-		} else if ( startShot >= 0 && !CG_WeapPicture_PredictionKept( startShot ) ) {
+		} else if ( startShot >= 0 && !CG_WeapPicture_PredictionKept( startShot, &start ) ) {
 			// The server never did an action you were shown: let it play out,
 			// from where you saw it, beginning nothing of its own.
 			pic = start;

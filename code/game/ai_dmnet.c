@@ -1364,7 +1364,7 @@ void BotClearPath(bot_state_t *bs, bot_moveresult_t *moveresult) {
 						// if the mine is visible from the current position
 						if (bsptrace.fraction >= 1.0 || bsptrace.ent == state.number) {
 							// shoot at the mine
-							trap_EA_Attack(bs->client);
+							BotPullTrigger(bs);
 						}
 					}
 				}
@@ -1421,7 +1421,7 @@ void BotClearPath(bot_state_t *bs, bot_moveresult_t *moveresult) {
 						// if the mine is visible from the current position
 						if (bsptrace.fraction >= 1.0 || bsptrace.ent == state.number) {
 							// shoot at the mine
-							trap_EA_Attack(bs->client);
+							BotPullTrigger(bs);
 						}
 					}
 				}
@@ -1502,7 +1502,7 @@ int AINode_Seek_ActivateEntity(bot_state_t *bs) {
 				vectoangles(dir, ideal_viewangles);
 				// if the bot is pretty close with its aim
 				if (InFieldOfVision(bs->viewangles, 20, ideal_viewangles)) {
-					trap_EA_Attack(bs->client);
+					BotPullTrigger(bs);
 				}
 			}
 		}

@@ -3179,7 +3179,9 @@ static const bg_weaponNote_t bgnotes_m40_end[] = {
 	{ M40_RELOAD_CLOSE_MS, WNOTE_BOLT_CLOSED, 0 }, { 0, WNOTE_NONE, 0 }
 };
 
-// The rifle's reload is prototype data with no retail MW2 timing claim. The
+// The rifle's reload is MW2's m16_shotgun_mp: reloadTime 2029 with the
+// magazine in at reloadAddTime 1100 (its longer empty reload, 2359, is not
+// modelled; the magazine-out note is Peace's sound cue). The
 // Masterkey's rows are MW2's m16_shotgun_attach_mp: fireTime 330 then
 // rechamberTime 430 in one clip, with the bolt MW2's 1ms into the rechamber
 // (rechamberBoltTime 0); a start of 1000 that feeds its own shell at 600
@@ -3244,9 +3246,8 @@ int BG_WeaponFireLength( int weapon ) {
    PM_WeaponTimeAdjust, with the fire path's zero as a backstop), so
    a held one fires every ceil(time / msec) thinks where it used to average its
    time: the lightning gun's 50ms every 2 commands at 33ms, the plasma gun's
-   100ms every 4. The M16 rifle is Peace's placeholder automatic, not
-   m16_shotgun_mp's 3-round burst; the generated guns take it from their
-   weapon.json. */
+   100ms every 4. The generated guns take theirs from their weapon.json: the
+   M16 rifle is m16_shotgun_mp's 3-Round Burst. */
 static const int bg_weaponFireType[MAX_WEAPONS] = {
 	/* WP_NONE            */ BG_FIRE_FULLAUTO,
 	/* WP_GAUNTLET        */ BG_FIRE_FULLAUTO,
@@ -3279,13 +3280,21 @@ int BG_WeaponFireType( int weapon ) {
 	return bg_weaponFireType[weapon];
 }
 
-/* The held-trigger lock also asks about the gun under a melee action. */
-static int PM_SlotFireType( int weapon ) {
-	if ( BG_HasSelector( pm->ps, weapon ) &&
-	     ( pm->ps->slotFlags[pm->ps->stats[STAT_ACTIVE_SLOT]] & BG_GUN_AUTO ) ) {
+/* PM_SlotFireType's rule for any playerState, so that what asks a gun's fire
+   type outside pmove (BG_BurstFirePending, BG_TriggerNeedsRelease: the server,
+   cgame, the bots) gets the same answer the lock does: a gun with a selector
+   fires by its slot's committed mode. */
+int BG_SlotFireType( const playerState_t *ps, int weapon ) {
+	if ( BG_HasSelector( ps, weapon ) &&
+	     ( ps->slotFlags[ps->stats[STAT_ACTIVE_SLOT]] & BG_GUN_AUTO ) ) {
 		return BG_FIRE_FULLAUTO;
 	}
 	return BG_WeaponFireType( weapon );
+}
+
+/* The held-trigger lock also asks about the gun under a melee action. */
+static int PM_SlotFireType( int weapon ) {
+	return BG_SlotFireType( pm->ps, weapon );
 }
 
 /* MW2's ShotLimitReached (5769e0): whether this pull of the trigger has fired
@@ -3305,6 +3314,55 @@ qboolean BG_ShotLimitReached( int fireType, int shotCount ) {
 	default:
 		return qfalse;
 	}
+}
+
+/* MW2's BurstFirePending (576a70; inlined for hand 0 in PM_Weapon,
+   44c444-44c49f): a burst is under way. The gun in hand has a round in its
+   magazine (576a8a, 5759b0: an empty clip is never pending, so a clip run dry
+   ends the burst), is not full auto (576a96), has fired at least one shot of
+   this pull (576a9c-576aad) and not yet all of them (576ab3-576ac0). A pure
+   function of the playerstate: it reads no weapon state and no button, so it
+   is as true in a raise as in the shot. While it is, the gun fires as its
+   time runs out whatever the trigger does (PM_Weapon_ShouldBeFiring,
+   576d3f-576d62) and PM_Weapon runs none of its checks (44c4b3). Only a burst
+   type can be: a single shot's first shot is its limit. Equipment and the
+   knife are never counted (their rows are full auto). */
+qboolean BG_BurstFirePending( const playerState_t *ps ) {
+	int weapon = ps->weapon, fireType;
+
+	if ( weapon <= WP_NONE || weapon >= MAX_WEAPONS || ps->ammo[weapon] <= 0 ) {
+		return qfalse;
+	}
+	fireType = BG_SlotFireType( ps, weapon );
+	if ( fireType == BG_FIRE_FULLAUTO || !ps->weaponShotCount ) {
+		return qfalse;
+	}
+	return !BG_ShotLimitReached( fireType, ps->weaponShotCount );
+}
+
+/* A trigger worked by a program and not a finger (the game's bots): whether it
+   must come up on this think for the gun to fire again. MW2's fire is a level
+   test of the trigger, and what stops a held one is the lock
+   (PM_WeaponTimeAdjust): once the pull's shots have all left
+   (BG_ShotLimitReached on the gun in hand's fire type) a trigger still down
+   fires nothing more, so one that was down on the last think is let go for
+   this one, as a player lets go between pulls. One that is already up is
+   pressed whatever the count says: a pull ends only on a think a state's time
+   runs out with the trigger up (or with a burst gun's fresh press), and a gun
+   at rest has no such think. A full-auto gun never needs it. */
+qboolean BG_TriggerNeedsRelease( const playerState_t *ps, qboolean held ) {
+	if ( !held || ps->weapon <= WP_NONE || ps->weapon >= MAX_WEAPONS ) {
+		return qfalse;
+	}
+	return BG_ShotLimitReached( BG_SlotFireType( ps, ps->weapon ), ps->weaponShotCount );
+}
+
+// MW2's burst fire types, the ones its pending pull and its cooldown ask for
+// (576ae9-576af1, 57896c-578974): the double barrel, limited at one shot, is
+// not one of them.
+static qboolean PM_BurstFireType( int weapon ) {
+	int fireType = PM_SlotFireType( weapon );
+	return fireType >= BG_FIRE_BURST2 && fireType <= BG_FIRE_BURST4;
 }
 
 static const bg_weaponNote_t bgnotes_g19_mag[] = {
@@ -3692,7 +3750,23 @@ qboolean BG_OffhandOut(const playerState_t *ps) {
 		(BG_IsActionWeapon(ps->weapon) || !(ps->weaponAction & WA_FIRED));
 }
 
+// MW2's firstRaiseTime, for a gun that has taken it (keyed by weapon): the M16
+// rifle's, m16_shotgun_mp's, from its weapon.json.
+static const struct {
+	int weapon;
+	int time;
+} bg_weaponFirstRaise[] = {
+	{ WP_M16, M16_FIRST_RAISE_MS }
+};
+
 int BG_WeaponFirstRaiseTime(int weapon) {
+	int row;
+
+	for ( row = 0; row < ARRAY_LEN( bg_weaponFirstRaise ); row++ ) {
+		if ( bg_weaponFirstRaise[row].weapon == weapon ) {
+			return bg_weaponFirstRaise[row].time;
+		}
+	}
 	// First deployment has room for the weapon's authored action/check cycle.
 	// A gun without that cycle simply uses its ordinary draw.
 	return BG_WeaponRaiseTime(weapon) + BG_WeaponFireLength(weapon);
@@ -3852,9 +3926,9 @@ qboolean BG_WeaponItem(const entityState_t *item, bg_weaponInstance_t *gun) {
 		}
 	} else {
 		gun->ammo = BG_WeaponMagSize(gun->weapon);
-		gun->reserve = BG_WeaponMaxReserve(gun->weapon);
+		gun->reserve = BG_WeaponStartReserve(gun->weapon);
 		gun->altAmmo = BG_WeaponMagSize(alternate);
-		gun->altReserve = BG_WeaponMaxReserve(alternate);
+		gun->altReserve = BG_WeaponStartReserve(alternate);
 	}
 	return qtrue;
 }
@@ -3948,6 +4022,7 @@ int BG_LethalWeapon( const playerState_t *ps ) {
 }
 
 // Maximum reserve ammo the player can carry per weapon (mags not including the one loaded).
+// The M16 rifle's is MW2's maxAmmo (m16_shotgun_mp, 180); it is given with less (BG_WeaponStartReserve).
 static const int bg_weaponMaxReserve[MAX_WEAPONS] = {
 	0,		// WP_NONE
 	0,		// WP_GAUNTLET
@@ -3977,6 +4052,85 @@ static const int bg_weaponMaxReserve[MAX_WEAPONS] = {
 int BG_WeaponMaxReserve( int weapon ) {
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return 0;
 	return bg_weaponMaxReserve[weapon];
+}
+
+/*
+===============
+BG_WeaponStartReserve
+
+The reserve a gun is given with: at spawn, and by a map's gun that carries no
+ammunition of its own. MW2 gives a weapon its startAmmo, which fills the
+magazine first (its give tops the player up to iStartAmmo, 5d8bd0-5d8e2a, and
+Add_Ammo 4e1480 fills the clip out of it), so the reserve starts at startAmmo
+less a magazine, below maxAmmo, the most it can hold (BG_WeaponMaxReserve,
+which a scavenged gun's rounds fill it to). Only a gun that has taken MW2's
+ammunition has a row, keyed by weapon: the M16 rifle, m16_shotgun_mp's 90 of
+180, from its weapon.json. Every other gun starts with its whole reserve:
+Peace's placeholder counts.
+===============
+*/
+static const struct {
+	int weapon;
+	int startAmmo;
+} bg_weaponStartAmmo[] = {
+	{ WP_M16, M16_START_AMMO }	// m16_shotgun_mp
+};
+
+int BG_WeaponStartReserve( int weapon ) {
+	int row, reserve, max = BG_WeaponMaxReserve( weapon );
+
+	for ( row = 0; row < ARRAY_LEN( bg_weaponStartAmmo ); row++ ) {
+		if ( bg_weaponStartAmmo[row].weapon == weapon ) {
+			reserve = bg_weaponStartAmmo[row].startAmmo - BG_WeaponMagSize( weapon );
+			return reserve < 0 ? 0 : reserve > max ? max : reserve;
+		}
+	}
+	return max;
+}
+
+/*
+===============
+BG_BulletDamage
+
+MW2's Bullet_GetDamage (5d5220) on the gun's weapon data (damage, minDamage,
+maxDamageRange, minDamageRange): the gun's damage out to maxDamageRange from
+where the bullet started (5d5262-5d5271), its minDamage from minDamageRange on
+(5d5289-5d5296), and in between the line from one to the other, truncated to
+a whole number (5d5298-5d52d4). Only a gun that has taken its MW2 damage has a
+row, keyed by weapon, never positional: the M16 rifle, m16_shotgun_mp's 40
+falling to 30 between 1500 and 2000 units, from its weapon.json. Every other
+gun deals what its caller passes, at any range: Peace's placeholder numbers.
+MW2's hit-location multipliers (5d52d9) are not modelled.
+===============
+*/
+static const struct {
+	int weapon;
+	int damage, minDamage;
+	float maxDamageRange, minDamageRange;
+} bg_bulletDamage[] = {
+	{ WP_M16, M16_DAMAGE, M16_MIN_DAMAGE, M16_MAX_DAMAGE_RANGE, M16_MIN_DAMAGE_RANGE }	// m16_shotgun_mp
+};
+
+int BG_BulletDamage( int weapon, float dist, int damage ) {
+	int row;
+	float f;
+
+	for ( row = 0; row < ARRAY_LEN( bg_bulletDamage ); row++ ) {
+		if ( bg_bulletDamage[row].weapon == weapon ) break;
+	}
+	if ( row == ARRAY_LEN( bg_bulletDamage ) ) {
+		return damage;
+	}
+	damage = bg_bulletDamage[row].damage;
+	if ( damage == bg_bulletDamage[row].minDamage || dist < bg_bulletDamage[row].maxDamageRange ) {
+		return damage;
+	}
+	if ( dist >= bg_bulletDamage[row].minDamageRange ) {
+		return bg_bulletDamage[row].minDamage;
+	}
+	f = ( dist - bg_bulletDamage[row].maxDamageRange ) /
+		( bg_bulletDamage[row].minDamageRange - bg_bulletDamage[row].maxDamageRange );
+	return (int)( ( 1.0f - f ) * damage + f * bg_bulletDamage[row].minDamage );
 }
 
 // Base bullet spread per weapon (hipfire, standing still), in the same units
@@ -4048,8 +4202,9 @@ hip/adsViewKickYawMin/Max and hip/adsViewKickCenterSpeed, in degrees per
 second and per second squared. Each Peace gun has the MW2 gun it already
 models: the machinegun MW2's M4 (m4_mp), the shotgun its SPAS-12
 (spas12_mp), the rocket launcher its RPG and AT4 (rpg_mp and at4_mp, whose
-view kicks are the same), and the M300 the Intervention (cheytac_mp, owner's
-choice; its numbers live in weapon.json). Equipment is MW2's own: frag, flash,
+view kicks are the same), the M300 the Intervention (cheytac_mp, owner's
+choice; its numbers live in weapon.json) and the M16 rifle MW2's
+m16_shotgun_mp (its weapon.json; the Masterkey has no row yet). Equipment is MW2's own: frag, flash,
 Semtex, throwing knife and flare all have zero kick and zero centre speed.
 A weapon with no row has no MW2 weapon def: no shot of it kicks, and the
 centre speed is weapon 0's. That is WP_NONE, and every gun with no MW2
@@ -4073,6 +4228,11 @@ static const struct {
 		M40_HIP_VIEW_KICK_YAW_MIN, M40_HIP_VIEW_KICK_YAW_MAX, M40_HIP_VIEW_KICK_CENTER_SPEED,
 		M40_ADS_VIEW_KICK_PITCH_MIN, M40_ADS_VIEW_KICK_PITCH_MAX,
 		M40_ADS_VIEW_KICK_YAW_MIN, M40_ADS_VIEW_KICK_YAW_MAX, M40_ADS_VIEW_KICK_CENTER_SPEED },	// cheytac_mp
+	{ WP_M16,
+		M16_HIP_VIEW_KICK_PITCH_MIN, M16_HIP_VIEW_KICK_PITCH_MAX,
+		M16_HIP_VIEW_KICK_YAW_MIN, M16_HIP_VIEW_KICK_YAW_MAX, M16_HIP_VIEW_KICK_CENTER_SPEED,
+		M16_ADS_VIEW_KICK_PITCH_MIN, M16_ADS_VIEW_KICK_PITCH_MAX,
+		M16_ADS_VIEW_KICK_YAW_MIN, M16_ADS_VIEW_KICK_YAW_MAX, M16_ADS_VIEW_KICK_CENTER_SPEED },	// m16_shotgun_mp
 	{ WP_FRAG,		0, 0, 0, 0, 0,	0, 0, 0, 0, 0 },	// frag_grenade_mp
 	{ WP_FLASH,		0, 0, 0, 0, 0,	0, 0, 0, 0, 0 },	// flash_grenade_mp
 	{ WP_SEMTEX,		0, 0, 0, 0, 0,	0, 0, 0, 0, 0 },	// semtex_mp
@@ -4288,9 +4448,9 @@ void BG_SetSlotWeapon( playerState_t *ps, int slot, int weapon ) {
 	memset(&gun, 0, sizeof(gun));
 	gun.weapon = weapon;
 	gun.ammo = BG_WeaponMagSize(weapon);
-	gun.reserve = BG_WeaponMaxReserve(weapon);
+	gun.reserve = BG_WeaponStartReserve(weapon);
 	gun.altAmmo = BG_WeaponMagSize(BG_AlternateWeapon(weapon));
-	gun.altReserve = BG_WeaponMaxReserve(BG_AlternateWeapon(weapon));
+	gun.altReserve = BG_WeaponStartReserve(BG_AlternateWeapon(weapon));
 	BG_PutSlot(ps, slot, &gun);
 }
 
@@ -4319,11 +4479,11 @@ void BG_ApplyClass( playerState_t *ps, const bg_class_t *cl ) {
 		}
 		ps->stats[STAT_SLOT_PRIMARY + i] = w;
 		ps->ammo[w]        = BG_WeaponMagSize( w );
-		ps->ammoReserve[w] = BG_WeaponMaxReserve( w );
+		ps->ammoReserve[w] = BG_WeaponStartReserve( w );
 		ps->slotAmmo[i] = ps->ammo[w];
 		ps->slotReserve[i] = ps->ammoReserve[w];
 		ps->slotAltAmmo[i] = BG_WeaponMagSize(BG_AlternateWeapon(w));
-		ps->slotAltReserve[i] = BG_WeaponMaxReserve(BG_AlternateWeapon(w));
+		ps->slotAltReserve[i] = BG_WeaponStartReserve(BG_AlternateWeapon(w));
 		if (BG_AlternateWeapon(w)) {
 			ps->ammo[BG_AlternateWeapon(w)] = ps->slotAltAmmo[i];
 			ps->ammoReserve[BG_AlternateWeapon(w)] = ps->slotAltReserve[i];
@@ -4984,7 +5144,10 @@ static void PM_UpdateWeaponAction( void ) {
 		    BG_RequestedSlot( pm->ps, pm->cmd.weapon ) != pm->ps->stats[STAT_ACTIVE_SLOT] ) );
 	int held = PM_HeldActionButtons();
 	int heldBefore = (pm->ps->weaponAction & WA_HELD_MASK) >> WA_HELD_SHIFT;
-	int pressed = held & ~heldBefore;
+	// A burst under way takes no knife and no equipment (MW2 skips its melee
+	// and offhand checks, 44c4b3): the press is spent in it, since the held
+	// record below is still written, as MW2's oldcmd is every step.
+	int pressed = pml.burstPending ? 0 : held & ~heldBefore;
 	int action = pm->ps->weaponAction & (WA_TYPE_MASK | WA_FIRED);
 	int returning = pm->ps->weaponAction & WA_RETURNING;
 	int recovering = pm->ps->weaponAction & WA_RECOVERING;
@@ -5461,7 +5624,7 @@ static void PM_FinishWeaponChange( void ) {
 static qboolean PM_LadderWeapon( void ) {
 	int state = pm->ps->stats[STAT_LADDER];
 	if ( (state & LADDER_ATTACHED) &&
-		!( pm->ps->weaponAction & WA_TYPE_MASK ) && !pml.recoveryEnds &&
+		!( pm->ps->weaponAction & WA_TYPE_MASK ) && !pml.recoveryEnds && !pml.burstPending &&
 		!(state & LADDER_HOLSTER) && pm->ps->weaponstate != WEAPON_LADDER && PM_WeaponChangeOpen() ) {
 		pm->ps->stats[STAT_LADDER] |= LADDER_HOLSTER;
 		pm->ps->weaponstate = WEAPON_DROPPING;
@@ -5606,21 +5769,43 @@ fire: YY's return, a grenade's, a change or a reload (MW2's PM_Weapon_Idle
 and PM_BeginWeaponReload). An action's end keeps its 1 to step 4c, which
 makes it READY: its close note, the only thing in between that gives a lock
 away, always crosses on an earlier think.
+
+A burst gun (fireType 2-, 3- or 4-Round Burst) meets MW2's cooldown first
+(578939-5789cd): on the think its shot's time runs out with no burst pending
+(BG_BurstFirePending: the pull's shots all fired, or the clip run dry), the
+gun is READY with BG_BURST_FIRE_COOLDOWN on its time, whatever the trigger
+does, and nothing else is asked. Between a burst's shots a burst is pending:
+nothing is locked (the count is below its limit), nothing is reset (578b5e)
+and the time is dropped to 0, so the fire test below fires the next shot. The
+cooldown's own crossing, READY, is any other gun's: a trigger held since the
+burst's first shot is locked, one let go ends the pull. A fresh press made
+since the pull's first shot (PWF_PENDING_PULL, PM_UpdatePendingTriggerPull)
+keeps the lock off (5789dd), and with the trigger down it ends the pull as a
+release would (578b51-578b67): the next burst starts on that think.
 ===============
 */
 static void PM_WeaponTimeAdjust( int oldTime ) {
 	int gun;
+	qboolean attack = ( pm->cmd.buttons & BUTTON_ATTACK ) != 0;
+	qboolean pendingPull = ( pm->ps->weapFlags & PWF_PENDING_PULL ) != 0;
 
 	if ( !PM_WeaponTimeRanOut( oldTime ) ) {
 		return;
 	}
+	// The knife in WEAPON_FIRING is no shot of the gun's (MW2's MELEE_FIRE).
+	if ( pm->ps->weaponstate == WEAPON_FIRING && !BG_IsActionWeapon( pm->ps->weapon ) &&
+	     PM_BurstFireType( pm->ps->weapon ) && !BG_BurstFirePending( pm->ps ) ) {
+		pm->ps->weaponTime = BG_BURST_FIRE_COOLDOWN;
+		pm->ps->weaponstate = WEAPON_READY;
+		return;
+	}
 	gun = PM_LockGun();
-	if ( gun <= WP_NONE || gun >= MAX_WEAPONS || !( pm->cmd.buttons & BUTTON_ATTACK ) ||
+	if ( gun <= WP_NONE || gun >= MAX_WEAPONS || !attack || pendingPull ||
 	     !BG_ShotLimitReached( PM_SlotFireType( gun ), pm->ps->weaponShotCount ) ||
 	     BG_RequestedWeapon( pm->ps, pm->cmd.weapon ) != gun ||
 	     BG_RequestedSlot( pm->ps, pm->cmd.weapon ) != pm->ps->stats[STAT_ACTIVE_SLOT] ||
 	     !pm->ps->ammo[gun] ) {
-		if ( !( pm->cmd.buttons & BUTTON_ATTACK ) ) {
+		if ( ( !attack || pendingPull ) && !BG_BurstFirePending( pm->ps ) ) {
 			pm->ps->weaponShotCount = 0;
 		}
 		// MW2's crossing drops what the time overshot by, in every state the
@@ -5660,6 +5845,35 @@ static void PM_WeaponTimeAdjust( int oldTime ) {
 		break;
 	default:
 		break;
+	}
+}
+
+/*
+===============
+PM_UpdatePendingTriggerPull
+
+MW2's PM_Weapon_UpdatePendingTriggerPull (576ad0), run each think just before
+the time step (44c40a): with a burst gun (576ae9-576af1), a trigger that is
+down on this think and was up on the last (pm->oldcmd, 576b1f-576b27) is a
+pending pull (576b29). It asks about MW2's ps->weapon, which its knife and its
+offhands never replace: the gun in hand here, or the slot's gun under the knife
+or equipment. With no gun there is nothing to latch (576ad3-576adb): an empty
+hand, and the gun the ladder has put away (MW2's ladder drop ends at weapon 0).
+Nothing but the first shot of a pull ever clears it (PM_Weapon's shot count):
+not a reload, a change, the knife, equipment, a sprint or a ladder.
+===============
+*/
+static void PM_UpdatePendingTriggerPull( qboolean attackBefore ) {
+	int gun = pm->ps->weapon;
+
+	if ( BG_IsActionWeapon( gun ) ) {
+		gun = ( pm->ps->weaponAction & WA_LEFT_EMPTY ) ? WP_NONE : BG_ActiveSlotWeapon( pm->ps );
+	}
+	if ( gun <= WP_NONE || pm->ps->weaponstate == WEAPON_LADDER || !PM_BurstFireType( gun ) ) {
+		return;
+	}
+	if ( ( pm->cmd.buttons & BUTTON_ATTACK ) && !attackBefore ) {
+		pm->ps->weapFlags |= PWF_PENDING_PULL;
 	}
 }
 
@@ -5933,6 +6147,20 @@ static void PM_Weapon( void ) {
 	// Like MW2's reload check, a quick action does not read it at all, from the
 	// press to the end of the recovery draw; everywhere else it is taken now,
 	// and a gun that cannot reload yet simply drops it.
+	// Nor is it read while a burst is under way: MW2's PM_Weapon runs no
+	// reload check then (44c444-44c4b3), and that check is the only place
+	// its Pmove reads or clears the bit (PM_Weapon_CheckForReload,
+	// 5786e3-5786f6), so a pending burst leaves the bit exactly as it found
+	// it, for the first think after the burst's last shot to take.
+	// (BG_BurstFirePending answers here as it will after the time step, which
+	// changes neither the gun nor its magazine and zeroes the count only when
+	// no burst is pending.) A reload press of the weapon's own is not read
+	// either (the same check's button test, 5786cd): asked again on every
+	// think, it is taken once the burst's last shot has left if it is still
+	// down then.
+	if ( BG_BurstFirePending( pm->ps ) ) {
+		reload = qfalse;
+	} else
 	if ( (pm->ps->weapFlags & PWF_USE_RELOAD) && !(pm->ps->weaponAction & WA_TYPE_MASK) ) {
 		pm->ps->weapFlags &= ~PWF_USE_RELOAD;
 		reload = qtrue;
@@ -6021,8 +6249,10 @@ static void PM_Weapon( void ) {
 	}
 
 	// MW2's held-trigger lock, decided here, after the timers and before any
-	// check of the think (PM_Weapon_WeaponTimeAdjust, 44c42b).
+	// check of the think (PM_Weapon_WeaponTimeAdjust, 44c42b). A burst gun's
+	// pending pull is latched just before it (44c40a).
 	attackBefore = ( pm->ps->weaponAction & WA_ATTACK_HELD ) != 0;
+	PM_UpdatePendingTriggerPull( attackBefore );
 	PM_WeaponTimeAdjust( oldWeaponTime );
 	// The ladder left with its holster unfinished: an ordinary drop from here,
 	// before any check reads it (MW2's change check finds no PMF_LADDER, 578c72).
@@ -6032,7 +6262,23 @@ static void PM_Weapon( void ) {
 	// MW2 latches its delayedAction here, after the timers and before every
 	// check (44c42b), so its checks see the delay of the state they found.
 	pml.delayedAction = PM_WeaponDelayEnds( oldElapsed );
+	// Whether a burst is under way is asked once, after the time step and
+	// before the checks (44c444-44c4b3): while one is, MW2 runs none of them.
+	// No knife or equipment starts (PM_UpdateWeaponAction), no ladder holster
+	// (below), no weapon change (step 1), no sprint posture (1b) and no
+	// reload (neither the use/reload bit nor the reload button is read, at
+	// the top, and an empty magazine is no pending burst): whatever was asked
+	// waits for the burst's last shot, and a press let go before then is
+	// lost. (YY's cancel, part of MW2's change
+	// check, needs a drop under way, and no drop begins or counts a shot
+	// while a burst is pending.) The sprint's flag, speed and meter are not
+	// weapon checks and run on (PM_CheckSprint). No burst gun has a fire
+	// clip, so step 4f never meets a burst.
+	pml.burstPending = BG_BurstFirePending( pm->ps );
 	PM_UpdateWeaponAction();
+	// The ladder's holster is MW2's change check too (its ladder branch,
+	// 578c72): a burst under way holds its start back, and the burst plays
+	// out on the ladder. One already going down, or down, is the ladder's.
 	ladderWeapon = PM_LadderWeapon();
 
 	// The requested destination came back to the gun still in our hands.
@@ -6066,7 +6312,7 @@ static void PM_Weapon( void ) {
 	//    (578bc9-578bf2), so a swap queued behind it begins from READY on the
 	//    next think; equipment pressed on that think is no weapon change and
 	//    comes out.
-	if ( !ladderWeapon && PM_WeaponChangeOpen() &&
+	if ( !ladderWeapon && !pml.burstPending && PM_WeaponChangeOpen() &&
 	     !( ( pm->ps->pm_flags & PMF_FROZEN ) && pm->ps->weapon != WP_NONE &&
 	        !BG_IsActionWeapon( pm->ps->weapon ) && !( pm->ps->weaponAction & WA_TYPE_MASK ) ) &&
 	     !( pml.recoveryEnds && !( pm->ps->weaponAction & WA_TYPE_MASK ) ) ) {
@@ -6111,6 +6357,7 @@ static void PM_Weapon( void ) {
 	//     check, 44c4d7).
 	if ( !ladderWeapon && !yyReturned && pm->ps->weaponstate != WEAPON_DROPPING && pm->ps->weaponstate != WEAPON_RAISING &&
 	     pm->ps->weaponstate != WEAPON_FIRING && pm->ps->weaponstate != WEAPON_BOLTING &&
+	     !pml.burstPending &&
 	     pm->ps->weaponstate != WEAPON_SELECTING ) {
 		if ( pm->ps->pm_flags & PMF_SPRINTING ) {
 			if ( pm->ps->weaponstate != WEAPON_SPRINT_IN &&
@@ -6448,7 +6695,12 @@ static void PM_Weapon( void ) {
 			return;
 		}
 	}
-	if (selectorPress && BG_HasSelector( pm->ps, pm->ps->weapon ) &&
+	// The selector's press is a check like the others: none is run while a
+	// burst is under way (MW2's PM_Weapon, 44c444-44c4b3), and the press is
+	// spent there. No gun with a selector bursts today (the G19 is semi or
+	// full auto by its slot's mode, BG_SlotFireType, and neither is ever
+	// pending), so this changes nothing of it.
+	if (selectorPress && !pml.burstPending && BG_HasSelector( pm->ps, pm->ps->weapon ) &&
 	    !(pm->ps->weaponAction & WA_TYPE_MASK) &&
 	    (pm->ps->weaponstate == WEAPON_READY || pm->ps->weaponstate == WEAPON_FIRING)) {
 		pm->ps->weaponAnimSeq = (pm->ps->slotFlags[pm->ps->stats[STAT_ACTIVE_SLOT]] & BG_GUN_AUTO)
@@ -6458,8 +6710,18 @@ static void PM_Weapon( void ) {
 		pm->ps->weaponAnimTime = 0;
 		return;
 	}
-	// check for fire
-	if ( !(pm->cmd.buttons & BUTTON_ATTACK) && PM_ActionWeapon() != pm->ps->weapon ) {
+	// check for fire. MW2's PM_Weapon_ShouldBeFiring (576cc0) fires on the
+	// trigger, a level, or on a burst under way (576d3f-576d62): once its
+	// first shot has left, a burst fires its other shots as each one's time
+	// runs out, the trigger let go or not. A frozen player's hand step
+	// returns before it is asked at all (579505): a frozen burst waits where
+	// it is, still pending, and goes on when the freeze lifts. (The frozen
+	// command's trigger is masked, which is all that holds any other gun.)
+	if ( BG_BurstFirePending( pm->ps ) ) {
+		if ( pm->ps->pm_flags & PMF_FROZEN ) {
+			return;
+		}
+	} else if ( !(pm->cmd.buttons & BUTTON_ATTACK) && PM_ActionWeapon() != pm->ps->weapon ) {
 		if ( !reload ) {
 			pm->ps->weaponTime = 0;
 			pm->ps->weaponstate = WEAPON_READY;
@@ -6542,7 +6804,12 @@ static void PM_Weapon( void ) {
 		}
 	}
 	// The shot counts toward this pull of the trigger, but a full-auto one
-	// (MW2's PM_Weapon_StartFiring, 576f93-576fc5, capped at 4).
+	// (MW2's PM_Weapon_StartFiring, 576f93-576fc5, capped at 4). The first
+	// shot of a pull, and no other, clears the pending pull (576fa9-576fb0):
+	// a press made after it is the next pull's.
+	if ( PM_SlotFireType( pm->ps->weapon ) != BG_FIRE_FULLAUTO && !pm->ps->weaponShotCount ) {
+		pm->ps->weapFlags &= ~PWF_PENDING_PULL;
+	}
 	if ( PM_SlotFireType( pm->ps->weapon ) != BG_FIRE_FULLAUTO &&
 	     pm->ps->weaponShotCount < BG_SHOT_COUNT_MAX ) {
 		pm->ps->weaponShotCount++;

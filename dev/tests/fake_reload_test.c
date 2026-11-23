@@ -103,6 +103,7 @@ typedef struct {
 	int action, button;					/* the reload button: X (use/reload) or R (+reload) */
 	int reloadAt, reloadLen, knifeAt, knifeLen, adsAt, fireAt, fireLen;	/* ms after the gun is back */
 	int reload2At, reload2Len;
+	int fire2At, fire2Len;				/* a second pull of the trigger */
 } script_t;
 typedef struct {
 	int anchor;							/* client time the gun was seen back */
@@ -115,6 +116,8 @@ typedef struct {
 	int svMinAmmo;						/* the server's fewest rounds in the magazine */
 	int predHadReload, predHadKnife;	/* prediction showed one since the gun last rested */
 	int unpredictedPic;					/* the picture drew a reload or knife prediction never had */
+	int svShots, svRoundCmd[4];			/* rounds the server's magazine lost, and the commands the first four left on */
+	int predAdsWhileReloading;			/* prediction aimed while prediction was reloading */
 } outcome_t;
 
 static script_t S;
@@ -122,6 +125,7 @@ static outcome_t O;
 static playerState_t svPs, clPred;
 static bg_activate_t svUse;
 static int levelTime, oneWay, startPress, startShift, base, startAmmo, curNow, recordFrom, lastPacket;
+static int runAfter = 7500;	/* how long a run goes on after its press */
 static int maxPackets;	/* 0: a packet every frame (loopback, LAN); else cl_maxpackets */
 #define PENDING (-1)
 static struct { int arrive; usercmd_t cmd; } cq[MAXQ];
@@ -175,6 +179,7 @@ static int Buttons(int now) {
 	if (t >= S.knifeAt && t < S.knifeAt + S.knifeLen) b |= BUTTON_MELEE;
 	if (S.adsAt != NONE && t >= S.adsAt) b |= BUTTON_ADS;
 	if (t >= S.fireAt && t < S.fireAt + S.fireLen) b |= BUTTON_ATTACK;
+	if (t >= S.fire2At && t < S.fire2At + S.fire2Len) b |= BUTTON_ATTACK;
 	return b;
 }
 
@@ -184,7 +189,7 @@ static int Buttons(int now) {
 static int ProbeKnifeLive(void) { return S.knifeAt == NONE || base == NONE || curNow - base >= S.knifeAt; }
 static int SvKnifeOut(void) { return svPs.weapon == WP_KNIFE || (svPs.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == WA_MELEE; }
 static void ServerThink(usercmd_t *ucmd) {
-	pmove_t pm; int msec, wasKnife;
+	pmove_t pm; int msec, wasKnife, rounds;
 	if (ucmd->serverTime > levelTime + 200) ucmd->serverTime = levelTime + 200;
 	if (ucmd->serverTime < levelTime - 1000) ucmd->serverTime = levelTime - 1000;
 	msec = ucmd->serverTime - svPs.commandTime;
@@ -192,8 +197,13 @@ static void ServerThink(usercmd_t *ucmd) {
 	if (msec > 200) svPs.commandTime = ucmd->serverTime - 200;
 	memset(&pm, 0, sizeof(pm)); pm.ps = &svPs; pm.cmd = *ucmd;
 	wasKnife = SvKnifeOut();
+	rounds = svPs.weapon == GUN ? svPs.ammo[GUN] : -1;
 	FakeReloadPmove(&pm);
 	if (curNow >= recordFrom) {	/* every command, so a one-command shot is seen */
+		if (svPs.weapon == GUN && svPs.ammo[GUN] < rounds) {	/* a round left the magazine */
+			if (O.svShots < 4) O.svRoundCmd[O.svShots] = svPs.commandTime;
+			O.svShots++;
+		}
 		if (svPs.weaponstate == WEAPON_RELOADING && !O.svReload) { O.svReload = 1; O.svReloadCmd = svPs.commandTime - svPs.weaponAnimTime; }
 		/* A knife the server starts from a knife press in the window: the
 		 * quick action under test may itself be a knife still out then. */
@@ -273,6 +283,7 @@ static void Record(const playerState_t *pic, int clip) {
 	/* The picture never shows a reload or a knife that prediction never had. */
 	if (GunAtRest(&clPred) && GunAtRest(pic)) O.predHadReload = O.predHadKnife = 0;
 	if (clPred.weapon == GUN && clPred.weaponstate == WEAPON_RELOADING) O.predHadReload = 1;
+	if (clPred.weaponstate == WEAPON_RELOADING && (clPred.pm_flags & PMF_ADS)) O.predAdsWhileReloading = 1;
 	if (clPred.weapon == WP_KNIFE || (clPred.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == WA_MELEE) O.predHadKnife = 1;
 	if ((pic->weapon == GUN && FakeReloadIsReloadClip(clip) && !O.predHadReload) ||
 		(pic->weapon == WP_KNIFE && !O.predHadKnife)) O.unpredictedPic = 1;
@@ -455,7 +466,7 @@ static void Run1(int rtt, const script_t *sc, int at) {
 	recordFrom = base != NONE ? base - 400 : 1 << 30; lastPacket = -1000;
 	/* Pressed once the client's clock has settled, and run as long after. */
 	settle = Settle(rtt);
-	oneWay = rtt / 2; startPress = (settle > 1500 ? settle : 1500) + startShift; end = startPress + 7500;
+	oneWay = rtt / 2; startPress = (settle > 1500 ? settle : 1500) + startShift; end = startPress + runAfter;
 	ownHost = rtt == 0; svResidual = 0; clSeen = 0; lastSnapTime = 0;
 	cqHead = cqTail = sqHead = sqTail = numCmds = 0;
 	clDelta = clServerTime = clOldServerTime = clActive = clNewSnap = clSnapTime = clPrevSnapTime = 0;
@@ -505,7 +516,7 @@ static void Run(int rtt, const script_t *sc, int at) {
 }
 
 static script_t Script(int action, int button) {
-	script_t s = { 0, 0, NONE, 0, NONE, 0, NONE, NONE, 0, NONE, 0 };
+	script_t s = { 0, 0, NONE, 0, NONE, 0, NONE, NONE, 0, NONE, 0, NONE, 0 };
 	s.action = action; s.button = button;
 	return s;
 }
@@ -1136,6 +1147,323 @@ static void TestClockBase(void) {
 	SV_FRAME = keep;
 }
 
+
+/* ---- MW2's burstload: the fake reload a burst makes -------------------------
+ *
+ * Nothing names it; no gun has a case of its own. While a burst is pending
+ * MW2's PM_Weapon runs none of its checks (iw4x 0x44C444-0x44C4B3), and the
+ * reload check is the only place its Pmove reads or clears the use/reload bit
+ * (0x5786E3-0x5786F6). So an X pressed inside a burst is cleared, on the
+ * server, only by the use code after the first command X is up on; the
+ * client's copy, brought by a snapshot taken while X was down, rides the rest
+ * of the burst through the replay and is taken on the think after the last
+ * shot leaves, out of the shot (PM_BeginWeaponReload takes FIRING, 0x575E92).
+ * X let go before the last shot's command: the server never reloads and the
+ * client plays a reload as the burst finishes. X still down on it: a real
+ * reload on that same think, on both sides. +reload is the weapon's own
+ * button, read by the same check as a level (0x5786CD): never a fake.
+ *
+ * The gun here is the M16 rifle, a 3-Round Burst in its weapon.json; every
+ * length is read from the game (the fire type's limit, the shot's own
+ * commands, the reload's length), and every press is counted from the command
+ * the burst's last shot left on at that snapshot phase, found by running the
+ * phase once with the trigger alone (the client's clock drifts a millisecond
+ * a snapshot, so the shots move by a command with the phase).
+ *
+ * FAKERELOAD_BURSTLOAD=1 prints the windows at 8, 16 and 33ms commands instead
+ * of checking (FAKERELOAD_MAXPACKETS and FAKERELOAD_ONLINEGAME apply);
+ * FAKERELOAD_BURSTLOAD=check runs these checks alone. */
+static int BurstShots(void) {	/* the fire type's limit: the shots of one pull */
+	int n = 1;
+	while (!BG_ShotLimitReached(BG_WeaponFireType(GUN), n)) n++;
+	return n;
+}
+static void SetFrame(int ms) { CL_FRAME = ms; hostHold = ms; }	/* your own host holds its snapshot a frame */
+static int TrigIdx(void) { int i; for (i = 0; i < numCmds; i++) if (cmds[i].buttons & BUTTON_ATTACK) return i; return NONE; }
+static int CmdIdx(int serverTime) { int i; for (i = 0; i < numCmds; i++) if (cmds[i].serverTime == serverTime) return i; return NONE; }
+static int Lcm(int a, int b) { return a / Gcd(a, b) * b; }
+/* The frame the trigger goes down on, `shift` into the snapshots' cycle. */
+static int BurstAt(int r, int shift) {
+	int wait = Settle(rtts[r]);
+	startShift = shift;
+	return ((wait > 1500 ? wait : 1500) + shift + CL_FRAME - 1) / CL_FRAME * CL_FRAME;
+}
+/* One run: the trigger down on the frame at `at` for fireCmds commands; the
+ * reload button down on commands press..release-1, counted from the
+ * trigger's (never, when release <= press); aim held from command adsCmd. */
+static void BurstRun(int r, int at, int button, int press, int release, int fireCmds, int adsCmd) {
+	script_t s = Script(ACT_NONE, button);
+	s.fireAt = 0; s.fireLen = fireCmds * CL_FRAME;
+	if (release > press) { s.reloadAt = press * CL_FRAME; s.reloadLen = (release - press) * CL_FRAME; }
+	if (adsCmd != NONE) s.adsAt = adsCmd * CL_FRAME;
+	Run(rtts[r], &s, at);
+}
+/* The snapshot phases a burst is tried over: every frame of one cycle of the
+ * snapshots against the client's frames (a quarter of them where a cycle has
+ * a hundred, online at 33ms). */
+static int BurstSpan(int r) { return Lcm(SnapInterval(rtts[r]), CL_FRAME); }
+static int BurstStep(int r) { int n = BurstSpan(r) / CL_FRAME; return n > 50 ? CL_FRAME * (n / 25) : CL_FRAME; }
+/* The burst alone at this phase: the pull's shots and no more on the server,
+ * the first on the trigger's own command; no reload on either side; the
+ * picture never leaves prediction. Returns the command the last shot left on,
+ * counted from the trigger's. */
+#define BURST_PHASES 128
+static int lastShotAt[BURST_PHASES], lastShotKnown[BURST_PHASES];
+static int LastShot(int r, int shift) {
+	int k = shift / CL_FRAME, t;
+	CHECK(k < BURST_PHASES);
+	if (!lastShotKnown[k]) {
+		int n = BurstShots();
+		BurstRun(r, BurstAt(r, shift), X, 0, 0, 1, NONE);
+		t = TrigIdx();
+		CHECK(n >= 2 && n <= 4 && O.svShots == n && CmdIdx(O.svRoundCmd[0]) == t);
+		CHECK(!O.svReload && !O.predReload && !O.detachedMs && O.converged);
+		CHECK(O.svMinAmmo == startAmmo - n && svPs.ammo[GUN] == startAmmo - n);
+		lastShotAt[k] = CmdIdx(O.svRoundCmd[n - 1]) - t; lastShotKnown[k] = 1;
+		CHECK(lastShotAt[k] >= n - 1);
+	}
+	return lastShotAt[k];
+}
+static void ForgetBursts(void) { memset(lastShotKnown, 0, sizeof(lastShotKnown)); }
+/* A reload predicted that the server never began ... */
+static int Appears(void) { return O.predReload && !O.svReload; }
+/* ... and drawn for most of its length: the picture kept it. */
+static int Sticks(void) { return Appears() && O.reloadPicMs >= BG_WeaponReloadTime(GUN) / 2; }
+typedef struct {
+	int n, appears, sticks, real, nothing;
+	int stickShift;				/* a phase at which it stuck (NONE: none) */
+	int shownMin;				/* the least a reload that stuck was drawn for */
+	char outcome[BURST_PHASES];	/* each phase's: R real, F a fake that stuck, f one that did not, '.' nothing */
+} burstRate_t;
+static int Pct(int k, int n) { return 100 * k / n; }
+/* What every run obeys, whatever was pressed when (the trigger on command 0;
+ * the reload button on commands press..release-1; L the last shot's command):
+ *  - the server reloads if and only if the button is down on the first
+ *    command its reload check is run again: for X, whose bit the use code
+ *    sets after a command, the last shot's own (L); for +reload, read as a
+ *    level by the check itself, the one after (L + 1); and that reload begins
+ *    on the command after the last shot's, on both sides;
+ *  - a reload the server never began begins, in prediction, on that same
+ *    command, the bit having ridden the burst (never with +reload);
+ *  - with no reload of its own the server fired the pull's shots and no more
+ *    and lost those rounds and no others;
+ *  - both sides agree at the end, and prediction never aims while reloading. */
+static void BurstRules(int button, int press, int release, int L) {
+	int n = BurstShots(), t = TrigIdx(), U = cmds[t + L + 1].serverTime;
+	qboolean down = release > press && press <= (button == X ? L : L + 1) && release > (button == X ? L : L + 1);
+	CHECK(O.converged && !O.predAdsWhileReloading);
+	CHECK(O.svShots >= n && CmdIdx(O.svRoundCmd[n - 1]) == t + L);	/* the burst was never held back or cut */
+	CHECK(O.svReload == down);
+	if (O.svReload) CHECK(O.svReloadCmd == U && O.predReload && O.predReloadCmd == U);
+	else CHECK(O.svShots == n && O.svMinAmmo == startAmmo - n && svPs.ammo[GUN] == startAmmo - n);
+	if (Appears()) CHECK(button == X && O.predReloadCmd == U);
+	if (button == R) CHECK(O.predReload == O.svReload && !O.detachedMs);
+}
+/* Over every phase: the reload button down from command `press` after the
+ * trigger's (mode 0) or for `press` commands (mode 1), first up `up` commands
+ * after the last shot's (negative: before it); the trigger down for fireCmds
+ * commands. */
+static burstRate_t BurstRate(int r, int button, int mode, int press, int up, int fireCmds) {
+	burstRate_t q;
+	int shift, span = BurstSpan(r), step = BurstStep(r);
+	memset(&q, 0, sizeof(q)); q.stickShift = NONE; q.shownMin = 1 << 30;
+	for (shift = 0; shift < span; shift += step) {
+		int L = LastShot(r, shift), at = BurstAt(r, shift), release = L + up, first = mode ? release - press : press;
+		BurstRun(r, at, button, first, release, fireCmds, NONE);
+		BurstRules(button, first, release, L);
+		q.outcome[q.n++] = O.svReload ? 'R' : Sticks() ? 'F' : Appears() ? 'f' : '.';
+		q.real += O.svReload; q.appears += Appears(); q.sticks += Sticks();
+		q.nothing += !O.svReload && !O.predReload;
+		if (Sticks()) { q.stickShift = shift; if (O.reloadPicMs < q.shownMin) q.shownMin = O.reloadPicMs; }
+	}
+	startShift = 0;
+	return q;
+}
+
+/* The burstload at one command length: on your own host, then with ping. */
+static void BurstloadsAt(int frame) {
+	int r, j, c, n = BurstShots(), reload = BG_WeaponReloadTime(WP_M16);
+	burstRate_t q, held, sure;
+
+	SetFrame(frame);
+	runAfter = reload + 1500;
+
+	/* ---- your own host ---- */
+	ForgetBursts();
+	c = LastShot(0, 0) / (n - 1);	/* the commands a shot takes at this phase */
+	/* X after the trigger, let go just before the last shot: the reload plays
+	 * as the burst finishes, at every phase, and the server reloads nothing
+	 * (BurstRules: it begins on the command after the last shot's, and the
+	 * server fires its three and keeps its rounds). Sure for a release within
+	 * the clock's backoff and the host's held frame of that command, as the
+	 * fake reload after a knife is. */
+	q = sure = BurstRate(0, X, 0, 1, 0, 1);
+	CHECK(sure.appears == sure.n && !sure.real);
+	for (j = 1; j * CL_FRAME <= CL_TIME_BACKOFF + hostHold - CL_FRAME; j++) {
+		q = BurstRate(0, X, 0, 1, -j, 1);
+		CHECK(q.appears == q.n);
+	}
+	/* earlier, it falls with the snapshot phase, and never rises again ... */
+	for (; j <= c * (n - 1) - 2; j++) {
+		burstRate_t before = q;
+		q = BurstRate(0, X, 0, 1, -j, 1);
+		CHECK(q.appears <= before.appears && q.sticks <= before.sticks && !q.real);
+		/* ... to nothing at all, on either side, once the release is the
+		 * clock's whole lag before it: a tap wholly inside the burst and up
+		 * early is lost (the burst is long enough to show that at 8ms) */
+		if (j * CL_FRAME >= CL_TIME_BACKOFF + hostHold + snapInterval + 2 * CL_FRAME) CHECK(q.nothing == q.n);
+	}
+	if (frame == 8) CHECK(q.nothing == q.n);	/* the last one tried: X down on the command after the trigger's alone */
+	/* X with the trigger, on its command: the shot goes first (the use code
+	 * runs after the command's Pmove), and from there it is the same. */
+	q = BurstRate(0, X, 0, 0, 0, 1);
+	CHECK(q.appears == q.n && !memcmp(q.outcome, sure.outcome, q.n));
+	/* The trigger held throughout changes nothing: the lock and the pending
+	 * pull are no part of the reload's read. */
+	held = BurstRate(0, X, 0, 1, 0, 3000 / CL_FRAME);
+	CHECK(!memcmp(held.outcome, sure.outcome, sure.n));
+	/* X still down on the last shot's command is a real reload on the command
+	 * after it, out of the shot, on both sides (BurstRules), and so is X held
+	 * on: the reload as the burst ends. */
+	q = BurstRate(0, X, 0, 1, 1, 1); CHECK(q.real == q.n);
+	q = BurstRate(0, X, 0, 1, 2 * c, 1); CHECK(q.real == q.n);
+	/* X before the trigger, the magazine not full: the reload, not the burst. */
+	{
+		int L = LastShot(0, 0);
+		BurstRun(0, BurstAt(0, 0), X, -2, L, 1, NONE);
+		CHECK(O.svReload && !O.svShots && O.predReload && O.converged);
+		startShift = 0;
+	}
+	/* +reload is the weapon's own button, read by the same check as a level:
+	 * down on the command after the last shot's it is a real reload there, on
+	 * both sides at once; let go by then it is nothing; never a fake, never a
+	 * picture of its own (BurstRules). */
+	q = BurstRate(0, R, 0, 1, 2, 1); CHECK(q.real == q.n);
+	q = BurstRate(0, R, 0, 1, 1, 1); CHECK(q.nothing == q.n);
+	q = BurstRate(0, R, 0, 1, 0, 1); CHECK(q.nothing == q.n);
+	q = BurstRate(0, R, 0, 1, -1, 1); CHECK(q.nothing == q.n);
+	/* Whether the reload you were shown then plays out is the picture's
+	 * rule, and here MW2's viewmodel's: a correction that finds prediction
+	 * still in the last shot takes the picture back to it (MW2 restarts its
+	 * fire animation over the reload's, WeaponRunXModelAnims 0x59B5E0), one
+	 * that finds the gun READY in its cooldown leaves the reload playing. So
+	 * the snapshot that brought the bit must stay the base until the last
+	 * shot's time has run out: on your own host, where snapshots are closer
+	 * together than a shot is long at 8ms, some of the time, never none. */
+	CHECK(sure.sticks > 0 && sure.stickShift != NONE);
+	if (frame == 8) CHECK(sure.sticks < sure.n && c * CL_FRAME > snapInterval);
+	/* one that sticks is drawn from the frame it began to its end */
+	CHECK(sure.shownMin >= reload - 2 * CL_FRAME);
+	/* ... and you can aim through it: no gate is loosened (prediction, once
+	 * corrected, is not reloading, and never aimed while it was) */
+	{
+		int L = LastShot(0, sure.stickShift), at = BurstAt(0, sure.stickShift);
+		BurstRun(0, at, X, 1, L, 1, L + 2 * c);
+		BurstRules(X, 1, L, L);
+		CHECK(Sticks() && O.adsUnderReloadMs > reload / 2);
+		startShift = 0;
+	}
+	printf("  burstload, %2dms commands, your own host: X let go on the last shot's command plays the reload at %d%% of phases, and it plays out at %d%%\n",
+		CL_FRAME, Pct(sure.appears, sure.n), Pct(sure.sticks, sure.n));
+
+	/* ---- with ping ---- */
+	for (r = 1; r <= 2; r++) {
+		int L, at, span;
+		ForgetBursts();
+		/* X down from the command after the trigger's to the last shot's:
+		 * down across one of the server's snapshots (they come every 100ms,
+		 * and the burst is two shot times long), it always appears, and the
+		 * base that brought it is old enough to outlast the last shot: it
+		 * always plays out. Where the commands make that press a hair
+		 * shorter than a snapshot interval (33ms), nearly always. */
+		q = BurstRate(r, X, 0, 1, 0, 1);
+		span = (LastShot(r, 0) - 1) * CL_FRAME;
+		if (span >= RemoteInterval()) CHECK(q.sticks == q.n);
+		else CHECK(q.sticks * 10 >= q.n * 9 && q.sticks == q.appears);
+		CHECK(q.shownMin >= reload - RemoteInterval() - rtts[r] - 4 * CL_FRAME);
+		printf("  burstload, %2dms commands, RTT %3d: X from the command after the trigger's to the last shot's plays out at %d%% of phases",
+			CL_FRAME, rtts[r], Pct(q.sticks, q.n));
+		/* a tap one shot long is seen only where a snapshot falls in it */
+		q = BurstRate(r, X, 1, c, 0, 1);
+		CHECK(q.sticks > 0 && q.sticks < q.n);
+		printf(", a %dms tap at %d%%\n", c * CL_FRAME, Pct(q.sticks, q.n));
+		/* held past the last shot: the real reload as the burst ends */
+		q = BurstRate(r, X, 0, 1, 1, 1); CHECK(q.real == q.n);
+		/* +reload never fakes, with ping either */
+		q = BurstRate(r, R, 0, 1, 2, 1); CHECK(q.real == q.n);
+		q = BurstRate(r, R, 0, 1, 1, 1); CHECK(q.nothing == q.n);
+
+		/* Through one that plays out (the first phase's does): */
+		L = LastShot(r, 0); at = BurstAt(r, 0);
+		runAfter = 2 * reload + 2500;
+		/* ... you can aim. No gate is loosened: prediction, once corrected,
+		 * is not reloading, and never aimed while it was. */
+		BurstRun(r, at, X, 1, L, 1, L + 2 * c);
+		BurstRules(X, 1, L, L);
+		CHECK(Sticks() && O.adsUnderReloadMs > reload / 2);
+		/* ... a pull of the trigger fires a real burst, which takes the picture ... */
+		{
+			script_t s = Script(ACT_NONE, X);
+			s.fireAt = 0; s.fireLen = CL_FRAME; s.reloadAt = CL_FRAME; s.reloadLen = (L - 1) * CL_FRAME;
+			s.fire2At = reload / 2; s.fire2Len = CL_FRAME;
+			Run(rtts[r], &s, at);
+			CHECK(Appears() && O.svShots == 2 * n && O.detachedMs > 0 && !O.detachedWhileFiring && O.converged);
+			CHECK(svPs.ammo[GUN] == startAmmo - 2 * n);
+			/* ... and X is a real reload. */
+			s.fire2At = NONE; s.fire2Len = 0; s.reload2At = reload / 2; s.reload2Len = RemoteInterval();
+			Run(rtts[r], &s, at);
+			CHECK(O.svReload && O.detachedMs > 0 && O.svReloadCmd - O.predReloadCmd >= reload / 4 && O.converged);
+			CHECK(O.svShots == n && svPs.ammo[GUN] == BG_WeaponMagSize(GUN));
+		}
+		runAfter = reload + 1500;
+		startShift = 0;
+	}
+}
+static void Burstloads(void) {
+	int keepFrame = CL_FRAME, keepHold = hostHold, keepAfter = runAfter, keepGun = GUN;
+	if (maxPackets || SV_FRAME != 50) return;	/* the shipped rates, a packet a frame */
+	GUN = WP_M16;
+	CHECK(BG_WeaponFireLength(GUN) == 0 && BurstShots() == 3);
+	BurstloadsAt(8);
+	BurstloadsAt(16);
+	BurstloadsAt(33);
+	CL_FRAME = keepFrame; hostHold = keepHold; runAfter = keepAfter; GUN = keepGun;
+	startShift = 0;
+}
+
+static void BurstloadTable(void) {
+	static const int frames[] = { 8, 16, 33 };
+	int f, r, j;
+	for (f = 0; f < 3; f++) {
+		SetFrame(frames[f]);
+		printf("burstload, %dms commands (%s): X down from the command after the trigger's, first up j commands before the last shot's\n",
+			CL_FRAME, maxPackets ? "cl_maxpackets batching online" : "a packet a frame");
+		for (r = 0; r < 4; r++) {
+			int L, c;
+			ForgetBursts();
+			L = LastShot(r, 0); c = L / (BurstShots() - 1);
+			printf("  RTT %3d%s, %d phases:\n    j        ", rtts[r], r ? "" : " (your own host)", BurstSpan(r) / BurstStep(r));
+			for (j = -1; j <= L - 2; j++) printf(" %4d", j);
+			printf("\n    appears  ");
+			for (j = -1; j <= L - 2; j++) {
+				burstRate_t q = BurstRate(r, X, 0, 1, -j, 1);
+				if (q.real) printf(" %4s", q.real == q.n ? "real" : "r/f"); else printf(" %4d", Pct(q.appears, q.n));
+				fflush(stdout);
+			}
+			printf("\n    sticks   ");
+			for (j = -1; j <= L - 2; j++) {
+				burstRate_t q = BurstRate(r, X, 0, 1, -j, 1);
+				if (q.real) printf(" %4s", q.real == q.n ? "real" : "r/f"); else printf(" %4d", Pct(q.sticks, q.n));
+				fflush(stdout);
+			}
+			printf("\n    X with the trigger, held: tapped %d%% sticks, a %d-command tap up on the last shot's command %d%%, +reload down on the command after it: %d%% real\n",
+				Pct(BurstRate(r, X, 0, 0, 0, 600).sticks, BurstRate(r, X, 0, 0, 0, 600).n), c,
+				Pct(BurstRate(r, X, 1, c, 0, 1).sticks, BurstRate(r, X, 1, c, 0, 1).n),
+				Pct(BurstRate(r, R, 0, 1, 2, 1).real, BurstRate(r, R, 0, 1, 2, 1).n));
+		}
+	}
+}
+
 int main(void) {
 	FakeReloadPictureInit();
 	if (getenv("FAKERELOAD_SVFPS")) SV_FRAME = 1000 / atoi(getenv("FAKERELOAD_SVFPS"));
@@ -1151,6 +1479,15 @@ int main(void) {
 		getenv("FAKERELOAD_PROBE") || getenv("FAKERELOAD_CLOCK")) ? atoi(getenv("FAKERELOAD_HOSTHOLD")) : CL_FRAME;
 	if (getenv("FAKERELOAD_CLOCK")) { script_t sc = Script(ACT_NONE, X); Run(0, &sc, NONE); return 0; }
 	if (getenv("FAKERELOAD_BULLETS")) { FakeBulletTable(); return 0; }
+	if (getenv("FAKERELOAD_BURSTLOAD")) {
+		if (!strcmp(getenv("FAKERELOAD_BURSTLOAD"), "check")) {	/* its checks alone */
+			TestClockBase(); Burstloads();
+			printf("PASS: %d burstload checks\n", checks);
+			return 0;
+		}
+		if (getenv("FAKERELOAD_ONLINEGAME")) onlineGame = atoi(getenv("FAKERELOAD_ONLINEGAME"));
+		GUN = WP_M16; runAfter = BG_WeaponReloadTime(GUN) + 1500; BurstloadTable(); return 0;
+	}
 	MeasureAnchors();
 	if (getenv("FAKERELOAD_PROBE")) { Probe(); return 0; }
 	if (getenv("FAKERELOAD_PHASES")) { Phases(); return 0; }
@@ -1179,6 +1516,7 @@ int main(void) {
 	TestCorrectionOnTheReadyThink();
 	Windows();
 	FakeReloads(); FakeBullets(); FakeBulletWindows(); WildScopes();
+	Burstloads();
 #ifdef FAKERELOAD_ENGINE
 	printf("  %d runs on your own host also run through the real Com_Frame and loopback, identically\n", engineRuns);
 #endif

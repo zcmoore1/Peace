@@ -173,7 +173,8 @@ source for MW2 behaviour; the owner rejects it.
   its READY think (MW2's auto reload refuses FIRING), never out of the shot,
   unless the trigger is still down from the shot (below); a gun with no fire
   clip, whose shot ends as its lock runs out, the think after that one, or on
-  it with the trigger held (MW2's FireWeapon ammo check, 0x5770C0).
+  it with the trigger held (MW2's FireWeapon ammo check, 0x5770C0); a burst
+  gun on that think whatever the trigger, out of its cooldown's READY.
 - **A single-shot gun fires once a pull of the trigger (owner's rule: do what
   MW2 does).** MW2's fire is a level test of the trigger (`ShouldBeFiring`,
   0x576CC0); what stops a held trigger is the lock `PM_WeaponTimeAdjust` puts
@@ -198,7 +199,7 @@ source for MW2 behaviour; the owner rejects it.
   been let go: let go on the action's last command and pulled on the next, it
   fires on the command a let-go trigger would have, so holding gains nothing
   (`dev/tests/trigger_test.c`). Full auto (the machinegun's `m4_mp`, the rocket launcher's
-  `rpg_mp`, the Quake 3 guns, the M16 as Peace's placeholder automatic) is
+  `rpg_mp`, the Quake 3 guns) is
   never locked, and each of its shots is given its whole time on the think the
   last one's ran out (MW2's `StartFiring` assigns `iFireTime`, 0x576E9C-0x576E9F,
   after the crossing dropped the overshoot, 0x578B71): held, it fires every
@@ -221,7 +222,55 @@ source for MW2 behaviour; the owner rejects it.
   0x5770C0), and with nothing anywhere and nowhere to go it dry-fires there
   (below). Never add a
   semi-auto flag, a trigger-release latch or a weapon-named branch: the
-  count, the fire type and the time are the whole rule.
+  count, the fire type and the time are the whole rule (a burst gun adds
+  MW2's own pending pull and cooldown, next).
+- **A burst is the shot count (owner's rule: do what MW2 does).** MW2 has no
+  burst state. While the count is above 0 and below the fire type's limit and
+  the magazine has a round, a burst is pending (`BG_BurstFirePending`, MW2's
+  `BurstFirePending` 0x576A70; a pure function of the playerstate, true in a
+  raise as in the shot): the gun fires on every think its time has run out
+  whatever the trigger does (the fire test, MW2's `ShouldBeFiring`
+  0x576D3F-0x576D62), and `PM_Weapon` runs none of its checks (0x44C444-
+  0x44C4B3; `pml.burstPending`, asked once after the time step): no knife or
+  equipment (the press is spent, its held record still written), no ladder
+  holster, no weapon change, no sprint lowering, no selector press, and the
+  use/reload bit and the reload button are not read at all. So nothing asked
+  for inside a burst begins before its last shot has left. On the think a burst gun's shot runs
+  out with no burst pending (the pull's shots all fired, or the magazine run
+  dry) the gun is READY with `BG_BURST_FIRE_COOLDOWN` (200, MW2's
+  `player_burstFireCooldown`) on its time, trigger up or down
+  (`PM_WeaponTimeAdjust`, 0x578939-0x5789CD). A fresh press of the trigger
+  with a burst gun is latched just before the time step
+  (`PM_UpdatePendingTriggerPull`, MW2's 0x576AD0; `PWF_PENDING_PULL`, MW2's
+  `weapHandFlags` bit 0): the latch keeps the lock off (0x5789DD) and, with
+  the trigger down on a crossing with no burst pending, ends the pull as a
+  release would (0x578B51-0x578B67), so a press made after a burst's first
+  shot and held starts the next burst on the think the cooldown runs out; a
+  trigger held since the first shot is locked like a single-shot gun's. Only
+  a pull's first shot clears the latch (0x576FB0); only a reload or a
+  crossing with no burst pending and the trigger up or latched zeroes the
+  count. A change, the alt switch, the knife, equipment, a sprint, a ladder
+  and death write neither, so a count carried to the rifle (a Masterkey
+  shell, the trigger kept down through the mode switch) fires the rest of a
+  burst by itself after the raise, and YY inside the cooldown leaves one
+  round on the next pull, as the ladder's cancel does for a trigger held
+  since the burst (the drop hangs under the lock with the count at 3, and
+  the jump off fires one round, the count 4): all come out of MW2's code as
+  read, never add or remove any. A frozen burst waits, still pending, and
+  goes on at the thaw (0x579505). Whatever asks a gun's fire type for any of
+  this asks its slot's (`BG_SlotFireType`, which `PM_SlotFireType` is for
+  `pm->ps`): the G19's selector makes it Single Shot or Full Auto, neither a
+  burst type, so it latches nothing, has no cooldown and is never pending,
+  and a pending pull left over from the rifle is to it what MW2's is to any
+  gun (read at every crossing, cleared by a pull's first counted shot). The M16 rifle is the one burst gun (`m16_shotgun_mp`,
+  `fire_type` "3-Round Burst", 64ms a shot): shots on commands 0, 8, 16 at
+  8ms (0, 4, 8 at 16ms; 0, 2, 4 at 33ms), the cooldown from 24 (12, 6), free
+  or the next burst on 49 (25, 13). Bots work the trigger as a player must:
+  `BotPullTrigger` lets it go for a think once the pull's shots have left
+  (`BG_TriggerNeedsRelease`). Never test a weapon id for any of this, never
+  add a burst state or timer, never clear the latch or the count anywhere
+  else, and never read or clear `PWF_USE_RELOAD` while a burst is pending
+  (the burstload, below, is exactly that). `dev/tests/burst_test.c`.
 - **The bolt cancel is the reload cancel.** `WNOTE_BOLT_CLOSED` on the fire
   animation carries no rounds. Like `WNOTE_MAG_IN` it clears the lock on its
   think and only queues its completion: the chambering commits in step 4, the
@@ -380,7 +429,7 @@ source for MW2 behaviour; the owner rejects it.
 - **Bullets are drawn by the clients (MW2's sv_clientSideBullets, owner's
   decision).** The server traces every hitscan shot for its damage only and
   sends no impact, tracer, blast or beam for it (`g_weapon.c`: `Bullet_Fire`
-  for the machinegun, M300 and chaingun, the SPAS's pellets, the railgun, the
+  for the machinegun, the M16 rifle, M300 and chaingun, the SPAS's pellets, the railgun, the
   lightning gun). Every client traces the shot again from its fire event and
   draws them (`CG_FireBullets`, cg_weapons.c). Both build it with the same
   `bg_misc.c` code: `BG_ShotMuzzle`, MW2's seed (the shot command's time,
@@ -987,7 +1036,10 @@ source for MW2 behaviour; the owner rejects it.
   press). `PM_Weapon` takes the bit as a reload press and
   clears it — except during a quick action, from the press through the
   recovery draw, where it is not read at all (MW2's reload check skips melee
-  and offhand) — and a gun that is reloading when the command begins drops it
+  and offhand), and while a burst is pending, where it is neither read nor
+  cleared (MW2 runs no reload check then, 0x44C444-0x44C4B3, and that check
+  is the only place its Pmove touches the bit, 0x5786E3-0x5786F6) — and a
+  gun that is reloading when the command begins drops it
   (MW2's rule). Peace's own rule: the trigger may fire on the think a reload
   ends, so a held trigger and reload alternate (MW2's reload's last think fires
   nothing, and a held trigger fires on the think after: one pmove step later.
@@ -1010,7 +1062,13 @@ source for MW2 behaviour; the owner rejects it.
   gets it from a snapshot and replays its commands over it, so a tap made as
   the gun comes back can reach the client's return after the server has already
   dropped it: the fake reload. A tap just before a shot is taken by the server
-  first and reaches the client late: the fake bullet. `+reload` is the
+  first and reaches the client late: the fake bullet. X pressed inside a
+  burst and let go before its last shot: the server's use code clears its bit
+  before its reload check runs again, while the client's copy rides the rest
+  of the burst through the replay and is taken on the think after the last
+  shot, out of the shot: MW2's burstload, a reload that plays as the burst
+  finishes, with the aim free once prediction is corrected (X still down on
+  the last shot's command is a real reload on that think, on both sides). `+reload` is the
   weapon's own button, predicted exactly, with no such tricks — as in MW2,
   where the scripts do every trick with `+usereload`. A reload request beats the
   trigger on the same command, as MW2 checks reload before it fires. Never
@@ -1064,7 +1122,14 @@ source for MW2 behaviour; the owner rejects it.
   something new, never detaches into an action it began itself, and follows
   prediction again when it comes to rest or prediction starts a real action. A
   correction that only removes a swap is followed at once, so a lone knife is
-  never a fake knife. The harness checks that the picture never draws a reload
+  never a fake knife. A corrected snapshot keeps the action you were shown
+  only when the server's own state there shows the same kind of action: a
+  reload is kept only by a server that is reloading, so a server still in a
+  shot when your reload began (the burstload) does not un-play it; a
+  detached picture goes back to prediction as soon as prediction is not
+  READY, as MW2's viewmodel puts a fire animation over a reload's and lets
+  the reload play out under an idle (`WeaponRunXModelAnims`, 0x59B5E0). The
+  harness checks that the picture never draws a reload
   or knife prediction never had, that a knife the server refuses never cuts a
   fake reload short, that a run which would begin something by itself
   hands back to prediction, and that a shot the server never fired is drawn
@@ -1187,8 +1252,8 @@ source for MW2 behaviour; the owner rejects it.
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
   swap edge latch, post-throw recovery, `WA_LEFT_EMPTY`, and `WA_ATTACK_HELD`
   (the last step's trigger, MW2's `pm->oldcmd`, for a reload's fresh press;
-  written every step and kept through a freeze). Protocol 93 (GAME_VERSION
-  -22) requires client, server and all modules rebuilt together. Older
+  written every step and kept through a freeze). Protocol 94 (GAME_VERSION
+  -23) requires client, server and all modules rebuilt together. Older
   builds/demos are incompatible.
 - `weaponShotCount` — MW2's `weapState[hand].weaponShotCount` (ps+0x200, its
   netfield's 3 bits, 0x742600): the shots of this pull of the trigger, 0 to
@@ -1202,7 +1267,11 @@ source for MW2 behaviour; the owner rejects it.
   `weapFlags` uses four bits for `PWF_SELECTOR_HELD`, `PWF_USE_RELOAD`,
   the server's use/reload request, `PWF_SPRINT_RELEASE` and
   `PWF_RELOAD_INTERRUPT` (MW2's RELOAD_START_INTERUPT and RELOADING_INTERUPT,
-  set only while reloading). None is a clock, and none is rebased. Protocol 80 adds `jumpLand` (signed 12 bits),
+  set only while reloading; protocol 92), and since protocol 94 a fifth for
+  `PWF_PENDING_PULL` (a burst gun's pending trigger pull, MW2's
+  `weapHandFlags` bit 0, netfield 0x7427E0; 16, above `PWF_SELECTOR_HELD`'s
+  8). None is a clock, and none is rebased. A sixth needs `msg.c`
+  widened. Protocol 80 adds `jumpLand` (signed 12 bits),
   `jumpWait` (10), `jumpOriginZ` (float) and `sprintUsed` (14): durations and a
   height, none rebased. Protocol 81 adds `cursorHintEntIndex`
   (`GENTITYNUM_BITS`; an entity number, never rebased) and widens
@@ -1399,9 +1468,10 @@ press is taken on it); a sprint on again in the sprint-out waits for its end; a
 swap queued behind the knife's or equipment's return, or an empty hand's
 after equipment, begins the think after it ends, while equipment pressed then comes out; YY
 while sprinting is READY on its think, working an owed action first; a gun
-with no fire clip (the Machinegun, the M16 rifle) reloads the think after its
+with no fire clip (the Machinegun) reloads the think after its
 last round's lock with the
-trigger up; equipment pressed on the knife's hit, or on the think an empty
+trigger up (a burst gun, the M16 rifle, on that crossing itself, out of its
+cooldown's READY, trigger up or down); equipment pressed on the knife's hit, or on the think an empty
 hand's return from equipment ends, is prepared on that think (with no use
 hint, out of the empty hand, it is in hand and ready on it; a think later its
 prepare plays), and a knife pressed there is lost, after the flash as after
@@ -1451,7 +1521,41 @@ shot on the command the ladder lets go (`TestHeldTopExit`: every way off is
 the same cancel); the leaving command's knife, frag, reload and Y,
 and a Masterkey's holster left toward another gun, no mode change
 (`TestLadderLeavingCommand`); and a hang and its cancel replayed from a
-snapshot (`TestHeldPredictionReplay`).
+snapshot (`TestHeldPredictionReplay`). `TestHeldTriggerBurst` is the burst
+gun there, at the same four rates: the M16 rifle's burst playing out on a
+ladder grabbed inside it, the drop on the last shot's crossing (the
+cooldown's think), hung with the trigger held since the first shot for no
+time, 3 seconds and 10, and the jump's command firing one round (the count 3
+to 4), then its cooldown and the lock; the jump inside the drop; the grab in
+the cooldown and under the lock after it; and the three ways the gun is put
+away instead (let go on the ladder, the trigger tapped, a fresh press inside
+the burst, whose pending pull ends the drop with the trigger down and is a
+whole burst after the raise).
+
+`dev/tests/burst_test.c` (in `run-masterkey`) drives MW2's burst fire on the
+M16 rifle through the real `Pmove` and the client's selection at 8, 16 and
+33ms commands: a tap (three shots on 0, c and 2c, the cooldown, the gun free
+on C); held (the lock from C until a release); a press in the cooldown or
+inside the burst, held (the next burst on C, each state through the real
+codec) and let go again; Y, the alt switch (trigger up, held, pressed again),
+a held and a tapped reload, a knife and a frag tapped, held and pressed after
+the last shot, the knife's end with the count on the hand, a sprint, a
+freeze, a death and a ladder, each asked for inside the burst; 2 rounds and 1
+with a reserve, with another gun and with nothing anywhere (the dry fires);
+YY inside the cooldown and a count carried from a Masterkey shell (read from
+MW2's code); the use/reload bit on the server and in a client's replay; the
+rifle's reserve at spawn, first raise, reload and sprint times; a
+trigger worked as the bots work theirs (`BG_TriggerNeedsRelease`) on every
+fire type; and the G19 beside it (`TestG19`: semi one shot a pull and auto a
+shot every fire time, its mode switch's press, click and end, never a burst
+pending, with a pending pull left over from the rifle and without one, the
+whole playerstate compared command for command; and the trigger held through
+the swap from the rifle in each mode). Every count and time is read from the
+fire type, the generated headers and `BG_BURST_FIRE_COOLDOWN`. `bullets_test.c` has the rifle among
+its guns (every round of every burst drawn where the server's went, on the
+shooter's and a watcher's screen) and its damage by range through the real
+`ClientThink`, `FireWeapon`, `Bullet_Fire` and `G_Damage`
+(`TestRangeFalloff`).
 
 `dev/tests/run-loadouts.cmd` (or `.sh`) checks class validation/persistence,
 modulo selection, same-update YY firing, reload/pull-out cancellation, tap/hold
@@ -1586,7 +1690,19 @@ through the real `Com_Frame` and loopback (`common.c`, `net_chan.c`,
 reload after knife/frag/Semtex cancel, tap vs hold, aiming/shooting/real reload
 during it, `+reload` never faking, no fake shot, the lone knife, the fake bullet
 (per tap, and over every snapshot phase on your own host, one frame later than
-ioquake3's host) and the M300 wild scope at 0/50/100/200 ms. It also drives
+ioquake3's host) and the M300 wild scope at 0/50/100/200 ms. On the M16 rifle
+it checks MW2's burstload (`Burstloads`) at 8, 16 and 33ms commands over every
+snapshot phase, every press counted from the command the burst's last shot
+left on: X let go before that command plays a reload on the command after it
+that the server never begins (three rounds fired, none reloaded), at every
+phase on your own host for a release inside the clock's sure zone and never
+once the release is the clock's whole lag early; it plays out only when the
+correction finds the gun in its cooldown (some phases at 8ms, all at 33ms;
+all with ping when X spans a snapshot); X still down on that command and
+`+reload` down on the next are real reloads on both sides, `+reload` never a
+fake; aim, a trigger pull (a real second burst) and a real reload through
+one; and prediction never aims while reloading. `FAKERELOAD_BURSTLOAD=1`
+prints its windows, `=check` runs its checks alone. It also drives
 the picture directly where no modelled lag reaches: a correction whose
 snapshot lands exactly on the shot's READY think keeps the shot the picture
 began (`TestCorrectionOnTheReadyThink`: `BG_ShotAwaitsAction` is a gun action
@@ -1864,14 +1980,26 @@ source tables and fill editable structs at runtime, as in `bg_loadout.c`.
   command by command at 8, 16 and 33ms). The Masterkey is Single Shot (MW2's
   `fireType`, `weapon.json`'s `fire_type`): held from the shot the pump starts
   on the shot's last think and nothing fires until the trigger is let go
-  (`TestHeldRechamber`, `trigger_test.c`). The rifle's fire,
-  reload, sprint and aim times are still provisional (it is automatic, `fire_type`
-  Full Auto, not MW2's 3-Round Burst, which the shot count supports: a burst
-  type's limit is its count), and so are both modes' damage, ammo counts and the Masterkey's
-  sights (MW2's has none). It uses ordinary note/holster/raise rules. Never add
+  (`TestHeldRechamber`, `trigger_test.c`). The rifle is `m16_shotgun_mp`
+  as far as Peace models it, all from `weapon.json`: `fire_type` "3-Round
+  Burst" at 64ms a shot ("A burst is the shot count" above), 40 damage to
+  1500 units falling to 30 at 2000 (`BG_BulletDamage`, MW2's
+  `Bullet_GetDamage` 0x5D5220: a per-weapon table, keyed by weapon, that any
+  gun can be given a row in; a gun without one deals what `FireWeapon`
+  passes), 30 rounds and 60 in reserve at spawn under a 180 cap (MW2's
+  startAmmo fills the magazine first: `BG_WeaponStartReserve`,
+  `BG_WeaponMaxReserve`), a 2029 reload with the magazine in at 1100 (the
+  generator hangs the reload pose on those keys), first raise 850, sprint
+  300/300 (699 loop), aim 250/250 at zoom FOV 50, and its view kick row.
+  Still Peace's, each waiting for something: one reload length (MW2's empty
+  reload, 2359, needs a remembered length and a clip), the hip spread (MW2's
+  spread model is not ported) and `mag_out_ms`, a sound cue. The Masterkey's
+  damage, ammo counts, sprint and aim times are still provisional, and so
+  are its sights (MW2's has none). It uses ordinary note/holster/raise rules. Never add
   a special NAC for it: MW2's Moni comes out of its data. Protocol 89 / game
   -18 added the alternate ammo fields; protocol 90 / game -19 widened
-  `weaponDraw` for the alt switch. The sight files use `zoomfov` in degrees.
+  `weaponDraw` for the alt switch; protocol 94 / game -23 the burst's pending
+  pull. The sight files use `zoomfov` in degrees.
   Run `run-masterkey` (which includes `moni_test.c`), `m16_asset_test.py` and
   `test-masterkey.ps1`; see `dev/M16.md`.
 - M300 Praetorian (`WP_M40A3`) is a separate, appended weapon (15 basegame / 18 missionpack). The

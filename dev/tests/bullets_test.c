@@ -22,7 +22,11 @@
  *    box, which no snapshot carries;
  *  - nothing is drawn for a projectile, and a shot into the sky draws nothing;
  *  - the fake bullet emerges: a shot the server never fires is still drawn
- *    on the shooter's screen, with no damage.
+ *    on the shooter's screen, with no damage;
+ *  - the M16 rifle (MW2's m16_shotgun_mp, a 3-Round Burst) is one of those
+ *    guns: every round of every burst is drawn where the server's went, and
+ *    its damage is MW2's by range (Bullet_GetDamage, iw4x 0x5D5220), through
+ *    the real ClientThink, Pmove, ClientEvents, FireWeapon and G_Damage.
  *
  * MW2's stance (dev/STANCE.md): every bullet and pellet ends where the
  * owner's hit volumes put it (D7, BG_PlayerHitVolumes: the box, the volume
@@ -38,6 +42,7 @@
 #include "../../code/qcommon/q_shared.h"
 #include "../../code/game/bg_public.h"
 #include "../../code/game/bg_g19_data.h"
+#include "../../code/game/bg_m16_data.h"	/* the M16 rifle's fire time and damage, from weapon.json */
 #include "bullets_world.h"
 #include "bullets.h"
 
@@ -46,6 +51,8 @@ static int checks;
 #define NEAR(a,b) (fabs((a)-(b))<0.01f)
 
 #define CMD_MSEC	8
+#define VICTIM_X	300	/* where Run puts the victim */
+#define VICTIM_RANGE	VICTIM_X	/* no further than that from the shooter's muzzle */
 #define SHOOTER		0
 #define VICTIM		1
 #define WATCHER		2
@@ -58,6 +65,7 @@ static int Damage( int weapon, int gametype ) {
 	case WP_RAILGUN: return 100;
 	case WP_LIGHTNING: return 8;
 	case WP_M40A3: return 100;
+	case WP_M16: return M16_DAMAGE;	/* MW2's, inside maxDamageRange (the victim stands at VICTIM_X) */
 #ifdef MISSIONPACK
 	case WP_CHAINGUN: return 7;
 #endif
@@ -134,6 +142,19 @@ static qboolean Settled( void ) {
 	return !ps->viewHeightLerpTarget && ps->viewheight == ( ( ps->pm_flags & PMF_PRONE ) ? PRONE_VIEWHEIGHT :
 		( ps->pm_flags & PMF_DUCKED ) ? CROUCH_VIEWHEIGHT : DEFAULT_VIEWHEIGHT );
 }
+/* a gun whose pull is more than one shot and not endless: MW2's burst types */
+static qboolean Burst( int weapon ) {
+	int type = BG_WeaponFireType( weapon );
+	return type != BG_FIRE_FULLAUTO && !BG_ShotLimitReached( type, 1 );
+}
+/* The commands in a server frame of a run whose shots must each end a frame
+ * (lastOnly: the trigger on a frame's last command). A burst's other shots
+ * leave a shot's time apart by themselves (MW2's BurstFirePending, 0x576A70),
+ * so its frame is that long. The burst gun here is the M16 rifle. */
+static int SnapEvery( int weapon ) {
+	return Burst( weapon ) ? ( M16_FIRE_MS + CMD_MSEC - 1 ) / CMD_MSEC : 6;
+}
+static qboolean triggerWasDown;	/* the shooter's last command's trigger */
 static usercmd_t Cmd( const run_t *r, int k, int t ) {
 	usercmd_t c;
 	float yaw = r->yaw, pitch = r->pitch;
@@ -147,8 +168,12 @@ static usercmd_t Cmd( const run_t *r, int k, int t ) {
 		if ( k == r->useReloadAt ) c.buttons |= BUTTON_USE_RELOAD;
 	} else if ( r->lastOnly ? ( k + 1 ) % r->snapEvery == 0 :
 		/* a gun that fires once a pull (MW2's ShotLimitReached at one shot:
-		   held, it fires no more) has its trigger pulled every other command */
+		   held, it fires no more) has its trigger pulled every other command;
+		   a burst gun's is let go for a command once the pull's shots have
+		   all left, as a bot lets its own go (BG_TriggerNeedsRelease) */
+		Burst( r->weapon ) ? !BG_TriggerNeedsRelease( BS_PlayerState( SHOOTER ), triggerWasDown ) :
 		!( ( k & 1 ) && BG_ShotLimitReached( BG_WeaponFireType( r->weapon ), 1 ) ) ) c.buttons |= BUTTON_ATTACK;
+	triggerWasDown = ( c.buttons & BUTTON_ATTACK ) != 0;
 	if ( r->ads ) c.buttons |= BUTTON_ADS;
 	if ( r->turn ) {	/* sweep across the victim and the wall behind them */
 		yaw = 6 * sin( k * 0.37 ); pitch += 2.5f * cos( k * 0.23 );
@@ -181,7 +206,7 @@ static void Run( const run_t *r ) {
 
 	BS_Reset( r->gametype );
 	BS_Place( SHOOTER, 0, r->shooterY, 24 );
-	BS_Place( VICTIM, 300, 0, 24 );
+	BS_Place( VICTIM, VICTIM_X, 0, 24 );
 	BS_Place( WATCHER, 0, 200, 24 );
 	BS_Arm( SHOOTER, r->weapon );
 	BS_EndFrame();
@@ -194,7 +219,7 @@ static void Run( const run_t *r ) {
 		BC_Snapshot( BS_START_TIME, BS_PlayerState( r->viewer ), first, n );
 	}
 	BC_ClearMarks(); BS_ClearMarks();
-	settledAt = -1;
+	settledAt = -1; triggerWasDown = qfalse;
 
 	for ( k = 0, t = BS_START_TIME; k < r->commands; k++ ) {
 		usercmd_t c;
@@ -270,7 +295,7 @@ static void Run( const run_t *r ) {
 	}
 }
 
-static const int guns[] = { WP_MACHINEGUN, WP_G19, WP_SHOTGUN, WP_RAILGUN, WP_LIGHTNING, WP_M40A3
+static const int guns[] = { WP_MACHINEGUN, WP_G19, WP_SHOTGUN, WP_RAILGUN, WP_LIGHTNING, WP_M40A3, WP_M16
 #ifdef MISSIONPACK
 	, WP_CHAINGUN
 #endif
@@ -328,7 +353,7 @@ static void TestUnpredicted( void ) {
 	run_t r;
 	for ( g = 0; g < ARRAY_LEN( guns ); g++ ) {
 		memset( &r, 0, sizeof( r ) );
-		r.weapon = guns[g]; r.gametype = GT_FFA; r.viewer = SHOOTER; r.renderEvery = 1; r.snapEvery = 6;
+		r.weapon = guns[g]; r.gametype = GT_FFA; r.viewer = SHOOTER; r.renderEvery = 1; r.snapEvery = SnapEvery( guns[g] );
 		r.commands = 240; r.lastOnly = qtrue; r.predicted = qfalse;
 		Run( &r );
 		CHECK( bs_markCount > 0 && FleshOn( VICTIM ) > 0 && MarksMatch( guns[g] ) );
@@ -355,7 +380,7 @@ static void TestOthers( void ) {
 	for ( g = 0; g < ARRAY_LEN( guns ); g++ ) for ( v = 0; v < 2; v++ ) {
 		run_t r;
 		memset( &r, 0, sizeof( r ) );
-		r.weapon = guns[g]; r.gametype = GT_FFA; r.viewer = viewers[v]; r.renderEvery = 1; r.snapEvery = 6;
+		r.weapon = guns[g]; r.gametype = GT_FFA; r.viewer = viewers[v]; r.renderEvery = 1; r.snapEvery = SnapEvery( guns[g] );
 		r.commands = 240; r.lastOnly = qtrue; r.predicted = qtrue;
 		Run( &r );
 		CHECK( bs_markCount > 0 && FleshOn( VICTIM ) > 0 && MarksMatch( guns[g] ) );
@@ -406,7 +431,6 @@ static void TestGenerator( void ) {
 	CHECK( BG_BulletSeed( 10008 ) != BG_BulletSeed( 10016 ) );
 }
 
-#define VICTIM_X	300	/* where Run puts the victim */
 
 /* A prone target's body, which lies behind its origin (MW2's room check's
  * body, D7): the victim lies down facing +y, so its body runs back along -y,
@@ -475,7 +499,7 @@ static void TestDropShot( void ) {
 		run_t r;
 		if ( viewers[v] != SHOOTER && m ) continue;	/* others are exact standing still (above) */
 		memset( &r, 0, sizeof( r ) );
-		r.weapon = guns[g]; r.gametype = GT_FFA; r.viewer = viewers[v]; r.renderEvery = 1; r.snapEvery = 6;
+		r.weapon = guns[g]; r.gametype = GT_FFA; r.viewer = viewers[v]; r.renderEvery = 1; r.snapEvery = SnapEvery( guns[g] );
 		r.commands = 240; r.predicted = qtrue; r.lastOnly = viewers[v] != SHOOTER; r.move = m;
 		r.shooterStance = BUTTON_PRONE;
 		Run( &r );
@@ -485,6 +509,129 @@ static void TestDropShot( void ) {
 	}
 	CHECK( prone && midLeg > 0 );
 	printf( "drop shots: %d bullets fired from an eye between two stances, drawn where the server's went\n", midLeg );
+}
+
+/* The M16 rifle's bursts, on the shooter's own screen and a watcher's: a tap
+ * of the trigger is three rounds on the server (MW2's BurstFirePending,
+ * 0x576A70: the other two leave by themselves, a shot's time apart), each
+ * drawn where the server's went. */
+static void TestBurst( void ) {
+	static const int viewers[] = { SHOOTER, WATCHER };
+	int v, shot = ( M16_FIRE_MS + CMD_MSEC - 1 ) / CMD_MSEC, pull = 1;
+	while ( !BG_ShotLimitReached( BG_WeaponFireType( WP_M16 ), pull ) ) pull++;
+	CHECK( Burst( WP_M16 ) && pull == 3 );
+	for ( v = 0; v < ARRAY_LEN( viewers ); v++ ) {
+		run_t r;
+		memset( &r, 0, sizeof( r ) );
+		r.weapon = WP_M16; r.gametype = GT_FFA; r.viewer = viewers[v]; r.renderEvery = 1; r.snapEvery = shot;
+		r.commands = 3 * shot; r.lastOnly = qtrue; r.predicted = qtrue;	/* one tap, on the first frame's last command */
+		Run( &r );
+		CHECK( bs_shotTraces == pull && bs_markCount == pull && FleshOn( VICTIM ) == pull && MarksMatch( WP_M16 ) );
+		CHECK( bs_bulletHealth[VICTIM] == pull * M16_DAMAGE );
+		CHECK( BS_PlayerState( SHOOTER )->ammo[WP_M16] == M16_MAG_SIZE - pull );
+	}
+}
+
+/* The M16 rifle's damage by range, MW2's Bullet_GetDamage (0x5D5220) on
+ * m16_shotgun_mp's damage, minDamage, maxDamageRange and minDamageRange: its
+ * damage out to maxDamageRange from where the bullet started, its minDamage
+ * from minDamageRange on, and between them the line from one to the other,
+ * truncated. One tap, aimed and crouched, at a target at each range, through
+ * the real ClientThink, Pmove, ClientEvents, FireWeapon, Bullet_Fire and
+ * G_Damage; each bullet's range is the engine trace's own. Every other gun
+ * deals what it always did at any range. All numbers are the generated
+ * header's. */
+static int Falloff( float range ) {
+	float f;
+	if ( range < M16_MAX_DAMAGE_RANGE ) return M16_DAMAGE;
+	if ( range >= M16_MIN_DAMAGE_RANGE ) return M16_MIN_DAMAGE;
+	f = ( range - M16_MAX_DAMAGE_RANGE ) / ( M16_MIN_DAMAGE_RANGE - M16_MAX_DAMAGE_RANGE );
+	return (int)( ( 1.0f - f ) * M16_DAMAGE + f * M16_MIN_DAMAGE );
+}
+/* The shooter at the origin, aimed and crouched, aims along -x, away from the
+ * wall, at a target whose near face is `range` away: three pulls of one
+ * command each, further apart than a burst and its cooldown are long. */
+static void ShootAtRange( int weapon, float range, int gametype ) {
+	const int pace = 2 * ( 3 * M16_FIRE_MS + BG_BURST_FIRE_COOLDOWN ) / CMD_MSEC;
+	int k, t = BS_START_TIME, settle = 2 * BG_PRONE_LERP_MS / CMD_MSEC, fire = settle + 3 * pace;
+	BS_Reset( gametype );
+	BS_Place( SHOOTER, 0, 0, 24 );
+	BS_Place( VICTIM, -( range + PLAYER_WIDTH ), 0, 24 );
+	BS_Place( WATCHER, 0, 400, 24 );
+	BS_Arm( SHOOTER, weapon );
+	BS_EndFrame();
+	BS_ClearMarks();
+	for ( k = 0; k < fire; k++ ) {
+		usercmd_t c;
+		memset( &c, 0, sizeof( c ) );
+		t += CMD_MSEC;
+		c.serverTime = t; c.weapon = weapon;
+		c.buttons = BUTTON_CROUCH | BUTTON_TEMP_STANCE | BUTTON_ADS;
+		/* the pulls, once the aim and the stance have settled */
+		if ( k >= settle && ( k - settle ) % pace == 0 ) c.buttons |= BUTTON_ATTACK;
+		c.angles[YAW] = ANGLE2SHORT( 180 );
+		BS_Command( SHOOTER, &c );
+		if ( ( k + 1 ) % 6 == 0 ) BS_EndFrame();
+	}
+	CHECK( ( BS_PlayerState( SHOOTER )->pm_flags & ( PMF_ADS | PMF_DUCKED ) ) == ( PMF_ADS | PMF_DUCKED ) );
+}
+static void TestRangeFalloff( void ) {
+	const float max = M16_MAX_DAMAGE_RANGE, min = M16_MIN_DAMAGE_RANGE;
+	/* inside maxDamageRange, a quarter and three quarters of the way down
+	   the line (where truncating and rounding differ), and past minDamageRange */
+	const float ranges[] = { max / 2, max - 40, max + ( min - max ) * 0.25f + 14, max + ( min - max ) * 0.75f + 14, min + 40, min * 1.25f };
+	int i, d, pull = 1, mid = 0;
+	while ( !BG_ShotLimitReached( BG_WeaponFireType( WP_M16 ), pull ) ) pull++;
+	CHECK( M16_DAMAGE > M16_MIN_DAMAGE + 4 && M16_MIN_DAMAGE > 0 && max > 0 && min > max && VICTIM_RANGE < max );
+
+	/* the rule itself, at exact ranges: whole to maxDamageRange, the least
+	   from minDamageRange, the line between truncated to a whole number */
+	CHECK( BG_BulletDamage( WP_M16, 0, 0 ) == M16_DAMAGE && BG_BulletDamage( WP_M16, max - 0.5f, 0 ) == M16_DAMAGE );
+	CHECK( BG_BulletDamage( WP_M16, max, 0 ) == M16_DAMAGE );
+	CHECK( BG_BulletDamage( WP_M16, ( max + min ) / 2, 0 ) * 2 == M16_DAMAGE + M16_MIN_DAMAGE );
+	CHECK( ( 3 * M16_DAMAGE + M16_MIN_DAMAGE ) % 4 == 2 );	/* a half: where truncating shows */
+	CHECK( BG_BulletDamage( WP_M16, max + ( min - max ) * 0.25f, 0 ) == ( 3 * M16_DAMAGE + M16_MIN_DAMAGE ) / 4 );
+	CHECK( BG_BulletDamage( WP_M16, max + ( min - max ) * 0.75f, 0 ) == ( M16_DAMAGE + 3 * M16_MIN_DAMAGE ) / 4 );
+	CHECK( BG_BulletDamage( WP_M16, min, 0 ) == M16_MIN_DAMAGE && BG_BulletDamage( WP_M16, 100 * min, 0 ) == M16_MIN_DAMAGE );
+	/* what the caller passes is not read for a gun with MW2's data, and is
+	   the whole answer for a gun without */
+	CHECK( BG_BulletDamage( WP_M16, max / 2, 7 ) == M16_DAMAGE );
+	for ( i = 0; i < ARRAY_LEN( guns ); i++ ) {
+		if ( guns[i] == WP_M16 ) continue;
+		CHECK( BG_BulletDamage( guns[i], 0, 7 ) == 7 && BG_BulletDamage( guns[i], ( max + min ) / 2, 7 ) == 7 &&
+			BG_BulletDamage( guns[i], 10 * min, 7 ) == 7 );
+	}
+
+	for ( i = 0; i < ARRAY_LEN( ranges ); i++ ) {
+		int health, lost = 0;
+		ShootAtRange( WP_M16, ranges[i], i & 1 ? GT_TEAM : GT_FFA );	/* MW2's damage in every game type */
+		health = BS_HEALTH - BS_Health( VICTIM );
+		/* three pulls of three rounds, every one on the target */
+		CHECK( bs_shotTraces == 3 * pull && bs_markCount == 3 * pull && bs_damageCount == 3 * pull && FleshOn( VICTIM ) == 3 * pull );
+		for ( d = 0; d < bs_damageCount; d++ ) {
+			float range = bs_markRange[d];
+			CHECK( bs_marks[d].entityNum == VICTIM && bs_damage[d].entityNum == VICTIM );
+			CHECK( fabs( range - ranges[i] ) < 24 );	/* the muzzle is 14 ahead of the eye */
+			CHECK( bs_damageDealt[d] == Falloff( range ) && bs_damageDealt[d] == BG_BulletDamage( WP_M16, range, 0 ) );
+			if ( range < max ) CHECK( bs_damageDealt[d] == M16_DAMAGE );
+			else if ( range >= min ) CHECK( bs_damageDealt[d] == M16_MIN_DAMAGE );
+			else { CHECK( bs_damageDealt[d] > M16_MIN_DAMAGE && bs_damageDealt[d] < M16_DAMAGE ); mid++; }
+			lost += bs_damageDealt[d];
+		}
+		CHECK( health == lost && bs_bulletHealth[VICTIM] == lost );
+		if ( i < 2 ) CHECK( lost == 3 * pull * M16_DAMAGE );
+		if ( i >= 4 ) CHECK( lost == 3 * pull * M16_MIN_DAMAGE );
+		if ( i == 2 ) CHECK( lost == 3 * pull * ( ( 3 * M16_DAMAGE + M16_MIN_DAMAGE ) / 4 ) );
+		if ( i == 3 ) CHECK( lost == 3 * pull * ( ( M16_DAMAGE + 3 * M16_MIN_DAMAGE ) / 4 ) );
+	}
+	CHECK( mid == 2 * 3 * pull );
+
+	/* the machinegun, at the rifle's longest range: what it always dealt */
+	ShootAtRange( WP_MACHINEGUN, min * 1.25f, GT_FFA );
+	CHECK( bs_damageCount > 0 && FleshOn( VICTIM ) == bs_damageCount );
+	for ( d = 0; d < bs_damageCount; d++ ) CHECK( bs_damageDealt[d] == Damage( WP_MACHINEGUN, GT_FFA ) && bs_markRange[d] > min );
+	printf( "the M16 rifle's damage by range: %d to %g units, %d from %g, the line between truncated\n",
+		M16_DAMAGE, max, M16_MIN_DAMAGE, min );
 }
 
 int main( void ) {
@@ -498,6 +645,8 @@ int main( void ) {
 	TestProneTarget();
 	TestOverTheBox();
 	TestDropShot();
+	TestBurst();
+	TestRangeFalloff();
 	printf( "bullets_test: %d checks passed\n", checks );
 	return 0;
 }

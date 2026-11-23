@@ -9,7 +9,10 @@
  * Protocol 92 is MW2's held trigger: weaponShotCount (MW2's netfield 0x742600, 3 bits), the
  * trigger's last step in weaponAction (WA_ATTACK_HELD, eleven bits) and the reload's stop
  * request in weapFlags (PWF_RELOAD_INTERRUPT, three bits).
- * Protocol 93 carries the selector button, its animation direction and each slot's committed mode. */
+ * Protocol 93 carries the selector button, its animation direction and each slot's committed mode.
+ * Protocol 94 is MW2's burst fire: the pending trigger pull in weapFlags (PWF_PENDING_PULL,
+ * MW2's weapHandFlags bit 0, netfield 0x7427E0 {0x1FC, 1}; five bits, above protocol 93's
+ * PWF_SELECTOR_HELD). */
 #include "../../code/qcommon/q_shared.h"
 #include "../../code/qcommon/qcommon.h"
 #include "../../code/game/bg_public.h"
@@ -180,7 +183,7 @@ int main(void) {
   from.cursorHint=i%CURSOR_HINT_COUNT; to.cursorHint=j%CURSOR_HINT_COUNT;	/* every hint type, from every other */
   to.pickupTarget=1023; to.pickupSerial=2147483000; to.pickupTime=1000;
   to.pickupSlot=j&1; to.pickupHeld=j&3;
-  from.weapFlags=i&15; to.weapFlags=j&15;
+  from.weapFlags=i&31; to.weapFlags=j&31;	/* protocol 93's four bits and protocol 94's PWF_PENDING_PULL */
   from.weaponAnimSeq=i%6; to.weaponAnimSeq=j%6;
   from.weaponShotCount=i%(BG_SHOT_COUNT_MAX+1); to.weaponShotCount=j%(BG_SHOT_COUNT_MAX+1);
   /* MW2's jump and sprint state: an airborne jump (-1), the longest landing
@@ -222,20 +225,37 @@ int main(void) {
   * Tactical Insertion types, the top one included, each from every other.
   * Protocol 85 adds grenadeTimeLeft; protocol 87 adds moveClass, 88 stance,
   * and 89 the underbarrel inventory fields. */
- CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==93);
+ CHECK(CURSOR_HINT_COUNT==6 && PS_CURSOR_HINT_BITS==3 && CURSOR_HINT_INSERTION_ENEMY==5 && PROTOCOL_VERSION==94);
  /* MW2's shot count in its three bits: every value it takes (to BG_SHOT_COUNT_MAX, MW2's cap
   * of 4) and the rest of the field, each from every other and alone in a delta; and the three
-  * low weapFlags bits used by the trigger and reload. */
+  * low weapFlags bits used by the trigger and reload. Above them the selector's held bit
+  * (PWF_SELECTOR_HELD, protocol 93) and, the top one, a burst gun's pending trigger pull
+  * (PWF_PENDING_PULL, protocol 94): all five bits, every combination from every other. */
  CHECK(BG_SHOT_COUNT_MAX==4 && PWF_RELOAD_INTERRUPT==4 && PWF_SPRINT_RELEASE==2 && PWF_USE_RELOAD==1);
- for(i=0;i<8;i++) for(j=0;j<8;j++) {
-  memset(&from,0,sizeof(from)); to=from; from.weaponShotCount=i; to.weaponShotCount=j;
+ CHECK(PWF_SELECTOR_HELD==8 && PWF_PENDING_PULL==16);
+ for(i=0;i<32;i++) for(j=0;j<32;j++) {
+  memset(&from,0,sizeof(from)); to=from; from.weaponShotCount=i&7; to.weaponShotCount=j&7;
   from.weapFlags=i; to.weapFlags=j; from.weaponAction=WA_ATTACK_HELD*(i&1); to.weaponAction=WA_ATTACK_HELD*(j&1);
   MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,&from,&to);
   CHECK(!msg.overflowed); MSG_BeginReading(&msg);
   MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
-  CHECK(decoded.weaponShotCount==j && decoded.weapFlags==j && decoded.weaponAction==to.weaponAction);
+  CHECK(decoded.weaponShotCount==(j&7) && decoded.weapFlags==j && decoded.weaponAction==to.weaponAction);
   CHECK(!memcmp(&decoded,&to,sizeof(to)));
  }
+ /* five bits and no more: the pending pull alone in a delta arrives, as the selector's held bit
+  * does beside it, and a sixth bit does not */
+ memset(&from,0,sizeof(from)); to=from; to.weapFlags=PWF_PENDING_PULL;
+ MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,&from,&to);
+ MSG_BeginReading(&msg); MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
+ CHECK(decoded.weapFlags==PWF_PENDING_PULL);
+ to.weapFlags=PWF_SELECTOR_HELD;
+ MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,&from,&to);
+ MSG_BeginReading(&msg); MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
+ CHECK(decoded.weapFlags==PWF_SELECTOR_HELD);
+ to.weapFlags=PWF_PENDING_PULL<<1;
+ MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,&from,&to);
+ MSG_BeginReading(&msg); MSG_ReadDeltaPlayerstate(&msg,&from,&decoded);
+ CHECK(decoded.weapFlags==0);
  CHECK(WDRAW_NORMAL==0 && WDRAW_FIRST==1 && WDRAW_ALT==2);
  /* moveClass is MW2's nine weapon classes in PS_MOVECLASS_BITS (4): every one,
   * the last included, from every other, and alone in a delta. */

@@ -293,14 +293,19 @@ def pose(name,t,data,sprint):
             result[3]=channels(add(NODES[3][2],(-3.7*pump,0,0)))
             angle[0]=-2*pump
     if name=='reload_loop' and not underbarrel:
-        ms=t*data['reload_loop_ms']
-        tilt=window(ms,0,240)-window(ms,1080,data['reload_loop_ms'])
+        # Every time hangs on the keys, so a retimed reload needs no edit here:
+        # the magazine leaves around mag_out_ms and is seated by mag_in_ms
+        # (MW2's reloadAddTime); over what is left of the reload (MW2's
+        # reloadTime) the support hand comes back and the gun levels.
+        length=data['reload_loop_ms']; seated=data['mag_in_ms']; tail=length-seated
+        ms=t*length
+        tilt=window(ms,0,240)-window(ms,seated+.20*tail,length)
         root=add(root,(-1.0*tilt,.6*tilt,-1.1*tilt)); angle=[-20*tilt,-4*tilt,3*tilt]
         out=window(ms,data['mag_out_ms']-160,data['mag_out_ms']+100)
-        seat=window(ms,700,data['mag_in_ms'])
+        seat=window(ms,seated-300,seated)
         travel=max(0,out-seat)
         result[1]=channels(add(NODES[1][2],(-1.2*travel,0,-8.5*travel)),(0,0,-8*travel))
-        reach=window(ms,50,250)-window(ms,1080,1340)
+        reach=window(ms,50,250)-window(ms,seated+.10*tail,seated+.60*tail)
         result[3]=channels(add(NODES[3][2],(-14.2*reach,-1.0*reach,-1.5*reach-5*travel)),(0,0,15*reach))
     if name.startswith('reload_') and underbarrel:
         # The start reaches for the port and feeds its own shell (MW2's
@@ -338,7 +343,9 @@ def clips(data,sprint):
     durations={'idle':1600,'raise':data['raise_ms'],'drop':data['drop_ms'],
                'fire':data['fire_ms'],'reload_loop':data['reload_loop_ms'],
                'sprint_in':data['sprint_in_ms'],'sprint_loop':data['sprint_loop_ms'],
-               'sprint_out':data['sprint_out_ms'],'first_raise':data['raise_ms'],
+               'sprint_out':data['sprint_out_ms'],
+               # the rifle's first deployment is MW2's firstRaiseTime
+               'first_raise':data.get('first_raise_ms',data['raise_ms']),
                'alt_raise':data['alt_raise_ms']}
     if data.get('underbarrel'):
         durations['reload_start']=data['reload_start_ms']
@@ -521,14 +528,27 @@ def build():
             '#ifndef BG_M16_DATA_H','#define BG_M16_DATA_H']
     names={'MAG_SIZE':'mag_size','RESERVE':'reserve','FIRE_MS':'fire_ms','DROP_MS':'drop_ms',
            'RAISE_MS':'raise_ms','ALT_DROP_MS':'alt_drop_ms','ALT_RAISE_MS':'alt_raise_ms',
-           'SPRINT_IN_MS':'sprint_in_ms','SPRINT_OUT_MS':'sprint_out_ms','FIRE_TYPE':'fire_type'}
-    for prefix,source,extra in [('M16',data,{'RELOAD_MS':'reload_loop_ms','MAG_OUT_MS':'mag_out_ms','MAG_IN_MS':'mag_in_ms'}),
+           'SPRINT_IN_MS':'sprint_in_ms','SPRINT_OUT_MS':'sprint_out_ms','FIRE_TYPE':'fire_type',
+           'ADS_ZOOM_FOV':'ads_zoom_fov'}
+    # The rifle's own: MW2's startAmmo (the magazine and the reserve it is given
+    # with; 'reserve' is its maxAmmo, the most the reserve holds), firstRaiseTime,
+    # view kick (hip/adsViewKick*) and bullet damage with its range falloff
+    # (damage, minDamage, maxDamageRange, minDamageRange).
+    kick={f'{aim}_VIEW_KICK_{part}'.upper():f'{aim}_view_kick_{part}'
+          for aim in ('hip','ads') for part in ('pitch_min','pitch_max','yaw_min','yaw_max','center_speed')}
+    damage={'DAMAGE':'damage','MIN_DAMAGE':'min_damage',
+            'MAX_DAMAGE_RANGE':'max_damage_range','MIN_DAMAGE_RANGE':'min_damage_range'}
+    for prefix,source,extra in [('M16',data,dict({'START_AMMO':'start_ammo','FIRST_RAISE_MS':'first_raise_ms',
+         'RELOAD_MS':'reload_loop_ms','MAG_OUT_MS':'mag_out_ms','MAG_IN_MS':'mag_in_ms'},**damage,**kick)),
         ('MASTERKEY',shotgun,{'BOLT_OPEN_MS':'bolt_open_ms','BOLT_CLOSE_MS':'bolt_close_ms',
          'RELOAD_START_MS':'reload_start_ms','RELOAD_START_ADD_MS':'reload_start_add_ms',
          'RELOAD_LOOP_MS':'reload_loop_ms','RELOAD_END_MS':'reload_end_ms',
          'ROUND_IN_MS':'round_in_ms'})]:
         for macro,key in dict(names,**extra).items():
             value=FIRE_TYPES[source[key]] if key=='fire_type' else source[key]
+            # A negative value in parentheses: MSVC pastes a sign written
+            # against a bare negative macro into one token.
+            if not isinstance(value,str) and value<0: value=f'({value})'
             header.append(f'#define {prefix}_{macro} {value}')
     header+=['#endif','']
     return {'assets/baseq3/'+PREFIX+'view.iqm':model,'assets/baseq3/'+PREFIX+'view.cfg':cfg,

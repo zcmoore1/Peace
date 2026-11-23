@@ -12,6 +12,7 @@
  * kicksim.py has them. kicksim's own printed results are checked too. */
 #include "../../code/cgame/cg_local.h"
 #include "../../code/game/bg_m40a3_data.h"
+#include "../../code/game/bg_m16_data.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,7 +60,8 @@ static const dumpKick_t dump[] = {
 	{ WP_MACHINEGUN, "m4_mp", { -30, 50, 40, -40, 1500, -30, 50, 40, -40, 1500 } },
 	{ WP_SHOTGUN, "spas12_mp", { 85, 95, -45, 45, 1000, 85, 95, -45, 45, 1000 } },
 	{ WP_ROCKET_LAUNCHER, "rpg_mp/at4_mp", { 100, 150, -50, -80, 1500, 20, 95, -10, 30, 2500 } },
-	{ WP_M40A3, "cheytac_mp", { 80, 100, -50, -55, 500, 30, 85, 70, -75, 500 } }
+	{ WP_M40A3, "cheytac_mp", { 80, 100, -50, -55, 500, 30, 85, 70, -75, 500 } },
+	{ WP_M16, "m16_shotgun_mp", { -30, 60, 45, -45, 1500, -30, 60, 45, -45, 1500 } }
 };
 static const int equipment[] = { WP_FRAG, WP_FLASH, WP_SEMTEX, WP_THROWING_KNIFE, WP_TACTICAL_INSERTION };
 
@@ -198,7 +200,7 @@ static void CheckKick( const double kick[3] ) {
 
 /* ---- the tests ---- */
 
-/* Every weapon's data: the four MW2 guns kick at MW2's numbers (r exactly 0
+/* Every weapon's data: the five MW2 guns kick at MW2's numbers (r exactly 0
  * and one half from crafted seeds), equipment brakes nothing, the knife reads
  * the gun, and the rest have no MW2 def. */
 static void TestData( void ) {
@@ -233,6 +235,11 @@ static void TestData( void ) {
 	}
 	/* the M300 is generated from weapon.json, as cheytac_mp */
 	CHECK( M40_HIP_VIEW_KICK_CENTER_SPEED == 500 && M40_ADS_VIEW_KICK_YAW_MAX == -75 );
+	/* and the M16 rifle, as m16_shotgun_mp: each of its burst's shots kicks
+	   (the kick is the fire event's); the Masterkey has no row yet */
+	CHECK( M16_HIP_VIEW_KICK_PITCH_MIN == -30 && M16_HIP_VIEW_KICK_PITCH_MAX == 60 && M16_ADS_VIEW_KICK_YAW_MAX == -45 &&
+		M16_ADS_VIEW_KICK_CENTER_SPEED == 1500 );
+	CHECK( Dump( WP_M16 ) && !Dump( WP_MASTERKEY ) );
 	/* the knife is MW2's melee: the view reads the gun it is written over */
 	memset( &p, 0, sizeof( p ) ); p.weapon = WP_KNIFE;
 	p.stats[STAT_SLOT_PRIMARY] = WP_M40A3; p.stats[STAT_SLOT_SECONDARY] = WP_SHOTGUN;

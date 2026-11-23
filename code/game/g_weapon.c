@@ -231,6 +231,10 @@ bullet comes from the shot command's time, as MW2's Bullet_Fire seeds it with
 its gameTime, through the shared BG_BulletEnd, so the shooter's client repeats
 it exactly. Every hitscan shooter is a client: FireWeapon is reached only
 from ClientEvents.
+
+The damage is the caller's at any range, except for a gun with MW2's damage
+data, which deals MW2's Bullet_GetDamage (5d5220) by how far the bullet went
+from its start to the hit (BG_BulletDamage: the M16 rifle).
 ======================
 */
 void Bullet_Fire (gentity_t *ent, int damage, int mod ) {
@@ -239,11 +243,9 @@ void Bullet_Fire (gentity_t *ent, int damage, int mod ) {
 #ifdef MISSIONPACK
 	vec3_t		impactpoint, bouncedir;
 #endif
-	float		spread;
+	float		spread, dist;
 	gentity_t	*traceEnt;
 	int			i, passent, seed;
-
-	damage *= s_quadFactor;
 
 	// Effective spread comes from the shared formula so it matches the crosshair
 	// exactly (ADS tightens, movement/air widen). Same code in campaign and MP.
@@ -261,6 +263,9 @@ void Bullet_Fire (gentity_t *ent, int damage, int mod ) {
 		}
 
 		traceEnt = &g_entities[ tr.entityNum ];
+
+		// how far the bullet went, before the hit is snapped
+		dist = Distance( muzzle, tr.endpos );
 
 		// snap the endpos to integers, but nudged towards the line
 		SnapVectorTowards( tr.endpos, muzzle );
@@ -290,7 +295,7 @@ void Bullet_Fire (gentity_t *ent, int damage, int mod ) {
 			else {
 #endif
 				G_Damage( traceEnt, ent, ent, forward, tr.endpos,
-					damage, 0, mod);
+					(int)( BG_BulletDamage( ent->s.weapon, dist, damage ) * s_quadFactor ), 0, mod);
 #ifdef MISSIONPACK
 			}
 #endif
@@ -944,12 +949,17 @@ void FireWeapon( gentity_t *ent ) {
 		weapon_supershotgun_fire( ent );
 		break;
 	case WP_MACHINEGUN:
-	case WP_M16:
 		if ( g_gametype.integer != GT_TEAM ) {
 			Bullet_Fire( ent, MACHINEGUN_DAMAGE, MOD_MACHINEGUN );
 		} else {
 			Bullet_Fire( ent, MACHINEGUN_TEAM_DAMAGE, MOD_MACHINEGUN );
 		}
+		break;
+	case WP_M16:
+		// m16_shotgun_mp's damage and range falloff, in every game type
+		// (BG_BulletDamage, in Bullet_Fire); the kill is still logged as the
+		// machinegun's.
+		Bullet_Fire( ent, BG_BulletDamage( WP_M16, 0, 0 ), MOD_MACHINEGUN );
 		break;
 	case WP_GRENADE_LAUNCHER:
 		weapon_grenadelauncher_fire( ent );

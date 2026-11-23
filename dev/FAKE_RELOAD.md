@@ -1,4 +1,4 @@
-# Fake reload, fake bullet and wild scope
+# Fake reload, fake bullet, burstload and wild scope
 
 MW2 behaviour, emergent from MW2's own use/reload. No code names any of these.
 
@@ -21,6 +21,12 @@ scripts do every one of these with `+usereload`.
   damage, as in MW2. Only the picture is new; the window below did not move
   (`dev/tests/run-bullets.sh` checks the drawn shot, `run-fakereload.sh` the
   windows).
+- **Burstload.** With a burst gun (the M16 rifle), shoot and press X right
+  after, letting go before the third shot leaves. A reload plays as the burst
+  finishes, nothing reloads, and you can aim (or shoot, or really reload)
+  through it: a fake reload with no knife or grenade before it. X still down
+  as the third shot leaves is a real reload the moment the burst ends, with
+  none of the rifle's cooldown. Its windows are below.
 - **Wild scope.** With a scoped gun (the M300), hold aim, do the fake reload,
   and knife straight after. The knife plays while you stay scoped (a fake
   knife).
@@ -55,7 +61,11 @@ scripts do every one of these with `+usereload`.
    nothing to use, and again on every command while that press is held. The
    weapon takes the bit as a reload press on the next command, but does not
    read it during a quick action, from the press to the end of the recovery
-   draw, as MW2's reload check skips its melee and offhand states.
+   draw, as MW2's reload check skips its melee and offhand states. Nor does
+   it read or clear it while a burst is pending (a burst gun between its
+   first shot and its last, `BG_BurstFirePending`): MW2's `PM_Weapon` runs no
+   reload check then (0x44C444-0x44C4B3), and that check is the only place
+   its Pmove touches the bit (0x5786E3-0x5786F6).
 2. **The client never sets the bit.** It arrives in a snapshot, and the client
    replays its own commands over it. A tap made while the server's gun is still
    away reaches the client in a snapshot taken then; the client's replay
@@ -64,6 +74,16 @@ scripts do every one of these with `+usereload`.
    A tap just before a shot is taken by the server first (it reloads, and a
    reload beats the trigger); the client learns of it a round trip later and
    has already shown the shot: the fake bullet.
+   X pressed inside a burst is the same thing with the burst in the place of
+   the quick action. The server's use code clears its bit after the first
+   command X is up on; if that is before the burst's last shot, the server's
+   reload check, which runs again on the command after that shot, finds
+   nothing. The client's copy, from a snapshot taken while X was down, rides
+   the rest of the burst through the replay and is taken on that same
+   command, out of the last shot (a reload is taken out of a shot at once,
+   MW2's `PM_BeginWeaponReload` 0x575E92): the burstload. With X still down
+   on the last shot's command the server's bit is set too, and both reload
+   there for real.
 3. **No knife while a scoped gun is aimed** (MW2's melee rule;
    `BG_WeaponScopeOverlay`, from the rifle's `scope_overlay`). During a fake
    reload the client thinks the gun is reloading, so it is not aiming, and its
@@ -78,7 +98,15 @@ scripts do every one of these with `+usereload`.
    A shot's pump or bolt is the same action as the shot, across the READY
    think between them (`BG_ShotAwaitsAction`), so a shot you were shown is
    drawn to the end of its action. A correction that only removes a swap is
-   followed at once. Aim, camera, HUD
+   followed at once. A corrected snapshot keeps the action you were shown
+   only if the server's state in it shows the same kind of action: a reload
+   is kept only by a server that is reloading. (So the last shot of a burst,
+   which the server is still in when your burstload's reload begins, does
+   not un-play that reload.) Once detached, the picture goes back to
+   prediction as soon as prediction is not READY: a reload you were shown
+   plays out only under a predicted gun at rest. That is MW2's viewmodel
+   too, read from its code: an idle lets a running animation finish, any
+   other animation replaces it at once (`WeaponRunXModelAnims`, 0x59B5E0). Aim, camera, HUD
    and gameplay read the predicted state.
 
 ## The clock and the host (MW2's)
@@ -234,6 +262,78 @@ moved, see above. The M300's knife return now lands where that phase is
 unkind; over every phase the M300 passes the same `Windows` checks as the
 SPAS, sure zone included.)
 
+Burstload (the M16 rifle, a 3-round burst of 64ms shots; `Burstloads` in the
+suite, `FAKERELOAD_BURSTLOAD=1` for these tables). The trigger goes down on
+command 0 and the burst's last shot leaves on command L: 16 at 125 fps, 8 at
+62, 4 at 30 (a command more or less with the snapshot phase, as the client's
+clock drifts; everything is counted from the command it really left on). Two
+things decide it:
+
+- **X must be up on command L.** The server's reload check runs again on
+  L + 1 and reads the bit its use code left after L. X down on L is a real
+  reload on L + 1, on both sides, at every phase and ping.
+- **The snapshot your client predicts from must have been taken while X was
+  down**, when it builds command L + 1 (the reload appears, on that command)
+  and still when it builds the command the last shot's time runs out on (it
+  plays out). If prediction is corrected while it is still in the last shot,
+  the picture goes back to the shot and the reload is gone after a few
+  frames; corrected into the cooldown, the gun is at rest and the reload
+  plays to its end, with aim, the trigger and a real reload all free.
+
+X down from the command after the trigger's, first up j commands before L;
+the share of snapshot phases at which a reload the server never began appears,
+and at which it plays out:
+
+| 125 fps (8ms), j = | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 12 | 14 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| own host, appears | 100% | 100% | 100% | 88% | 68% | 56% | 36% | 20% | 8% | 0% | 0% | 0% | 0% |
+| own host, plays out | 32% | 16% | 8% | 0% | 0% | 0% | 0% | 0% | 0% | 0% | 0% | 0% | 0% |
+| 50 ms ping, appears | 100% | 100% | 100% | 100% | 92% | 84% | 76% | 68% | 60% | 52% | 48% | 32% | 12% |
+| 50 ms ping, plays out | 100% | 100% | 92% | 84% | 76% | 68% | 60% | 52% | 44% | 36% | 32% | 16% | 0% |
+| 100 ms ping, both | 100% | 100% | 100% | 100% | 96% | 88% | 80% | 68% | 60% | 52% | 44% | 28% | 12% |
+| 200 ms ping, both | 100% | 100% | 100% | 100% | 96% | 88% | 76% | 68% | 60% | 52% | 44% | 28% | 12% |
+
+| 62 fps (16ms), j = | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|---|
+| own host, appears | 100% | 100% | 80% | 52% | 20% | 0% | 0% |
+| own host, plays out | 68% | 36% | 16% | 0% | 0% | 0% | 0% |
+| 50 ms ping, appears | 100% | 100% | 88% | 72% | 56% | 40% | 28% |
+| 50 ms ping, plays out | 100% | 100% | 84% | 64% | 48% | 32% | 20% |
+| 100 and 200 ms ping, both | 100% | 96% | 88% | 80% | 64% | 44% | 24% |
+
+| 30 fps (33ms), j = | 0 | 1 | 2 |
+|---|---|---|---|
+| own host, both | 100% | 94% | 28% |
+| 50 ms ping, both | 100% | 64% | 32% |
+| 100 ms ping, both | 100% | 68% | 32% |
+| 200 ms ping, both | 96% | 64% | 32% |
+
+(j = -1, X still down on L, is the real reload in every cell. Online the
+fall with j is the press getting shorter, not the release getting earlier:
+X has to be down across one of the 100ms snapshots, and the whole burst,
+128ms from the trigger to the last shot, holds just one such interval.)
+
+So online it is sure when X goes down with the trigger or just after and
+comes up in the last frame or two before the third shot; a quick tap inside
+the burst works about as often as (its length / 100ms): a tap one shot long
+plays out at 64-88% of phases, depending on the rate. On your own host the
+reload always appears for a release in the clock's sure zone before the
+third shot (16ms + the held frame - one frame, as the fake reload after a
+knife) and never from 16ms + the held frame + an interval + two frames
+before it (a tap wholly inside the burst and up early is nothing at all),
+but it plays out only when the snapshot that brought the bit is still the
+base a shot's time later: at best 32% of phases at 125 fps, 68% at 62 and
+all of them at 30; otherwise it flickers for a few frames as the burst ends.
+The trigger held or tapped makes no difference, and nor does X going down
+with the trigger rather than after it (the shot goes first: the use code runs
+after the command's Pmove). X before the trigger with the magazine not full
+is a real reload instead of the burst. `+reload` is read by the same check
+as a level: down on L + 1 it is a real reload there on both sides at once,
+let go by then it is nothing, and it never fakes. In every fake the server
+fires exactly three rounds, loses exactly three, and is never reloading; the
+suite checks that for every run, and that prediction never aims while it is
+reloading (the aim returns with the correction: no gate is loosened).
+
 Fake bullet. What matters is how long after X the trigger goes out. X and
 the trigger in one command is a real shot, then the reload; the trigger one
 command or more later is fake until the client learns of the reload. Which
@@ -364,6 +464,14 @@ delays (cheats; the dev autoexec sets `sv_cheats 1`).
   predicted as before, and a fire tap after a quick action is always real.
 
 ## Where Peace and MW2 still differ
+
+- **Whether a burstload's reload plays out** is read from MW2's viewmodel
+  code (above), not watched in MW2. If MW2 in fact kept the reload when the
+  correction finds the gun still in its last shot, its burstload on a host
+  would be as easy as the "appears" rows, and Peace's picture, which goes
+  back to a predicted shot, would be stricter than MW2's there. A cut-short
+  one also differs in picture for a few frames: MW2 restarts its fire
+  animation, Peace's rifle shows the tail of the shot.
 
 - **The IW4x wild scope script** presses knife and X on the same frame while
   the gun is still coming back from equipment, with aim held. That knife is

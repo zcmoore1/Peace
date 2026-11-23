@@ -81,6 +81,10 @@ typedef struct {
 	// equipment) ends on this think.
 	qboolean	delayedAction;
 	qboolean	recoveryEnds;
+	// burstPending: MW2's BurstFirePending (576a70) as PM_Weapon asks it once
+	// a think, after the time step and before its checks (44c444-44c4b3): a
+	// burst is under way and none of the checks is run.
+	qboolean	burstPending;
 } pml_t;
 
 extern	pmove_t		*pm;

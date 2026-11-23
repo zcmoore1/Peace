@@ -80,13 +80,16 @@ perk mask is a predicted/replayed playerstate field. The current build (MW2's
 event rings: four playerstate events and every entity's own ring, with the
 view kick's cgame import and client-side bullets, MW2's spawn class speed and
 stance, the M16's per-instance underbarrel ammunition, MW2's mode switch, its
-frozen flag and its held trigger) uses protocol **93**, game **-22**.
+frozen flag, its held trigger, the G19's select fire and MW2's burst fire)
+uses protocol **94**, game **-23**. Protocol 94 / game -23 added MW2's burst
+fire: a burst gun's pending trigger pull, `PWF_PENDING_PULL` in `weapFlags`
+(now 5 bits; MW2's `weapHandFlags` bit 0, netfield 0x7427E0).
 Protocol 93 adds the select-fire button latch, two animation sequences and the
 committed mode of each inventory slot. Protocol
 92 / game -21 added MW2's held trigger: the shot count `weaponShotCount` (3
 bits, MW2's netfield 0x742600), the trigger's last step `WA_ATTACK_HELD` in
 `weaponAction` (now 11 bits) and the segmented reload's stop request
-`PWF_RELOAD_INTERRUPT` in `weapFlags` (now 3 bits). Protocol 91 / game -20
+`PWF_RELOAD_INTERRUPT` in `weapFlags` (3 bits then). Protocol 91 / game -20
 added the frozen flag (`pm_flags` 19 bits), protocol 90 / game -19
 added the mode switch, protocol 89 / game -18 the underbarrel
 fields, protocol 88 / game -17 added stance, protocol 87 / game -16 added

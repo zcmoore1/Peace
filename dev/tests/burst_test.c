@@ -846,11 +846,12 @@ static void TestCarriedCount(void) {
 /* A ladder grabbed inside the burst (MW2's ladder holster is its change check's
  * ladder branch, 0x578C72, skipped with the rest while a burst is pending,
  * 0x44C444-0x44C4B3): the burst plays out on the ladder, its shots on c and
- * 2c, and the gun is put away only after the last one has left: no later than
- * the think that shot's time runs out, the cooldown's first, where MW2's
- * change gate opens (0x578C31; which think in between is the ladder's own
- * rule, dev/LADDERS.md). The count and the pending pull are not the ladder's
- * to write (section 3 of the burst's table: kept). */
+ * 2c, and the drop begins on the think the last shot's time runs out, the
+ * cooldown's first: MW2's change gate refuses the shot while it has time left
+ * (0x578C31) and takes the cooldown's READY (0x578C0A-0x578C47). The count
+ * and the pending pull are not the ladder's to write (section 3 of the
+ * burst's table: kept). The trigger held on the ladder, the hang and the one
+ * round on the jump off are ladder_test.c's (TestHeldTriggerBurst). */
 static void TestLadder(void) {
 	int r, cmd, began;
 	EACH_RATE {

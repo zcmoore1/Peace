@@ -5621,6 +5621,10 @@ static void PM_FinishWeaponChange( void ) {
 // WEAPON_LADDER), which the held trigger's lock never lets it reach
 // (PM_LockGun). And it is the ladder's only while the ladder is held
 // (PM_LadderLeft).
+// Like every check of MW2's PM_Weapon it is not run while a burst is pending
+// (44c444-44c4b3; pml.burstPending): a burst gun's other shots leave on the
+// ladder, and the drop begins on the think the last one's time runs out, the
+// burst cooldown's READY, which the gate takes (578c0a-578c47).
 static qboolean PM_LadderWeapon( void ) {
 	int state = pm->ps->stats[STAT_LADDER];
 	if ( (state & LADDER_ATTACHED) &&
@@ -6277,8 +6281,9 @@ static void PM_Weapon( void ) {
 	pml.burstPending = BG_BurstFirePending( pm->ps );
 	PM_UpdateWeaponAction();
 	// The ladder's holster is MW2's change check too (its ladder branch,
-	// 578c72): a burst under way holds its start back, and the burst plays
-	// out on the ladder. One already going down, or down, is the ladder's.
+	// 578c72): a burst under way holds its start back (PM_LadderWeapon), and
+	// the burst plays out on the ladder. One already going down, or down, is
+	// the ladder's.
 	ladderWeapon = PM_LadderWeapon();
 
 	// The requested destination came back to the gun still in our hands.
@@ -6700,7 +6705,10 @@ static void PM_Weapon( void ) {
 	// spent there. No gun with a selector bursts today (the G19 is semi or
 	// full auto by its slot's mode, BG_SlotFireType, and neither is ever
 	// pending), so this changes nothing of it.
-	if (selectorPress && !pml.burstPending && BG_HasSelector( pm->ps, pm->ps->weapon ) &&
+	if ( pml.burstPending ) {
+		selectorPress = qfalse;
+	}
+	if (selectorPress && BG_HasSelector( pm->ps, pm->ps->weapon ) &&
 	    !(pm->ps->weaponAction & WA_TYPE_MASK) &&
 	    (pm->ps->weaponstate == WEAPON_READY || pm->ps->weaponstate == WEAPON_FIRING)) {
 		pm->ps->weaponAnimSeq = (pm->ps->slotFlags[pm->ps->stats[STAT_ACTIVE_SLOT]] & BG_GUN_AUTO)

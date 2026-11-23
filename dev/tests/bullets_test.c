@@ -295,7 +295,8 @@ static void Run( const run_t *r ) {
 	}
 }
 
-static const int guns[] = { WP_MACHINEGUN, WP_G19, WP_SHOTGUN, WP_RAILGUN, WP_LIGHTNING, WP_M40A3, WP_M16
+static const int guns[] = { WP_MACHINEGUN, WP_G19, WP_SHOTGUN, WP_RAILGUN, WP_LIGHTNING, WP_M40A3
+	, WP_M16
 #ifdef MISSIONPACK
 	, WP_CHAINGUN
 #endif

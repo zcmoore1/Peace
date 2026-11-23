@@ -52,7 +52,8 @@ int bs_damageCount, bs_bulletHealth[BS_CLIENTS];
 float bs_markRange[BW_MAX_MARKS];	/* each mark's distance from its shot's start, as the engine traced it */
 int bs_damageDealt[BW_MAX_MARKS];	/* the health each recorded damage took */
 static qboolean BS_BulletWeapon( int weapon ) {
- return weapon==WP_MACHINEGUN || weapon==WP_G19 || weapon==WP_SHOTGUN || weapon==WP_M40A3 || weapon==WP_M16
+ return weapon==WP_MACHINEGUN || weapon==WP_G19 || weapon==WP_SHOTGUN || weapon==WP_M40A3
+  || weapon==WP_M16
 #ifdef MISSIONPACK
   || weapon==WP_CHAINGUN
 #endif

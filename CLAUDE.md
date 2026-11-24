@@ -380,14 +380,32 @@ source for MW2 behaviour; the owner rejects it.
   The one path that pays a raise with the trigger held is MW2's too: a ladder
   grabbed on the bolt's own think has its drop finished by that delayed action
   at once (step 2c, MW2's path A), the hands empty, and the raise after
-  leaving waits under the lock. `BG_LADDER_DROP_TIME` stays 100 (owner's call;
+  leaving waits under the lock. A gun's drop already running at the grab is
+  not begun again: MW2's `PM_BeginWeaponChange` returns for any drop state
+  (0x575F96-0x575FB1), so a swap's drop keeps its own time
+  (`PM_LadderKeepsDrop`: nothing is marked or restamped). While the ladder is
+  held it is the ladder's all the same: nothing cancels it there, a Y back
+  included (MW2's ladder branch returns before its cancel), the lock asks it
+  like any drop, and its end is `WEAPON_LADDER` (MW2's `FinishWeaponChange`
+  with PMF_LADDER, 0x576388), from which the gun the command names is raised
+  when the ladder is left; left inside it, it is the swap's drop again.
+  `BG_LADDER_DROP_TIME` stays 100 (owner's call;
   MW2's path never reads the length). cgame draws a holster that has run out
   and hangs as it draws `WEAPON_LADDER`, the gun out of view
-  (`BG_LadderHolsterDown`, picture only: pmove never reads it), brings a
+  (`BG_LadderHolsterDown`, picture only: pmove never reads it; it asks the
+  lock's own conditions, because a holster still running passes through
+  weaponTime 1 by itself at 11 and 33ms commands), keeps it out of view for
+  what is left of that drop when equipment takes it on the leaving command
+  (`CG_WeapAnim_LadderStowed`), brings a
   cancelled one home up its drop clip with the gun READY, the 24-unit lowering
   with it, and has the gun in hand at once when a shot or the action takes it
-  out of a hung one. Never add a trigger test, a timer or a weapon id to any
-  of this, never let the lock skip the holster again, and never raise the gun
+  out of a hung one. A holster begun while that lowering is still on screen (a
+  ladder grabbed again inside the return) takes the gun down from where it
+  is, and a gun with no view model reads the same eased lowering: neither
+  ever moves 24 units in a frame. Never add a trigger test, a timer or a
+  weapon id to any
+  of this, never let the lock skip the holster again, never restamp a running
+  drop for the ladder, and never raise the gun
   on a path the cancel covers.
 - **Clip frame ranges are data.** They live in the `.cfg` beside the model and
   are read by `CG_WeapAnim_RegisterClips`. Re-exporting a model must never mean
@@ -1374,7 +1392,8 @@ source for MW2 behaviour; the owner rejects it.
   prediction corrections. Other bitmask stats still have the bit-15 trap.
 - `STAT_LADDER` packs attachment, holster destination, jump separation latch,
   and 12-bit inward-facing yaw into bits 0–14. No bit 15, no extra pm_flags.
-  Ladder contact stamps `BG_LADDER_DROP_TIME` before the unchanged note pass;
+  Ladder contact stamps `BG_LADDER_DROP_TIME` before the unchanged note pass
+  (a gun's drop already running keeps its own time and gets no mark);
   its destination completes before queued ammo fill, just like a normal holster.
   Like any weapon change it waits for a latched quick action (MW2's
   CheckForChangeWeapon refuses the melee and offhand states) and for a shot's
@@ -1521,8 +1540,18 @@ shot on the command the ladder lets go (`TestHeldTopExit`: every way off is
 the same cancel); the leaving command's knife, frag, reload and Y,
 and a Masterkey's holster left toward another gun, no mode change
 (`TestLadderLeavingCommand`); and a hang and its cancel replayed from a
-snapshot (`TestHeldPredictionReplay`). `TestHeldTriggerBurst` is the burst
-gun there, at the same four rates: the M16 rifle's burst playing out on a
+snapshot (`TestHeldPredictionReplay`). `TestSwapDropOnLadder` is a swap's drop
+already running at the grab: its own time across the grab, `WEAPON_LADDER` at
+its end and the named gun's raise after the jump; the jump inside it; Y back
+on the ladder (no cancel there, the cancel on the leaving command); with the
+trigger held from a spent pull, hung and fired on the jump (Y back) or ended
+in the empty hands (no Y back); and equipment's drop, which is no hang.
+`TestG19Ladder` is the G19 with Select Fire: in semi the holster hangs and the
+jump's command fires, in auto (set through the real selector) it never hangs,
+and a ladder grabbed during the mode switch does what is measured today
+(before the click's command the switch is cancelled, on it the hands are empty
+at once and the mode is not committed, after it the new mode stays).
+`TestHeldTriggerBurst` is the burst gun there, at the same four rates: the M16 rifle's burst playing out on a
 ladder grabbed inside it, the drop on the last shot's crossing (the
 cooldown's think), hung with the trigger held since the first shot for no
 time, 3 seconds and 10, and the jump's command firing one round (the count 3
@@ -1604,10 +1633,23 @@ its drop clip and the lowering over its own time, held at the drop's end and
 stowed for 3 seconds of the lock, then in hand at once into the shot or the
 action, home up the drop with the trigger let go (the lowering following the
 clip, never a snap), crossfaded from the pose shown out of a holster still on
-screen, and kept to its end toward another gun. `equipment_view_test.c`'s
+screen, and kept to its end toward another gun; grabbed again inside the
+return (out of a hang let go on the leaving command, and out of a holster left
+with the trigger up) it goes down from the lowering and the pose on screen, and
+the raise after `WEAPON_LADDER` carries no lowering. `TestLadderKeepsDrop`
+(which pinned the old ladder restamp of a running drop as `TestRestampLower`)
+is a swap's drop, or the draw it reversed, running on at its own fit across a
+ladder grab. `equipment_view_test.c`'s
 `TestLadderView` draws the same through the real `CG_AddViewWeapon`: lowered
 24 units over the holster, not drawn in `WEAPON_LADDER` or hung, the layers
-running on under it.
+running on under it, the two ways grabbed again and the raise after the empty
+hands; `TestLadderViewEdges` is the holster's last millisecond at 11ms commands
+(drawn with the trigger up or let go inside it, stowed under the lock), the
+frag pressed on the leaving command out of a hang (no gun drawn) and an
+ordinary swap's drop at weaponTime 1 (drawn); `TestLadderPlainGun` is a gun
+with no view model (eased home, grabbed again from where it is). That test
+defines every symbol `cg_weapons.c` names and is linked without
+`-Wl,--gc-sections`, as MSVC needs.
 The glide return is compared frame by frame with the ordinary sprint exit
 from the same posture (carry, loop, exit under way, partial entry), in both
 rendering paths, for SPAS and M300.

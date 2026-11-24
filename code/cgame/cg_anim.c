@@ -98,6 +98,8 @@ static qboolean      cg_animContextValid;
 static int           cg_animClient, cg_animSpawn, cg_animTeleport, cg_animSlot, cg_animAttachments;
 static int           cg_dropLock, cg_dropDuration;	// the drop as last fitted
 static float         cg_ladderLower, cg_ladderLowerFrom;	// the ladder holster's own lowering, on screen and where its return began
+static float         cg_ladderLowerStart;	// the lowering on screen when the holster now going down began
+static qboolean      cg_ladderHolster;	// the last picture was a ladder holster going down or hung
 static qboolean      cg_ladderStowed;	// the last picture was a ladder holster run out, the gun out of view
 // Base-action releases start from the last picture, including a blend already
 // in progress. Draw/drop cancellation stays with the move layer's clip return.
@@ -172,8 +174,8 @@ void CG_WeapAnim_Reset( void ) {
 	cg_retainedActive = cg_retainedDrop = cg_previousSprint = qfalse;
 	cg_animContextValid = qfalse;
 	cg_dropLock = cg_dropDuration = 0;
-	cg_ladderLower = cg_ladderLowerFrom = 0.0f;
-	cg_ladderStowed = qfalse;
+	cg_ladderLower = cg_ladderLowerFrom = cg_ladderLowerStart = 0.0f;
+	cg_ladderHolster = cg_ladderStowed = qfalse;
 	CG_WeapAnim_ResetReturn();
 }
 
@@ -185,8 +187,8 @@ static void CG_WeapAnim_WeaponChanged( int weapon ) {
 	Com_Memset( cg_weapLayers, 0, sizeof(cg_weapLayers) );
 	cg_retainedActive = cg_retainedDrop = cg_previousSprint = qfalse;
 	cg_retainedRate = 1.0f;
-	cg_ladderLower = cg_ladderLowerFrom = 0.0f;
-	cg_ladderStowed = qfalse;
+	cg_ladderLower = cg_ladderLowerFrom = cg_ladderLowerStart = 0.0f;
+	cg_ladderHolster = cg_ladderStowed = qfalse;
 	CG_WeapAnim_ResetReturn();
 
 	// Start with idle on base layer at full weight.
@@ -296,9 +298,10 @@ static void CG_WeapAnim_BeginHolster(const weapAnimDef_t *def, animLayer_t *move
 	move->targetWeight = 1.0f;
 }
 
-// Pmove restamped the running drop (a ladder grabbed during it), or
-// BG_HolsterTime handed it to another rule (a grenade keeping a heavy
-// holster, once less of it is left than a quick drop).
+// BG_HolsterTime handed the running drop to another rule (a grenade keeping a
+// heavy holster, once less of it is left than a quick drop; a ladder's
+// holster left toward another gun), or a snapshot shows its lock restamped.
+// (A ladder grabbed during a drop restamps nothing: PM_LadderKeepsDrop.)
 // Carry on from where the old fit has the picture, so the rest of the clip
 // spans what is left of the lock. The fit stays BG_HolsterTime.
 static float CG_WeapAnim_DropFit(const animLayer_t *move, float f) {
@@ -309,8 +312,8 @@ static float CG_WeapAnim_DropFit(const animLayer_t *move, float f) {
 }
 static void CG_WeapAnim_ReanchorDrop(const playerState_t *ps, animLayer_t *move, int msec) {
 	int duration = BG_HolsterTime(ps);
-	// The old fit runs on by this frame at most: a lock pmove restamped lower
-	// (a ladder grab) must not skip the picture.
+	// The old fit runs on by this frame at most: a lock found lower than the
+	// frame's step leaves it must not skip the picture.
 	int lock = ps->weaponTime > cg_dropLock - msec ? ps->weaponTime : cg_dropLock - msec;
 	float p, f;
 	if (lock > cg_dropLock) lock = cg_dropLock;
@@ -721,11 +724,16 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	// animation with no blend, and its drop has played out: WeaponRunXModelAnims,
 	// 59b5e0). A drop that runs on toward another gun keeps the lowering to
 	// its end.
+	// A holster starts from the lowering on screen, like its drop clip
+	// (CG_WeapAnim_BeginHolster): a ladder grabbed again while a cancelled
+	// holster is still coming home takes the gun down from where it is, over
+	// the new holster's time, never from the top.
 	if ( ( ps->stats[STAT_LADDER] & LADDER_HOLSTER ) && ps->weaponstate == WEAPON_DROPPING ) {
 		float fraction = CG_WeapAnim_HoldsDrop() ? 0.0f : 1.0f - (float)ps->weaponTime / BG_LADDER_DROP_TIME;
 		if ( fraction < 0.0f ) fraction = 0.0f;
 		if ( fraction > 1.0f ) fraction = 1.0f;
-		cg_ladderLower = cg_ladderLowerFrom = fraction;
+		if ( !cg_ladderHolster ) cg_ladderLowerStart = cg_ladderLower;
+		cg_ladderLower = cg_ladderLowerFrom = cg_ladderLowerStart + ( 1.0f - cg_ladderLowerStart ) * fraction;
 	} else if ( ps->weaponstate == WEAPON_LADDER ) {
 		cg_ladderLower = cg_ladderLowerFrom = 0.0f;	// hidden; the raise after it is its own clip
 	} else if ( ps->weaponstate != WEAPON_DROPPING ) {
@@ -742,7 +750,8 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 		}
 		if ( cg_ladderLower < 0.0f ) cg_ladderLower = cg_ladderLowerFrom = 0.0f;
 	}
-	cg_ladderStowed = BG_LadderHolsterDown( ps );
+	cg_ladderHolster = ( ps->stats[STAT_LADDER] & LADDER_HOLSTER ) && ps->weaponstate == WEAPON_DROPPING;
+	cg_ladderStowed = CG_WeapAnim_LadderStowed( ps );
 }
 
 // ---------------------------------------------------------------------------
@@ -1007,6 +1016,20 @@ qboolean CG_WeapAnim_HoldsDrop(void) {
 // clips have it, 1 all the way down.
 float CG_WeapAnim_LadderLower(void) {
 	return cg_ladderLower;
+}
+
+// The gun is out of view: a ladder's holster run out and hung under the held
+// trigger's lock (BG_LadderHolsterDown), and what is left of that drop when
+// something else takes it. Equipment pressed on the command the ladder is
+// left keeps the drop and its last 1ms for its own (MW2's OffHandInit,
+// 578e15-578e76), with the ladder's mark gone: MW2's drop animation was
+// started once and has played out, and nothing starts it again
+// (WeaponRunXModelAnims, 59b5e0), so the gun stays stowed until the state
+// leaves that drop.
+qboolean CG_WeapAnim_LadderStowed( const playerState_t *ps ) {
+	return BG_LadderHolsterDown( ps ) ||
+		( cg_ladderStowed && ps->weaponstate == WEAPON_DROPPING && ps->weaponTime <= 1 &&
+		  ps->weapon == cg_weapAnimWeapon );
 }
 
 qboolean CG_WeapAnim_Apply( playerState_t *ps, refEntity_t *entity, int msec ) {

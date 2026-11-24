@@ -3663,20 +3663,40 @@ int BG_HolsterTime( const playerState_t *ps ) {
 ==============
 BG_LadderHolsterDown
 
-The ladder's holster has run its time and only the held trigger's lock keeps
+The ladder's drop has run its time and only the held trigger's lock keeps
 it a drop (PM_WeaponTimeAdjust re-arms weaponTime 1 on every think, for as
-long as the trigger stays down). MW2 starts its quick-drop animation once,
+long as the trigger stays down): the ladder's own holster, or a gun's drop it
+found running and left its time (PM_LadderKeepsDrop), which reads the same
+with the ladder held. MW2 starts its quick-drop animation once,
 when the drop begins (PM_BeginWeaponChange, 576149), and a finished one-shot
 holds its last frame (WeaponRunXModelAnims, 59b5e0), so the gun went down in
 the drop's time and stays down, stowed, however long the state hangs. Picture
 only: cgame draws it as it draws WEAPON_LADDER, the look a ladder has with the
 trigger let go. Pmove never reads it: the state is still the drop, the gun
 still in hand.
+
+A holster still running passes through weaponTime 1 by itself whenever a step
+lands on it (100 - 9 * 11, 100 - 3 * 33), so the time alone does not say it has
+hung. The lock does: the trigger down on the last command, the pull's shots
+all fired and a round in the clip (PM_WeaponTimeAdjust's conditions, as far as
+the playerState carries them; the command's gun is not in it). With those the
+next think keeps it; without them it is a holster in its last millisecond,
+still drawn.
 ==============
 */
 qboolean BG_LadderHolsterDown( const playerState_t *ps ) {
-	return ( ps->stats[STAT_LADDER] & LADDER_HOLSTER ) && ps->weaponstate == WEAPON_DROPPING &&
-		ps->weaponTime <= 1;
+	int gun = ps->weapon, fireType;
+	if ( !( ps->stats[STAT_LADDER] & ( LADDER_HOLSTER | LADDER_ATTACHED ) ) || ps->weaponstate != WEAPON_DROPPING ||
+	     ( ps->weaponAction & WA_TYPE_MASK ) || ps->weaponTime > 1 || gun <= WP_NONE || gun >= MAX_WEAPONS ) {
+		return qfalse;
+	}
+	// the gun's fire type by its slot's committed mode, as the lock reads it
+	fireType = BG_WeaponFireType( gun );
+	if ( BG_HasSelector( ps, gun ) && ( ps->slotFlags[ps->stats[STAT_ACTIVE_SLOT]] & BG_GUN_AUTO ) ) {
+		fireType = BG_FIRE_FULLAUTO;
+	}
+	return ( ps->weaponAction & WA_ATTACK_HELD ) && BG_ShotLimitReached( fireType, ps->weaponShotCount ) &&
+		ps->ammo[gun] > 0;
 }
 
 // MW2's alt switch times. They are its data and are never raised to the swap
@@ -5494,9 +5514,10 @@ static void PM_BeginWeaponChange( int weapon ) {
 	}
 
 	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
-		// Already going down. If where we are going now has a quicker holster -
-		// a ladder grabbed part way through a heavy gun's holster - finish as
-		// that one. Shortened only, never lengthened. A drop a pickup's take
+		// Already going down. If where we are going now has a quicker holster,
+		// finish as that one (a ladder is no such place: it leaves a running
+		// drop its time, PM_LadderKeepsDrop). Shortened only, never
+		// lengthened. A drop a pickup's take
 		// emptied keeps running to its end (MW2's BeginWeaponChange returns
 		// for any drop before it looks at the weapon); only a quick action
 		// asked for out of it takes its own time.
@@ -5625,8 +5646,32 @@ static void PM_FinishWeaponChange( void ) {
 // (44c444-44c4b3; pml.burstPending): a burst gun's other shots leave on the
 // ladder, and the drop begins on the think the last one's time runs out, the
 // burst cooldown's READY, which the gate takes (578c0a-578c47).
+//
+// A gun's drop already running on a think that finds the ladder held is not
+// begun again: MW2's PM_BeginWeaponChange returns for any drop state before
+// it looks at anything else (575f96-575fb1), so a swap's drop keeps the time
+// and the kind it had. While the ladder is held it is the ladder's all the
+// same: the branch returns before the double-tap cancel is reached (578c67
+// before 578d00), so a command back on the gun in hand cancels nothing there,
+// and its end is the ladder's empty hands (FinishWeaponChange with PMF_LADDER
+// makes the weapon 0, 576388: WEAPON_LADDER), from which the gun the command
+// names is raised when the ladder is left, on its ordinary raise. The lock
+// asks it like any drop (the command names another gun unless it came back).
+// Left before it ends it is the swap's drop again, with the time it has left
+// (PM_LadderKeepsDrop reads the ladder each think; nothing is marked).
+// Equipment's drop is none of this: MW2's offhand states are refused by the
+// change check, the ladder's branch included (578bcf-578c04), and the grenade
+// comes out on the ladder.
+static qboolean PM_LadderKeepsDrop( void ) {
+	return ( pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED ) && !( pm->ps->stats[STAT_LADDER] & LADDER_HOLSTER ) &&
+		pm->ps->weaponstate == WEAPON_DROPPING && !( pm->ps->weaponAction & WA_TYPE_MASK );
+}
+
 static qboolean PM_LadderWeapon( void ) {
 	int state = pm->ps->stats[STAT_LADDER];
+	if ( PM_LadderKeepsDrop() ) {
+		return qtrue;
+	}
 	if ( (state & LADDER_ATTACHED) &&
 		!( pm->ps->weaponAction & WA_TYPE_MASK ) && !pml.recoveryEnds && !pml.burstPending &&
 		!(state & LADDER_HOLSTER) && pm->ps->weaponstate != WEAPON_LADDER && PM_WeaponChangeOpen() ) {
@@ -6415,7 +6460,8 @@ static void PM_Weapon( void ) {
 	// timing: the shared note runner above is the only thing that can clear the
 	// freshly stamped positive lock on the grab think.
 	if ( ladderWeapon ) {
-		if ( (pm->ps->stats[STAT_LADDER] & LADDER_HOLSTER) && pm->ps->weaponTime <= 0 ) {
+		// the ladder's own holster, or a drop it found running (PM_LadderKeepsDrop)
+		if ( pm->ps->weaponstate == WEAPON_DROPPING && pm->ps->weaponTime <= 0 ) {
 			pm->ps->stats[STAT_LADDER] &= ~LADDER_HOLSTER;
 			pm->ps->weaponstate = WEAPON_LADDER;
 			pm->ps->weaponAnimTime = -1;

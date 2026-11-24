@@ -54,7 +54,8 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
   clipped downward slide from being normalized into an upward bounce/re-grab.
   This does not release a midair hang or require a timer to reattach.
 - Contact stamps a positive, universal `BG_LADDER_DROP_TIME` and enters ordinary
-  `WEAPON_DROPPING`. The existing animation-note pass then runs unchanged. Its
+  `WEAPON_DROPPING` (a gun's drop already running is left its own time, below).
+  The existing animation-note pass then runs unchanged. Its
   lock release can finish the transition into `WEAPON_LADDER` before queued ammo
   fill, just as a normal holster can. No NAC branch, reload-time inspection, fake
   reload, artificial desync, or zoomload feature is added.
@@ -95,6 +96,25 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
     equipment takes the drop as it is and is prepared on the next command
     (MW2's offhand check runs before the cancel). With the command naming
     another gun the drop runs out the time it had and raises that one.
+  - **A drop already running keeps its time.** The ladder branch asks for the
+    change to weapon 0 on every think, and MW2's `PM_BeginWeaponChange` returns
+    for any drop state before it looks at anything else (0x575F96-0x575FB1).
+    So a swap's drop under way at the grab is not begun again and not
+    restamped as the 100ms holster (`PM_LadderKeepsDrop`; Peace restamped it
+    before): it runs out its own time. While the ladder is held it is the
+    ladder's all the same. Nothing cancels it there, a Y back to the gun in
+    hand included (the branch returns before the double-tap cancel; MW2's
+    client cannot send that Y on a ladder, Peace's does); the lock asks it
+    like any drop (with the command back on the gun, the trigger held and the
+    pull spent it hangs, and the jump fires); and its end is the ladder's
+    empty hands (`FinishWeaponChange` with PMF_LADDER, 0x576388:
+    `WEAPON_LADDER`), from which the gun the command names is raised on its
+    ordinary raise when the ladder is left. Left before it ends it is the
+    swap's drop again: it ends on the command it always would have and raises
+    that gun, or is cancelled if the command is back on the gun in hand. SPAS
+    to machinegun with the ladder grabbed 3 commands in: empty hands 104, 52,
+    26 and 13 commands after Y at 8, 16, 33 and 66ms (it was 16, 10, 7 and 5).
+    Equipment's drop is none of this: the grenade comes out on the ladder.
 - A grab with the knife or a grenade out takes nothing from it. MW2's ladder
   drop is a weapon change, and `CheckForChangeWeapon` refuses every melee and
   offhand state and the quick raise after one (iw4x.exe 0x578BC0-0x578C04,
@@ -145,6 +165,19 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
   0x578939-0x5789CD; `ladder_test.c`'s `TestHeldTriggerBurst`). Let go on the
   ladder, or pressed afresh there (the pending pull keeps the lock off,
   0x5789DD), the drop finishes and leaving raises the gun.
+- The G19 with Select Fire is both cases in one gun (`TestG19Ladder`), because
+  its fire type is its slot's committed mode: in semi the holster hangs under
+  the held trigger and the jump's command fires (no bolt, so nothing is ever
+  owed); in auto it never hangs. A ladder grabbed during the mode switch
+  (`WEAPON_SELECTING`) is not an MW2 case; this is what Peace does, measured
+  and pinned: the switch is no shot, so the holster begins on the grab's
+  command and ends the switch, whose clock stops with the state. Grabbed
+  before the click's command, the click never lands and the mode is not
+  changed (a ladder left inside that holster gives the gun back READY in the
+  mode it had). Grabbed on the click's own command, the click takes the
+  holster's lock, so the hands are empty on that command, and the mode is not
+  committed (the ladder's block ends the think first). Grabbed after the
+  click, the mode is the new one already and stays.
 - The original reload helpers, swap helpers, note runner and their non-ladder
   ordering are unchanged. A ladder just owns the weapon while the hands are busy.
   Leaving with the drop ended (`WEAPON_LADDER`) raises the selected weapon using
@@ -172,6 +205,32 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
   the holster was still on screen, and at once out of a hung one, where there
   was no gun on screen to flow from (the gun is in hand, firing or being
   pumped, on that frame).
+  - **Grabbed again while it is still coming home**, the new holster takes the
+    gun down from the lowering and the pose on screen, over its own time
+    (`cg_anim.c`, `cg_ladderLowerStart`): it never starts again from the top.
+    Reachable by sliding to the floor inside the holster and pressing forward
+    again, or slipping off and back on at a ladder's edge.
+  - **A gun with no view model** (the machinegun and the Quake 3 guns) has only
+    the 24-unit lowering for a picture. It reads the same eased value
+    (`CG_WeapAnim_LadderLower`), so a cancelled holster brings it home over the
+    move layer's 40ms fade instead of in one frame; it has no raise, and is at
+    rest at once when the ladder is left with the hands empty.
+  - **"Run out and hung" is the lock's, not the clock's.** A holster still
+    running passes through weaponTime 1 by itself whenever a step lands on it
+    (11ms commands: 100 - 9 * 11; 33ms: 100 - 3 * 33). `BG_LadderHolsterDown`
+    therefore asks what the lock asks, as far as the playerState carries it:
+    the trigger down on the last command, the pull's shots all fired, a round
+    in the clip. With the trigger up that frame is a holster in its last
+    millisecond and is drawn. With them it is stowed one frame before the
+    lock first re-arms it (the next think keeps it; the gun is 99% down).
+  - **Equipment pressed on the leaving command out of a hang** takes the drop
+    and its last 1ms for itself, the ladder's mark gone (MW2's `OffHandInit`
+    keeps a running drop's time), and is prepared on the next command. The
+    gun stays out of view for that think (`CG_WeapAnim_LadderStowed`): MW2's
+    drop animation played out long before and nothing starts it again.
+  - **A swap's drop the ladder found running** (above) is drawn as the swap's
+    drop, at its own rate to its own end, with no ladder lowering; the gun is
+    out of view when it ends in the empty hands, and stowed if it hangs.
 
 Tuning lives in `bg_public.h`. MW2's: the 128 units/s jump push
 (`jump_ladderPushVel`), its x0.75 rise and the ±100° look (`bg_ladder_yawcap`).
@@ -210,9 +269,15 @@ trigger let go on the ladder and on the jump's command; a full-auto gun never
 hung; a holster left with the trigger up; the grab and the jump on one command;
 the top climbed off with the trigger held (every way off is the same cancel);
 the leaving command's knife, frag, reload and Y; and a hang and its cancel
-replayed from a snapshot. The picture is checked in the loadout suite:
-`weapon_pose_test.c` (`TestLadderHeldPicture`) and, through the real
-`CG_AddViewWeapon`, `equipment_view_test.c` (`TestLadderView`).
+replayed from a snapshot. `TestSwapDropOnLadder` is a swap's drop already
+running at the grab (its own time, the empty hands at its end, the jump inside
+it, Y back on the ladder, the hang and the jump's shot with the trigger held),
+and `TestG19Ladder` the G19 in semi, in auto and grabbed during its mode
+switch. The picture is checked in the loadout suite:
+`weapon_pose_test.c` (`TestLadderHeldPicture`, with the ladder grabbed again
+inside the return and the raise after the empty hands; `TestLadderKeepsDrop`)
+and, through the real `CG_AddViewWeapon`, `equipment_view_test.c`
+(`TestLadderView`, `TestLadderViewEdges`, `TestLadderPlainGun`).
 Linux: repeat with `LADDER_TEST_DEFINES=-DMISSIONPACK` to check the full stat layout.
 
 For the hands-on pass, try running sideways into a grab, falling onto it, a

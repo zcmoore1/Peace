@@ -61,6 +61,7 @@ qboolean CG_WeapAnim_Apply( playerState_t *ps, refEntity_t *entity, int msec ) {
 qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec ) { abort(); }
 qboolean CG_WeapAnim_HoldsDrop( void ) { abort(); }
 float CG_WeapAnim_LadderLower( void ) { abort(); }
+qboolean CG_WeapAnim_LadderStowed( const playerState_t *ps ) { abort(); }
 void CG_WeapAnim_RegisterClips( int weapon, qhandle_t hModel, const char *cfgPath ) { abort(); }
 void trap_CM_BoxTrace( trace_t *results, const vec3_t start, const vec3_t end, const vec3_t mins, const vec3_t maxs, clipHandle_t model, int brushmask ) { abort(); }
 clipHandle_t trap_CM_TempBoxModel( const vec3_t mins, const vec3_t maxs ) { abort(); }

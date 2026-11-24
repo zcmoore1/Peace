@@ -1561,7 +1561,13 @@ to 4), then its cooldown and the lock; the jump inside the drop; the grab in
 the cooldown and under the lock after it; and the three ways the gun is put
 away instead (let go on the ladder, the trigger tapped, a fresh press inside
 the burst, whose pending pull ends the drop with the trigger down and is a
-whole burst after the raise).
+whole burst after the raise). `TestSwapDropBurst` is the two together: Y
+inside the burst waits for it, the swap's drop begins on the last shot's
+crossing and the ladder grabbed inside it keeps its time; with Y back the
+held trigger hangs it and the jump fires one round, a pending pull ends it
+with the trigger down and is a whole burst after the raise, and without Y
+back it ends and the jump raises the other gun. `QuickTick` holds the
+picture's hang to pmove's after every think (`PictureAgrees`).
 
 `dev/tests/burst_test.c` (in `run-masterkey`) drives MW2's burst fire on the
 M16 rifle through the real `Pmove` and the client's selection at 8, 16 and

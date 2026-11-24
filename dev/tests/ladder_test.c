@@ -2067,6 +2067,95 @@ static void TestHeldTriggerBurst(int dt) {
     CHECK(fired[WP_M16] == 2 * b.limit && ps.weaponShotCount == b.limit);
     move.cmd.buttons = 0;
 }
+/* The burst and a swap's drop the ladder finds running, together (both are
+ * MW2's rules above, nothing new): Y asked for inside the M16 rifle's burst
+ * waits for it (no change check while a burst is pending, 0x44C444-0x44C4B3),
+ * and the swap's drop begins on the last shot's crossing, over the cooldown
+ * (0x578C0A-0x578C47), with its own time (BG_WeaponDropTime, MW2's 449). The
+ * ladder grabbed inside that drop keeps it (0x575F96-0x575FB1) and its end
+ * is weapon 0 (0x576388): WEAPON_LADDER. With Y back on the rifle the lock
+ * asks it like the ladder's own holster: the trigger held since the burst's
+ * first shot hangs it, and the jump's command fires one round (the count past
+ * the burst's limit), then the cooldown and the lock; a fresh press made
+ * inside the burst (the pending pull, 0x5789DD) keeps the lock off, so the
+ * drop ends with the trigger down and the pull it latched is a whole burst on
+ * the command after the rifle's raise; let go, the drop ends and the raise
+ * fires nothing. Without Y back the command names the machinegun, which the
+ * lock never takes (0x578AC4): the drop ends, and the jump raises the
+ * machinegun. At 8 and 16ms a step lands on the drop's last millisecond
+ * (449 - 1 is 56 * 8), where PictureAgrees holds the picture to the lock,
+ * pending pull included. Commands are counted from the drop's first. */
+static void TestSwapDropBurst(int dt) {
+    burst_t b = Burst(dt);
+    const int drop = BG_WeaponDropTime(WP_M16), D = Thinks(drop, dt), g = 3;
+    int mode, back, n, k, raise;
+    CHECK(drop > BG_LADDER_DROP_TIME && D > g + 2);
+    for (mode = BURST_HELD; mode <= BURST_PRESSED_AGAIN; mode++) {
+        for (back = 0; back < 2; back++) {
+            const qboolean latched = mode == BURST_PRESSED_AGAIN, held = mode != BURST_TAPPED;
+            BurstPull(&b);
+            move.cmd.weapon = WP_MACHINEGUN;            /* Y, on command 1 */
+            BurstTo(&b, mode, b.limit * b.c - 1);
+            move.cmd.buttons = BurstButtons(mode, 2);
+            QuickTick(dt); n = 0;                       /* the last shot's crossing: the swap's drop */
+            CHECK(!Attached() && ps.weapon == WP_M16 && ps.weaponstate == WEAPON_DROPPING && !Holstering());
+            CHECK(ps.weaponTime == drop && BG_HolsterTime(&ps) == drop);
+            CHECK(fired[WP_M16] == b.limit && ps.weaponShotCount == b.limit && Latched() == latched);
+            while (n < g - 1) { QuickTick(dt); n++; }
+            ToLadder(); QuickTick(dt); n++;             /* the grab: kept, its own time */
+            for (;;) {
+                CHECK(Attached() && ps.weapon == WP_M16 && ps.weaponstate == WEAPON_DROPPING && !Holstering());
+                CHECK(ps.weaponTime == drop - n * dt && ps.weaponTime > 0 && BG_HolsterTime(&ps) == drop);
+                CHECK(fired[WP_M16] == b.limit && ps.weaponShotCount == b.limit && Latched() == latched);
+                if (n == D - 1) break;
+                if (back && n == g) move.cmd.weapon = WP_M16;   /* Y back on the ladder */
+                QuickTick(dt); n++;
+            }
+            CHECK(!BG_LadderHolsterDown(&ps) || ps.weaponTime == 1);
+            QuickTick(dt); n++;                         /* the drop's crossing */
+            if (back && mode == BURST_HELD) {
+                /* hung under the lock, for as long as the trigger is held */
+                for (k = 0; k <= Thinks(500, dt); k++) {
+                    CHECK(Attached() && ps.weapon == WP_M16 && ps.weaponstate == WEAPON_DROPPING && !Holstering());
+                    CHECK(ps.weaponTime == 1 && BG_LadderHolsterDown(&ps) && ps.weaponShotCount == b.limit);
+                    CHECK(fired[WP_M16] == b.limit && !Latched() && (move.cmd.buttons & BUTTON_ATTACK));
+                    QuickTick(dt);
+                }
+                HeldJump(&b.h, &b.n);
+                BurstRound(&b);
+                continue;
+            }
+            CHECK(Attached() && ps.weapon == WP_M16 && ps.weaponstate == WEAPON_LADDER && ps.weaponTime == 0);
+            CHECK(!BG_LadderHolsterDown(&ps) && fired[WP_M16] == b.limit && Latched() == latched);
+            CHECK(ps.weaponShotCount == (back || mode != BURST_HELD ? 0 : b.limit));
+            for (k = 0; k < Thinks(300, dt); k++) {
+                QuickTick(dt);
+                CHECK(Attached() && ps.weaponstate == WEAPON_LADDER && fired[WP_M16] == b.limit && Latched() == latched);
+            }
+            if (back) {
+                /* the rifle's raise; the latched pull is a whole burst on the command after it */
+                BurstRaise(&b);
+                CHECK(Latched() == latched && (move.cmd.buttons & BUTTON_ATTACK) == (held ? BUTTON_ATTACK : 0));
+                QuickTick(dt);
+                if (latched) {
+                    CHECK(fired[WP_M16] == b.limit + 1 && ps.weaponShotCount == 1 && ps.weaponstate == WEAPON_FIRING && !Latched());
+                    for (k = 1; k < b.limit * b.c; k++) QuickTick(dt);
+                    CHECK(fired[WP_M16] == 2 * b.limit && ps.weaponShotCount == b.limit);
+                } else {
+                    CHECK(fired[WP_M16] == b.limit && ps.weaponstate == WEAPON_READY && ps.weaponTime == 0);
+                }
+            } else {
+                /* the machinegun the command names, on its own draw */
+                HeldJump(&b.h, &b.n);
+                raise = ps.weaponTime;
+                CHECK(ps.weapon == WP_MACHINEGUN && ps.weaponstate == WEAPON_RAISING && raise == BG_WeaponDrawTime(&ps));
+                CHECK(raise == BG_WeaponRaiseTime(WP_MACHINEGUN) || raise == BG_WeaponFirstRaiseTime(WP_MACHINEGUN));
+                CHECK(fired[WP_M16] == b.limit && Latched() == latched);
+            }
+            move.cmd.buttons = 0;
+        }
+    }
+}
 /* A swap's drop already running when the ladder is grabbed. MW2's ladder
  * branch asks for the change to weapon 0 on every think (0x578C54-0x578C67),
  * and PM_BeginWeaponChange returns for any drop state before it looks at
@@ -2453,6 +2542,7 @@ static void TestHeldTriggerHolster(int dt) {
     TestHeldTopExit(dt);
     TestLadderLeavingCommand(dt);
     TestSwapDropOnLadder(dt);
+    TestSwapDropBurst(dt);
     TestEmptyClipHolster(dt);
     TestG19Ladder(dt);
     TestHeldPredictionReplay(dt);

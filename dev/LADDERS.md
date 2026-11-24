@@ -165,6 +165,12 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
   0x578939-0x5789CD; `ladder_test.c`'s `TestHeldTriggerBurst`). Let go on the
   ladder, or pressed afresh there (the pending pull keeps the lock off,
   0x5789DD), the drop finishes and leaving raises the gun.
+  Y asked for inside the burst waits for it too, so the swap's drop begins on
+  the last shot's crossing; a ladder grabbed inside that drop keeps it (above)
+  and the lock asks it the same way: with Y back on the rifle a trigger held
+  since the first shot hangs it and the jump fires the one round, a fresh
+  press inside the burst ends it with the trigger down, and without Y back
+  the command names the other gun and it ends (`TestSwapDropBurst`).
 - The G19 with Select Fire is both cases in one gun (`TestG19Ladder`), because
   its fire type is its slot's committed mode: in semi the holster hangs under
   the held trigger and the jump's command fires (no bolt, so nothing is ever

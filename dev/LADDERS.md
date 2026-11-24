@@ -219,9 +219,15 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
     running passes through weaponTime 1 by itself whenever a step lands on it
     (11ms commands: 100 - 9 * 11; 33ms: 100 - 3 * 33). `BG_LadderHolsterDown`
     therefore asks what the lock asks, as far as the playerState carries it:
-    the trigger down on the last command, the pull's shots all fired, a round
-    in the clip. With the trigger up that frame is a holster in its last
-    millisecond and is drawn. With them it is stowed one frame before the
+    the trigger down on the last command, no burst gun's pending pull (the
+    latch keeps the lock off, iw4x.exe 0x5789DD), the pull's shots all fired
+    by the fire type the slot's mode gives (`BG_SlotFireType`, as the lock
+    reads it), a round in the clip. With the trigger up, or a fresh press
+    latched inside the M16 rifle's burst, that frame is a holster in its last
+    millisecond and is drawn. `ladder_test.c` runs the next think on a copy
+    after every think that leaves a ladder's drop at weaponTime 1 or less
+    with the trigger down (`PictureAgrees`), so the picture's hang and
+    pmove's never disagree. With them it is stowed one frame before the
     lock first re-arms it (the next think keeps it; the gun is 99% down).
   - **Equipment pressed on the leaving command out of a hang** takes the drop
     and its last 1ms for itself, the ladder's mark gone (MW2's `OffHandInit`

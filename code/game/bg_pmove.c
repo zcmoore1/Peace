@@ -3677,26 +3677,26 @@ still in hand.
 
 A holster still running passes through weaponTime 1 by itself whenever a step
 lands on it (100 - 9 * 11, 100 - 3 * 33), so the time alone does not say it has
-hung. The lock does: the trigger down on the last command, the pull's shots
-all fired and a round in the clip (PM_WeaponTimeAdjust's conditions, as far as
-the playerState carries them; the command's gun is not in it). With those the
-next think keeps it; without them it is a holster in its last millisecond,
-still drawn.
+hung. The lock does: the trigger down on the last command, no pending pull
+(PWF_PENDING_PULL keeps the lock off, 5789dd), the pull's shots all fired by
+the gun's fire type as its slot's mode gives it (BG_SlotFireType) and a round
+in the clip (PM_WeaponTimeAdjust's conditions, as far as the playerState
+carries them; the command's gun is not in it). With the trigger still down on
+the next command no new pull can latch before the lock asks (the press needs
+it up on this one), so with those the next think keeps it; without them it is
+a holster in its last millisecond, still drawn.
 ==============
 */
 qboolean BG_LadderHolsterDown( const playerState_t *ps ) {
-	int gun = ps->weapon, fireType;
+	int gun = ps->weapon;
 	if ( !( ps->stats[STAT_LADDER] & ( LADDER_HOLSTER | LADDER_ATTACHED ) ) || ps->weaponstate != WEAPON_DROPPING ||
 	     ( ps->weaponAction & WA_TYPE_MASK ) || ps->weaponTime > 1 || gun <= WP_NONE || gun >= MAX_WEAPONS ) {
 		return qfalse;
 	}
-	// the gun's fire type by its slot's committed mode, as the lock reads it
-	fireType = BG_WeaponFireType( gun );
-	if ( BG_HasSelector( ps, gun ) && ( ps->slotFlags[ps->stats[STAT_ACTIVE_SLOT]] & BG_GUN_AUTO ) ) {
-		fireType = BG_FIRE_FULLAUTO;
-	}
-	return ( ps->weaponAction & WA_ATTACK_HELD ) && BG_ShotLimitReached( fireType, ps->weaponShotCount ) &&
-		ps->ammo[gun] > 0;
+	// the lock's own terms (PM_WeaponTimeAdjust): the trigger, the pending
+	// pull, the shot limit by the slot's committed mode and the clip
+	return ( ps->weaponAction & WA_ATTACK_HELD ) && !( ps->weapFlags & PWF_PENDING_PULL ) &&
+		BG_ShotLimitReached( BG_SlotFireType( ps, gun ), ps->weaponShotCount ) && ps->ammo[gun] > 0;
 }
 
 // MW2's alt switch times. They are its data and are never raised to the swap

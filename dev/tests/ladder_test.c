@@ -934,7 +934,34 @@ static void TestLadderPush(int dt) {
  * think is still the quick raise's: 578bc9-578bf2). Nothing new starts on the
  * ladder meanwhile. The grab is real contact with the shipped
  * BSP, through the real Pmove. */
-static int fired[MAX_WEAPONS], suicides;
+static int fired[MAX_WEAPONS], suicides, pictureAsks;
+/* The picture's hang never disagrees with pmove's. cgame stows the gun of a
+ * ladder's drop that has run its time when BG_LadderHolsterDown says the
+ * held trigger's lock keeps it (MW2's drop animation has played out); pmove
+ * keeps it when PM_WeaponTimeAdjust locks it. After every think that leaves a
+ * drop on the ladder at weaponTime 1 or less, the trigger down, one more
+ * think on a copy with the same command (still on the ladder, still naming
+ * the gun in hand: what the playerState cannot carry) hangs it, a drop at
+ * weaponTime 1, exactly when BG_LadderHolsterDown said so: the lock's terms
+ * as pmove asks them, the burst's pending pull and the slot's mode
+ * included. */
+static void PictureAgrees(int dt) {
+    const playerState_t save = ps;
+    const pmove_t saveMove = move;
+    qboolean down, hung, still;
+    if (ps.weaponstate != WEAPON_DROPPING || ps.weaponTime > 1 || !Attached() ||
+        !(move.cmd.buttons & BUTTON_ATTACK) || move.cmd.upmove > 0 ||
+        BG_RequestedWeapon(&ps, move.cmd.weapon) != ps.weapon ||
+        BG_RequestedSlot(&ps, move.cmd.weapon) != ps.stats[STAT_ACTIVE_SLOT]) {
+        return;
+    }
+    down = BG_LadderHolsterDown(&ps);
+    Tick(dt);
+    still = Attached();
+    hung = ps.weaponstate == WEAPON_DROPPING && ps.weaponTime == 1;
+    ps = save; move = saveMove;
+    if (still) { CHECK(down == hung); pictureAsks++; }
+}
 static void QuickTick(int dt) {
     int seq = ps.eventSequence;
     Tick(dt);
@@ -943,6 +970,7 @@ static void QuickTick(int dt) {
         if (ev == EV_FIRE_WEAPON) fired[ps.eventParms[seq & (MAX_PS_EVENTS - 1)]]++;
         if (ev == EV_GRENADE_SUICIDE) suicides++;
     }
+    PictureAgrees(dt);
 }
 static void QuickReset(int lethal, int dt) {
     bg_class_t cl = *BG_Class(0);
@@ -2021,6 +2049,13 @@ static void TestHeldTriggerBurst(int dt) {
     ToLadder(); BurstTo(&b, BURST_PRESSED_AGAIN, b.limit * b.c - 1); CHECK(Attached() && Latched());
     QuickTick(dt); BurstDropBegan(&b); CHECK(Latched());
     BurstDropRuns(&b);
+    /* The drop's last command before its crossing: at 33ms a step lands on
+     * its last millisecond (100 - 3 * 33). The pending pull keeps the lock
+     * off, so that is no hang, and the picture says so (BG_LadderHolsterDown
+     * asks the latch as the lock does; PictureAgrees in QuickTick runs the
+     * next think on a copy). */
+    CHECK((ps.weaponTime == 1) == ((BG_LADDER_DROP_TIME - 1) % dt == 0));
+    CHECK(Latched() && (ps.weaponAction & WA_ATTACK_HELD) && ps.weaponShotCount == b.limit && !BG_LadderHolsterDown(&ps));
     QuickTick(dt); BurstPutAway(&b);
     CHECK(Latched() && (move.cmd.buttons & BUTTON_ATTACK));
     for (t = 0; t < 500; t += dt) { QuickTick(dt); BurstPutAway(&b); CHECK(Latched()); }
@@ -2456,6 +2491,7 @@ int main(void) {
     TestJumpEndsTimers();
     TestCrouchedJump();
     TestStepRules();
+    CHECK(pictureAsks > 0);
     for (i = 0; i < numAllocations; i++) free(allocations[i]);
     printf("PASS: ladder BSP collision, momentum, traversal, detach, yaw, push, offhand grabs, weapon ordering, prediction replay, steps and jumps (%d checks).\n", checks);
     return 0;

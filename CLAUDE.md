@@ -393,8 +393,10 @@ source for MW2 behaviour; the owner rejects it.
   MW2's path never reads the length). cgame draws a holster that has run out
   and hangs as it draws `WEAPON_LADDER`, the gun out of view
   (`BG_LadderHolsterDown`, picture only: pmove never reads it; it asks the
-  lock's own conditions, because a holster still running passes through
-  weaponTime 1 by itself at 11 and 33ms commands), keeps it out of view for
+  lock's own conditions, the burst's pending pull and `BG_SlotFireType`
+  included, because a holster still running passes through weaponTime 1 by
+  itself at 11 and 33ms commands; `ladder_test.c`'s `PictureAgrees` holds it
+  to pmove's next think), keeps it out of view for
   what is left of that drop when equipment takes it on the leaving command
   (`CG_WeapAnim_LadderStowed`), brings a
   cancelled one home up its drop clip with the gun READY, the 24-unit lowering

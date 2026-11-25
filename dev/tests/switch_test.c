@@ -413,6 +413,67 @@ static void Trigger(int at, int k, int answer[ANSWERS]) {
 	(void)at;
 }
 
+/* A spent pull held through the action's end: MW2's lock at the action's end
+ * (FinishRechamber with weaponTime 1, 578b06-578b0f: PM_WeaponTimeRanOut's
+ * crossing at the action's length, then step 4c). The pump's and the bolt's
+ * shot with the trigger never let go: the action begins under it, and on its
+ * E the gun is READY under the lock, fires nothing for as long as the trigger
+ * stays down, and fires on the first press after it is let go. The switch,
+ * begun out of a full-auto spray whose trigger is never let go, into semi:
+ * the same on its E, as the lock asks the mode the click committed, Single
+ * Shot, of a pull already spent (the trigger went down for an M16 burst, and
+ * Y back to the G19 under it sprays, counting nothing). The action's E is counted from
+ * its first command, as in the run with nothing pressed (the held trigger
+ * starts the pump a think sooner, on the shot's own crossing). */
+static void HeldThroughEnd(int at, int k, int answer[ANSWERS]) {
+	int n, s = -1, e, release, shots = 0;
+	Clear(); Setup(); nR = 0;
+	if (G->attachment) {
+		/* into full auto first, a whole switch; then the spray */
+		Frame(BUTTON_SELECTFIRE, 0);
+		for (n = 0; n < E + 1; n++) Frame(0, 0);
+		CHECK(Mode() != startMode && PS->weaponstate == WEAPON_READY);
+		startMode = Mode();
+		/* the M16's burst, its pull spent and the trigger kept down: a burst
+		 * counts its shots toward the pull, a full-auto shot none (MW2's
+		 * StartFiring), so the spray that follows keeps the count */
+		Frame(0, IN_Y);
+		for (n = 0; n < Frames(3000) && !(PS->weapon == OTHER && PS->weaponstate == WEAPON_READY); n++) Frame(0, 0);
+		for (n = 0; n < Frames(1000); n++) Frame(BUTTON_ATTACK, 0);
+		CHECK(PS->weapon == OTHER && PS->weaponstate == WEAPON_READY && PS->weaponTime == 1);
+		/* back to the G19, the trigger still down: it sprays */
+		Frame(BUTTON_ATTACK, IN_Y);
+		for (n = 0; n < Frames(3000) && shots < 3; n++) { Frame(BUTTON_ATTACK, 0); shots += R[nR - 1].fired; }
+		CHECK(shots == 3 && PS->weapon == G->weapon);
+		/* the selector on the spray's next free think, the trigger still down */
+		for (n = 0; n < Frames(2000) && s < 0; n++) {
+			int press = PS->weaponTime <= msec && !( PS->weapFlags & PWF_SELECTOR_HELD );
+			Frame(BUTTON_ATTACK | (press ? BUTTON_SELECTFIRE : 0), 0);
+			if (PS->weaponstate == WEAPON_BOLTING) s = nR - 1;
+		}
+		CHECK(s >= 0 && R[s].seq == ASEQ_SELECT_SEMI && R[s].at == 0 && !R[s].fired);
+	} else {
+		for (n = 0; n < Frames(2000) && s < 0; n++) {
+			Frame(BUTTON_ATTACK, 0);
+			if (PS->weaponstate == WEAPON_BOLTING) s = nR - 1;
+		}
+		CHECK(s >= 0 && R[s].seq == ASEQ_FIRE && R[0].fired == 1);
+	}
+	e = s + (E - S);
+	release = e + Frames(1000);
+	while (nR < release) Frame(BUTTON_ATTACK, 0);
+	Frame(0, 0);	/* let go: the lock's think ends the pull */
+	Frame(BUTTON_ATTACK, 0);
+	answer[0] = R[e - 1].state == WEAPON_BOLTING && R[e].state == WEAPON_READY && R[e].wt == 1 && R[e].closed;
+	for (n = s + 1; n < release; n++) answer[1] += R[n].fired;
+	for (n = e; n < release; n++) answer[2] += R[n].state == WEAPON_READY && R[n].wt == 1;
+	answer[2] -= release - e;
+	answer[3] = R[release].fired;
+	answer[4] = R[release + 1].fired;
+	CHECK(answer[0] && answer[1] == 0 && answer[2] == 0 && answer[3] == 0 && answer[4] == 1);
+	(void)at; (void)k;
+}
+
 /* The selection seen on C (the NAC), and the close note's event: raised on C
  * whatever takes the gun there, as it is on a pump's or a bolt's NAC. */
 static void NacEvent(int at, int k, int answer[ANSWERS]) {
@@ -503,6 +564,45 @@ static void TestReturn(void) {
 	}
 }
 
+/* Two edges of the switch's own press, each the bolt's code at work (rule
+ * (f)), on the G19 alone: a pump or a bolt is started by step 4d, before the
+ * reload and the fire checks of its think, the switch by its press, after
+ * them. An empty G19 with rounds in reserve, the selector pressed on the think
+ * its last shot's lock runs out (still FIRING there, which the auto reload
+ * refuses): the switch starts, and on the next think step 4e reloads the empty
+ * gun out of it, as it reloads an empty SPAS out of its pump; the switch is
+ * lost, the mode as it was. And the selector pressed again on the switch's
+ * last command, E: the switch has ended READY there (step 4c), so the press
+ * starts the next switch, back, on E, as a trigger tapped on E fires on E. */
+static void TestSwitchEdges(void) {
+	int n, k = -1, end;
+	G = &guns[GUNS - 1]; Landmarks();
+	CHECK(G->attachment && S == 0);
+	where = "selector on the empty gun's last think";
+	Clear(); Setup(); nR = 0;
+	for (n = 0; n < Frames(60000) && PS->ammo[G->weapon] > 1; n++) Frame(n & 1 ? 0 : BUTTON_ATTACK, 0);
+	CHECK(PS->ammo[G->weapon] == 1 && PS->ammoReserve[G->weapon] > 0);
+	for (n = 0; n < Frames(2000) && PS->ammo[G->weapon]; n++) Frame(n & 1 ? 0 : BUTTON_ATTACK, 0);
+	CHECK(PS->ammo[G->weapon] == 0 && PS->weaponstate == WEAPON_FIRING);
+	while (PS->weaponTime > msec) Frame(0, 0);
+	Frame(BUTTON_SELECTFIRE, 0); k = nR - 1;
+	Frame(0, 0);
+	CHECK(R[k - 1].state == WEAPON_FIRING && R[k].state == WEAPON_BOLTING && R[k].at == 0);
+	CHECK(R[k + 1].state == WEAPON_RELOADING && !R[k + 1].closed);
+	for (n = 0; n < Frames(5000) && PS->weaponstate != WEAPON_READY; n++) Frame(0, 0);
+	CHECK(PS->weaponstate == WEAPON_READY && PS->ammo[G->weapon] == BG_WeaponMagSize(G->weapon));
+	for (n = k; n < nR; n++) CHECK(!R[n].closed && (n > k + 1 || !R[n].notetrack));
+	CHECK(Mode() == startMode);
+	where = "selector again on E";
+	Clear(); Press(E, BUTTON_SELECTFIRE, 0);
+	end = E + (E - S);
+	Script(end + 4);
+	CHECK(R[E - 1].state == WEAPON_BOLTING && R[E - 1].closed);
+	CHECK(R[E].state == WEAPON_BOLTING && R[E].at == 0 && R[E].seq == ASEQ_SELECT_SEMI && R[E].wt == BG_ActionLength(PS));
+	for (n = E; n < end; n++) CHECK(R[n].state == WEAPON_BOLTING && R[n].notetrack == (n == E + (C - S)));
+	CHECK(R[end].state == WEAPON_READY && Mode() == startMode);
+}
+
 int main(void) {
 	static const int rates[] = { 8, 16, 33 };
 	static const int changes[] = { AT_S, AT_S1, AT_MID, AT_C1BEFORE, AT_C, AT_CAFTER, AT_E1BEFORE, AT_E };
@@ -529,6 +629,7 @@ int main(void) {
 		SideBySide("YY", YY, yys, ARRAY_LEN(yys));
 		SideBySide("frag", Frag, equipment, ARRAY_LEN(equipment));
 		SideBySide("trigger", Trigger, triggers, ARRAY_LEN(triggers));
+		SideBySide("a spent pull held through the end", HeldThroughEnd, nac, ARRAY_LEN(nac));
 		SideBySide("the close note's event on a NAC", NacEvent, nac, ARRAY_LEN(nac));
 		SideBySide("freeze", Freeze, freeze, ARRAY_LEN(freeze));
 		/* the knife and the reload on every command of the action, with
@@ -547,6 +648,7 @@ int main(void) {
 		}
 		perk = PERK_NONE;
 		TestReturn();
+		TestSwitchEdges();
 	}
 	printf("PASS: %d switch-as-a-bolt checks (SPAS pump, M300 bolt and G19 switch side by side)\n", checks);
 	return 0;

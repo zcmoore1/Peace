@@ -1119,7 +1119,13 @@ source for MW2 behaviour; the owner rejects it.
   of the burst through the replay and is taken on the command after the last
   shot, out of the shot: MW2's burstload, a reload that plays as the burst
   finishes, with the aim free once prediction is corrected (X still down on
-  the last shot's command is a real reload on it, on both sides). `+reload` is the
+  the last shot's command is a real reload on it, on both sides). X pressed a
+  frame or more before the Y that NACs a bolt, pump or SF (an SF only with a
+  magazine that is not full) is the owner's skree: the server takes the reload
+  out of the action a command or more before Y's, so Y is a whole holster with
+  the pump or bolt owed (an SF lost) and the reload lost, while the client
+  shows the NAC's next gun until a snapshot tells it of the reload (X pressed
+  with Y or after it is a real NAC on both sides). `+reload` is the
   weapon's own button, predicted exactly, with no such tricks — as in MW2,
   where the scripts do every trick with `+usereload`. A reload request beats the
   trigger on the same command, as MW2 checks reload before it fires. Never
@@ -1819,11 +1825,19 @@ all with ping when X spans a snapshot); X still down on that command and
 `+reload` down on the next are real reloads on both sides, `+reload` never a
 fake; aim, a trigger pull (a real second burst) and a real reload through
 one; and prediction never aims while reloading. `FAKERELOAD_BURSTLOAD=1`
-prints its windows, `=check` runs its checks alone. It also drives
-the picture directly where no modelled lag reaches: a correction whose
-snapshot lands exactly on the shot's READY command keeps the shot the picture
-began (`TestCorrectionOnTheReadyCommand`: `BG_ShotAwaitsAction` is a gun action
-to `CG_WeapPicture_PredictionKept`).
+prints its windows, `=check` runs its checks alone. On the M300, the SPAS and
+the G19's SF it checks the owner's skree (`Skrees`) at 8, 16 and 33ms commands
+over every snapshot phase, Y first seen on the close note's command: X a frame
+before Y is a whole holster on the server, the pump or bolt owed (the SF lost)
+and the reload lost, while the client draws the next gun until its base has
+run X's command and then the old gun going down (longer at 100ms of ping); X
+with Y or after it is a real NAC on both sides; X long before it draws the
+reload start, then a plain holster; and a G19 with a full magazine is a real
+SF NAC whatever X does. `FAKERELOAD_SKREE=check` runs its checks alone. It
+also drives the picture directly where no modelled lag reaches: a correction
+whose snapshot lands exactly on the shot's READY command keeps the shot the
+picture began (`TestCorrectionOnTheReadyCommand`: `BG_ShotAwaitsAction` is a
+gun action to `CG_WeapPicture_PredictionKept`).
 `FAKERELOAD_PROBE=1` prints every tap timing; `FAKERELOAD_SVFPS` changes the
 server rate; `FAKERELOAD_BULLETS=1` prints the fake bullet over every phase
 (`FAKERELOAD_CLFRAME`, `FAKERELOAD_ONLINEGAME=0` for 50ms snapshots online,

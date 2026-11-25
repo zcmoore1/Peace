@@ -1,4 +1,4 @@
-# Fake reload, fake bullet, burstload and wild scope
+# Fake reload, fake bullet, burstload, skree and wild scope
 
 MW2 behaviour, emergent from MW2's own use/reload. No code names any of these.
 
@@ -27,6 +27,18 @@ scripts do every one of these with `+usereload`.
   through it: a fake reload with no knife or grenade before it. X still down
   as the third shot leaves is a real reload the moment the burst ends, with
   none of the rifle's cooldown. Its windows are below.
+- **Skree** (the owner's name). In a bolt, a pump or the G19's SF, press X a
+  frame or more before the Y that NACs it (Y first seen on the close note's
+  command). The NAC shows: the next gun comes up at once. Then the old gun is
+  back on screen going down, and the swap is an ordinary one: the bolt or
+  pump still owed, the SF lost, nothing reloaded. The next gun shows for
+  16-64ms on your own host at 125 and 62 fps, 33-66ms at 30 fps, and about
+  70-200ms at 100ms of ping. X with Y (the same frame) or after it is a real
+  NAC. X much earlier (from about 25-100ms before Y on your own host,
+  depending on the frame rate and the snapshot phase; more online) shows no
+  flash, just a plain swap, with the reload starting first once X is earlier
+  still. A G19 with a full magazine has nothing to reload, so every X and Y
+  there is a real SF NAC.
 - **Wild scope.** With a scoped gun (the M300), hold aim, do the fake reload,
   and knife straight after. The knife plays while you stay scoped (a fake
   knife).
@@ -84,6 +96,22 @@ scripts do every one of these with `+usereload`.
    MW2's `PM_BeginWeaponReload` 0x575E92): the burstload. With X still down
    on the last shot's command the server's bit is set too, and both reload
    there for real.
+   The skree is the same bit under a NAC. X pressed in a bolt, a pump or the
+   SF a frame or more before the Y that lands on the close note's command
+   reaches the server's weapon a command or more before Y's (Y's selection
+   reaches the commands a frame after its press, X's bit the command after
+   X's), and step 4e takes the reload out of the action there (MW2's
+   `PM_BeginWeaponReload` takes RECHAMBERING). So on Y's command no close
+   note lands, and the change check stamps a whole holster: an ordinary swap,
+   the pump or bolt still owed (the SF lost, the owner's rule), the reload
+   lost with it. The client, without the bit, predicts the close note and the
+   NAC, and draws the next gun until a snapshot taken after the server ran
+   X's command is its base; then prediction is the old gun going down, and
+   the picture follows it at once. X with Y or after it is a real NAC on both
+   sides: the change check runs before the reload check (MW2 0x44C4D7,
+   0x44C4DE), and a gun going down or coming up takes no reload. X early
+   enough for its snapshot to be the base before Y's command shows the reload
+   start, then the plain holster.
 3. **No knife while a scoped gun is aimed** (MW2's melee rule;
    `BG_WeaponScopeOverlay`, from the rifle's `scope_overlay`). During a fake
    reload the client thinks the gun is reloading, so it is not aiming, and its
@@ -334,6 +362,55 @@ fires exactly three rounds, loses exactly three, and is never reloading; the
 suite checks that for every run, and that prediction never aims while it is
 reloading (the aim returns with the correction: no gate is loosened).
 
+Skree (`Skrees` in the suite; `FAKERELOAD_SKREE=check` runs its checks
+alone). The M300's bolt, the SPAS's pump and the G19's SF, each counted from
+the command its close note crosses at that snapshot phase (C, found by
+running the phase with the action alone), with Y first seen on C (pressed on
+the frame before, C - 1, which every time before Y below counts from) and X
+down for one command, the next gun's magazine two rounds short, over every
+snapshot phase, at 8, 16 and 33ms commands, on your own host and at 100ms of
+ping. X a frame before Y (its command C - 2):
+
+| X a frame before Y | 125 fps (8ms) | 62 fps (16ms) | 30 fps (33ms) |
+|---|---|---|---|
+| own host, phases that draw the next gun | 100% | 100% | 96% (G19 94%) |
+| own host, drawn for | 16–64 ms (M300 16–56) | 16–64 ms | 33–66 ms |
+| 100 ms ping, phases | 100% | 100% | 100% |
+| 100 ms ping, drawn for | 104–200 ms | 96–192 ms | 66–165 ms |
+
+On the server, at every phase, the reload begins on C - 1, out of the action,
+and on C the gun goes down whole: the next gun is in hand once the gun's
+whole drop time has run, the pump or bolt is still owed (the SF lost, its
+mode as it was) and the magazine is as it was. The client draws, on every
+frame whose prediction base the server took after X's command, what the
+server did on that frame's command, and on every frame before, what the
+server did with Y alone, which is the NAC. So the next gun shows from C until
+the first frame whose base has run X's command, and that frame draws the old
+gun going down; nothing detaches. The suite checks that rule frame by frame
+on every run; that the next gun shows no longer than MW2's clock lets the
+base lag (its 16 ms backoff, a snapshot interval, and the round trip or, on
+your own host, the frame the host holds its snapshot: 74, 82 and 99 ms on
+your own host, 216 ms at 100 ms of ping); and with ping, that it shows for at
+least the round trip less those two commands, and longer, shortest and
+longest, than on your own host. (At 30 fps on your own host the base is
+sometimes newer than two commands, and the client knows of X by C: the
+earlier-X case below.) X with Y (its command C - 1), one or two frames after
+Y, and Y alone are a real NAC on both sides at every phase. The next gun
+there has rounds to load, so what refuses the reload during its raise is the
+raise itself, not a full magazine.
+
+X earlier: on your own host the next gun is no longer drawn for X from 24–72
+ms before Y at 125 fps, 32–80 at 62 and 33–99 at 30, depending on the phase
+(and at that phase never again for any earlier X); X more than the base is
+ever old before Y (104, 144 and 231 ms) draws the reload starting, then the
+plain holster, at every phase. At 100 ms of ping that X is 240, 272 and 330
+ms before Y, which fits in the bolt at every rate, in the pump at 125 and 62
+fps and in the SF only at 125 fps (at some phases); the suite requires it of
+the bolt. An X so early that its reload has paid the pump or bolt (MW2's
+reload delayed action) or filled a round by Y's command is a reload that Y
+cuts short, not the skree, and is not tried. A G19 with a full magazine is a
+real SF NAC wherever X is, before Y, with it or after it.
+
 Fake bullet. What matters is how long after X the trigger goes out. X and
 the trigger in one command is a real shot, then the reload; the trigger one
 command or more later is fake until the client learns of the reload. Which
@@ -464,6 +541,13 @@ delays (cheats; the dev autoexec sets `sv_cheats 1`).
   predicted as before, and a fire tap after a quick action is always real.
 
 ## Where Peace and MW2 still differ
+
+- **The skree's picture.** What the suite pins is gameplay, MW2's as read from
+  its code: the server's whole drop with the pump or bolt owed (the SF lost),
+  the client's NAC until it learns of the reload, and the old gun drawn going
+  down from that frame on. How the old gun's drop is drawn as it comes back
+  (whether its clip starts part-way or from its start) is Peace's picture, not
+  watched in MW2; the owner may change it, and the suite leaves it free.
 
 - **Whether a burstload's reload plays out** is read from MW2's viewmodel
   code (above), not watched in MW2. If MW2 in fact kept the reload when the

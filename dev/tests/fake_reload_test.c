@@ -51,7 +51,8 @@
  * sets the client frame (com_maxfps 85 is 12), FAKERELOAD_ONLINEGAME=0 gives
  * an internet client a snapshot every 50ms (sv_onlineGame 0) and
  * FAKERELOAD_HOSTHOLD=0 gives ioquake3's own host, which read its snapshots
- * without the held frame. */
+ * without the held frame.
+ * FAKERELOAD_SKREE=check runs the skree's checks alone (Skrees, below). */
 #include "../../code/qcommon/q_shared.h"
 #include "../../code/game/bg_public.h"
 #include <stdio.h>
@@ -104,6 +105,9 @@ typedef struct {
 	int reloadAt, reloadLen, knifeAt, knifeLen, adsAt, fireAt, fireLen;	/* ms after the gun is back */
 	int reload2At, reload2Len;
 	int fire2At, fire2Len;				/* a second pull of the trigger */
+	int selectAt, selectLen;			/* the selector (the G19's Select Fire) */
+	int swapAt;							/* the frame Y is pressed on: its command carries the
+										 * swap button, the next ones slot 1 (cg_weapons.c) */
 } script_t;
 typedef struct {
 	int anchor;							/* client time the gun was seen back */
@@ -161,6 +165,25 @@ static int Settle(int rtt) { return (CL_TIME_BACKOFF + SnapInterval(rtt)) * Snap
 #ifdef FAKERELOAD_ENGINE
 static int engineRuns;					/* runs on your own host also run through the real Com_Frame */
 #endif
+#define OTHER_GUN	WP_MACHINEGUN		/* slot 1: the gun Y goes to */
+static int gunAttachment;				/* the gun's own attachment (else the class's) */
+static int fullMag;						/* the gun starts with a full magazine */
+static int otherPartial;				/* the slot-1 gun's magazine is not full (the skree) */
+/* Command by command, by its index in cmds: the server after running it (the
+ * gun's action closed, its magazine), and the client's frame that built it
+ * (prediction, the picture, and the time of the last command its base had
+ * run). */
+typedef struct { int ran, weapon, state, closed, ammo; } svCmd_t;
+typedef struct { int predWeapon, predState, picWeapon, picState, detached, baseTime; } clFrame_t;
+static svCmd_t svAt[MAXQ];
+static clFrame_t clAt[MAXQ];
+/* What the gun's action closes is closed: its pump or bolt paid, or, with
+ * Select Fire, the SF's mode committed (the G19 starts semi-automatic). */
+static int ActionClosed(const playerState_t *ps) {
+	bg_weaponInstance_t g;
+	BG_GetSlot(ps, SLOT_PRIMARY, &g);
+	return gunAttachment == BG_ATTACHMENT_SWITCH ? (g.flags & BG_GUN_AUTO) != 0 : !(g.flags & BG_GUN_UNCHAMBERED);
+}
 
 static int Buttons(int now) {
 	int b = 0, t;
@@ -180,6 +203,8 @@ static int Buttons(int now) {
 	if (S.adsAt != NONE && t >= S.adsAt) b |= BUTTON_ADS;
 	if (t >= S.fireAt && t < S.fireAt + S.fireLen) b |= BUTTON_ATTACK;
 	if (t >= S.fire2At && t < S.fire2At + S.fire2Len) b |= BUTTON_ATTACK;
+	if (t >= S.selectAt && t < S.selectAt + S.selectLen) b |= BUTTON_SELECTFIRE;
+	if (S.swapAt != NONE && t >= S.swapAt && t < S.swapAt + CL_FRAME) b |= BUTTON_WEAPON_SWAP;
 	return b;
 }
 
@@ -188,7 +213,8 @@ static int Buttons(int now) {
  * recording starts. */
 static int ProbeKnifeLive(void) { return S.knifeAt == NONE || base == NONE || curNow - base >= S.knifeAt; }
 static int SvKnifeOut(void) { return svPs.weapon == WP_KNIFE || (svPs.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == WA_MELEE; }
-static void RunOnServer(usercmd_t *ucmd) {
+static void RunOnServer(int index) {
+	usercmd_t *ucmd = &cq[index].cmd;
 	pmove_t pm; int msec, wasKnife, rounds;
 	if (ucmd->serverTime > levelTime + 200) ucmd->serverTime = levelTime + 200;
 	if (ucmd->serverTime < levelTime - 1000) ucmd->serverTime = levelTime - 1000;
@@ -199,6 +225,12 @@ static void RunOnServer(usercmd_t *ucmd) {
 	wasKnife = SvKnifeOut();
 	rounds = svPs.weapon == GUN ? svPs.ammo[GUN] : -1;
 	FakeReloadPmove(&pm);
+	{
+		bg_weaponInstance_t g;
+		BG_GetSlot(&svPs, SLOT_PRIMARY, &g);
+		svAt[index].ran = 1; svAt[index].weapon = svPs.weapon; svAt[index].state = svPs.weaponstate;
+		svAt[index].closed = ActionClosed(&svPs); svAt[index].ammo = g.ammo;
+	}
 	if (curNow >= recordFrom) {	/* every command, so a one-command shot is seen */
 		if (svPs.weapon == GUN && svPs.ammo[GUN] < rounds) {	/* a round left the magazine */
 			if (O.svShots < 4) O.svRoundCmd[O.svShots] = svPs.commandTime;
@@ -333,6 +365,9 @@ static int ClientFrame(int now) {
 	memset(c, 0, sizeof(*c));
 	c->serverTime = clServerTime ? clServerTime : clSnapTime;
 	c->buttons = Buttons(now); c->weapon = BG_SLOT_COMMAND + SLOT_PRIMARY;
+	/* Y's selection is first seen on the command after the frame it was pressed on */
+	if (base != NONE && S.swapAt != NONE && now - base > S.swapAt)
+		c->weapon = BG_WeaponCommand(&rs[rsLatest % RS_BACKUP].ps, SLOT_SECONDARY, qfalse);
 	cq[cqTail].arrive = PENDING; cq[cqTail].cmd = *c;
 	SetCGameTime(now);
 	ProcessSnapshots();
@@ -355,6 +390,9 @@ static int ClientFrame(int now) {
 	pic = CG_WeapPicture_State(&clPred);
 	copy = *pic; clip = FakeReloadPicture(&copy, now, CL_FRAME);
 	if (base != NONE ? now >= recordFrom : O.anchor != NONE) Record(pic, clip);
+	clAt[numCmds - 1].predWeapon = clPred.weapon; clAt[numCmds - 1].predState = clPred.weaponstate;
+	clAt[numCmds - 1].picWeapon = pic->weapon; clAt[numCmds - 1].picState = pic->weaponstate;
+	clAt[numCmds - 1].detached = pic != &clPred; clAt[numCmds - 1].baseTime = clBase->commandTime;
 	if (getenv("FAKERELOAD_TRACE") && base != NONE && now >= base - 120 && now <= base + 400)
 		printf("t%+5d st%d b%06x | cl w%2d s%2d A%d act%03x ws%d | pic w%2d s%2d %s | sv w%2d s%2d A%d act%03x wf%d | snap ct%d\n",
 			now - base, c->serverTime, Buttons(now), clPred.weapon, clPred.weaponstate, !!(clPred.pm_flags & PMF_ADS), clPred.weaponAction & 0x107,
@@ -389,7 +427,7 @@ static void HostFrame(int now) {
 	int snap, cmd;
 	curNow = now;
 	while (sqHead < sqTail && sq[sqHead].arrive <= now) ReceiveSnapshot(sqHead++);	/* first event loop */
-	while (cqHead < cqTail && cq[cqHead].arrive <= now) RunOnServer(&cq[cqHead++].cmd);
+	while (cqHead < cqTail && cq[cqHead].arrive <= now) RunOnServer(cqHead++);
 	snap = HostServerFrame(CL_FRAME);
 	if (snap >= 0) sq[snap].arrive = now + hostHold;
 	while (sqHead < sqTail && sq[sqHead].arrive <= now) ReceiveSnapshot(sqHead++);	/* second */
@@ -402,7 +440,7 @@ static void HostFrame(int now) {
 static void NetworkMs(int now) {
 	int cmd;
 	curNow = now;
-	while (cqHead < cqTail && cq[cqHead].arrive != PENDING && cq[cqHead].arrive <= now) RunOnServer(&cq[cqHead++].cmd);
+	while (cqHead < cqTail && cq[cqHead].arrive != PENDING && cq[cqHead].arrive <= now) RunOnServer(cqHead++);
 	while (sqHead < sqTail && sq[sqHead].arrive <= now) ReceiveSnapshot(sqHead++);
 	if (now % SV_FRAME == 0) {
 		int snap;
@@ -437,7 +475,7 @@ void FakeReloadHostSnapshot(int i, int now) {	/* CL_PacketEvent */
 void FakeReloadHostCommand(int i, int now) {	/* SV_PacketEvent */
 	EngineStep(now, 1);
 	CHECK(i == cqHead && cq[i].arrive == now); cqHead++;
-	RunOnServer(&cq[i].cmd);
+	RunOnServer(i);
 }
 int FakeReloadHostServer(int msec, int now) {	/* SV_Frame */
 	int snap;
@@ -474,13 +512,16 @@ static void Run1(int rtt, const script_t *sc, int at) {
 	clk.leadMin = clk.ageMin = clk.intervalMin = 1 << 30; clk.leadMax = clk.ageMax = clk.intervalMax = -(1 << 30);
 	pictureDetached = sawGunActionInPicture = 0;
 	CG_WeapPicture_Reset();
+	memset(svAt, 0, sizeof(svAt)); memset(clAt, 0, sizeof(clAt));
 	memset(&svPs, 0, sizeof(svPs)); memset(&svUse, 0, sizeof(svUse));
-	cl.slot[0] = GUN; cl.slot[1] = WP_MACHINEGUN;
+	cl.slot[0] = GUN; cl.slot[1] = OTHER_GUN;
+	if (gunAttachment) { cl.attachments[0] = gunAttachment; cl.attachments[1] = 0; }
 	cl.lethal = S.action == ACT_SEMTEX_CANCEL ? WP_SEMTEX : WP_FRAG; cl.lethalCount = BG_ClassEquipmentCount(cl.lethal);
 	BG_ApplyClass(&svPs, &cl);
 	svPs.ammo[cl.lethal] = 2;	/* as before MW2's counts: a scenario may use one before its own */
 	svPs.stats[STAT_HEALTH] = 100; svPs.pm_type = PM_NORMAL; svPs.weapon = GUN; svPs.weaponstate = WEAPON_READY;
-	svPs.ammo[GUN] = svPs.slotAmmo[SLOT_PRIMARY] = startAmmo = BG_WeaponMagSize(GUN) - 2;
+	svPs.ammo[GUN] = svPs.slotAmmo[SLOT_PRIMARY] = startAmmo = BG_WeaponMagSize(GUN) - (fullMag ? 0 : 2);
+	if (otherPartial) svPs.ammo[OTHER_GUN] = svPs.slotAmmo[SLOT_SECONDARY] = BG_WeaponMagSize(OTHER_GUN) - 2;
 	svPs.viewheight = DEFAULT_VIEWHEIGHT; svPs.origin[2] = 24.125f; svPs.groundEntityNum = ENTITYNUM_WORLD;
 	levelTime = 1000;
 #ifdef FAKERELOAD_ENGINE
@@ -503,11 +544,15 @@ static void Run1(int rtt, const script_t *sc, int at) {
 static void Run(int rtt, const script_t *sc, int at) {
 #ifdef FAKERELOAD_ENGINE
 	if (rtt == 0 && hostHold == CL_FRAME) {
+		static svCmd_t modelSvAt[MAXQ];
+		static clFrame_t modelClAt[MAXQ];
 		outcome_t model; playerState_t modelSv, modelCl;
 		Run1(rtt, sc, at);
 		model = O; modelSv = svPs; modelCl = clPred;
+		memcpy(modelSvAt, svAt, sizeof(svAt)); memcpy(modelClAt, clAt, sizeof(clAt));
 		viaEngine = 1; Run1(rtt, sc, at); viaEngine = 0;
 		CHECK(!memcmp(&model, &O, sizeof(O)) && !memcmp(&modelSv, &svPs, sizeof(svPs)) && !memcmp(&modelCl, &clPred, sizeof(clPred)));
+		CHECK(!memcmp(modelSvAt, svAt, sizeof(svAt)) && !memcmp(modelClAt, clAt, sizeof(clAt)));
 		engineRuns++;
 		return;
 	}
@@ -516,7 +561,7 @@ static void Run(int rtt, const script_t *sc, int at) {
 }
 
 static script_t Script(int action, int button) {
-	script_t s = { 0, 0, NONE, 0, NONE, 0, NONE, NONE, 0, NONE, 0, NONE, 0 };
+	script_t s = { 0, 0, NONE, 0, NONE, 0, NONE, NONE, 0, NONE, 0, NONE, 0, NONE, 0, NONE };
 	s.action = action; s.button = button;
 	return s;
 }
@@ -1542,6 +1587,345 @@ static void BurstloadTable(void) {
 	}
 }
 
+/* ---- MW2's skree: the NAC that X takes away ---------------------------------
+ *
+ * The owner's name for it. Nothing names it; no gun has a case of its own.
+ * During a bolt, a pump or the SF (the G19's select-fire switch, worked as a
+ * bolt), X pressed at least a frame before the Y whose first command lands on
+ * the close note's command: Y reaches the commands a frame after its press, so
+ * X's command is two or more before Y's first. X is a reload only the server
+ * hears. Its use code sets the bit after X's command (MW2's
+ * Player_UpdateActivate, 0x4D78F0, called at 0x4939A1), and the next command
+ * takes it out of the action (step 4e; MW2's PM_BeginWeaponReload takes
+ * RECHAMBERING). So on Y's command no close note lands, and the change check
+ * stamps a whole holster: a plain swap, the pump or bolt still owed (the SF
+ * lost, its mode as it was), the reload lost, the magazine as it was. The
+ * client, never told of the bit, predicts the close note and the NAC and draws
+ * the next gun from Y's command until a snapshot taken after the server ran
+ * X's command is its base; then prediction is the old gun going down, and the
+ * picture follows at once (nothing detaches). X so early that this snapshot is
+ * the base by Y's command draws no next gun, only a plain holster, with the
+ * reload start before it once the snapshot is the base on the frame Y is
+ * pressed on. X with Y (its command the one before Y's first) or after it is
+ * a real NAC on both sides: the change check runs before the reload check
+ * (MW2 0x44C4D7, 0x44C4DE), and the bit then finds a gun going down or coming
+ * up, which takes no reload (the next gun has rounds to load: its magazine is
+ * not full). A G19 with a full magazine has nothing to reload: every X is a
+ * real SF NAC.
+ *
+ * Counted as the burstload is: every command from the action's own (the
+ * trigger's, the selector's for the SF) at that snapshot phase, Y first seen
+ * on its close note's command C, found by running the phase once with the
+ * action alone. What is pinned is gameplay; how the old gun's picture comes
+ * back (where its drop clip starts) is the owner's to change.
+ *
+ * FAKERELOAD_SKREE=check runs these checks alone. */
+static const struct { int weapon, attachment, full; const char *name; } skreeGuns[] = {
+	{ WP_M40A3, 0, 0, "M300 bolt" },
+	{ WP_SHOTGUN, 0, 0, "SPAS pump" },
+	{ WP_G19, BG_ATTACHMENT_SWITCH, 0, "G19 SF" },
+	{ WP_G19, BG_ATTACHMENT_SWITCH, 1, "G19 SF, full magazine" }
+};
+#define SKREE_GUNS ((int)(sizeof(skreeGuns) / sizeof(skreeGuns[0])))
+/* The action's own command: the trigger's, the selector's for the SF. */
+static int ActionIdx(void) {
+	int i;
+	for (i = 0; i < numCmds; i++) if (cmds[i].buttons & (BUTTON_ATTACK | BUTTON_SELECTFIRE)) return i;
+	return NONE;
+}
+/* One run: the action on the frame at `at`; Y first seen on command y,
+ * pressed on the frame before (NONE: no Y); X down on commands x..x+xLen-1
+ * (NONE: no X); every command counted from the action's. */
+static void SkreeRun(int r, int at, int y, int x, int xLen) {
+	script_t s = Script(ACT_NONE, X);
+	if (gunAttachment) { s.selectAt = 0; s.selectLen = CL_FRAME; }
+	else { s.fireAt = 0; s.fireLen = CL_FRAME; }
+	if (y != NONE) s.swapAt = (y - 1) * CL_FRAME;
+	if (x != NONE) { s.reloadAt = x * CL_FRAME; s.reloadLen = xLen * CL_FRAME; }
+	Run(rtts[r], &s, at);
+}
+/* The action alone at this phase, as LastShot is for the burst: S, the first
+ * command it is under way (the gun BOLTING), and C, the command its close
+ * note crosses (the pump or bolt paid, the SF's mode committed), both counted
+ * from the action's command; and how old prediction's base got. Nothing
+ * reloads or detaches, and the action ends closed. */
+static int skreeS[BURST_PHASES], skreeC[BURST_PHASES], skreeAge[BURST_PHASES], skreeKnown[BURST_PHASES];
+static int CloseNote(int r, int shift, int *start, int *ageMax) {
+	int k = shift / CL_FRAME;
+	CHECK(k < BURST_PHASES);
+	if (!skreeKnown[k]) {
+		int a, i, open = NONE;
+		SkreeRun(r, BurstAt(r, shift), NONE, NONE, 0);
+		a = ActionIdx();
+		CHECK(a != NONE && O.converged && !O.svReload && !O.predReload && !O.detachedMs);
+		CHECK(svPs.weapon == GUN && svPs.weaponstate == WEAPON_READY && ActionClosed(&svPs));
+		skreeS[k] = skreeC[k] = NONE;
+		for (i = a; i < numCmds && skreeC[k] == NONE; i++) {
+			if (!svAt[i].ran) continue;
+			if (skreeS[k] == NONE && svAt[i].state == WEAPON_BOLTING) skreeS[k] = i - a;
+			if (open == NONE && !svAt[i].closed) open = i;
+			else if (open != NONE && svAt[i].closed) skreeC[k] = i - a;
+		}
+		CHECK(skreeS[k] != NONE && skreeC[k] != NONE && skreeS[k] < skreeC[k]);
+		skreeAge[k] = clk.ageMax;
+		skreeKnown[k] = 1;
+	}
+	*start = skreeS[k]; *ageMax = skreeAge[k];
+	return skreeC[k];
+}
+static void ForgetSkrees(void) { memset(skreeKnown, 0, sizeof(skreeKnown)); }
+/* Y alone at this phase, first seen on the close note's command: the server
+ * command by command, which is what the client draws until it knows of X. */
+static struct { int ran, weapon, state, serverTime; } yAlone[MAXQ];
+typedef struct { int at, a, S, C, ageMax; } skreePhase_t;
+static skreePhase_t SkreePhase(int r, int shift) {
+	skreePhase_t p;
+	int i;
+	p.C = CloseNote(r, shift, &p.S, &p.ageMax);
+	p.at = BurstAt(r, shift);
+	SkreeRun(r, p.at, p.C, NONE, 0);
+	p.a = ActionIdx();
+	for (i = 0; i < numCmds; i++) {
+		yAlone[i].ran = svAt[i].ran; yAlone[i].weapon = svAt[i].weapon; yAlone[i].state = svAt[i].state;
+		yAlone[i].serverTime = cmds[i].serverTime;
+	}
+	return p;
+}
+typedef struct { int nac, flash, shownMs, reloadShown; } skree_t;
+/* What every run with Y first seen on the close note's command obeys (y =
+ * a + C, Y's first command; x, X's one command, or NONE):
+ *  - Y is a swap: the next gun is in hand at the end, both sides agree, and
+ *    the picture never leaves prediction;
+ *  - the pump or bolt is still owed (the SF lost, its mode as it was: the
+ *    owner's rule) and the gun's magazine is as the action left it;
+ *  - the server: a NAC, the next gun in hand on Y's command, unless X's
+ *    command is two or more before Y's and there is a round to load. Then it
+ *    took the reload out of the action on the command after X's, and on Y's
+ *    the change check put the gun down whole: the next gun once the gun's
+ *    whole drop time has run, and nothing filled;
+ *  - the client: on every frame whose prediction base the server took after
+ *    X's command, it draws what the server did on that frame's command; on
+ *    every frame before, what the server did with Y alone (it cannot know of
+ *    X). So in a NAC it is never corrected; in the server's whole holster it
+ *    draws the next gun on Y's command exactly when its base had not yet run
+ *    X's command, and then, on the first frame whose base has, the old gun
+ *    going down. */
+static skree_t SkreeRules(const skreePhase_t *p, int x) {
+	skree_t q;
+	int i, k, y = p->a + p->C, xTime = x == NONE ? 1 << 30 : cmds[x].serverTime;
+	bg_weaponInstance_t g;
+	memset(&q, 0, sizeof(q));
+	CHECK(ActionIdx() == p->a && O.converged && !O.detachedMs && svPs.weapon == OTHER_GUN);
+	BG_GetSlot(&svPs, SLOT_PRIMARY, &g);
+	CHECK(!ActionClosed(&svPs) && O.svShots == (gunAttachment ? 0 : 1) && g.ammo == startAmmo - O.svShots);
+	CHECK(svAt[y].ran && svAt[y - 1].ran);
+	for (i = p->a; i < numCmds; i++) {
+		CHECK(cmds[i].serverTime == yAlone[i].serverTime);
+		if (!svAt[i].ran || !yAlone[i].ran) continue;
+		if (clAt[i].baseTime >= xTime) CHECK(clAt[i].picWeapon == svAt[i].weapon && clAt[i].picState == svAt[i].state);
+		else CHECK(clAt[i].picWeapon == yAlone[i].weapon && clAt[i].picState == yAlone[i].state);
+	}
+	CHECK(yAlone[y].weapon == OTHER_GUN);	/* Y alone is the NAC */
+	q.nac = svAt[y].weapon == OTHER_GUN;
+	if (x == NONE || x >= y - 1 || fullMag) {
+		CHECK(q.nac && !O.svReload && !O.predReload);
+		return q;
+	}
+	/* the reload out of the action, then Y's whole holster */
+	CHECK(!q.nac && x >= p->a + p->S && svAt[x].state == WEAPON_BOLTING);
+	CHECK(svAt[x + 1].weapon == GUN && svAt[x + 1].state == WEAPON_RELOADING && O.svReload);
+	CHECK(svAt[y - 1].state == WEAPON_RELOADING && svAt[y].weapon == GUN && svAt[y].state == WEAPON_DROPPING);
+	for (i = y; i < numCmds && svAt[i].weapon == GUN; i++) CHECK(svAt[i].state == WEAPON_DROPPING);
+	/* the next gun once the gun's whole drop time has run, within a command */
+	CHECK((i - y + 1) * CL_FRAME >= BG_WeaponDropTime(GUN) && (i - y - 1) * CL_FRAME < BG_WeaponDropTime(GUN));
+	q.flash = clAt[y].picWeapon == OTHER_GUN;
+	if (q.flash) {
+		for (k = y; clAt[k].picWeapon == OTHER_GUN; k++) ;
+		CHECK(clAt[k].picWeapon == GUN && clAt[k].picState == WEAPON_DROPPING);
+		CHECK(clAt[k].baseTime >= xTime && clAt[k - 1].baseTime < xTime);
+		q.shownMs = (k - y) * CL_FRAME;
+		/* prediction learned of the reload only once Y's command was made */
+		CHECK(!O.predReload);
+	} else {
+		q.reloadShown = clAt[y - 1].baseTime >= xTime;
+		CHECK(q.reloadShown == O.predReload);
+	}
+	return q;
+}
+
+/* X a frame before Y (X's command two before Y's first): the server's whole
+ * holster at every phase; the client's next gun on Y's command, drawn until
+ * its base has run X's command: at least a frame, at least the round trip less
+ * those two commands, no longer than the base was ever old less a command,
+ * and no longer than MW2's clock lets the base lag (TestClockBase): its
+ * backoff, a snapshot interval, and the round trip, or on your own host the
+ * frame the host holds its snapshot. Returns how many phases drew it, and the
+ * shortest and longest it was drawn. */
+static int TestSkreeXAFrameBeforeY(int r, int *shownMin, int *shownMax, int *phases) {
+	int shift, n = 0, flashes = 0, span = BurstSpan(r), step = BurstStep(r);
+	*shownMin = 1 << 30; *shownMax = -1;
+	for (shift = 0; shift < span; shift += step) {
+		skreePhase_t p = SkreePhase(r, shift);
+		int y = p.a + p.C;
+		skree_t q;
+		SkreeRun(r, p.at, p.C, p.C - 2, 1);
+		q = SkreeRules(&p, y - 2);
+		n++;
+		CHECK(!q.nac);
+		if (!q.flash) continue;
+		flashes++;
+		CHECK(q.shownMs >= CL_FRAME && q.shownMs >= rtts[r] - 2 * CL_FRAME);
+		CHECK(q.shownMs + 2 * CL_FRAME <= p.ageMax + CL_FRAME);
+		CHECK(q.shownMs <= CL_TIME_BACKOFF + SnapInterval(rtts[r]) + (rtts[r] ? rtts[r] : hostHold));
+		if (q.shownMs < *shownMin) *shownMin = q.shownMs;
+		if (q.shownMs > *shownMax) *shownMax = q.shownMs;
+	}
+	startShift = 0;
+	*phases = n;
+	return flashes;
+}
+/* Y alone, X with Y (its command the one before Y's first), and X one and two
+ * frames after Y: a real NAC on both sides, at every phase. The next gun has
+ * rounds to load (otherPartial), so X during its raise is refused by the
+ * gun's state, not by a full magazine. */
+static void TestSkreeXWithOrAfterY(int r) {
+	int shift, dx, span = BurstSpan(r), step = BurstStep(r);
+	for (shift = 0; shift < span; shift += step) {
+		skreePhase_t p = SkreePhase(r, shift);
+		CHECK(SkreeRules(&p, NONE).nac);
+		for (dx = -1; dx <= 1; dx++) {
+			SkreeRun(r, p.at, p.C, p.C + dx, 1);
+			CHECK(SkreeRules(&p, p.a + p.C + dx).nac);
+		}
+	}
+	startShift = 0;
+}
+/* The commands before Y's first that X must be for its snapshot to be the
+ * base by the frame before Y's: more than the base is ever old, and that
+ * frame. */
+static int SkreeFar(const skreePhase_t *p) { return (p->ageMax + CL_FRAME - 1) / CL_FRAME + 2; }
+/* How many commands after the one it starts on the gun's reload first does
+ * something (pays the owed pump or bolt, as MW2's reload delayed action does,
+ * or fills a round), at this phase: X on the action's first command, no Y. An
+ * X so early that this lands by Y's command is a reload Y cuts short (or, on
+ * Y's command, a NAC of its own), not the skree. */
+static int ReloadEffect(int r, const skreePhase_t *p) {
+	int i, start = NONE;
+	SkreeRun(r, p->at, NONE, p->S, 1);
+	CHECK(ActionIdx() == p->a && O.svReload && O.converged);
+	for (i = p->a + p->S; i < numCmds; i++) {
+		if (!svAt[i].ran) continue;
+		if (start == NONE) { if (svAt[i].state == WEAPON_RELOADING) start = i; continue; }
+		if (svAt[i].closed != svAt[start].closed || svAt[i].ammo != svAt[start].ammo) return i - start;
+	}
+	CHECK(!"a reload that neither pays the action nor fills a round");
+	return 0;
+}
+/* X long before Y. At each phase, the earlier X is, the sooner the client
+ * knows: once X is early enough that the next gun is not drawn, it is not
+ * drawn for any earlier X. And X more than the base is ever old before the
+ * frame before Y's draws the reload start, then a plain holster, at every
+ * phase. With `sweep` every command from two before Y's to that one is tried;
+ * else that one alone. Only where that X is inside the action and the reload
+ * it starts has done nothing yet by Y's command (ReloadEffect). Returns how
+ * many phases were tried and the earliest X tried, and with `sweep` the
+ * first X that drew no next gun at the luckiest and the unluckiest phase,
+ * all in ms before Y's press (the frame before Y's first command). */
+static int TestSkreeXLongBeforeY(int r, int sweep, int *farMs, int *clearMin, int *clearMax) {
+	int shift, n = 0, span = BurstSpan(r), step = BurstStep(r);
+	*farMs = 0; *clearMin = 1 << 30; *clearMax = -1;
+	for (shift = 0; shift < span; shift += step) {
+		skreePhase_t p = SkreePhase(r, shift);
+		int k, far = SkreeFar(&p), drawn = 1;
+		if (p.C - far < p.S || ReloadEffect(r, &p) < far) continue;
+		for (k = sweep ? 2 : far; k <= far; k++) {
+			skree_t q;
+			SkreeRun(r, p.at, p.C, p.C - k, 1);
+			q = SkreeRules(&p, p.a + p.C - k);
+			CHECK(!q.nac && (!q.flash || drawn));
+			if (sweep && drawn && !q.flash) {
+				if ((k - 1) * CL_FRAME < *clearMin) *clearMin = (k - 1) * CL_FRAME;
+				if ((k - 1) * CL_FRAME > *clearMax) *clearMax = (k - 1) * CL_FRAME;
+			}
+			drawn = q.flash;
+			if (k == far) CHECK(!q.flash && q.reloadShown);
+		}
+		if ((far - 1) * CL_FRAME > *farMs) *farMs = (far - 1) * CL_FRAME;
+		n++;
+	}
+	startShift = 0;
+	return n;
+}
+/* The G19 with a full magazine: X anywhere in the SF, before Y, with it or
+ * after it, is a real SF NAC on both sides: there is nothing to reload. */
+static void TestSkreeFullMagazineSF(int r) {
+	int shift, dx, span = BurstSpan(r), step = BurstStep(r);
+	CHECK(fullMag && gunAttachment == BG_ATTACHMENT_SWITCH);
+	for (shift = 0; shift < span; shift += step) {
+		skreePhase_t p = SkreePhase(r, shift);
+		CHECK(SkreeRules(&p, NONE).nac);
+		for (dx = -SkreeFar(&p); dx <= 1; dx++) {
+			if (p.C + dx < p.S) continue;
+			SkreeRun(r, p.at, p.C, p.C + dx, 1);
+			CHECK(SkreeRules(&p, p.a + p.C + dx).nac && startAmmo == BG_WeaponMagSize(GUN));
+		}
+	}
+	startShift = 0;
+}
+
+/* The skree at one command length, each gun: on your own host, then with
+ * 100ms of ping, where the next gun is drawn longer. */
+static void SkreesAt(int frame) {
+	int g;
+	SetFrame(frame);
+	for (g = 0; g < SKREE_GUNS; g++) {
+		int r, ownMin = 0, ownMax = 0;
+		GUN = skreeGuns[g].weapon; gunAttachment = skreeGuns[g].attachment; fullMag = skreeGuns[g].full;
+		for (r = 0; r <= 2; r += 2) {
+			int flashes, phases, shownMin, shownMax, far = 0, farPhases, clearMin, clearMax;
+			ForgetSkrees();
+			if (fullMag) {
+				TestSkreeFullMagazineSF(r);
+				printf("  skree, %-21s %2dms commands, %s: X anywhere, before Y or after it: a real SF NAC\n",
+					skreeGuns[g].name, CL_FRAME, r ? "RTT 100" : "own host");
+				continue;
+			}
+			flashes = TestSkreeXAFrameBeforeY(r, &shownMin, &shownMax, &phases);
+			TestSkreeXWithOrAfterY(r);
+			farPhases = TestSkreeXLongBeforeY(r, !r, &far, &clearMin, &clearMax);
+			/* X a frame before Y draws the next gun at every phase online
+			 * and at 8 and 16ms on your own host; at 33ms there, those two
+			 * commands are sometimes longer than the base is old, and the
+			 * client knows of X by Y's command (SkreeRules) */
+			CHECK(flashes > 0);
+			if (r || CL_FRAME <= 16) CHECK(flashes == phases);
+			/* the long X fits in every action on your own host, and online
+			 * in the bolt, the longest */
+			if (!r || GUN == WP_M40A3) CHECK(farPhases == phases);
+			if (!r) { ownMin = shownMin; ownMax = shownMax; }
+			else CHECK(shownMin > ownMin && shownMax > ownMax);	/* longer online */
+			printf("  skree, %-21s %2dms commands, %s: X a frame before Y draws the next gun at %3d%% of phases for %3d..%3dms",
+				skreeGuns[g].name, CL_FRAME, r ? "RTT 100" : "own host", Pct(flashes, phases), shownMin, shownMax);
+			if (!r) printf("; none for X from %d..%dms before Y, by phase", clearMin, clearMax);
+			if (farPhases) printf("; X %dms before, the reload, then a plain holster%s\n", far,
+				farPhases < phases ? " (at the phases where that is inside the action)" : "");
+			else printf("; no X that long before is inside the action and its reload's start\n");
+		}
+	}
+	gunAttachment = fullMag = 0;
+}
+static void Skrees(void) {
+	int keepFrame = CL_FRAME, keepHold = hostHold, keepAfter = runAfter, keepGun = GUN;
+	if (maxPackets || SV_FRAME != 50) return;	/* the shipped rates, a packet a frame */
+	runAfter = 3000; otherPartial = 1;
+	SkreesAt(8);
+	SkreesAt(16);
+	SkreesAt(33);
+	otherPartial = 0;
+	CL_FRAME = keepFrame; hostHold = keepHold; runAfter = keepAfter; GUN = keepGun;
+	startShift = 0;
+}
+
 int main(void) {
 	FakeReloadPictureInit();
 	if (getenv("FAKERELOAD_SVFPS")) SV_FRAME = 1000 / atoi(getenv("FAKERELOAD_SVFPS"));
@@ -1565,6 +1949,11 @@ int main(void) {
 		}
 		if (getenv("FAKERELOAD_ONLINEGAME")) onlineGame = atoi(getenv("FAKERELOAD_ONLINEGAME"));
 		GUN = WP_M16; runAfter = BG_WeaponReloadTime(GUN) + 1500; BurstloadTable(); return 0;
+	}
+	if (getenv("FAKERELOAD_SKREE") && !strcmp(getenv("FAKERELOAD_SKREE"), "check")) {	/* its checks alone */
+		TestClockBase(); Skrees();
+		printf("PASS: %d skree checks\n", checks);
+		return 0;
 	}
 	MeasureAnchors();
 	if (getenv("FAKERELOAD_PROBE")) { Probe(); return 0; }
@@ -1596,9 +1985,10 @@ int main(void) {
 	Windows();
 	FakeReloads(); FakeBullets(); FakeBulletWindows(); WildScopes();
 	Burstloads();
+	Skrees();
 #ifdef FAKERELOAD_ENGINE
 	printf("  %d runs on your own host also run through the real Com_Frame and loopback, identically\n", engineRuns);
 #endif
-	printf("PASS: %d fake reload, fake bullet and wild scope checks\n", checks);
+	printf("PASS: %d fake reload, fake bullet, burstload, skree and wild scope checks\n", checks);
 	return 0;
 }

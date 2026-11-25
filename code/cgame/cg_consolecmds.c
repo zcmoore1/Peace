@@ -480,7 +480,6 @@ static const char *CG_PD_StateName( int st ) {
 	case WEAPON_READY:			return "READY";
 	case WEAPON_RAISING:		return "RAISING";
 	case WEAPON_DROPPING:		return "DROPPING";
-	case WEAPON_SELECTING: return "SELECTING";
 	case WEAPON_LADDER:		return "LADDER";
 	case WEAPON_FIRING:			return "FIRING";
 	case WEAPON_BOLTING:         return "BOLTING";

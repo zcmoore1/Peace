@@ -139,6 +139,39 @@ the command that crosses the click takes the next gun out immediately and keeps
 the old mode. An earlier or later swap uses the normal holster. Returning to the
 G19 starts the next switch from the beginning.
 
+The switch is worked like a pump or a bolt (the owner's rule, "Switch NAC";
+MW2 has no selector, so this is Peace's own; `dev/MW2_DIFFERENCES.md`). It is
+`WEAPON_BOLTING` playing the switch's own segment, and the click is that
+segment's close note, so everything the pump or bolt allows or refuses during
+its action the switch allows or refuses the same way, by the same code:
+
+- **The switch NAC.** A swap (Y or `weapalt`) whose
+  command crosses the click is instant, and the mode is not changed, exactly
+  as a pump NAC leaves the pump owed. From the hip or aimed: aim stays on
+  through the switch. Equipment pressed on that command is in hand at once
+  too, and a ladder grabbed on it empties the hands at once.
+- **Lose progress.** A swap before the click is the G19's whole holster and
+  the switch is lost; one a command after it is the whole holster and the new
+  mode is kept. Unlike a pump or bolt, a lost switch is not owed: back on the
+  G19 nothing is worked again, the mode is the one it had, and a new press
+  starts a whole switch from 0.
+- **Sprint.** A sprint started inside the switch never lowers the gun: it
+  finishes and the gun lowers on the command after its end. A sprint and then
+  a swap is the swap's holster, with the switch's clip carried through it as
+  a pump's is.
+- **YY** inside the switch has the gun back READY at once in its old mode (no
+  switch worked again, where a pump would be). A **knife** waits for the
+  click (pressed before it, or on it, it is lost; after it, it cuts the rest
+  short). A **reload** is taken at once, as out of a pump; before the click
+  the switch is lost, on or after it the new mode is kept. The **trigger**
+  fires nothing inside the switch, and is taken on its last command. The
+  **freeze** lets the switch run to its end.
+
+`dev/tests/switch_test.c` runs the SPAS's pump, the M300's bolt and the G19's
+switch through the same inputs at 8, 16 and 33 ms commands and requires the
+same commands relative to each action's own close note;
+`weapon_pose_test.c`'s `TestSwitchPicture` holds the picture to the pump's.
+
 ## YY behavior
 
 The selection is MW2's cycle (`CycleWeapPrimary`): from an underbarrel, Y is

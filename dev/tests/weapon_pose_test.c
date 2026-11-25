@@ -1672,6 +1672,139 @@ static void TestLadderHeldPicture(weapAnimDef_t *def,int gun) {
  flow.cmd.buttons=0;
 }
 
+/* The G19's select-fire switch is worked as a bolt is (owner's rule, "Switch
+ * NAC"), and the picture draws it as it draws a pump or a bolt: its clip is
+ * the action's clip. Side by side, the SPAS's pump and the G19's switch,
+ * through the real PM_Weapon at 8ms, one rendered frame a command, from the
+ * shipped poses. A swap inside the action releases the action's clip from the
+ * pose on screen into the drop; a sprint begun inside it carries the action's
+ * clip, which plays on at the action's own pace under no sprint posture and
+ * fades over the entry after its end; a sprint and then a swap (the sprint
+ * swap) leave the action's clip the picture through the whole holster, the
+ * drop hidden; YY inside it eases home. Wherever the state changes, the frame
+ * drawn with no time passed is the frame on screen: nothing snaps. */
+enum { SWITCH_PIC_SWAP, SWITCH_PIC_SPRINT, SWITCH_PIC_SPRINT_SWAP, SWITCH_PIC_YY, SWITCH_PIC_WAYS };
+static modelPose_t switchShown;
+static int switchState, switchWeapon, switchFrames;
+static void SwitchPictureBegin(int gun) {
+ bg_class_t cl=*BG_Class(0);
+ int t;
+ memset(&flowPs,0,sizeof(flowPs)); memset(&flow,0,sizeof(flow));
+ cl.slot[0]=gun; cl.slot[1]=WP_MACHINEGUN;
+ cl.attachments[0]=gun==WP_G19 ? BG_ATTACHMENT_SWITCH : 0; cl.attachments[1]=0;
+ CHECK(BG_ValidateClass(&cl));
+ BG_ApplyClass(&flowPs,&cl);
+ flowPs.slotFlags[0]&=~BG_GUN_FIRST_DRAW; flowPs.slotFlags[1]&=~BG_GUN_FIRST_DRAW;
+ flowPs.stats[STAT_HEALTH]=100; flowPs.pm_type=PM_NORMAL;
+ BG_SelectSlot(&flowPs,0);
+ flowPs.weapon=gun; flowPs.weaponstate=WEAPON_READY; flowPs.weaponAnimTime=-1;
+ flow.ps=&flowPs; flow.trace=FlowTrace; flow.cmd.weapon=BG_SLOT_COMMAND+SLOT_PRIMARY;
+ CG_WeapAnim_Reset();
+ for(t=0;t<80;t++) Picture(&flowPs,8,&switchShown);
+ switchState=flowPs.weaponstate; switchWeapon=flowPs.weapon; switchFrames=0;
+ CHECK(BG_HasSelector(&flowPs,gun)==(gun==WP_G19) && cg_weapLayers[LAYER_MOVE].weight==0);
+}
+/* One command, then the frame. Where the action or its drop ends on the gun in
+ * hand (into the drop, READY or back from a drop), the frame is drawn first
+ * with no time passed, and must be the frame already on screen. */
+static void SwitchPictureStep(int buttons) {
+ modelPose_t now;
+ flow.cmd.buttons=buttons; flow.cmd.serverTime+=8; PickupWeaponStep(&flow,8); switchFrames++;
+ if(flowPs.weapon!=switchWeapon) return;	/* the next gun: another model */
+ if(flowPs.weaponstate!=switchState && (switchState==WEAPON_BOLTING || switchState==WEAPON_DROPPING) &&
+  (flowPs.weaponstate==WEAPON_DROPPING || flowPs.weaponstate==WEAPON_READY)) {
+  Picture(&flowPs,0,&now);
+  CHECK(PoseDistance(&switchShown,&now)<.001f);
+ }
+ Picture(&flowPs,8,&switchShown);
+ switchState=flowPs.weaponstate;
+}
+static void TestSwitchPicture(void) {
+ static const struct { int gun; const char *model; } guns[]={
+  {WP_SHOTGUN,"assets/baseq3/models/weapons2/spas12/view.iqm"},
+  {WP_G19,"assets/baseq3/models/weapons2/g19/view.iqm"}};
+ animLayer_t *base=&cg_weapLayers[LAYER_BASE],*move=&cg_weapLayers[LAYER_MOVE];
+ animLayer_t *sprint=&cg_weapLayers[LAYER_SPRINT],*retained=&cg_weapLayers[LAYER_RETAINED];
+ int g,way,n,start,close,end,clip,dropped;
+ playerState_t pic;
+ CG_WeapAnim_RegisterClips(WP_G19,4,"assets/baseq3/models/weapons2/g19/view.cfg");
+ CG_WeapAnim_RegisterClips(WP_MACHINEGUN,5,NULL);
+ /* the switch's clips are its segment's length (BG_ActionLength), as the fire clip is the fire table's */
+ Ready(&pic,WP_G19); pic.weaponAnimSeq=ASEQ_SELECT_AUTO;
+ CHECK(BG_ActionLength(&pic)>0 && fabs(CG_WeapAnim_ClipLength(&bg_weapAnimDefs[WP_G19],WANIM_SELECT_AUTO)-BG_ActionLength(&pic))<.5f);
+ pic.weaponAnimSeq=ASEQ_SELECT_SEMI;
+ CHECK(fabs(CG_WeapAnim_ClipLength(&bg_weapAnimDefs[WP_G19],WANIM_SELECT_SEMI)-BG_ActionLength(&pic))<.5f);
+ nativePose=qtrue;
+ for(g=0;g<ARRAY_LEN(guns);g++) for(way=0;way<SWITCH_PIC_WAYS;way++) {
+  int gun=guns[g].gun;
+  LoadAuthoredPoses(guns[g].model);
+  SwitchPictureBegin(gun);
+  /* the action begins on command 0; its first command, its close note's and its end */
+  SwitchPictureStep(gun==WP_G19 ? BUTTON_SELECTFIRE : BUTTON_ATTACK);
+  for(n=0;n<10000 && flowPs.weaponstate!=WEAPON_BOLTING;n++) SwitchPictureStep(0);
+  CHECK(flowPs.weaponstate==WEAPON_BOLTING);
+  clip=base->clip; start=switchFrames;
+  CHECK(clip==(gun==WP_G19 ? WANIM_SELECT_AUTO : WANIM_FIRE) && base->weight==1);
+  close=start+(PickupNoteTime(gun,flowPs.weaponAnimSeq,WNOTE_BOLT_CLOSED)-flowPs.weaponAnimTime+7)/8;
+  end=start+(BG_ActionLength(&flowPs)-flowPs.weaponAnimTime+7)/8;
+  CHECK(close>start+8 && end>close);
+  /* a few commands in */
+  while(switchFrames<start+4) SwitchPictureStep(0);
+  if(way==SWITCH_PIC_SPRINT || way==SWITCH_PIC_SPRINT_SWAP) {
+   flowPs.pm_flags|=PMF_SPRINTING;
+   SwitchPictureStep(0);
+   CHECK(flowPs.weaponstate==WEAPON_BOLTING && cg_retainedActive && retained->clip==clip);
+   while(switchFrames<start+8) SwitchPictureStep(0);
+  }
+  if(way==SWITCH_PIC_SPRINT) {
+   /* the action plays to its end, carried, under no sprint posture */
+   for(n=0;n<10000 && flowPs.weaponstate==WEAPON_BOLTING;n++) {
+    CHECK(cg_retainedActive && retained->clip==clip && fabs(retained->time-base->time)<.5f);
+    CHECK(sprint->weight==0);
+    SwitchPictureStep(0);
+   }
+   CHECK(switchFrames==end && flowPs.weaponstate==WEAPON_READY && cg_retainedActive && retained->clip==clip);
+   SwitchPictureStep(0);
+   CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN && !cg_retainedActive && retained->targetWeight==0);
+   CHECK(retained->clip==clip && retained->weight>0 && sprint->clip==WANIM_SPRINT_IN);
+   for(n=0;n<BG_WeaponSprintInTime(gun)/8;n++) SwitchPictureStep(0);
+   CHECK(retained->weight==0);
+   continue;
+  }
+  /* Y, before the close note */
+  FlowSlot(SLOT_SECONDARY); SwitchPictureStep(0);
+  CHECK(switchFrames<close && flowPs.weaponstate==WEAPON_DROPPING && flowPs.weaponTime==BG_WeaponDropTime(gun));
+  if(way==SWITCH_PIC_SPRINT_SWAP) {
+   /* the action's clip is the picture through the whole holster, the drop hidden */
+   for(dropped=0;dropped<10000 && flowPs.weapon==gun;dropped++) {
+    CHECK(flowPs.weaponstate==WEAPON_DROPPING && cg_retainedActive && cg_retainedDrop);
+    CHECK(retained->clip==clip && retained->weight==1 && move->weight==0 && sprint->weight==0);
+    SwitchPictureStep(0);
+   }
+   CHECK(dropped==(BG_WeaponDropTime(gun)+7)/8 && flowPs.weapon==WP_MACHINEGUN);
+   continue;
+  }
+  /* released from the action's pose, the drop fading in under it */
+  CHECK(!cg_retainedActive && CG_WeapAnim_ReturnWeight()>0 && move->clip==WANIM_DROP);
+  if(way==SWITCH_PIC_SWAP) {
+   for(n=0;n<10000 && flowPs.weapon==gun;n++) SwitchPictureStep(0);
+   CHECK(flowPs.weapon==WP_MACHINEGUN);
+   continue;
+  }
+  /* YY: back two commands later; the gun is ready (the pump owed and worked
+   * again, the switch lost) and the picture eases home along the drop */
+  SwitchPictureStep(0);
+  FlowSlot(SLOT_PRIMARY); SwitchPictureStep(0);
+  CHECK(flowPs.weapon==gun && flowPs.weaponstate==(gun==WP_G19 ? WEAPON_READY : WEAPON_BOLTING));
+  CHECK(move->clip==WANIM_DROP && move->weight>0);
+  if(gun==WP_G19) CHECK(move->fit==MOVE_FIT_RETURN && !(flowPs.slotFlags[0]&BG_GUN_AUTO));
+  for(n=0;n<MOVE_RETURN_MS/8+8;n++) SwitchPictureStep(0);
+  CHECK(move->weight==0);
+ }
+ nativePose=qfalse;
+ CG_WeapAnim_RegisterClips(WP_G19,0,NULL);
+}
+
 int main(void) {
  playerState_t ps;
  const int states[]={WEAPON_READY,WEAPON_FIRING,WEAPON_BOLTING};
@@ -1729,5 +1862,6 @@ int main(void) {
  TestShotPictureAcrossReady(WP_M40A3);
  TestDryFirePicture(WP_M40A3);
  TestModeSwitchPicture();
+ TestSwitchPicture();
  printf("PASS: %d weapon presentation ownership checks\n",checks); return 0;
 }

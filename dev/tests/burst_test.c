@@ -1089,14 +1089,14 @@ static void SwitchMode(qboolean toAuto) {
 	CHECK(PS->weapon == WP_G19 && PS->weaponstate == WEAPON_READY && BG_HasSelector(PS, WP_G19));
 	CHECK(!!(*flags & BG_GUN_AUTO) == !toAuto && click >= 2 && end > click);
 	Frame(BUTTON_SELECTFIRE, 0);
-	CHECK(PS->weaponstate == WEAPON_SELECTING && PS->weaponTime == G19_SWITCH_MS && PS->weaponAnimTime == 0);
+	CHECK(PS->weaponstate == WEAPON_BOLTING && PS->weaponTime == G19_SWITCH_MS && PS->weaponAnimTime == 0);
 	CHECK(PS->weaponAnimSeq == (toAuto ? ASEQ_SELECT_AUTO : ASEQ_SELECT_SEMI) && (PS->weapFlags & PWF_SELECTOR_HELD));
 	CHECK(!raised[EV_WEAPON_NOTETRACK] && !!(*flags & BG_GUN_AUTO) == !toAuto);
 	for (k = 1; k <= end; k++) {
 		Frame(0, 0);
 		CHECK(!(PS->weapFlags & PWF_SELECTOR_HELD) && raised[EV_WEAPON_NOTETRACK] == (k == click));
 		CHECK(!!(*flags & BG_GUN_AUTO) == (toAuto ? k >= click : k < click));
-		CHECK(PS->weaponstate == (k < end ? WEAPON_SELECTING : WEAPON_READY));
+		CHECK(PS->weaponstate == (k < end ? WEAPON_BOLTING : WEAPON_READY));
 		if (k < end) CHECK(PS->weaponAnimTime == k * msec);
 		CHECK(!BG_BurstFirePending(PS) && !raised[EV_FIRE_WEAPON] && PS->weapon == WP_G19);
 	}

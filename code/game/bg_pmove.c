@@ -3368,9 +3368,53 @@ static qboolean PM_BurstFireType( int weapon ) {
 static const bg_weaponNote_t bgnotes_g19_mag[] = {
 	{ G19_MAG_IN_MS, WNOTE_MAG_IN, -1 }, { 0, WNOTE_NONE, 0 }
 };
+/* The selector's switch is worked as a bolt is (owner's rule, Peace's own:
+   MW2 has no selector): one segment, WEAPON_BOLTING, whose close note is the
+   click. Like the bolt's it carries no rounds (param 0): it releases the lock
+   on its think and only queues what it closes, the slot's mode, which step 4
+   commits at the chambering's commit point. */
 static const bg_weaponNote_t bgnotes_g19_switch[] = {
-	{ G19_CLICK_MS, WNOTE_SELECTOR, 0 }, { 0, WNOTE_NONE, 0 }
+	{ G19_CLICK_MS, WNOTE_BOLT_CLOSED, 0 }, { 0, WNOTE_NONE, 0 }
 };
+
+/* Each gun's selector switch, played by both directions (ASEQ_SELECT_AUTO and
+   ASEQ_SELECT_SEMI), laid out as bg_weaponFire: a gun with none has length 0. */
+static const bg_weaponAnimSeg_t bg_weaponSelect[MAX_WEAPONS] = {
+	/* WP_NONE            */ { 0, bgnotes_none },
+	/* WP_GAUNTLET        */ { 0, bgnotes_none },
+	/* WP_MACHINEGUN      */ { 0, bgnotes_none },
+	/* WP_SHOTGUN         */ { 0, bgnotes_none },
+	/* WP_GRENADE_LAUNCHER*/ { 0, bgnotes_none },
+	/* WP_ROCKET_LAUNCHER */ { 0, bgnotes_none },
+	/* WP_LIGHTNING       */ { 0, bgnotes_none },
+	/* WP_RAILGUN         */ { 0, bgnotes_none },
+	/* WP_PLASMAGUN       */ { 0, bgnotes_none },
+	/* WP_BFG             */ { 0, bgnotes_none },
+	/* WP_GRAPPLING_HOOK  */ { 0, bgnotes_none },
+#ifdef MISSIONPACK
+	{ 0, bgnotes_none }, { 0, bgnotes_none }, { 0, bgnotes_none },
+#endif
+	/* WP_KNIFE           */ { 0, bgnotes_none },
+	/* WP_FRAG            */ { 0, bgnotes_none },
+	/* WP_FLASH           */ { 0, bgnotes_none },
+	/* WP_SEMTEX          */ { 0, bgnotes_none },
+	/* WP_M40A3           */ { 0, bgnotes_none },
+	/* WP_THROWING_KNIFE  */ { 0, bgnotes_none },
+	/* WP_TACTICAL_INSERTION */ { 0, bgnotes_none },
+	/* WP_M16             */ { 0, bgnotes_none },
+	/* WP_MASTERKEY       */ { 0, bgnotes_none },
+	{ G19_SWITCH_MS, bgnotes_g19_switch }, // WP_G19
+};
+
+/* The segment a WEAPON_BOLTING gun plays: the fire clip, whose action is the
+   rest of it after the open note, or the selector's switch. The action ends on
+   its clock at this length (step 4c), which is also its crossing for the held
+   trigger's lock (PM_WeaponTimeRanOut). */
+int BG_ActionLength( const playerState_t *ps ) {
+	if ( ps->weapon < 0 || ps->weapon >= MAX_WEAPONS ) return 0;
+	if ( BG_IS_SELECT_SEQ( ps->weaponAnimSeq ) ) return bg_weaponSelect[ps->weapon].length;
+	return bg_weaponFire[ps->weapon].length;
+}
 
 static const bg_weaponReload_t bg_weaponReloads[MAX_WEAPONS] = {
 	/* WP_NONE            */ { { SEG_NONE, SEG_NONE, SEG_NONE } },
@@ -4645,7 +4689,10 @@ static const bg_weaponNote_t *PM_SegNotes( int weapon, int seq ) {
 	// Selected by which SEGMENT is playing, deliberately not by weaponstate.
 	// By the time the notes run, step 1 may already have flipped the state to
 	// DROPPING - and the note that makes that holster free still has to land.
-	if (weapon == WP_G19 && (seq == ASEQ_SELECT_AUTO || seq == ASEQ_SELECT_SEMI)) return bgnotes_g19_switch;
+	if ( BG_IS_SELECT_SEQ( seq ) ) {
+		n = bg_weaponSelect[weapon].notes;
+		return n ? n : bgnotes_none;
+	}
 	if ( seq == ASEQ_FIRE ) {
 		n = bg_weaponFire[weapon].notes;
 		return n ? n : bgnotes_none;
@@ -4805,7 +4852,7 @@ PM_Weapon commits those effects after transitions have had a chance to finish.
 The returned chamber completion lives only for this think, like its note.
 ===============
 */
-static qboolean PM_RunWeaponNotes( int oldElapsed, int newElapsed, qboolean *selectorClick ) {
+static qboolean PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 	const bg_weaponNote_t *n;
 	qboolean chamberClosed = qfalse;
 
@@ -4818,10 +4865,6 @@ static qboolean PM_RunWeaponNotes( int oldElapsed, int newElapsed, qboolean *sel
 		}
 
 		switch ( n->note ) {
-		case WNOTE_SELECTOR:
-			*selectorClick = qtrue;
-			pm->ps->weaponTime = 0;
-			break;
 		case WNOTE_MAG_OUT:
 			PM_AddEvent( EV_RELOAD );
 			break;
@@ -4840,6 +4883,8 @@ static qboolean PM_RunWeaponNotes( int oldElapsed, int newElapsed, qboolean *sel
 			// Chambering is completion of the action, just as inserting ammo is
 			// completion of the reload. Queue it until the same commit point;
 			// a holster that finishes first abandons either kind of progress.
+			// The selector's click is this note on its switch: what it closes
+			// is the slot's mode, committed at the same point.
 			chamberClosed = qtrue;
 		case WNOTE_MAG_IN:
 			if ( n->param != 0 || n->note == WNOTE_MAG_IN ) {
@@ -4868,9 +4913,9 @@ PM_WeaponDelayEnds
 MW2's delayedAction: whether a weapon delay runs out on this think
 (PM_Weapon_WeaponTimeAdjust's return, 578b7b-578bab, taken before any check,
 44c42b). Peace's delays are the notes that release the lock - a reload's
-round (WNOTE_MAG_IN) and the bolt (WNOTE_BOLT_CLOSED), exactly as
-PM_RunWeaponNotes crosses them, but not the close note of a shell gun's
-reload end: that is Peace's own data, and MW2's RELOAD_END has no delay
+round (WNOTE_MAG_IN) and the bolt (WNOTE_BOLT_CLOSED, the selector's click
+too: its switch is worked as a bolt), exactly as PM_RunWeaponNotes crosses
+them, but not the close note of a shell gun's reload end: that is Peace's own data, and MW2's RELOAD_END has no delay
 (FinishReload stamps reloadEndTime alone, 5785eb-578606; only RELOADING and
 RELOAD_START get one, 575c50), so its knife check takes that think
 (577734-577755); the reload's settle of an owed action
@@ -4901,13 +4946,42 @@ static qboolean PM_WeaponDelayEnds( int oldElapsed ) {
 		return qfalse;
 	}
 	for ( n = PM_SegNotes( pm->ps->weapon, pm->ps->weaponAnimSeq ); n->note != WNOTE_NONE; n++ ) {
-		int noteTime = pm->ps->weaponAnimSeq == ASEQ_FIRE ? n->time : BG_ReloadTime( pm->ps, n->time );
+		int noteTime = pm->ps->weaponAnimSeq >= ASEQ_FIRE ? n->time : BG_ReloadTime( pm->ps, n->time );
 		if ( ( n->note == WNOTE_MAG_IN || n->note == WNOTE_BOLT_CLOSED ) &&
 		     oldElapsed < noteTime && pm->ps->weaponAnimTime >= noteTime ) {
 			return qtrue;
 		}
 	}
 	return PM_ReloadSettleCrossed( oldElapsed );
+}
+
+/*
+===============
+PM_ActionOpen
+
+An action still before its close note: WEAPON_BOLTING with the playing
+segment's WNOTE_BOLT_CLOSED still ahead of its clock. This is MW2's pending
+weaponDelay, which its knife check refuses outside the reload states
+(577734-577753): the rechamber's delay is its bolt (rechamberBoltTime,
+575bd8-575c03), and Peace's close note is that delay. For a pump or bolt it is
+exactly the action's debt: the action only starts at its open note owing it
+(step 4d), and only the close note's commit pays it. The selector's switch is
+worked the same way (owner's rule), with the click as its close note. The
+close note's own think is refused as a delay think (PM_WeaponDelayEnds).
+===============
+*/
+static qboolean PM_ActionOpen( void ) {
+	const bg_weaponNote_t *n;
+
+	if ( pm->ps->weaponstate != WEAPON_BOLTING || pm->ps->weaponAnimTime < 0 ) {
+		return qfalse;
+	}
+	for ( n = PM_SegNotes( pm->ps->weapon, pm->ps->weaponAnimSeq ); n->note != WNOTE_NONE; n++ ) {
+		if ( n->note == WNOTE_BOLT_CLOSED && pm->ps->weaponAnimTime < n->time ) {
+			return qtrue;
+		}
+	}
+	return qfalse;
 }
 
 /*
@@ -5264,17 +5338,18 @@ static void PM_UpdateWeaponAction( void ) {
 			int nextAction = 0;
 			// MW2 also starts no knife while a scoped gun is aimed at all. The gun
 			// in hand is aimed only if PM_CheckADS let it be. Nor while the action
-			// is still open: MW2's knife waits out the rechamber's bolt-close, so
-			// a press before WNOTE_BOLT_CLOSED is lost and one after it cuts the
-			// rest of the cycle short. Nor on any think a weapon delay runs out
-			// (5776ed-5776f2: MW2 passes its knife check the think's
-			// delayedAction, 44c4e3-44c4fc): on a reload's round or its settle
+			// is still open (PM_ActionOpen): MW2's knife waits out the
+			// rechamber's bolt-close, so a press before WNOTE_BOLT_CLOSED is lost
+			// and one after it cuts the rest of the cycle short; the selector's
+			// switch, worked as a bolt, waits for its click the same way. Nor on
+			// any think a weapon delay runs out (5776ed-5776f2: MW2 passes its
+			// knife check the think's delayedAction, 44c4e3-44c4fc): on a
+			// reload's round or its settle
 			// the press is lost and the round seats or the action is paid, and
 			// on the think equipment's return to an empty hand ends (its
 			// OFFHAND_END, refused by its state as well, 5776ae-5776b6).
 			// Equipment pressed with the knife wins: MW2 checks its offhands first.
-			qboolean boltOpen = pm->ps->weaponstate == WEAPON_BOLTING &&
-				( pm->ps->stats[STAT_UNCHAMBERED] & ( 1 << pm->ps->weapon ) );
+			qboolean boltOpen = PM_ActionOpen();
 			if ( (pressed & 2) && pm->ps->ammo[BG_LethalWeapon(pm->ps)] > 0 ) nextAction = WA_LETHAL;
 			else if ( (pressed & 4) && pm->ps->ammo[WP_FLASH] > 0 ) nextAction = WA_TACTICAL;
 			else if ( (pressed & 1) && !(action & WA_TYPE_MASK) && !swapping && !boltOpen && !pml.delayedAction &&
@@ -5741,7 +5816,7 @@ static qboolean PM_WeaponTimeRanOut( int oldTime ) {
 	case WEAPON_LADDER:
 		return qfalse;
 	case WEAPON_BOLTING:
-		return pm->ps->weaponAnimTime >= 0 && pm->ps->weaponAnimTime >= BG_WeaponFireLength( pm->ps->weapon );
+		return pm->ps->weaponAnimTime >= 0 && pm->ps->weaponAnimTime >= BG_ActionLength( pm->ps );
 	case WEAPON_FIRING:
 		if ( pm->ps->weaponAnimSeq == ASEQ_FIRE && pm->ps->weaponAnimTime >= 0 &&
 		     PM_ShotLength( pm->ps->weapon ) >= 0 ) {
@@ -6158,7 +6233,6 @@ static void PM_Weapon( void ) {
 	qboolean chamberClosed = qfalse;
 	qboolean reloadSettled = qfalse;
 	qboolean yyReturned = qfalse;
-	qboolean selectorClick = qfalse;
 	int buttons = (pm->ps->pm_flags & PMF_FROZEN) ? pm_rawButtons : pm->cmd.buttons;
 	qboolean selectorPress = (pm->cmd.buttons & BUTTON_SELECTFIRE) && !(pm->ps->weapFlags & PWF_SELECTOR_HELD);
 
@@ -6257,8 +6331,7 @@ static void PM_Weapon( void ) {
 	// have already flipped us to DROPPING and the mag-in note still has to land.
 	if ( ( pm->ps->weaponstate == WEAPON_RELOADING ||
 	       pm->ps->weaponstate == WEAPON_FIRING ||
-	       pm->ps->weaponstate == WEAPON_BOLTING ||
-	       pm->ps->weaponstate == WEAPON_SELECTING ) &&
+	       pm->ps->weaponstate == WEAPON_BOLTING ) &&
 	     pm->ps->weaponAnimTime >= 0 ) {
 		pm->ps->weaponAnimTime += pml.msec;		// no clamp - overshoot carries
 		// ...but not from the shot into the action. MW2's shot ends READY on
@@ -6407,8 +6480,7 @@ static void PM_Weapon( void ) {
 	//     check, 44c4d7).
 	if ( !ladderWeapon && !yyReturned && pm->ps->weaponstate != WEAPON_DROPPING && pm->ps->weaponstate != WEAPON_RAISING &&
 	     pm->ps->weaponstate != WEAPON_FIRING && pm->ps->weaponstate != WEAPON_BOLTING &&
-	     !pml.burstPending &&
-	     pm->ps->weaponstate != WEAPON_SELECTING ) {
+	     !pml.burstPending ) {
 		if ( pm->ps->pm_flags & PMF_SPRINTING ) {
 			if ( pm->ps->weaponstate != WEAPON_SPRINT_IN &&
 			     pm->ps->weaponstate != WEAPON_SPRINTING &&
@@ -6428,7 +6500,7 @@ static void PM_Weapon( void ) {
 	//    reload's mag-in note still has to land on this think for the race to
 	//    exist at all. MAG_IN zeroes the lock the holster just stamped.
 	if ( pm->ps->weaponAnimTime >= 0 ) {
-		chamberClosed = PM_RunWeaponNotes( oldElapsed, pm->ps->weaponAnimTime, &selectorClick );
+		chamberClosed = PM_RunWeaponNotes( oldElapsed, pm->ps->weaponAnimTime );
 	}
 	// 2b. The reload's delayed action on a gun that owes its pump or bolt lands
 	//     like any note: the lock goes on that think, so a holster stamped in
@@ -6530,23 +6602,17 @@ static void PM_Weapon( void ) {
 	//    sprint lock.)
 	//    Still RELOADING afterwards: the settle note has not arrived yet, and
 	//    the state alone is what keeps the gun from firing during the tail.
-	// The ordinary holster finish above gets first claim on the click's released lock.
-	if (pm->ps->weaponstate == WEAPON_SELECTING) {
-		if (selectorClick) {
-			int *flags = &pm->ps->slotFlags[pm->ps->stats[STAT_ACTIVE_SLOT]];
-			if (pm->ps->weaponAnimSeq == ASEQ_SELECT_AUTO) *flags |= BG_GUN_AUTO;
-			else *flags &= ~BG_GUN_AUTO;
-			PM_AddEvent(EV_WEAPON_NOTETRACK);
-		}
-		if (pm->ps->weaponAnimTime >= G19_SWITCH_MS) {
-			pm->ps->weaponstate = WEAPON_READY;
-			pm->ps->weaponAnimTime = -1;
-			pm->ps->weaponTime = 0;
-		}
-		return;
-	}
+	//    The selector's click is its switch's close note: what it commits
+	//    here is the slot's mode, so a swap, equipment or a ladder that took
+	//    the gun on its think (the switch NAC) left the mode as it was, and
+	//    one a think later keeps it (owner's rule: the switch is a bolt).
 	if ( chamberClosed || reloadSettled ) {
 		pm->ps->stats[STAT_UNCHAMBERED] &= ~( 1 << pm->ps->weapon );
+	}
+	if ( chamberClosed && BG_IS_SELECT_SEQ( pm->ps->weaponAnimSeq ) ) {
+		int *flags = &pm->ps->slotFlags[pm->ps->stats[STAT_ACTIVE_SLOT]];
+		if ( pm->ps->weaponAnimSeq == ASEQ_SELECT_AUTO ) *flags |= BG_GUN_AUTO;
+		else *flags &= ~BG_GUN_AUTO;
 	}
 	if ( reloadSettled ) {
 		PM_AddEvent( EV_WEAPON_NOTETRACK );
@@ -6565,13 +6631,16 @@ static void PM_Weapon( void ) {
 
 	// 4c. The fire cycle ends on the ANIM clock, not the busy lock - the lock
 	//     was already given away by the chamber note, and the settle after it
-	//     still has to play. Same shape as advancing a reload segment. Ended
+	//     still has to play. Same shape as advancing a reload segment. The
+	//     selector's switch ends here too, at its own segment's length
+	//     (BG_ActionLength), and its last think goes on as a bolt's does: a
+	//     reload or the trigger asked for on it is taken on it. Ended
 	//     with the trigger still down from the shot, the gun is READY under
 	//     MW2's lock (FinishRechamber with weaponTime 1, 578b06-578b0f, put on
 	//     at the top of this think): step 5 holds it, and it fires nothing
 	//     until the trigger is let go.
 	if ( pm->ps->weaponstate == WEAPON_BOLTING && pm->ps->weaponAnimTime >= 0 &&
-	     pm->ps->weaponAnimTime >= BG_WeaponFireLength( pm->ps->weapon ) ) {
+	     pm->ps->weaponAnimTime >= BG_ActionLength( pm->ps ) ) {
 		pm->ps->weaponstate    = WEAPON_READY;
 		pm->ps->weaponAnimTime = -1;
 	}
@@ -6754,13 +6823,18 @@ static void PM_Weapon( void ) {
 	if ( pml.burstPending ) {
 		selectorPress = qfalse;
 	}
+	// The press starts the switch as step 4d starts an owed action: worked in
+	// WEAPON_BOLTING on its own clock from 0, its segment's whole length on
+	// the lock, which its close note, the click, releases. Everything after
+	// is the bolt's code (owner's rule). Nothing is owed: a switch taken out
+	// of its hands before the click is simply lost, never worked again.
 	if (selectorPress && BG_HasSelector( pm->ps, pm->ps->weapon ) &&
 	    !(pm->ps->weaponAction & WA_TYPE_MASK) &&
 	    (pm->ps->weaponstate == WEAPON_READY || pm->ps->weaponstate == WEAPON_FIRING)) {
 		pm->ps->weaponAnimSeq = (pm->ps->slotFlags[pm->ps->stats[STAT_ACTIVE_SLOT]] & BG_GUN_AUTO)
 			? ASEQ_SELECT_SEMI : ASEQ_SELECT_AUTO;
-		pm->ps->weaponstate = WEAPON_SELECTING;
-		pm->ps->weaponTime = G19_SWITCH_MS;
+		pm->ps->weaponstate = WEAPON_BOLTING;
+		pm->ps->weaponTime = BG_ActionLength( pm->ps );
 		pm->ps->weaponAnimTime = 0;
 		return;
 	}

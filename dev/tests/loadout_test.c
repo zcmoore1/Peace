@@ -2877,7 +2877,7 @@ static void TestG19Selector(void) {
 
  Ready(WP_G19,WP_SHOTGUN); BG_ApplyClass(&ps,&cl);
  move.cmd.buttons=BUTTON_ADS|BUTTON_SELECTFIRE; PM_CheckADS(); Step(1);
- CHECK(ps.weaponstate==WEAPON_SELECTING && ps.weaponAnimSeq==ASEQ_SELECT_AUTO && (ps.pm_flags&PMF_ADS));
+ CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimSeq==ASEQ_SELECT_AUTO && (ps.pm_flags&PMF_ADS));
  Run(G19_CLICK_MS-1); CHECK(!(ps.slotFlags[0]&BG_GUN_AUTO));
  PM_CheckADS(); CHECK(ps.pm_flags&PMF_ADS); Step(1); CHECK(ps.slotFlags[0]&BG_GUN_AUTO);
  Run(G19_SWITCH_MS+5); CHECK(ps.weaponstate==WEAPON_READY && (ps.slotFlags[0]&BG_GUN_AUTO));
@@ -2885,7 +2885,7 @@ static void TestG19Selector(void) {
  move.cmd.buttons=0; Run(G19_FIRE_MS); move.cmd.buttons=BUTTON_SELECTFIRE; Step(1);
  CHECK(ps.weaponAnimSeq==ASEQ_SELECT_SEMI);
  move.cmd.buttons=BUTTON_SPRINT; SprintStep(1);
- CHECK((ps.pm_flags&PMF_SPRINTING) && ps.weaponstate==WEAPON_SELECTING && ps.weaponAnimTime==1);
+ CHECK((ps.pm_flags&PMF_SPRINTING) && ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==1);
  Run(G19_CLICK_MS-1); CHECK(!(ps.slotFlags[0]&BG_GUN_AUTO));
  Run(G19_SWITCH_MS-G19_CLICK_MS+1); CHECK(ps.weaponstate==WEAPON_SPRINT_IN);
  SprintMove(0,0,0,1); Run(BG_WeaponSprintOutTime(WP_G19)); CHECK(ps.weaponstate==WEAPON_READY);
@@ -2906,7 +2906,7 @@ static void TestG19Selector(void) {
   CHECK(!!(ps.slotFlags[0]&BG_GUN_AUTO)==(dir^(phase==1)));
   Returned(); Toggle(); Returned(); CHECK(ps.weapon==WP_G19 && ps.weaponAnimTime==-1);
   CHECK(!!(ps.slotFlags[0]&BG_GUN_AUTO)==(dir^(phase==1)));
-  move.cmd.buttons=BUTTON_SELECTFIRE; Step(step); CHECK(ps.weaponstate==WEAPON_SELECTING && ps.weaponAnimTime==0);
+  move.cmd.buttons=BUTTON_SELECTFIRE; Step(step); CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==0);
  }
  // A dropped fitted gun keeps its mode; unloaded or foreign attachment masks cannot grant auto.
  memset(&item,0,sizeof(item)); item.eType=ET_ITEM; item.modelindex=BG_FindItemForWeapon(WP_G19)-bg_itemlist;

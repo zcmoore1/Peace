@@ -205,15 +205,15 @@ typedef enum {
 						// state because it obeys different rules to firing: it
 						// cannot fire, it CAN be holstered out of, and the
 						// chamber note clears its lock the same way a mag-in
-						// clears a reload's
+						// clears a reload's. The selector's switch is worked in
+						// it too (owner's rule), playing its own segment
 	WEAPON_RELOADING,
 	WEAPON_SPRINT_IN,	// lowering into the sprint carry - a timed action with
 						// its own lock, so anything that clears the lock (the
 						// mag-in note) collapses the transition
 	WEAPON_SPRINTING,	// gun is down; cannot fire
 	WEAPON_SPRINT_OUT,	// bringing the gun back up
-	WEAPON_LADDER,		// hands occupied; entered through WEAPON_DROPPING
-	WEAPON_SELECTING
+	WEAPON_LADDER		// hands occupied; entered through WEAPON_DROPPING
 } weaponstate_t;
 
 // A quick action borrows the existing holster/deploy/fire states, but is never
@@ -375,8 +375,7 @@ typedef enum {
 	WNOTE_BOLT_OPEN,	// shot is away, the action starts opening
 	WNOTE_MAG_OUT,		// sound only
 	WNOTE_MAG_IN,		// gameplay: queue the clip fill and clear the busy lock
-	WNOTE_BOLT_CLOSED,	// pump/bolt guns: identical meaning to MAG_IN
-	WNOTE_SELECTOR
+	WNOTE_BOLT_CLOSED	// pump/bolt guns and the selector's click: identical meaning to MAG_IN
 } weaponNote_t;
 
 typedef struct {
@@ -400,6 +399,8 @@ typedef enum {
 	ASEQ_FIRE = RSEQ_COUNT,
 	ASEQ_SELECT_AUTO, ASEQ_SELECT_SEMI
 } reloadSeq_t;
+// The selector's switch, either way: a segment WEAPON_BOLTING plays (BG_ActionLength).
+#define BG_IS_SELECT_SEQ(seq) ((seq) == ASEQ_SELECT_AUTO || (seq) == ASEQ_SELECT_SEMI)
 
 typedef struct {
 	int						length;	// segment duration in ms. 0 = segment absent
@@ -492,6 +493,7 @@ int  BG_ReloadSegmentTime( const playerState_t *ps, int seq );
 int  BG_HolsterTime( const playerState_t *ps );	// the holster this player is doing right now
 qboolean BG_LadderHolsterDown( const playerState_t *ps );	// a ladder's holster run out, hung under the trigger's lock (picture only)
 int  BG_WeaponFireLength( int weapon );		// 0 = no modelled fire animation
+int  BG_ActionLength( const playerState_t *ps );	// the length of the segment a WEAPON_BOLTING gun plays
 qboolean BG_ShotAwaitsAction( const playerState_t *ps );	// READY between a shot and its action (picture only)
 qboolean BG_DryFiring( const playerState_t *ps );	// MW2's held dry fire: FIRING with no fire clip running (picture only)
 int  BG_WeaponFireType( int weapon );		// bg_fireType_t: MW2's fireType

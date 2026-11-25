@@ -145,7 +145,14 @@ source for MW2 behaviour; the owner rejects it.
 - **Bolting is a state, not a phase of firing.** `WEAPON_FIRING` is the shot;
   `WEAPON_BOLTING` is the action being worked. "Bolting" covers bolt, pump,
   cock and lever — they differ only in cycle length and note placement, never
-  in code. It cannot fire, it cannot be sprinted out of, and it CAN be
+  in code — and the G19's select-fire switch (owner's rule, "Switch NAC";
+  Peace-only, MW2 has no selector): the selector's press starts it from 0 on
+  its own segment (`ASEQ_SELECT_AUTO`/`_SEMI`, `bg_weaponSelect`; the
+  segment's length is `BG_ActionLength`, read wherever the action's end is),
+  its close note is the click, and what that note closes is the slot's mode,
+  committed in step 4 beside the chambering. Nothing is owed by a switch: one
+  taken out of the gun's hands before the click is lost, and step 4d never
+  starts one, so nothing of it is worked again. It cannot fire, it cannot be sprinted out of, and it CAN be
   holstered out of. Sprint is MW2's `PM_Weapon_CheckForSprint` (iw4x
   0x578060), which does nothing while the gun is FIRING or RECHAMBERING;
   the sprint flag, speed and meter run as usual (MW2's sprint gates never
@@ -163,8 +170,11 @@ source for MW2 behaviour; the owner rejects it.
   the action is under way step 1b never lowers `WEAPON_BOLTING`: you run
   while it finishes and the gun lowers the think after step 4c ends it,
   chambered. A knife waits for `WNOTE_BOLT_CLOSED` (MW2's knife refuses the
-  rechamber's pending bolt-close delay): a press before it is lost, one
-  after it cuts the tail short; the shot and its READY think take one. It
+  rechamber's pending bolt-close delay, 0x577734, and the think a delay runs
+  out on, 0x5776ED): a press before it, or on it, is lost, one after it cuts
+  the tail short; the shot and its READY think take one. The test is the
+  close note still ahead of the action's clock (`PM_ActionOpen`), which for a
+  pump or bolt is exactly its debt, and for the switch its click. It
   ends on the anim clock, never on the lock. A reload is taken at once out
   of the shot, its READY think or the action, as MW2's
   `PM_BeginWeaponReload` accepts READY, FIRING and RECHAMBERING (owner's
@@ -281,8 +291,13 @@ source for MW2 behaviour; the owner rejects it.
   lowers a gun in the action, so the note has no sprint lock to take and
   there is no "bolt NAC into a sprint" (MW2 has none). One think later — the
   late cancel — the chambering has committed and is kept. It is the same note,
-  in the same place, that opens the reload's window. Never write a second
-  cancel.
+  in the same place, that opens the reload's window. The G19's selector click
+  is this note on its switch's segment, so the switch NAC is this NAC: a swap,
+  equipment or a ladder that completes on the click's think is instant and
+  leaves the mode uncommitted, from the hip or aimed, and a think later the
+  new mode is kept (`dev/tests/switch_test.c` runs the SPAS's pump, the M300's
+  bolt and the switch through the same inputs side by side). Never write a
+  second cancel.
 - **An open action is a debt, and it is never resumed.** Firing sets the
   weapon's bit in `STAT_UNCHAMBERED`; only the close note's step-4 commit, the
   reload's delayed action, or MW2's dry fire clears it. The dry fire is MW2's
@@ -1267,7 +1282,8 @@ source for MW2 behaviour; the owner rejects it.
   networked `ps.weapon` is 5 bits, so no weapon may pass 31. Other
   stats remain signed int16: their bit 15 must stay unused.
 - `weaponAnimSeq` uses 3 bits for three reload segments, fire and the two G19 selector directions.
-- `weaponstate` — 4 bits, including `WEAPON_LADDER` and `WEAPON_SELECTING`.
+- `weaponstate` — 4 bits, values 0-9 (`WEAPON_LADDER` the last; the G19's
+  switch is `WEAPON_BOLTING`).
 - `weaponAction` — a separate 11-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
   swap edge latch, post-throw recovery, `WA_LEFT_EMPTY`, and `WA_ATTACK_HELD`
@@ -1550,9 +1566,10 @@ trigger held from a spent pull, hung and fired on the jump (Y back) or ended
 in the empty hands (no Y back); and equipment's drop, which is no hang.
 `TestG19Ladder` is the G19 with Select Fire: in semi the holster hangs and the
 jump's command fires, in auto (set through the real selector) it never hangs,
-and a ladder grabbed during the mode switch does what is measured today
-(before the click's command the switch is cancelled, on it the hands are empty
-at once and the mode is not committed, after it the new mode stays).
+and a ladder grabbed during the mode switch is a ladder grabbed in a pump (the
+switch is worked as a bolt: before the click's command the switch is lost, on
+it the hands are empty at once and the mode is not committed, after it the new
+mode stays).
 `TestHeldTriggerBurst` is the burst gun there, at the same four rates: the M16 rifle's burst playing out on a
 ladder grabbed inside it, the drop on the last shot's crossing (the
 cooldown's think), hung with the trigger held since the first shot for no
@@ -1568,6 +1585,22 @@ held trigger hangs it and the jump fires one round, a pending pull ends it
 with the trigger down and is a whole burst after the raise, and without Y
 back it ends and the jump raises the other gun. `QuickTick` holds the
 picture's hang to pmove's after every think (`PictureAgrees`).
+
+`dev/tests/switch_test.c` (in `run-masterkey`) runs the SPAS's pump, the
+M300's bolt and the G19's select-fire switch side by side through the real
+`Pmove`, the client's selection and the server's use step at 8, 16 and 33ms
+commands, and requires the same commands counted from each action's own
+start, close note and end, and the bolt's rule: Y (and `weapalt`) from the
+hip and aimed, at the action's first command, inside it, on the command
+before the close note, on it (the NAC: instant, not closed) and after it; a
+sprint inside it and a sprint then Y; YY; a frag; the trigger held from inside
+it and tapped on its end; the close note's event on a NAC; a freeze; a knife
+and a reload on every command of it, with Sleight of Hand too. Back on the G19
+after a NAC the switch is lost (rule (e)): its mode as it was, nothing worked
+again, a new press a whole switch from 0 (where the pump is owed and worked
+from its open note). `weapon_pose_test.c`'s `TestSwitchPicture` holds its
+picture to the pump's: released into a drop, carried by a sprint, kept through
+the sprint swap's holster, eased home from YY, and never snapping.
 
 `dev/tests/burst_test.c` (in `run-masterkey`) drives MW2's burst fire on the
 M16 rifle through the real `Pmove` and the client's selection at 8, 16 and

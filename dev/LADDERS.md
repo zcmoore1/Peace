@@ -174,16 +174,19 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
 - The G19 with Select Fire is both cases in one gun (`TestG19Ladder`), because
   its fire type is its slot's committed mode: in semi the holster hangs under
   the held trigger and the jump's command fires (no bolt, so nothing is ever
-  owed); in auto it never hangs. A ladder grabbed during the mode switch
-  (`WEAPON_SELECTING`) is not an MW2 case; this is what Peace does, measured
-  and pinned: the switch is no shot, so the holster begins on the grab's
-  command and ends the switch, whose clock stops with the state. Grabbed
-  before the click's command, the click never lands and the mode is not
-  changed (a ladder left inside that holster gives the gun back READY in the
-  mode it had). Grabbed on the click's own command, the click takes the
-  holster's lock, so the hands are empty on that command, and the mode is not
-  committed (the ladder's block ends the think first). Grabbed after the
-  click, the mode is the new one already and stays.
+  owed); in auto it never hangs. A ladder grabbed during the mode switch is
+  not an MW2 case (MW2 has no selector); by the owner's rule the switch is
+  worked as a bolt (`WEAPON_BOLTING` on its own segment, the click its close
+  note), so the grab is the one in a pump (`HeldGrabDuring`): the switch is no
+  shot, so the holster begins on the grab's command and ends the switch,
+  whose clock stops with the state. Grabbed before the click's command, the
+  click never lands and the mode is not changed (a ladder left inside that
+  holster gives the gun back READY in the mode it had: a lost switch is not
+  owed). Grabbed on the click's own command, the click takes the holster's
+  lock, so the hands are empty on that command, and the mode is not committed
+  (the ladder's block ends the think before step 4's commit, as it leaves a
+  pump owed). Grabbed after the click, the mode is the new one already and
+  stays.
 - The original reload helpers, swap helpers, note runner and their non-ladder
   ordering are unchanged. A ladder just owns the weapon while the hands are busy.
   Leaving with the drop ended (`WEAPON_LADDER`) raises the selected weapon using

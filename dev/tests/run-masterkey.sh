@@ -21,6 +21,9 @@ out/tests/trigger-test
 # MW2's burst fire (the M16 rifle): the pending burst, the cooldown, the pending pull, every interruption
 ${CC:-cc} $flags dev/tests/burst_test.c code/cgame/cg_event.c code/cgame/cg_playerstate.c dev/tests/pickup_pmove_driver.c $game $common code/qcommon/msg.c code/qcommon/huffman.c -Wl,--gc-sections -lm -o out/tests/burst-test
 out/tests/burst-test
+# The G19's select-fire switch worked as a bolt (owner's rule): beside the SPAS's pump and the M300's bolt
+${CC:-cc} $flags dev/tests/switch_test.c code/cgame/cg_playerstate.c dev/tests/pickup_pmove_driver.c $game $common -Wl,--gc-sections -lm -o out/tests/switch-test
+out/tests/switch-test
 # What a weapon state's last think does (MW2's ProcessHand), through the real Pmove.
 ${CC:-cc} $flags dev/tests/state_end_test.c $game $common -Wl,--gc-sections -lm -o out/tests/state-end-test
 out/tests/state-end-test

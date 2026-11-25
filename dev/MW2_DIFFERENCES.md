@@ -12,18 +12,18 @@ This is a snapshot: work after `3a99c10` may close items. In that case update th
 |---|---:|---:|---:|
 | Not modelled: MW2 does it, Peace does not | 55 | 0 | 66 |
 | Placeholder: Peace's values or art, not MW2's | 41 | 0 | 12 |
-| Peace-only: Peace has it, MW2 does not | 15 | 0 | 1 |
+| Peace-only: Peace has it, MW2 does not | 16 | 0 | 1 |
 | Owner choice: a deliberate departure | 14 | 2 | 3 |
 | Unverified: MW2's side not fully read | 13 | 12 | 2 |
 | Bug | 0 | 0 | 2 |
-| **Total** | **138** | **14** | **86** |
+| **Total** | **139** | **14** | **86** |
 
 "Unsettled" means MW2's behaviour, or whether Peace matches it, has not been traced to the end. Those items are marked *(unsettled)*.
 
 | Area | Open | Now matches MW2 |
 |---|---:|---:|
 | Movement and camera | 12 | 23 |
-| Weapons and gunplay | 44 | 26 |
+| Weapons and gunplay | 45 | 26 |
 | Equipment | 18 | 16 |
 | Use and pickups | 8 | 2 |
 | Netcode and killcam | 9 | 9 |
@@ -134,6 +134,8 @@ The two bugs found are fixed: the knife did 100 instead of 135, and an empty let
 
 - **The client's other cycle gates.** MW2's `WeaponCycleAllowed` refuses Y while the player is respawned (`PMF_RESPAWNED`), on a ladder, or has the disable-weapons or disable-swapping flags, and `ActionSlotUsageAllowed` refuses the alt toggle for the same and in a vehicle or on a turret. Peace's client refuses them only while frozen (and Y and `weapprev` in the empty-gun switch's lockout, below); a Y on a ladder is kept for when the gun comes back. *Not modelled.* MW2: iw4x.exe 0x59D590-0x59D5E7, 0x59D6F0-0x59D74E (`wf20/research/cycle.md` §1.3). Peace: `code/cgame/cg_weapons.c` (`CG_NextWeapon_f`, `CG_AltWeapon_f`).
 - **YY cancels an ordinary raise** *(unsettled)*. Peace lets YY cancel an ordinary raise ("not a bug"), but not a quick action's recovery raise. An earlier reading had MW2 refuse a change during a raise with time left, so YY would not skip a draw there. A later one (wf20, two readers) finds the opposite: MW2's change check holds a raise only while `weaponDelay` is non-zero (0x578C3A-0x578C41), a raise never sets it (0x576240-0x5762A3), and `PM_BeginWeaponChange` refuses only a drop already running (0x575F96), so a change out of a raise starts the raising gun's whole drop and a second press cancels that drop (0x578D00), as in Peace. Neither reading was run in a game. *Owner choice.* MW2: iw4x.exe 0x578BC0, 0x578C0A-0x578C41, 0x575F96, 0x578D00-0x578D36 (re/melee_report.txt C17; sl/review3.txt; wf20/research/machine.md 4.2). Peace: `CLAUDE.md` (An ordinary raise is cancellable by YY); `code/game/bg_pmove.c` (`PM_WeaponChangeOpen`); `dev/SPAS12.md:7`.
+
+- **Switch NAC** (wf36; the owner's rule, "Switch NAC. New not in mw2"). MW2 has no selector (no gun of its changes its fire type in hand), so it has no switch to cancel. Peace's G19 with Select Fire has one, and the owner's rule is that it behaves like a bolt: a sprint swap, a NAC, or a NAC while aimed, losing the switch's progress. It emerges from the bolt's code, not a switch of its own: the switch is `WEAPON_BOLTING` playing its own segment (`bg_weaponSelect`, `BG_ActionLength`), and the click is that segment's `WNOTE_BOLT_CLOSED`, which releases the lock on its think and only queues the mode, committed at step 4 with the chambering. So a swap first seen on the click's command is instant with the mode not committed (a transition that finishes there returns before step 4, as a pump NAC leaves the pump owed), from the hip or aimed (aim stays on through the action); a swap before it is the gun's whole holster and the switch is lost; one a command after it is the whole holster with the mode kept. Everything else is the bolt's: a sprint never lowers the gun inside it, and a sprint and then a swap carry its clip through the holster; the knife waits for the click (MW2's pending weaponDelay, 0x577734, and the delay think, 0x5776ED, as for the rechamber); equipment is the quick drop, in hand at once on the click's command; a ladder grab is the ladder's holster; a reload is taken at once and the trigger on the last command; the freeze lets it finish; prediction and the picture treat it as an action of the gun. One departure from the bolt is the owner's (until said otherwise): an interrupted switch is lost, not owed, so back on the G19 nothing is worked again, the mode is the one it had and a new press starts a whole switch from 0. (Before wf36 the switch was its own state, `WEAPON_SELECTING`, with its own note and its own step-4 block that returned: the knife came out inside it, a reload pressed inside it was lost, a trigger on its last command was lost, the click on a NAC played no sound, and a sprint swap showed the drop clip.) *Peace-only.* MW2: iw4x.exe 0x577670 (0x5776ED, 0x577734-0x577753), 0x575BD8-0x575C03. Peace: `code/game/bg_pmove.c` (`bg_weaponSelect`, `BG_ActionLength`, `PM_ActionOpen`, step 4's commit, the press); `code/cgame/cg_anim.c`; `dev/LOADOUTS.md` (G19 Select Fire); `CLAUDE.md` (The bolt cancel is the reload cancel); `dev/tests/switch_test.c`, `dev/tests/weapon_pose_test.c` (`TestSwitchPicture`), `dev/tests/loadout_test.c` (`TestG19Selector`), `dev/tests/ladder_test.c` (`TestG19Ladder`).
 
 **Damage and health**
 

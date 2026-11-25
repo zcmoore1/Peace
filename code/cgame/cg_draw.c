@@ -2559,7 +2559,6 @@ static void CG_DrawWeaponDebug( void ) {
 		case WEAPON_READY:		stateName = "READY";	break;
 		case WEAPON_RAISING:	stateName = "RAISING";	break;
 		case WEAPON_DROPPING:	stateName = "DROPPING";	break;
-		case WEAPON_SELECTING: stateName = "SELECTING"; break;
 		case WEAPON_LADDER:		stateName = "LADDER";	break;
 		case WEAPON_FIRING:		stateName = "FIRING";	break;
 		case WEAPON_RELOADING:	stateName = "RELOADING";break;

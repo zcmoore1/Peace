@@ -53,13 +53,15 @@ static qboolean CG_WeapPicture_GunAction( const playerState_t *ps ) {
 }
 
 // A new action of the held gun, not the pump continuing the same shot, across
-// the shot's READY think or straight over it.
+// the shot's READY think or straight over it. The selector's switch, also
+// worked in WEAPON_BOLTING, is no pump: begun out of a shot it is a new action.
 static qboolean CG_WeapPicture_BeganAction( const playerState_t *before, const playerState_t *after ) {
 	qboolean shot = before->weaponstate == WEAPON_FIRING || BG_ShotAwaitsAction( before );
 	if ( !CG_WeapPicture_GunAction( after ) ) return qfalse;
 	if ( after->weaponstate == before->weaponstate && after->weapon == before->weapon ) return qfalse;
 	if ( shot && after->weapon == before->weapon &&
-		( after->weaponstate == WEAPON_BOLTING || BG_ShotAwaitsAction( after ) ) ) return qfalse;
+		( ( after->weaponstate == WEAPON_BOLTING && after->weaponAnimSeq == ASEQ_FIRE ) ||
+		  BG_ShotAwaitsAction( after ) ) ) return qfalse;
 	return qtrue;
 }
 

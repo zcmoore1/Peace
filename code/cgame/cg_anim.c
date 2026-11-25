@@ -23,7 +23,6 @@ Each layer has:
 */
 
 #include "cg_local.h"
-#include "../game/bg_g19_data.h"
 
 // ---------------------------------------------------------------------------
 // Clip indices used by the viewmodel config.
@@ -128,14 +127,16 @@ static void CG_WeapAnim_ResetReturn(void) {
 // picture keeps running across that think instead of easing out into idle.
 // MW2's dry fire out of the last round's shot (BG_DryFiring) is FIRING with
 // the idle playing (PM_Weapon_CheckFiringAmmo, 5770a0): no fire clip.
+// The selector's switch is worked as a bolt is (WEAPON_BOLTING), so it is an
+// action's clip to everything here; only the clip drawn is its own.
 static qboolean CG_WeapAnim_FireClip(const playerState_t *ps) {
 	return ( ps->weaponstate == WEAPON_FIRING && !BG_DryFiring(ps) ) ||
 		ps->weaponstate == WEAPON_BOLTING || BG_ShotAwaitsAction(ps);
 }
 
-// What a base-action release eases out of: a reload or the fire clip.
+// What a base-action release eases out of: a reload or an action's clip.
 static qboolean CG_WeapAnim_BaseAction(const playerState_t *ps) {
-	return ps->weaponstate == WEAPON_RELOADING || ps->weaponstate == WEAPON_SELECTING || CG_WeapAnim_FireClip(ps);
+	return ps->weaponstate == WEAPON_RELOADING || CG_WeapAnim_FireClip(ps);
 }
 
 static int CG_WeapAnim_DrawClip(const weapAnimDef_t *def, const playerState_t *ps) {
@@ -267,7 +268,7 @@ static void CG_WeapAnim_PlayLayer( animLayer_t *l, int clip ) {
 }
 
 static qboolean CG_WeapAnim_Retainable(int clip) {
-	return clip != WANIM_IDLE && clip != WANIM_SELECT_AUTO && clip != WANIM_SELECT_SEMI && (clip < WANIM_RELOAD_START || clip > WANIM_RELOAD_END);
+	return clip != WANIM_IDLE && (clip < WANIM_RELOAD_START || clip > WANIM_RELOAD_END);
 }
 
 static qboolean CG_WeapAnim_IsDrawClip(int clip) {
@@ -400,7 +401,7 @@ static void CG_WeapAnim_UpdateRetention(const weapAnimDef_t *def, const playerSt
 	// A quick action still never starts a retention or becomes its source.
 	qboolean holding = cg_retainedActive && cg_retainedDrop && dropping;
 	qboolean forbidden = ((ps->weaponAction & WA_TYPE_MASK) && !holding) || BG_IsActionWeapon(ps->weapon) ||
-		ps->weaponstate == WEAPON_RELOADING || ps->weaponstate == WEAPON_SELECTING ||
+		ps->weaponstate == WEAPON_RELOADING ||
 		ps->weaponstate == WEAPON_LADDER || ps->stats[STAT_HEALTH] <= 0;
 	int i, source = -1;
 	retained->blendSpeed = RETAINED_BLEND_SPEED;
@@ -469,6 +470,7 @@ static void CG_WeapAnim_UpdateRetention(const weapAnimDef_t *def, const playerSt
 			case WANIM_ALT_RAISE: duration = BG_WeaponAltRaiseTime(ps->weapon); break;
 			case WANIM_DROP: duration = BG_WeaponDropTime(ps->weapon); break;
 			case WANIM_FIRE: duration = BG_WeaponFireLength(ps->weapon); break;
+			case WANIM_SELECT_AUTO: case WANIM_SELECT_SEMI: duration = BG_ActionLength(ps); break;
 			case WANIM_SPRINT_IN:
 				duration = BG_WeaponSprintInTime(ps->weapon);
 				length = CG_WeapAnim_LastFrameTime(def, retained->clip); break;
@@ -519,7 +521,8 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	// working are a single authored animation; the split into two states is a
 	// gameplay distinction, not a second piece of art, so the picture just
 	// keeps running across the boundary, the shot's READY think included.
-	if (ps->weaponstate == WEAPON_SELECTING) {
+	// The selector's switch plays its own clip, the way it moves.
+	if ( ps->weaponstate == WEAPON_BOLTING && BG_IS_SELECT_SEQ( ps->weaponAnimSeq ) ) {
 		baseClip = ps->weaponAnimSeq == ASEQ_SELECT_AUTO ? WANIM_SELECT_AUTO : WANIM_SELECT_SEMI;
 	} else if ( CG_WeapAnim_FireClip( ps ) ) {
 		baseClip = WANIM_FIRE;
@@ -542,7 +545,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	// but always from the pose on screen: YY must flow, never snap.
 	if ( !swapping && (ps->weaponstate == WEAPON_READY ||
 	                         ps->weaponstate == WEAPON_FIRING ||
-	                         ps->weaponstate == WEAPON_BOLTING || ps->weaponstate == WEAPON_SELECTING) ) {
+	                         ps->weaponstate == WEAPON_BOLTING) ) {
 		// Gameplay has released the transition (including a reversed holster).
 		// Ready means ready: a cancelled clip only eases the picture home, and a
 		// shot takes the picture over at once. Its clip is never a lock.
@@ -649,15 +652,15 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	// off, so the frame on screen is the frame the notes are being read from. A
 	// loop wrap or a cancelled reload cannot leave the viewmodel on a stale
 	// client-side stopwatch, because there is no client-side stopwatch.
-	if (ps->weaponstate == WEAPON_SELECTING) {
-		base->time = (float)ps->weaponAnimTime / G19_SWITCH_MS * CG_WeapAnim_LastFrameTime(def, base->clip);
-	} else if ( ps->weaponstate == WEAPON_RELOADING ) {
+	// An action's clip, the fire clip's or a switch's, runs on its own
+	// segment's clock (BG_ActionLength), as a reload's runs on its segment's.
+	if ( ps->weaponstate == WEAPON_RELOADING ) {
 		int duration = BG_ReloadSegmentTime( ps, ps->weaponAnimSeq );
 		base->time = duration > 0 ? (float)ps->weaponAnimTime / duration *
 		             CG_WeapAnim_ClipLength( def, base->clip ) : 0.0f;
 	} else if ( CG_WeapAnim_FireClip( ps ) &&
-	            ps->weaponAnimSeq == ASEQ_FIRE && ps->weaponAnimTime >= 0 ) {
-		int duration = BG_WeaponFireLength( ps->weapon );
+	            ps->weaponAnimSeq >= ASEQ_FIRE && ps->weaponAnimTime >= 0 ) {
+		int duration = BG_ActionLength( ps );
 		base->time = duration > 0 ? (float)ps->weaponAnimTime / duration *
 		             CG_WeapAnim_ClipLength( def, base->clip ) : 0.0f;
 	} else if ( ps->weaponstate == WEAPON_FIRING ) {

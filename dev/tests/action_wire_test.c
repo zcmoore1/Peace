@@ -172,7 +172,7 @@ int main(void) {
   to.stats[PS_STAT_WEAPONS]=(1<<14)|(1<<17)|(1<<(MAX_WEAPONS-1));
   to.stats[PS_STAT_UNCHAMBERED]=(1<<15)|(1<<18)|(1<<(MAX_WEAPONS-1));
   to.ammo[17]=2; to.ammo[MAX_WEAPONS-1]=3; to.ammoReserve[MAX_WEAPONS-1]=99;
-  to.weapon=(j&1)?WP_G19:3; to.weaponstate=(j&1)?WEAPON_SELECTING:2; to.weaponTime=37;
+  to.weapon=(j&1)?WP_G19:3; to.weaponstate=(j&1)?WEAPON_LADDER:2; to.weaponTime=37;
   to.weaponDraw=j%3; to.slotAmmo[0]=7; to.slotAmmo[1]=2;
   to.slotReserve[0]=29; to.slotReserve[1]=40;
   to.slotAttachments[0]=i&3; to.slotAttachments[1]=j&3;

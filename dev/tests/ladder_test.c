@@ -2299,17 +2299,20 @@ static void TestSwapDropOnLadder(int dt) {
  *    shot's end and runs out its time with the trigger down; the hands are
  *    empty, the way back is the raise, and the gun fires on after it. Left
  *    inside the holster it fires on that command.
- * And a ladder grabbed during the mode switch (WEAPON_SELECTING). This is what
- * dev does today, measured, not an MW2 rule (MW2 has no selector): the switch
- * is no shot, so the change gate is open and the holster begins on the grab's
- * command, which ends the switch. Its clock stops with the state, so
+ * And a ladder grabbed during the mode switch. The owner's rule, not MW2's
+ * (MW2 has no selector): the switch is worked as a bolt is, WEAPON_BOLTING
+ * playing its own segment with the click as its close note, so a ladder
+ * grabbed in it is the ladder grabbed in a pump (HeldGrabDuring): the change
+ * gate is open and the holster begins on the grab's command, which ends the
+ * switch. Its clock stops with the state, so
  *  - grabbed before the click's command, the click never lands: the mode is
  *    not changed, on the ladder or after it, and a ladder left inside that
- *    holster gives the gun back READY in the mode it had;
+ *    holster gives the gun back READY in the mode it had (nothing is owed);
  *  - grabbed on the click's own command, the click lands (the note pass does
  *    not read the state) and takes the holster's lock away, so the hands are
  *    empty on that command, as a swap on the click's command is instant; the
- *    mode is not committed, because the ladder's block ends the think first;
+ *    mode is not committed, because the ladder's block ends the think before
+ *    step 4's commit, as it leaves a pump owed;
  *  - grabbed after the click, the mode is the new one already and stays. */
 static void G19ResetWith(int dt, int other) {
     bg_class_t cl = *BG_Class(0);
@@ -2332,7 +2335,7 @@ static qboolean G19Auto(void) { return (ps.slotFlags[SLOT_PRIMARY] & BG_GUN_AUTO
 /* The selector, pressed on command 0 of the count. */
 static void G19Select(int dt, int seq) {
     move.cmd.buttons = BUTTON_SELECTFIRE; QuickTick(dt); move.cmd.buttons = 0;
-    CHECK(ps.weaponstate == WEAPON_SELECTING && ps.weaponAnimSeq == seq && ps.weaponAnimTime == 0);
+    CHECK(ps.weaponstate == WEAPON_BOLTING && ps.weaponAnimSeq == seq && ps.weaponAnimTime == 0);
     CHECK(ps.weaponTime == G19_SWITCH_MS);
 }
 static void TestG19Ladder(int dt) {
@@ -2444,7 +2447,7 @@ static void TestG19Ladder(int dt) {
         G19Reset(dt); n = 0;
         G19Select(dt, ASEQ_SELECT_AUTO);
         HeldTo(&h, &n, click + phase - 1);
-        CHECK(ps.weaponstate == WEAPON_SELECTING && ps.weaponAnimTime == n * dt && G19Auto() == (phase > 0));
+        CHECK(ps.weaponstate == WEAPON_BOLTING && ps.weaponAnimTime == n * dt && G19Auto() == (phase > 0));
         HeldGrab(&h, &n);
         CHECK(n == click + phase && ps.weapon == gun && !fired[gun]);
         if (phase == 0) {

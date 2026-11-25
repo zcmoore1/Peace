@@ -164,17 +164,36 @@ its action the switch allows or refuses the same way, by the same code:
   in the new one. A **knife** waits for the click (pressed before it, or on
   it, it is lost; after it, it cuts the rest short). A **reload** is taken at
   once, as out of a pump; before the click the switch is lost, on or after it
-  the new mode is kept. The **trigger** fires nothing inside the switch, and
-  is taken on its last command. The **freeze** lets the switch run to its
-  end.
+  the new mode is kept. (A pump or bolt left owed by an early reload is paid
+  when the reload ends; a lost switch is not owed, so the mode stays as it
+  was.) The **trigger** fires nothing inside the switch, and is taken on its
+  last command; a trigger still down from a spent pull (a burst, say, and the
+  switch begun out of a full-auto spray under it) is held there by MW2's lock
+  until it is let go, as at the end of a pump. The **freeze** lets the switch
+  run to its end.
+- **Its edges.** An empty G19 with rounds in reserve, its selector pressed on
+  the think its last shot's lock runs out, starts the switch and is reloaded
+  out of it on the next think, as an empty SPAS is reloaded out of its pump:
+  the switch is lost and the mode unchanged. A selector pressed again on the
+  switch's last command starts the next switch there, as a trigger tapped
+  there fires.
+- **The picture.** The switch's clip runs on its segment's length, as the
+  fire clip does, so it reaches its last pose about 17 ms before the switch
+  ends and holds it; the mode, the fitted semi/auto model and the HUD still
+  change on the click's command.
 
 `dev/tests/switch_test.c` runs the SPAS's pump, the M300's bolt and the G19's
 switch through the same inputs at 8, 16 and 33 ms commands and requires the
-same commands relative to each action's own close note;
-`weapon_pose_test.c`'s `TestSwitchPicture` holds the picture to the pump's,
+same commands relative to each action's own close note (`TestSwitchEdges`
+pins the two edges); `weapon_pose_test.c`'s `TestSwitchPicture` holds the
+picture to the pump's at 8, 16 and 33 ms,
 `ladder_test.c`'s `TestSwitchLadderLikePump` the ladder, and
 `fake_reload_test.c`'s `TestSwitchOutOfAShot` a switch prediction was
-corrected away from (played through, never snapped).
+corrected away from (played through, never snapped). Played through, that
+picture's own run commits the mode at the click, so the fitted semi/auto model
+shows the new mode from the click until the picture hands back at the switch's
+end, while the HUD keeps the mode the server has (an open question for the
+owner; a pump played through has no visible commit).
 
 ## YY behavior
 

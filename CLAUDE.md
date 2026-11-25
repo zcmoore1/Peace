@@ -1599,13 +1599,20 @@ start, close note and end, and the bolt's rule: Y (and `weapalt`) from the
 hip and aimed, at the action's first command, inside it, on the command
 before the close note, on it (the NAC: instant, not closed) and after it; a
 sprint inside it and a sprint then Y; YY; a frag; the trigger held from inside
-it and tapped on its end; the close note's event on a NAC; a freeze; a knife
-and a reload on every command of it, with Sleight of Hand too. Back on the G19
-after a NAC the switch is lost (rule (e)): its mode as it was, nothing worked
-again, a new press a whole switch from 0 (where the pump is owed and worked
-from its open note). `weapon_pose_test.c`'s `TestSwitchPicture` holds its
-picture to the pump's: released into a drop, carried by a sprint, kept through
-the sprint swap's holster, eased home from YY, and never snapping.
+it and tapped on its end; a spent pull held through its end (MW2's lock there:
+the switch begun out of a full-auto spray under an M16 burst's pull); the
+close note's event on a NAC; a freeze; a knife and a reload on every command
+of it, with Sleight of Hand too. Back on the G19 after a NAC the switch is lost
+(rule (e)): its mode as it was, nothing worked again, a new press a whole
+switch from 0 (where the pump is owed and worked from its open note).
+`TestSwitchEdges` pins the switch's own press: on an empty G19's last think it
+is reloaded out of on the next (step 4e), and pressed again on its end it
+starts the next. `weapon_pose_test.c`'s `TestSwitchPicture` holds its picture
+to the pump's at 8, 16 and 33ms: released into a drop, carried by a sprint,
+kept through the sprint swap's holster, eased home from YY, taking over a
+sprint YY's ease home at the move layer's crossfade (beside the SPAS's shot),
+never snapping, and the idle at rest after it, though `weaponAnimSeq` still
+names the switch (after it played out, after YY lost it, on the next gun).
 
 `dev/tests/burst_test.c` (in `run-masterkey`) drives MW2's burst fire on the
 M16 rifle through the real `Pmove` and the client's selection at 8, 16 and

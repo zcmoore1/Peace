@@ -152,8 +152,8 @@ source for MW2 behaviour; the owner rejects it.
   its close note is the click, and what that note closes is the slot's mode,
   committed in step 4 beside the chambering. Nothing is owed by a switch: one
   taken out of the gun's hands before the click is lost, and step 4d never
-  starts one, so nothing of it is worked again. It cannot fire, it cannot be sprinted out of, and it CAN be
-  holstered out of. Sprint is MW2's `PM_Weapon_CheckForSprint` (iw4x
+  starts one, so nothing of it is worked again. It cannot fire, it cannot be
+  sprinted out of, and it CAN be holstered out of. Sprint is MW2's `PM_Weapon_CheckForSprint` (iw4x
   0x578060), which does nothing while the gun is FIRING or RECHAMBERING;
   the sprint flag, speed and meter run as usual (MW2's sprint gates never
   test those states). With the trigger let go, MW2's shot ends READY owing its

@@ -942,6 +942,84 @@ static void TestPictureFinishesTheAction(void) {
 	CHECK(handed && sawReady && sawAction && pred.ammo[GUN] == rest.ammo[GUN]);
 }
 
+/* The G19's select-fire switch is worked as a bolt (WEAPON_BOLTING, owner's
+ * rule), so the picture treats it as an action of the gun: one begun on the
+ * think a G19 shot's time runs out, straight out of FIRING, is a new action,
+ * not that shot's pump. A correction whose server fired but never switched
+ * (the selector's press never reached it) then plays the switch you were shown
+ * through, its own clip, to its end, and hands back at rest; it never snaps
+ * it away because the shot was kept. Driven directly, as
+ * TestPictureFinishesTheAction: frame 1 predicts the shot and the switch;
+ * frame 2's snapshot is older than the shot, and its replay has the shot and
+ * no switch. */
+static void TestSwitchOutOfAShot(void) {
+	bg_class_t cl = *BG_Class(0);
+	playerState_t rest, pred, before;
+	pmove_t pm, model;
+	int i, j, k = -1, m, keep = GUN, sawSwitch = 0, handed = 0;
+	GUN = WP_G19;
+	memset(&rest, 0, sizeof(rest));
+	cl.slot[0] = WP_G19; cl.slot[1] = WP_MACHINEGUN;
+	cl.attachments[0] = BG_ATTACHMENT_SWITCH; cl.attachments[1] = 0;
+	CHECK(BG_ValidateClass(&cl));
+	BG_ApplyClass(&rest, &cl);
+	rest.stats[STAT_HEALTH] = 100; rest.pm_type = PM_NORMAL; rest.weapon = WP_G19;
+	rest.weaponstate = WEAPON_READY; rest.weaponAnimTime = -1; rest.commandTime = 1000;
+	rest.viewheight = DEFAULT_VIEWHEIGHT; rest.origin[2] = 24.125f; rest.groundEntityNum = ENTITYNUM_WORLD;
+	CHECK(GunAtRest(&rest) && BG_HasSelector(&rest, WP_G19) && !(rest.slotFlags[SLOT_PRIMARY] & BG_GUN_AUTO));
+	memset(cmds, 0, sizeof(cmds));
+	for (i = 0; i < 600; i++) { cmds[i].serverTime = rest.commandTime + 8 * (i + 1); cmds[i].weapon = BG_SLOT_COMMAND; }
+	cmds[0].buttons = BUTTON_ATTACK;
+	memset(&model, 0, sizeof(model)); FakeReloadModel(&model);
+	/* the command the shot's time runs out on, the trigger let go */
+	pred = rest;
+	for (i = 0; i < 100 && k < 0; i++) {
+		before = pred; memset(&pm, 0, sizeof(pm)); pm.ps = &pred; pm.cmd = cmds[i]; FakeReloadPmove(&pm);
+		if (i > 0 && before.weaponstate == WEAPON_FIRING && pred.weaponstate != WEAPON_FIRING) k = i;
+	}
+	CHECK(k > 0);
+	cmds[k].buttons = BUTTON_SELECTFIRE;
+	m = k + 6;
+	/* frame 1: prediction fires, and switches straight out of the shot */
+	CG_WeapPicture_Reset();
+	numCmds = m + 1;
+	CG_WeapPicture_BeginReplay(&rest);
+	pred = rest;
+	for (j = 0; j <= m; j++) {
+		before = pred; memset(&pm, 0, sizeof(pm)); pm.ps = &pred; pm.cmd = cmds[j]; FakeReloadPmove(&pm);
+		if (j == k) CHECK(before.weaponstate == WEAPON_FIRING && pred.weaponstate == WEAPON_BOLTING &&
+			pred.weaponAnimSeq == ASEQ_SELECT_AUTO);
+		CG_WeapPicture_ReplayStep(&before, &pred, NULL);
+	}
+	CG_WeapPicture_Update(&pred, &model, 0, m, GetCmd);
+	CG_WeapPicture_Update(&pred, &model, 0, m, GetCmd);
+	CHECK(pred.weaponstate == WEAPON_BOLTING && CG_WeapPicture_State(&pred) == &pred);
+	/* then the server's: it fired and never switched */
+	cmds[k].buttons = 0;
+	for (i = m + 1; i < 600 && !handed; i++) {
+		const playerState_t *pic;
+		numCmds = i + 1;
+		CG_WeapPicture_BeginReplay(&rest);
+		pred = rest;
+		for (j = 0; j <= i; j++) {
+			before = pred; memset(&pm, 0, sizeof(pm)); pm.ps = &pred; pm.cmd = cmds[j]; FakeReloadPmove(&pm);
+			CG_WeapPicture_ReplayStep(&before, &pred, NULL);
+		}
+		CG_WeapPicture_Update(&pred, &model, 0, i, GetCmd);
+		pic = CG_WeapPicture_State(&pred);
+		CHECK(pred.weaponstate != WEAPON_BOLTING && !(pred.slotFlags[SLOT_PRIMARY] & BG_GUN_AUTO));
+		if (pic != &pred) {
+			CHECK(pic->weaponstate == WEAPON_BOLTING || GunAtRest(pic));
+			if (pic->weaponstate == WEAPON_BOLTING) { CHECK(pic->weaponAnimSeq == ASEQ_SELECT_AUTO); sawSwitch = 1; }
+		} else {
+			CHECK(i > m + 1);	/* never snapped away on the correction */
+			handed = 1;
+		}
+	}
+	CHECK(sawSwitch && handed);
+	GUN = keep;
+}
+
 /* The shot's READY think is still the shot (BG_ShotAwaitsAction): a correction
  * whose snapshot base lands exactly on it keeps the shot the picture began.
  * No network desync in this model moves a shot by a command (every action
@@ -1509,6 +1587,7 @@ int main(void) {
 	TestPictureHandsBack();
 	TestPictureFinishesTheAction();
 	TestCorrectionOnTheReadyThink();
+	TestSwitchOutOfAShot();
 	Windows();
 	FakeReloads(); FakeBullets(); FakeBulletWindows();
 	GUN = WP_M40A3; MeasureAnchors();

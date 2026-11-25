@@ -170,7 +170,10 @@ its action the switch allows or refuses the same way, by the same code:
 `dev/tests/switch_test.c` runs the SPAS's pump, the M300's bolt and the G19's
 switch through the same inputs at 8, 16 and 33 ms commands and requires the
 same commands relative to each action's own close note;
-`weapon_pose_test.c`'s `TestSwitchPicture` holds the picture to the pump's.
+`weapon_pose_test.c`'s `TestSwitchPicture` holds the picture to the pump's,
+`ladder_test.c`'s `TestSwitchLadderLikePump` the ladder, and
+`fake_reload_test.c`'s `TestSwitchOutOfAShot` a switch prediction was
+corrected away from (played through, never snapped).
 
 ## YY behavior
 

@@ -1152,7 +1152,10 @@ source for MW2 behaviour; the owner rejects it.
 - **The gun never un-plays an action it showed (owner's rule).**
   `cg_weappicture.c` draws the viewmodel from its own run of the client's
   commands through the real `Pmove` once prediction is corrected away from a
-  reload, shot or pump of the held gun that you were shown. That run only
+  reload, shot or pump of the held gun that you were shown (the G19's
+  select-fire switch is such an action: it is worked in `WEAPON_BOLTING`, and
+  one begun straight out of a G19 shot is a new action, not that shot's pump,
+  `TestSwitchOutOfAShot`). That run only
   finishes what you saw: it withholds whatever in your commands would begin
   something new, never detaches into an action it began itself, and follows
   prediction again when it comes to rest or prediction starts a real action. A
@@ -1569,7 +1572,9 @@ jump's command fires, in auto (set through the real selector) it never hangs,
 and a ladder grabbed during the mode switch is a ladder grabbed in a pump (the
 switch is worked as a bolt: before the click's command the switch is lost, on
 it the hands are empty at once and the mode is not committed, after it the new
-mode stays).
+mode stays); `TestSwitchLadderLikePump` grabs the SPAS's pump and the switch
+side by side around their close notes and requires the same commands (left by
+a jump, the pump is worked again and the switch is not).
 `TestHeldTriggerBurst` is the burst gun there, at the same four rates: the M16 rifle's burst playing out on a
 ladder grabbed inside it, the drop on the last shot's crossing (the
 cooldown's think), hung with the trigger held since the first shot for no

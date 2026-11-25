@@ -2487,6 +2487,61 @@ static void TestG19Ladder(int dt) {
         CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && G19Auto() == (phase > 0) && !fired[gun]);
     }
 }
+/* The switch is worked as a bolt (owner's rule, "Switch NAC"), so a ladder
+ * grabbed in it is a ladder grabbed in a pump: the SPAS's pump and the G19's
+ * switch side by side, the trigger let go, grabbed on the command before the
+ * close note (the pump's bolt, the switch's click), on it and after it, give
+ * the same commands. Before it: the ladder's whole holster, nothing closed.
+ * On it: the hands empty at once (the note took the holster's lock), nothing
+ * closed (the ladder's block ends the think before step 4). After it: the
+ * whole holster, closed. Left by a jump, the gun the command names is raised;
+ * then the pump is owed and worked whole from its open note, and the switch
+ * is lost (the owner's rule (e)): READY in the mode it had, nothing worked. */
+static void TestSwitchLadderLikePump(int dt) {
+    static const int guns[] = { WP_SHOTGUN, WP_G19 };
+    int answers[2][3][4], g, phase, k;
+    for (g = 0; g < 2; g++) for (phase = -1; phase <= 1; phase++) {
+        int gun = guns[g], close, n = 0, *a = answers[g][phase + 1];
+        held_t h;
+        if (gun == WP_G19) {
+            G19Reset(dt);
+            h.gun = gun; h.dt = dt;
+            G19Select(dt, ASEQ_SELECT_AUTO);
+            close = Thinks(Note(gun, ASEQ_SELECT_AUTO, WNOTE_BOLT_CLOSED), dt);
+        } else {
+            h = Held(gun, dt);
+            HeldShot(&h);
+            move.cmd.buttons = 0;
+            close = h.F + 1 + Thinks(h.close - h.open, dt);
+        }
+        HeldTo(&h, &n, close + phase - 1);
+        CHECK(ps.weaponstate == WEAPON_BOLTING && ps.weapon == gun);
+        HeldGrab(&h, &n);
+        a[0] = ps.weaponstate == WEAPON_LADDER && ps.weaponTime == 0 && !Holstering();
+        a[1] = ps.weaponstate == WEAPON_DROPPING && Holstering() && ps.weaponTime == BG_LADDER_DROP_TIME;
+        a[2] = gun == WP_G19 ? G19Auto() : !Owed(gun);
+        CHECK(Attached() && ps.weapon == gun && a[0] == (phase == 0) && a[1] == (phase != 0) && a[2] == (phase > 0));
+        for (k = 0; k < Thinks(BG_LADDER_DROP_TIME, dt) && ps.weaponstate != WEAPON_LADDER; k++) HeldTo(&h, &n, n + 1);
+        CHECK(Attached() && ps.weaponstate == WEAPON_LADDER && ps.weapon == gun);
+        HeldJump(&h, &n);
+        for (k = 0; k < 1000 && !(ps.weapon == gun && ps.weaponstate == WEAPON_READY); k++) HeldTo(&h, &n, n + 1);
+        CHECK(ps.weapon == gun && ps.weaponstate == WEAPON_READY);
+        HeldTo(&h, &n, n + 1);
+        a[3] = ps.weaponstate == WEAPON_BOLTING;
+        if (gun == WP_G19) {
+            CHECK(!a[3] && ps.weaponstate == WEAPON_READY && G19Auto() == (phase > 0));
+        } else {
+            CHECK(a[3] == (phase <= 0));
+            if (a[3]) CHECK(ps.weaponAnimTime == h.open && Owed(gun));
+        }
+        CHECK(!fired[gun] || gun != WP_G19);
+    }
+    /* side by side: the same commands; only what is owed differs, by rule (e) */
+    for (phase = 0; phase < 3; phase++) {
+        CHECK(answers[0][phase][0] == answers[1][phase][0] && answers[0][phase][1] == answers[1][phase][1]);
+        CHECK(answers[0][phase][2] == answers[1][phase][2]);
+    }
+}
 /* The lock needs a round in the clip (0x578AD0-0x578AE1). The SPAS's last
  * round fired and the trigger never let go: the dry fire keeps the gun up on
  * the ladder until its time runs out (MW2's gate, 0x578C31), then the holster
@@ -2548,6 +2603,7 @@ static void TestHeldTriggerHolster(int dt) {
     TestSwapDropBurst(dt);
     TestEmptyClipHolster(dt);
     TestG19Ladder(dt);
+    TestSwitchLadderLikePump(dt);
     TestHeldPredictionReplay(dt);
 }
 int main(void) {

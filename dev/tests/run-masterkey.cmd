@@ -32,9 +32,9 @@ cl %flags% /Feout\build\masterkey-tests\burst.exe dev\tests\burst_test.c code\cg
 if errorlevel 1 goto fail
 out\build\masterkey-tests\burst.exe
 if errorlevel 1 goto fail
-cl %flags% /Feout\build\masterkey-tests\switch.exe dev\tests\switch_test.c code\cgame\cg_playerstate.c dev\tests\pickup_pmove_driver.c %game% %common% /link /OPT:REF
+cl %flags% /Feout\build\masterkey-tests\sf.exe dev\tests\sf_test.c code\cgame\cg_playerstate.c dev\tests\pickup_pmove_driver.c %game% %common% /link /OPT:REF
 if errorlevel 1 goto fail
-out\build\masterkey-tests\switch.exe
+out\build\masterkey-tests\sf.exe
 if errorlevel 1 goto fail
 cl %flags% /Feout\build\masterkey-tests\state-end.exe dev\tests\state_end_test.c %game% %common% /link /OPT:REF
 if errorlevel 1 goto fail

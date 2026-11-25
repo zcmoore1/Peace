@@ -174,14 +174,14 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
 - The G19 with Select Fire is both cases in one gun (`TestG19Ladder`), because
   its fire type is its slot's committed mode: in semi the holster hangs under
   the held trigger and the jump's command fires (no bolt, so nothing is ever
-  owed); in auto it never hangs. A ladder grabbed during the mode switch is
-  not an MW2 case (MW2 has no selector); by the owner's rule the switch is
-  worked as a bolt (`WEAPON_BOLTING` on its own segment, the click its close
-  note), so the grab is the one in a pump (`HeldGrabDuring`): the switch is no
-  shot, so the holster begins on the grab's command and ends the switch,
-  whose clock stops with the state. Grabbed before the click's command, the
-  click never lands and the mode is not changed (a ladder left inside that
-  holster gives the gun back READY in the mode it had: a lost switch is not
+  owed); in auto it never hangs. A ladder grabbed during an SF (the G19's
+  select-fire switch) is not an MW2 case (MW2 has no selector); by the owner's
+  rule the SF is worked as a bolt (`WEAPON_BOLTING` on its own segment, the
+  click its close note), so the grab is the one in a pump (`HeldGrabDuring`):
+  the SF is no shot, so the holster begins on the grab's command and ends the
+  SF, whose clock stops with the state. Grabbed before the click's command,
+  the click never lands and the mode is not changed (a ladder left inside
+  that holster gives the gun back READY in the mode it had: a lost SF is not
   owed). Grabbed on the click's own command, the click takes the holster's
   lock, so the hands are empty on that command, and the mode is not committed
   (the ladder's block ends the think before step 4's commit, as it leaves a
@@ -287,8 +287,8 @@ the leaving command's knife, frag, reload and Y; and a hang and its cancel
 replayed from a snapshot. `TestSwapDropOnLadder` is a swap's drop already
 running at the grab (its own time, the empty hands at its end, the jump inside
 it, Y back on the ladder, the hang and the jump's shot with the trigger held),
-and `TestG19Ladder` the G19 in semi, in auto and grabbed during its mode
-switch. The picture is checked in the loadout suite:
+and `TestG19Ladder` the G19 in semi, in auto and grabbed during its
+SF. The picture is checked in the loadout suite:
 `weapon_pose_test.c` (`TestLadderHeldPicture`, with the ladder grabbed again
 inside the return and the raise after the empty hands; `TestLadderKeepsDrop`)
 and, through the real `CG_AddViewWeapon`, `equipment_view_test.c`

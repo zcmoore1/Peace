@@ -1,6 +1,6 @@
-/* The G19's select-fire switch is worked as a bolt is (the owner's rule,
- * "Switch NAC", Peace's own: MW2 has no selector). The SPAS's pump, the M300's
- * bolt and the G19's switch, side by side, through the same inputs: the real
+/* The SF (the G19's select-fire switch) is worked as a bolt is (the owner's
+ * rule, the SF NAC, Peace's own: MW2 has no selector). The SPAS's pump, the
+ * M300's bolt and the G19's SF, side by side, through the same inputs: the real
  * client selection (cg_weapons.c), the real full Pmove and the server's real
  * use/reload step (BG_UpdateActivate), in moni_test.c's frame order, at 8, 16
  * and 33ms commands. A Y pressed on a frame is first seen by pmove on the next
@@ -12,8 +12,8 @@
  * own command), C the command its close note crosses (the bolt or the pump
  * paid; the click, the mode committed) and E the command it ends READY on.
  * The three guns must give the same answers, and the answers must be the
- * bolt's rule. Where the switch differs from the bolt on purpose, it is the
- * owner's rule (e): an interrupted switch is lost, never owed, so nothing of
+ * bolt's rule. Where the SF differs from the bolt on purpose, it is the
+ * owner's rule (e): an interrupted SF is lost, never owed, so nothing of
  * it is worked again when the gun comes back.
  *
  * The test only presses buttons; every time is read from the game's tables,
@@ -36,7 +36,7 @@ typedef struct { int weapon, attachment; const char *name; } actionGun_t;
 static const actionGun_t guns[] = {
 	{ WP_SHOTGUN, 0, "SPAS pump" },
 	{ WP_M40A3, 0, "M300 bolt" },
-	{ WP_G19, BG_ATTACHMENT_SWITCH, "G19 switch" }
+	{ WP_G19, BG_ATTACHMENT_SWITCH, "G19 SF" }
 };
 #define GUNS ((int)(sizeof(guns) / sizeof(guns[0])))
 static const actionGun_t *G;	/* the gun under test, in slot 0 */
@@ -84,7 +84,7 @@ static int Owes(void) {
 	BG_GetSlot(PS, 0, &gun);
 	return ( gun.flags & BG_GUN_UNCHAMBERED ) != 0;
 }
-/* What the action closes is committed: the pump or bolt paid, the switch's mode. */
+/* What the action closes is committed: the pump or bolt paid, the SF's mode. */
 static int Closed(void) { return G->attachment ? Mode() != startMode : !Owes(); }
 
 /* The gun in slot 0, the M16 in slot 1, standing on the floor. The G19 starts
@@ -166,7 +166,7 @@ static int Frames(int ms) { return (ms + msec - 1) / msec; }
 /* A script: buttons on a command, keys on its frame (a key's selection is
  * first seen on the next command), buttons held from a command on, a sprint's
  * forward from a command on, and a freeze. Command 0 begins the action: the
- * trigger for the pump and the bolt, the selector for the switch. */
+ * trigger for the pump and the bolt, the selector for the SF. */
 typedef struct { int n, buttons, keys; } press_t;
 static press_t script[8];
 static int nScript, holdFrom, holdButtons, forwardFrom, frozenFrom, frozenTo;
@@ -199,7 +199,7 @@ static int First(int from, int weapon, int state) {
 
 /* The landmarks, from a run with nothing else pressed, checked against the
  * tables: the action starts at its open note (the pump, the bolt) or at 0 (the
- * switch), and its close note and its end are on its own clock. */
+ * SF), and its close note and its end are on its own clock. */
 static int S, C, E, RUN;
 static void Landmarks(void) {
 	playerState_t ps;
@@ -251,9 +251,9 @@ typedef void (*case_t)(int at, int k, int answer[ANSWERS]);
 
 /* A change seen on command k (Y, or weapalt to the M16's underbarrel, with or
  * without aim held from command 0). Before C, the change is the whole
- * holster, and the action is not closed (the pump owed, the switch lost). On
+ * holster, and the action is not closed (the pump owed, the SF lost). On
  * C it is instant: the next gun is up on C, nothing put down, and the action
- * is still not closed (the switch NAC, as a successful NAC does not complete
+ * is still not closed (the SF NAC, as a successful NAC does not complete
  * the pump). After C it is the whole holster, the action closed and kept.
  * Aim stays on through the action, on the change's own command too, so the
  * NAC works aimed. */
@@ -322,7 +322,7 @@ static void SprintSwap(int at, int k, int answer[ANSWERS]) {
  * holster of the next gun's raise, and the gun comes back from it. What the
  * gun does once back differs on purpose: a pump or bolt is owed and worked
  * again, whole, from its open note on k+1 (An open action is a debt); a lost
- * switch is not (the owner's rule (e)): the gun stays READY in its old mode. */
+ * SF is not (the owner's rule (e)): the gun stays READY in its old mode. */
 static void YY(int at, int k, int answer[ANSWERS]) {
 	int n, back, rest;
 	Clear(); Seen(k, IN_Y); Seen(k + 1, IN_Y);
@@ -418,7 +418,7 @@ static void Trigger(int at, int k, int answer[ANSWERS]) {
  * crossing at the action's length, then step 4c). The pump's and the bolt's
  * shot with the trigger never let go: the action begins under it, and on its
  * E the gun is READY under the lock, fires nothing for as long as the trigger
- * stays down, and fires on the first press after it is let go. The switch,
+ * stays down, and fires on the first press after it is let go. The SF,
  * begun out of a full-auto spray whose trigger is never let go, into semi:
  * the same on its E, as the lock asks the mode the click committed, Single
  * Shot, of a pull already spent (the trigger went down for an M16 burst, and
@@ -429,7 +429,7 @@ static void HeldThroughEnd(int at, int k, int answer[ANSWERS]) {
 	int n, s = -1, e, release, shots = 0;
 	Clear(); Setup(); nR = 0;
 	if (G->attachment) {
-		/* into full auto first, a whole switch; then the spray */
+		/* into full auto first, a whole SF; then the spray */
 		Frame(BUTTON_SELECTFIRE, 0);
 		for (n = 0; n < E + 1; n++) Frame(0, 0);
 		CHECK(Mode() != startMode && PS->weaponstate == WEAPON_READY);
@@ -522,10 +522,10 @@ static void SideBySide(const char *name, case_t run, const int *places, int coun
 	}
 }
 
-/* The switch NAC and the bolt's, from the hip and aimed, and weapalt's; then
- * back to the gun: a pump or bolt is owed and worked from its open note, a
- * switch is lost (rule (e)): the mode as it was, nothing worked again, and a
- * new press starts a whole switch from 0. */
+/* The SF NAC and the bolt's, from the hip and aimed, and weapalt's; then
+ * back to the gun: a pump or bolt is owed and worked from its open note, an
+ * SF is lost (rule (e)): the mode as it was, nothing worked again, and a
+ * new press starts a whole SF from 0. */
 static void TestReturn(void) {
 	int g, n, back;
 	for (g = 0; g < GUNS; g++) {
@@ -551,7 +551,7 @@ static void TestReturn(void) {
 		for (n = 0; n < Frames(2000); n++) Frame(0, 0);
 		for (n = back; n < nR; n++) CHECK(R[n].state == WEAPON_READY && !R[n].closed && !R[n].notetrack);
 		CHECK(Mode() == startMode);
-		/* a new press: the switch whole, from 0, the same way, its click C later */
+		/* a new press: the SF whole, from 0, the same way, its click C later */
 		back = nR;
 		Frame(BUTTON_SELECTFIRE, 0);
 		CHECK(PS->weaponstate == WEAPON_BOLTING && PS->weaponAnimTime == 0 && PS->weaponAnimSeq == ASEQ_SELECT_AUTO);
@@ -564,17 +564,17 @@ static void TestReturn(void) {
 	}
 }
 
-/* Two edges of the switch's own press, each the bolt's code at work (rule
+/* Two edges of the SF's own press, each the bolt's code at work (rule
  * (f)), on the G19 alone: a pump or a bolt is started by step 4d, before the
- * reload and the fire checks of its think, the switch by its press, after
+ * reload and the fire checks of its think, the SF by its press, after
  * them. An empty G19 with rounds in reserve, the selector pressed on the think
  * its last shot's lock runs out (still FIRING there, which the auto reload
- * refuses): the switch starts, and on the next think step 4e reloads the empty
- * gun out of it, as it reloads an empty SPAS out of its pump; the switch is
- * lost, the mode as it was. And the selector pressed again on the switch's
- * last command, E: the switch has ended READY there (step 4c), so the press
- * starts the next switch, back, on E, as a trigger tapped on E fires on E. */
-static void TestSwitchEdges(void) {
+ * refuses): the SF starts, and on the next think step 4e reloads the empty
+ * gun out of it, as it reloads an empty SPAS out of its pump; the SF is
+ * lost, the mode as it was. And the selector pressed again on the SF's
+ * last command, E: the SF has ended READY there (step 4c), so the press
+ * starts the next SF, back, on E, as a trigger tapped on E fires on E. */
+static void TestSFEdges(void) {
 	int n, k = -1, end;
 	G = &guns[GUNS - 1]; Landmarks();
 	CHECK(G->attachment && S == 0);
@@ -648,8 +648,8 @@ int main(void) {
 		}
 		perk = PERK_NONE;
 		TestReturn();
-		TestSwitchEdges();
+		TestSFEdges();
 	}
-	printf("PASS: %d switch-as-a-bolt checks (SPAS pump, M300 bolt and G19 switch side by side)\n", checks);
+	printf("PASS: %d SF-as-a-bolt checks (SPAS pump, M300 bolt and G19 SF side by side)\n", checks);
 	return 0;
 }

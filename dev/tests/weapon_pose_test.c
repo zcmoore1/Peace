@@ -1672,9 +1672,9 @@ static void TestLadderHeldPicture(weapAnimDef_t *def,int gun) {
  flow.cmd.buttons=0;
 }
 
-/* The G19's select-fire switch is worked as a bolt is (owner's rule, "Switch
- * NAC"), and the picture draws it as it draws a pump or a bolt: its clip is
- * the action's clip. Side by side, the SPAS's pump and the G19's switch,
+/* The SF (the G19's select-fire switch) is worked as a bolt is (owner's rule,
+ * the SF NAC), and the picture draws it as it draws a pump or a bolt: its clip
+ * is the action's clip. Side by side, the SPAS's pump and the G19's SF,
  * through the real PM_Weapon at 8, 16 and 33ms, one rendered frame a command,
  * from the shipped poses. A swap inside the action releases the action's clip
  * from the pose on screen into the drop; a sprint begun inside it carries the
@@ -1688,20 +1688,20 @@ static void TestLadderHeldPicture(weapAnimDef_t *def,int gun) {
  * SPAS's shot does. And once the gun is at rest, the idle is drawn: after an
  * action played out, after YY lost it, and on the next gun after a swap,
  * though the state still names the action's last segment (weaponAnimSeq). */
-enum { SWITCH_PIC_SWAP, SWITCH_PIC_SPRINT, SWITCH_PIC_SPRINT_SWAP, SWITCH_PIC_YY, SWITCH_PIC_FINISH, SWITCH_PIC_WAYS };
-static const struct { int gun, next; const char *model; } switchGuns[]={
+enum { SF_PIC_SWAP, SF_PIC_SPRINT, SF_PIC_SPRINT_SWAP, SF_PIC_YY, SF_PIC_FINISH, SF_PIC_WAYS };
+static const struct { int gun, next; const char *model; } sfGuns[]={
  {WP_SHOTGUN,WP_G19,"assets/baseq3/models/weapons2/spas12/view.iqm"},
  {WP_G19,WP_SHOTGUN,"assets/baseq3/models/weapons2/g19/view.iqm"}};
-static modelPose_t switchShown;
-static int switchState, switchWeapon, switchFrames, switchMsec;
-static int SwitchFrames(int ms) { return (ms+switchMsec-1)/switchMsec; }
-static const char *SwitchModel(int gun) {
+static modelPose_t sfShown;
+static int sfState, sfWeapon, sfFrames, sfMsec;
+static int SFFrames(int ms) { return (ms+sfMsec-1)/sfMsec; }
+static const char *SFModel(int gun) {
  int g;
- for(g=0;g<ARRAY_LEN(switchGuns);g++) if(switchGuns[g].gun==gun) return switchGuns[g].model;
+ for(g=0;g<ARRAY_LEN(sfGuns);g++) if(sfGuns[g].gun==gun) return sfGuns[g].model;
  CHECK(0); return NULL;
 }
 /* The gun in slot 0 at rest, the other one of the two in slot 1. */
-static void SwitchPictureBegin(int gun,int next) {
+static void SFPictureBegin(int gun,int next) {
  bg_class_t cl=*BG_Class(0);
  int t;
  memset(&flowPs,0,sizeof(flowPs)); memset(&flow,0,sizeof(flow));
@@ -1715,10 +1715,10 @@ static void SwitchPictureBegin(int gun,int next) {
  BG_SelectSlot(&flowPs,0);
  flowPs.weapon=gun; flowPs.weaponstate=WEAPON_READY; flowPs.weaponAnimTime=-1;
  flow.ps=&flowPs; flow.trace=FlowTrace; flow.cmd.weapon=BG_SLOT_COMMAND+SLOT_PRIMARY;
- LoadAuthoredPoses(SwitchModel(gun));
+ LoadAuthoredPoses(SFModel(gun));
  CG_WeapAnim_Reset();
- for(t=0;t<80;t++) Picture(&flowPs,8,&switchShown);
- switchState=flowPs.weaponstate; switchWeapon=flowPs.weapon; switchFrames=0;
+ for(t=0;t<80;t++) Picture(&flowPs,8,&sfShown);
+ sfState=flowPs.weaponstate; sfWeapon=flowPs.weapon; sfFrames=0;
  CHECK(BG_HasSelector(&flowPs,gun)==(gun==WP_G19) && cg_weapLayers[LAYER_MOVE].weight==0);
 }
 /* One command, then the frame. Where the action begins out of READY, or the
@@ -1726,26 +1726,26 @@ static void SwitchPictureBegin(int gun,int next) {
  * from a drop), the frame is drawn first with no time passed, and must be the
  * frame already on screen. (A shot takes the picture over at once, by design:
  * it is not checked.) The next gun is drawn from its own model. */
-static void SwitchPictureStep(int buttons) {
+static void SFPictureStep(int buttons) {
  modelPose_t now;
- flow.cmd.buttons=buttons; flow.cmd.serverTime+=switchMsec; PickupWeaponStep(&flow,switchMsec); switchFrames++;
- if(flowPs.weapon!=switchWeapon) {
-  LoadAuthoredPoses(SwitchModel(flowPs.weapon));
-  switchWeapon=flowPs.weapon;
- } else if(flowPs.weaponstate!=switchState && (((switchState==WEAPON_BOLTING || switchState==WEAPON_DROPPING) &&
+ flow.cmd.buttons=buttons; flow.cmd.serverTime+=sfMsec; PickupWeaponStep(&flow,sfMsec); sfFrames++;
+ if(flowPs.weapon!=sfWeapon) {
+  LoadAuthoredPoses(SFModel(flowPs.weapon));
+  sfWeapon=flowPs.weapon;
+ } else if(flowPs.weaponstate!=sfState && (((sfState==WEAPON_BOLTING || sfState==WEAPON_DROPPING) &&
   (flowPs.weaponstate==WEAPON_DROPPING || flowPs.weaponstate==WEAPON_READY)) ||
-  (switchState==WEAPON_READY && flowPs.weaponstate==WEAPON_BOLTING))) {
+  (sfState==WEAPON_READY && flowPs.weaponstate==WEAPON_BOLTING))) {
   Picture(&flowPs,0,&now);
-  CHECK(PoseDistance(&switchShown,&now)<.001f);
+  CHECK(PoseDistance(&sfShown,&now)<.001f);
  }
- Picture(&flowPs,switchMsec,&switchShown);
- switchState=flowPs.weaponstate;
+ Picture(&flowPs,sfMsec,&sfShown);
+ sfState=flowPs.weaponstate;
 }
 /* At rest: READY and nothing pressed for a while, the idle alone drawn. */
-static void SwitchPictureAtRest(void) {
+static void SFPictureAtRest(void) {
  int n,l;
- for(n=0;n<SwitchFrames(10000) && flowPs.weaponstate!=WEAPON_READY;n++) SwitchPictureStep(0);
- for(n=0;n<SwitchFrames(1000);n++) SwitchPictureStep(0);
+ for(n=0;n<SFFrames(10000) && flowPs.weaponstate!=WEAPON_READY;n++) SFPictureStep(0);
+ for(n=0;n<SFFrames(1000);n++) SFPictureStep(0);
  CHECK(flowPs.weaponstate==WEAPON_READY);
  CHECK(cg_weapLayers[LAYER_BASE].clip==WANIM_IDLE && cg_weapLayers[LAYER_BASE].weight==1);
  for(l=LAYER_MOVE;l<ANIM_LAYER_COUNT;l++) CHECK(cg_weapLayers[l].weight==0);
@@ -1758,151 +1758,151 @@ static void SwitchPictureAtRest(void) {
  * ease's own frames (ease) do, plus that crossfade's share of the distance
  * between the two pictures being crossed (slerp's at most pi/2 on a rotation
  * component). Returns the largest frame-to-frame move. */
-static float SwitchPictureEase(int gun,int d,int action,float own,float ease) {
+static float SFPictureEase(int gun,int d,int action,float own,float ease) {
  animLayer_t *base=&cg_weapLayers[LAYER_BASE],*move=&cg_weapLayers[LAYER_MOVE];
  const weapAnimDef_t *def=&bg_weapAnimDefs[gun];
  modelPose_t before,under,over;
  int n,next=gun==WP_G19 ? WP_SHOTGUN : WP_G19;
  float w,jump,gap,worst=0;
- SwitchPictureBegin(gun,next);
+ SFPictureBegin(gun,next);
  flowPs.pm_flags|=PMF_SPRINTING;
- for(n=0;n<SwitchFrames(200);n++) SwitchPictureStep(0);
+ for(n=0;n<SFFrames(200);n++) SFPictureStep(0);
  CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN || flowPs.weaponstate==WEAPON_SPRINTING);
- FlowSlot(SLOT_SECONDARY); SwitchPictureStep(0);
+ FlowSlot(SLOT_SECONDARY); SFPictureStep(0);
  CHECK(flowPs.weaponstate==WEAPON_DROPPING && cg_retainedActive && cg_retainedDrop);
  flowPs.pm_flags&=~PMF_SPRINTING;
- FlowSlot(SLOT_PRIMARY); SwitchPictureStep(0);
+ FlowSlot(SLOT_PRIMARY); SFPictureStep(0);
  CHECK(flowPs.weapon==gun && flowPs.weaponstate==WEAPON_READY && move->fit==MOVE_FIT_RETURN && move->weight>0);
- for(n=1;n<d;n++) SwitchPictureStep(0);
+ for(n=1;n<d;n++) SFPictureStep(0);
  CHECK(flowPs.weaponstate==WEAPON_READY && move->weight>0);
- for(n=0;n<=SwitchFrames((int)MOVE_RETURN_MS);n++) {
-  w=move->weight; before=switchShown; gap=0;
+ for(n=0;n<=SFFrames((int)MOVE_RETURN_MS);n++) {
+  w=move->weight; before=sfShown; gap=0;
   if(w>0) {
    CHECK(CG_WeapAnim_SampleLayer(1,def,base,&under) && CG_WeapAnim_SampleLayer(1,def,move,&over));
    gap=PoseDistance(&under,&over);
   }
-  SwitchPictureStep(!n && action ? (gun==WP_G19 ? BUTTON_SELECTFIRE : BUTTON_ATTACK) : 0);
+  SFPictureStep(!n && action ? (gun==WP_G19 ? BUTTON_SELECTFIRE : BUTTON_ATTACK) : 0);
   if(!n && action) CHECK(flowPs.weaponstate==(gun==WP_G19 ? WEAPON_BOLTING : WEAPON_FIRING));
-  CHECK(move->weight>=w-MOVE_BLEND_SPEED*switchMsec-.0001f);
-  jump=PoseDistance(&before,&switchShown); if(jump>worst) worst=jump;
-  if(action) CHECK(jump<=own+ease+MOVE_BLEND_SPEED*switchMsec*gap*1.6f+.001f);
+  CHECK(move->weight>=w-MOVE_BLEND_SPEED*sfMsec-.0001f);
+  jump=PoseDistance(&before,&sfShown); if(jump>worst) worst=jump;
+  if(action) CHECK(jump<=own+ease+MOVE_BLEND_SPEED*sfMsec*gap*1.6f+.001f);
  }
  return worst;
 }
 /* The largest frame-to-frame move of the action begun at rest, over the same
  * stretch the ease is checked for. */
-static float SwitchPictureOwn(int gun,int next) {
+static float SFPictureOwn(int gun,int next) {
  modelPose_t before; float jump,own=0; int n;
- SwitchPictureBegin(gun,next);
- for(n=0;n<=SwitchFrames((int)MOVE_RETURN_MS);n++) {
-  before=switchShown;
-  SwitchPictureStep(!n ? (gun==WP_G19 ? BUTTON_SELECTFIRE : BUTTON_ATTACK) : 0);
-  jump=PoseDistance(&before,&switchShown); if(jump>own) own=jump;
+ SFPictureBegin(gun,next);
+ for(n=0;n<=SFFrames((int)MOVE_RETURN_MS);n++) {
+  before=sfShown;
+  SFPictureStep(!n ? (gun==WP_G19 ? BUTTON_SELECTFIRE : BUTTON_ATTACK) : 0);
+  jump=PoseDistance(&before,&sfShown); if(jump>own) own=jump;
  }
  return own;
 }
-static void TestSwitchPicture(void) {
+static void TestSFPicture(void) {
  static const int rates[]={8,16,33};
  animLayer_t *base=&cg_weapLayers[LAYER_BASE],*move=&cg_weapLayers[LAYER_MOVE];
  animLayer_t *sprint=&cg_weapLayers[LAYER_SPRINT],*retained=&cg_weapLayers[LAYER_RETAINED];
  int r,g,way,n,start,close,end,clip,dropped,d;
  playerState_t pic;
  CG_WeapAnim_RegisterClips(WP_G19,4,"assets/baseq3/models/weapons2/g19/view.cfg");
- /* the switch's clips are its segment's length (BG_ActionLength), as the fire clip is the fire table's */
+ /* the SF's clips are its segment's length (BG_ActionLength), as the fire clip is the fire table's */
  Ready(&pic,WP_G19); pic.weaponAnimSeq=ASEQ_SELECT_AUTO;
  CHECK(BG_ActionLength(&pic)>0 && fabs(CG_WeapAnim_ClipLength(&bg_weapAnimDefs[WP_G19],WANIM_SELECT_AUTO)-BG_ActionLength(&pic))<.5f);
  pic.weaponAnimSeq=ASEQ_SELECT_SEMI;
  CHECK(fabs(CG_WeapAnim_ClipLength(&bg_weapAnimDefs[WP_G19],WANIM_SELECT_SEMI)-BG_ActionLength(&pic))<.5f);
  nativePose=qtrue;
- for(r=0;r<ARRAY_LEN(rates);r++) for(g=0;g<ARRAY_LEN(switchGuns);g++) for(way=0;way<SWITCH_PIC_WAYS;way++) {
-  int gun=switchGuns[g].gun,next=switchGuns[g].next;
-  switchMsec=rates[r];
-  SwitchPictureBegin(gun,next);
+ for(r=0;r<ARRAY_LEN(rates);r++) for(g=0;g<ARRAY_LEN(sfGuns);g++) for(way=0;way<SF_PIC_WAYS;way++) {
+  int gun=sfGuns[g].gun,next=sfGuns[g].next;
+  sfMsec=rates[r];
+  SFPictureBegin(gun,next);
   /* the action begins on command 0; its first command, its close note's and its end */
-  SwitchPictureStep(gun==WP_G19 ? BUTTON_SELECTFIRE : BUTTON_ATTACK);
-  for(n=0;n<10000 && flowPs.weaponstate!=WEAPON_BOLTING;n++) SwitchPictureStep(0);
+  SFPictureStep(gun==WP_G19 ? BUTTON_SELECTFIRE : BUTTON_ATTACK);
+  for(n=0;n<10000 && flowPs.weaponstate!=WEAPON_BOLTING;n++) SFPictureStep(0);
   CHECK(flowPs.weaponstate==WEAPON_BOLTING);
-  clip=base->clip; start=switchFrames;
+  clip=base->clip; start=sfFrames;
   CHECK(clip==(gun==WP_G19 ? WANIM_SELECT_AUTO : WANIM_FIRE) && base->weight==1);
-  close=start+SwitchFrames(PickupNoteTime(gun,flowPs.weaponAnimSeq,WNOTE_BOLT_CLOSED)-flowPs.weaponAnimTime);
-  end=start+SwitchFrames(BG_ActionLength(&flowPs)-flowPs.weaponAnimTime);
-  CHECK(close>start+SwitchFrames(64)+1 && end>close);
-  if(way==SWITCH_PIC_FINISH) {
-   /* played out: at rest the idle, the switch's segment still on the state */
-   SwitchPictureAtRest();
+  close=start+SFFrames(PickupNoteTime(gun,flowPs.weaponAnimSeq,WNOTE_BOLT_CLOSED)-flowPs.weaponAnimTime);
+  end=start+SFFrames(BG_ActionLength(&flowPs)-flowPs.weaponAnimTime);
+  CHECK(close>start+SFFrames(64)+1 && end>close);
+  if(way==SF_PIC_FINISH) {
+   /* played out: at rest the idle, the SF's segment still on the state */
+   SFPictureAtRest();
    if(gun==WP_G19) CHECK(BG_IS_SELECT_SEQ(flowPs.weaponAnimSeq) && (flowPs.slotFlags[0]&BG_GUN_AUTO));
    continue;
   }
   /* a few commands in */
-  while(switchFrames<start+SwitchFrames(32)) SwitchPictureStep(0);
-  if(way==SWITCH_PIC_SPRINT || way==SWITCH_PIC_SPRINT_SWAP) {
+  while(sfFrames<start+SFFrames(32)) SFPictureStep(0);
+  if(way==SF_PIC_SPRINT || way==SF_PIC_SPRINT_SWAP) {
    flowPs.pm_flags|=PMF_SPRINTING;
-   SwitchPictureStep(0);
+   SFPictureStep(0);
    CHECK(flowPs.weaponstate==WEAPON_BOLTING && cg_retainedActive && retained->clip==clip);
-   while(switchFrames<start+SwitchFrames(64)) SwitchPictureStep(0);
+   while(sfFrames<start+SFFrames(64)) SFPictureStep(0);
   }
-  if(way==SWITCH_PIC_SPRINT) {
+  if(way==SF_PIC_SPRINT) {
    /* the action plays to its end, carried, under no sprint posture */
    for(n=0;n<10000 && flowPs.weaponstate==WEAPON_BOLTING;n++) {
     CHECK(cg_retainedActive && retained->clip==clip && fabs(retained->time-base->time)<.5f);
     CHECK(sprint->weight==0);
-    SwitchPictureStep(0);
+    SFPictureStep(0);
    }
-   CHECK(switchFrames==end && flowPs.weaponstate==WEAPON_READY && cg_retainedActive && retained->clip==clip);
-   SwitchPictureStep(0);
+   CHECK(sfFrames==end && flowPs.weaponstate==WEAPON_READY && cg_retainedActive && retained->clip==clip);
+   SFPictureStep(0);
    CHECK(flowPs.weaponstate==WEAPON_SPRINT_IN && !cg_retainedActive && retained->targetWeight==0);
    CHECK(retained->clip==clip && retained->weight>0 && sprint->clip==WANIM_SPRINT_IN);
-   for(n=0;n<SwitchFrames(BG_WeaponSprintInTime(gun));n++) SwitchPictureStep(0);
+   for(n=0;n<SFFrames(BG_WeaponSprintInTime(gun));n++) SFPictureStep(0);
    CHECK(retained->weight==0);
    continue;
   }
   /* Y, before the close note */
-  FlowSlot(SLOT_SECONDARY); SwitchPictureStep(0);
-  CHECK(switchFrames<close && flowPs.weaponstate==WEAPON_DROPPING && flowPs.weaponTime==BG_WeaponDropTime(gun));
-  if(way==SWITCH_PIC_SPRINT_SWAP) {
+  FlowSlot(SLOT_SECONDARY); SFPictureStep(0);
+  CHECK(sfFrames<close && flowPs.weaponstate==WEAPON_DROPPING && flowPs.weaponTime==BG_WeaponDropTime(gun));
+  if(way==SF_PIC_SPRINT_SWAP) {
    /* the action's clip is the picture through the whole holster, the drop hidden */
    for(dropped=0;dropped<10000 && flowPs.weapon==gun;dropped++) {
     CHECK(flowPs.weaponstate==WEAPON_DROPPING && cg_retainedActive && cg_retainedDrop);
     CHECK(retained->clip==clip && retained->weight==1 && move->weight==0 && sprint->weight==0);
-    SwitchPictureStep(0);
+    SFPictureStep(0);
    }
-   CHECK(dropped==SwitchFrames(BG_WeaponDropTime(gun)) && flowPs.weapon==next);
+   CHECK(dropped==SFFrames(BG_WeaponDropTime(gun)) && flowPs.weapon==next);
    continue;
   }
   /* released from the action's pose, the drop fading in under it */
   CHECK(!cg_retainedActive && CG_WeapAnim_ReturnWeight()>0 && move->clip==WANIM_DROP);
-  if(way==SWITCH_PIC_SWAP) {
-   for(n=0;n<10000 && flowPs.weapon==gun;n++) SwitchPictureStep(0);
+  if(way==SF_PIC_SWAP) {
+   for(n=0;n<10000 && flowPs.weapon==gun;n++) SFPictureStep(0);
    CHECK(flowPs.weapon==next);
    /* the next gun, at rest, draws its idle */
-   SwitchPictureAtRest();
+   SFPictureAtRest();
    CHECK(flowPs.weapon==next);
    continue;
   }
   /* YY: back two commands later; the gun is ready (the pump owed and worked
-   * again, the switch lost) and the picture eases home along the drop */
-  SwitchPictureStep(0);
-  FlowSlot(SLOT_PRIMARY); SwitchPictureStep(0);
+   * again, the SF lost) and the picture eases home along the drop */
+  SFPictureStep(0);
+  FlowSlot(SLOT_PRIMARY); SFPictureStep(0);
   CHECK(flowPs.weapon==gun && flowPs.weaponstate==(gun==WP_G19 ? WEAPON_READY : WEAPON_BOLTING));
   CHECK(move->clip==WANIM_DROP && move->weight>0);
   if(gun==WP_G19) CHECK((move->fit==MOVE_FIT_RETURN || move->targetWeight==0) && !(flowPs.slotFlags[0]&BG_GUN_AUTO));
-  for(n=0;n<SwitchFrames((int)MOVE_RETURN_MS+64);n++) SwitchPictureStep(0);
+  for(n=0;n<SFFrames((int)MOVE_RETURN_MS+64);n++) SFPictureStep(0);
   CHECK(move->weight==0);
-  /* at rest, the idle: the pump played out, the switch lost */
-  SwitchPictureAtRest();
+  /* at rest, the idle: the pump played out, the SF lost */
+  SFPictureAtRest();
   CHECK(flowPs.weapon==gun);
   if(gun==WP_G19) CHECK(BG_IS_SELECT_SEQ(flowPs.weaponAnimSeq) && !(flowPs.slotFlags[0]&BG_GUN_AUTO));
  }
  /* The action begun 1 to 6 commands into a sprint YY's ease home: the
-  * SPAS's shot, which the pump follows, and the G19's switch. Each beside
+  * SPAS's shot, which the pump follows, and the G19's SF. Each beside
   * the same ease with nothing begun, and the action begun at rest. */
- for(r=0;r<ARRAY_LEN(rates);r++) for(g=0;g<ARRAY_LEN(switchGuns);g++) for(d=1;d<=6;d++) {
-  int gun=switchGuns[g].gun;
+ for(r=0;r<ARRAY_LEN(rates);r++) for(g=0;g<ARRAY_LEN(sfGuns);g++) for(d=1;d<=6;d++) {
+  int gun=sfGuns[g].gun;
   float own,ease;
-  switchMsec=rates[r];
-  own=SwitchPictureOwn(gun,switchGuns[g].next);
-  ease=SwitchPictureEase(gun,d,0,0,0);
-  SwitchPictureEase(gun,d,1,own,ease);
+  sfMsec=rates[r];
+  own=SFPictureOwn(gun,sfGuns[g].next);
+  ease=SFPictureEase(gun,d,0,0,0);
+  SFPictureEase(gun,d,1,own,ease);
  }
  nativePose=qfalse;
  CG_WeapAnim_RegisterClips(WP_G19,0,NULL);
@@ -1965,6 +1965,6 @@ int main(void) {
  TestShotPictureAcrossReady(WP_M40A3);
  TestDryFirePicture(WP_M40A3);
  TestModeSwitchPicture();
- TestSwitchPicture();
+ TestSFPicture();
  printf("PASS: %d weapon presentation ownership checks\n",checks); return 0;
 }

@@ -942,21 +942,21 @@ static void TestPictureFinishesTheAction(void) {
 	CHECK(handed && sawReady && sawAction && pred.ammo[GUN] == rest.ammo[GUN]);
 }
 
-/* The G19's select-fire switch is worked as a bolt (WEAPON_BOLTING, owner's
- * rule), so the picture treats it as an action of the gun: one begun on the
- * think a G19 shot's time runs out, straight out of FIRING, is a new action,
- * not that shot's pump. A correction whose server fired but never switched
- * (the selector's press never reached it) then plays the switch you were shown
- * through, its own clip, to its end, and hands back at rest; it never snaps
- * it away because the shot was kept. Driven directly, as
- * TestPictureFinishesTheAction: frame 1 predicts the shot and the switch;
- * frame 2's snapshot is older than the shot, and its replay has the shot and
- * no switch. */
-static void TestSwitchOutOfAShot(void) {
+/* The SF (the G19's select-fire switch) is worked as a bolt (WEAPON_BOLTING,
+ * owner's rule), so the picture treats it as an action of the gun: one begun
+ * on the think a G19 shot's time runs out, straight out of FIRING, is a new
+ * action, not that shot's pump. A correction whose server fired but never
+ * started the SF (the selector's press never reached it) then plays the SF you
+ * were shown through, its own clip, to its end, and hands back at rest; it
+ * never snaps it away because the shot was kept. Driven directly, as
+ * TestPictureFinishesTheAction: frame 1 predicts the shot and the SF; frame
+ * 2's snapshot is older than the shot, and its replay has the shot and no
+ * SF. */
+static void TestSFOutOfAShot(void) {
 	bg_class_t cl = *BG_Class(0);
 	playerState_t rest, pred, before;
 	pmove_t pm, model;
-	int i, j, k = -1, m, keep = GUN, sawSwitch = 0, handed = 0;
+	int i, j, k = -1, m, keep = GUN, sawSF = 0, handed = 0;
 	GUN = WP_G19;
 	memset(&rest, 0, sizeof(rest));
 	cl.slot[0] = WP_G19; cl.slot[1] = WP_MACHINEGUN;
@@ -980,7 +980,7 @@ static void TestSwitchOutOfAShot(void) {
 	CHECK(k > 0);
 	cmds[k].buttons = BUTTON_SELECTFIRE;
 	m = k + 6;
-	/* frame 1: prediction fires, and switches straight out of the shot */
+	/* frame 1: prediction fires, and starts the SF straight out of the shot */
 	CG_WeapPicture_Reset();
 	numCmds = m + 1;
 	CG_WeapPicture_BeginReplay(&rest);
@@ -994,7 +994,7 @@ static void TestSwitchOutOfAShot(void) {
 	CG_WeapPicture_Update(&pred, &model, 0, m, GetCmd);
 	CG_WeapPicture_Update(&pred, &model, 0, m, GetCmd);
 	CHECK(pred.weaponstate == WEAPON_BOLTING && CG_WeapPicture_State(&pred) == &pred);
-	/* then the server's: it fired and never switched */
+	/* then the server's: it fired and never started the SF */
 	cmds[k].buttons = 0;
 	for (i = m + 1; i < 600 && !handed; i++) {
 		const playerState_t *pic;
@@ -1010,13 +1010,13 @@ static void TestSwitchOutOfAShot(void) {
 		CHECK(pred.weaponstate != WEAPON_BOLTING && !(pred.slotFlags[SLOT_PRIMARY] & BG_GUN_AUTO));
 		if (pic != &pred) {
 			CHECK(pic->weaponstate == WEAPON_BOLTING || GunAtRest(pic));
-			if (pic->weaponstate == WEAPON_BOLTING) { CHECK(pic->weaponAnimSeq == ASEQ_SELECT_AUTO); sawSwitch = 1; }
+			if (pic->weaponstate == WEAPON_BOLTING) { CHECK(pic->weaponAnimSeq == ASEQ_SELECT_AUTO); sawSF = 1; }
 		} else {
 			CHECK(i > m + 1);	/* never snapped away on the correction */
 			handed = 1;
 		}
 	}
-	CHECK(sawSwitch && handed);
+	CHECK(sawSF && handed);
 	GUN = keep;
 }
 
@@ -1587,7 +1587,7 @@ int main(void) {
 	TestPictureHandsBack();
 	TestPictureFinishesTheAction();
 	TestCorrectionOnTheReadyThink();
-	TestSwitchOutOfAShot();
+	TestSFOutOfAShot();
 	Windows();
 	FakeReloads(); FakeBullets(); FakeBulletWindows();
 	GUN = WP_M40A3; MeasureAnchors();

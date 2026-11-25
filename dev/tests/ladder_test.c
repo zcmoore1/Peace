@@ -2299,12 +2299,12 @@ static void TestSwapDropOnLadder(int dt) {
  *    shot's end and runs out its time with the trigger down; the hands are
  *    empty, the way back is the raise, and the gun fires on after it. Left
  *    inside the holster it fires on that command.
- * And a ladder grabbed during the mode switch. The owner's rule, not MW2's
- * (MW2 has no selector): the switch is worked as a bolt is, WEAPON_BOLTING
- * playing its own segment with the click as its close note, so a ladder
- * grabbed in it is the ladder grabbed in a pump (HeldGrabDuring): the change
- * gate is open and the holster begins on the grab's command, which ends the
- * switch. Its clock stops with the state, so
+ * And a ladder grabbed during an SF (the G19's select-fire switch). The
+ * owner's rule, not MW2's (MW2 has no selector): the SF is worked as a bolt
+ * is, WEAPON_BOLTING playing its own segment with the click as its close
+ * note, so a ladder grabbed in it is the ladder grabbed in a pump
+ * (HeldGrabDuring): the change gate is open and the holster begins on the
+ * grab's command, which ends the SF. Its clock stops with the state, so
  *  - grabbed before the click's command, the click never lands: the mode is
  *    not changed, on the ladder or after it, and a ladder left inside that
  *    holster gives the gun back READY in the mode it had (nothing is owed);
@@ -2441,7 +2441,7 @@ static void TestG19Ladder(int dt) {
     HeldTo(&h, &n, n + 1);
     CHECK(Attached() && ps.weapon == gun && ps.weaponstate == WEAPON_LADDER && ps.weaponTime == 0);
     move.cmd.buttons = 0;
-    /* The ladder grabbed during the mode switch: found by the weapon think the
+    /* The ladder grabbed during the SF: found by the weapon think the
      * command before the click's, on it, and the command after it. */
     for (phase = -1; phase <= 1; phase++) for (way = 0; way < 2; way++) {
         G19Reset(dt); n = 0;
@@ -2456,7 +2456,7 @@ static void TestG19Ladder(int dt) {
             CHECK(Attached() && ps.weaponstate == WEAPON_LADDER && ps.weaponTime == 0 && !Holstering());
             CHECK(ps.weaponAnimTime == -1 && !G19Auto());
         } else {
-            /* the holster, whole; the switch's clock stopped where it was */
+            /* the holster, whole; the SF's clock stopped where it was */
             CHECK(Attached() && ps.weaponstate == WEAPON_DROPPING && Holstering() && ps.weaponTime == BG_LADDER_DROP_TIME);
             CHECK(ps.weaponAnimTime == n * dt && G19Auto() == (phase > 0));
         }
@@ -2487,17 +2487,17 @@ static void TestG19Ladder(int dt) {
         CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && G19Auto() == (phase > 0) && !fired[gun]);
     }
 }
-/* The switch is worked as a bolt (owner's rule, "Switch NAC"), so a ladder
+/* The SF is worked as a bolt (owner's rule, the SF NAC), so a ladder
  * grabbed in it is a ladder grabbed in a pump: the SPAS's pump and the G19's
- * switch side by side, the trigger let go, grabbed on the command before the
- * close note (the pump's bolt, the switch's click), on it and after it, give
+ * SF side by side, the trigger let go, grabbed on the command before the
+ * close note (the pump's bolt, the SF's click), on it and after it, give
  * the same commands. Before it: the ladder's whole holster, nothing closed.
  * On it: the hands empty at once (the note took the holster's lock), nothing
  * closed (the ladder's block ends the think before step 4). After it: the
  * whole holster, closed. Left by a jump, the gun the command names is raised;
- * then the pump is owed and worked whole from its open note, and the switch
+ * then the pump is owed and worked whole from its open note, and the SF
  * is lost (the owner's rule (e)): READY in the mode it had, nothing worked. */
-static void TestSwitchLadderLikePump(int dt) {
+static void TestSFLadderLikePump(int dt) {
     static const int guns[] = { WP_SHOTGUN, WP_G19 };
     int answers[2][3][4], g, phase, k;
     for (g = 0; g < 2; g++) for (phase = -1; phase <= 1; phase++) {
@@ -2603,7 +2603,7 @@ static void TestHeldTriggerHolster(int dt) {
     TestSwapDropBurst(dt);
     TestEmptyClipHolster(dt);
     TestG19Ladder(dt);
-    TestSwitchLadderLikePump(dt);
+    TestSFLadderLikePump(dt);
     TestHeldPredictionReplay(dt);
 }
 int main(void) {

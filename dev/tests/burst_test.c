@@ -1079,10 +1079,10 @@ static void SwapTo(int weapon, int buttons) {
 	}
 	CHECK(f < 5000 && PS->weaponTime == 0);
 }
-/* The selector, from the G19 at rest: the press starts the switch, the click
- * commits the mode G19_CLICK_MS in (the note's command) and raises its event
- * there, and the state ends G19_SWITCH_MS after the press. Nothing fires, and
- * no burst is ever pending. */
+/* The selector, from the G19 at rest: the press starts the SF (the
+ * select-fire switch), the click commits the mode G19_CLICK_MS in (the note's
+ * command) and raises its event there, and the state ends G19_SWITCH_MS after
+ * the press. Nothing fires, and no burst is ever pending. */
 static void SwitchMode(qboolean toAuto) {
 	int k, click = Frames(G19_CLICK_MS), end = Frames(G19_SWITCH_MS);
 	const int *flags = &PS->slotFlags[PS->stats[STAT_ACTIVE_SLOT]];
@@ -1167,7 +1167,7 @@ static void TestG19(void) {
 		 * the G19 arrives: a second press inside the rifle's burst, let go
 		 * before the cooldown runs out, stays latched (MW2 leaves it for the
 		 * next pull's first shot). The G19 then does, command for command,
-		 * what it does with no pending pull at all: the mode switch, auto
+		 * what it does with no pending pull at all: the SF to auto
 		 * (which leaves the pull pending), back to semi (whose first shot
 		 * clears it), auto again. Every command's whole playerstate is
 		 * compared, the pending pull's own bit aside. */

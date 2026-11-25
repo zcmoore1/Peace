@@ -127,8 +127,9 @@ static void CG_WeapAnim_ResetReturn(void) {
 // picture keeps running across that think instead of easing out into idle.
 // MW2's dry fire out of the last round's shot (BG_DryFiring) is FIRING with
 // the idle playing (PM_Weapon_CheckFiringAmmo, 5770a0): no fire clip.
-// The selector's switch is worked as a bolt is (WEAPON_BOLTING), so it is an
-// action's clip to everything here; only the clip drawn is its own.
+// The SF (the G19's select-fire switch) is worked as a bolt is
+// (WEAPON_BOLTING), so it is an action's clip to everything here; only the
+// clip drawn is its own.
 static qboolean CG_WeapAnim_FireClip(const playerState_t *ps) {
 	return ( ps->weaponstate == WEAPON_FIRING && !BG_DryFiring(ps) ) ||
 		ps->weaponstate == WEAPON_BOLTING || BG_ShotAwaitsAction(ps);
@@ -521,7 +522,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	// working are a single authored animation; the split into two states is a
 	// gameplay distinction, not a second piece of art, so the picture just
 	// keeps running across the boundary, the shot's READY think included.
-	// The selector's switch plays its own clip, the way it moves.
+	// The SF plays its own clip, the way it moves.
 	if ( ps->weaponstate == WEAPON_BOLTING && BG_IS_SELECT_SEQ( ps->weaponAnimSeq ) ) {
 		baseClip = ps->weaponAnimSeq == ASEQ_SELECT_AUTO ? WANIM_SELECT_AUTO : WANIM_SELECT_SEMI;
 	} else if ( CG_WeapAnim_FireClip( ps ) ) {
@@ -652,7 +653,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	// off, so the frame on screen is the frame the notes are being read from. A
 	// loop wrap or a cancelled reload cannot leave the viewmodel on a stale
 	// client-side stopwatch, because there is no client-side stopwatch.
-	// An action's clip, the fire clip's or a switch's, runs on its own
+	// An action's clip, the fire clip's or an SF's, runs on its own
 	// segment's clock (BG_ActionLength), as a reload's runs on its segment's.
 	if ( ps->weaponstate == WEAPON_RELOADING ) {
 		int duration = BG_ReloadSegmentTime( ps, ps->weaponAnimSeq );

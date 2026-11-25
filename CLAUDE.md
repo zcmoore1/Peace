@@ -145,12 +145,12 @@ source for MW2 behaviour; the owner rejects it.
 - **Bolting is a state, not a phase of firing.** `WEAPON_FIRING` is the shot;
   `WEAPON_BOLTING` is the action being worked. "Bolting" covers bolt, pump,
   cock and lever — they differ only in cycle length and note placement, never
-  in code — and the G19's select-fire switch (owner's rule, "Switch NAC";
-  Peace-only, MW2 has no selector): the selector's press starts it from 0 on
+  in code — and the SF (the G19's select-fire switch; owner's rule, the SF
+  NAC; Peace-only, MW2 has no selector): the selector's press starts it from 0 on
   its own segment (`ASEQ_SELECT_AUTO`/`_SEMI`, `bg_weaponSelect`; the
   segment's length is `BG_ActionLength`, read wherever the action's end is),
   its close note is the click, and what that note closes is the slot's mode,
-  committed in step 4 beside the chambering. Nothing is owed by a switch: one
+  committed in step 4 beside the chambering. Nothing is owed by an SF: one
   taken out of the gun's hands before the click is lost, and step 4d never
   starts one, so nothing of it is worked again. It cannot fire, it cannot be
   sprinted out of, and it CAN be holstered out of. Sprint is MW2's `PM_Weapon_CheckForSprint` (iw4x
@@ -174,7 +174,7 @@ source for MW2 behaviour; the owner rejects it.
   out on, 0x5776ED): a press before it, or on it, is lost, one after it cuts
   the tail short; the shot and its READY think take one. The test is the
   close note still ahead of the action's clock (`PM_ActionOpen`), which for a
-  pump or bolt is exactly its debt, and for the switch its click. It
+  pump or bolt is exactly its debt, and for the SF its click. It
   ends on the anim clock, never on the lock. A reload is taken at once out
   of the shot, its READY think or the action, as MW2's
   `PM_BeginWeaponReload` accepts READY, FIRING and RECHAMBERING (owner's
@@ -292,11 +292,11 @@ source for MW2 behaviour; the owner rejects it.
   there is no "bolt NAC into a sprint" (MW2 has none). One think later — the
   late cancel — the chambering has committed and is kept. It is the same note,
   in the same place, that opens the reload's window. The G19's selector click
-  is this note on its switch's segment, so the switch NAC is this NAC: a swap,
+  is this note on the SF's segment, so the SF NAC is this NAC: a swap,
   equipment or a ladder that completes on the click's think is instant and
   leaves the mode uncommitted, from the hip or aimed, and a think later the
-  new mode is kept (`dev/tests/switch_test.c` runs the SPAS's pump, the M300's
-  bolt and the switch through the same inputs side by side). Never write a
+  new mode is kept (`dev/tests/sf_test.c` runs the SPAS's pump, the M300's
+  bolt and the SF through the same inputs side by side). Never write a
   second cancel.
 - **An open action is a debt, and it is never resumed.** Firing sets the
   weapon's bit in `STAT_UNCHAMBERED`; only the close note's step-4 commit, the
@@ -1152,10 +1152,10 @@ source for MW2 behaviour; the owner rejects it.
 - **The gun never un-plays an action it showed (owner's rule).**
   `cg_weappicture.c` draws the viewmodel from its own run of the client's
   commands through the real `Pmove` once prediction is corrected away from a
-  reload, shot or pump of the held gun that you were shown (the G19's
-  select-fire switch is such an action: it is worked in `WEAPON_BOLTING`, and
-  one begun straight out of a G19 shot is a new action, not that shot's pump,
-  `TestSwitchOutOfAShot`). That run only
+  reload, shot or pump of the held gun that you were shown (the G19's SF is
+  such an action: it is worked in `WEAPON_BOLTING`, and one begun straight
+  out of a G19 shot is a new action, not that shot's pump,
+  `TestSFOutOfAShot`). That run only
   finishes what you saw: it withholds whatever in your commands would begin
   something new, never detaches into an action it began itself, and follows
   prediction again when it comes to rest or prediction starts a real action. A
@@ -1286,7 +1286,7 @@ source for MW2 behaviour; the owner rejects it.
   stats remain signed int16: their bit 15 must stay unused.
 - `weaponAnimSeq` uses 3 bits for three reload segments, fire and the two G19 selector directions.
 - `weaponstate` — 4 bits, values 0-9 (`WEAPON_LADDER` the last; the G19's
-  switch is `WEAPON_BOLTING`).
+  SF is `WEAPON_BOLTING`).
 - `weaponAction` — a separate 11-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
   swap edge latch, post-throw recovery, `WA_LEFT_EMPTY`, and `WA_ATTACK_HELD`
@@ -1569,12 +1569,12 @@ trigger held from a spent pull, hung and fired on the jump (Y back) or ended
 in the empty hands (no Y back); and equipment's drop, which is no hang.
 `TestG19Ladder` is the G19 with Select Fire: in semi the holster hangs and the
 jump's command fires, in auto (set through the real selector) it never hangs,
-and a ladder grabbed during the mode switch is a ladder grabbed in a pump (the
-switch is worked as a bolt: before the click's command the switch is lost, on
-it the hands are empty at once and the mode is not committed, after it the new
-mode stays); `TestSwitchLadderLikePump` grabs the SPAS's pump and the switch
-side by side around their close notes and requires the same commands (left by
-a jump, the pump is worked again and the switch is not).
+and a ladder grabbed during the SF is a ladder grabbed in a pump (the SF is
+worked as a bolt: before the click's command the SF is lost, on it the hands
+are empty at once and the mode is not committed, after it the new mode
+stays); `TestSFLadderLikePump` grabs the SPAS's pump and the SF side by side
+around their close notes and requires the same commands (left by a jump, the
+pump is worked again and the SF is not).
 `TestHeldTriggerBurst` is the burst gun there, at the same four rates: the M16 rifle's burst playing out on a
 ladder grabbed inside it, the drop on the last shot's crossing (the
 cooldown's think), hung with the trigger held since the first shot for no
@@ -1591,8 +1591,8 @@ with the trigger down and is a whole burst after the raise, and without Y
 back it ends and the jump raises the other gun. `QuickTick` holds the
 picture's hang to pmove's after every think (`PictureAgrees`).
 
-`dev/tests/switch_test.c` (in `run-masterkey`) runs the SPAS's pump, the
-M300's bolt and the G19's select-fire switch side by side through the real
+`dev/tests/sf_test.c` (in `run-masterkey`) runs the SPAS's pump, the
+M300's bolt and the G19's SF side by side through the real
 `Pmove`, the client's selection and the server's use step at 8, 16 and 33ms
 commands, and requires the same commands counted from each action's own
 start, close note and end, and the bolt's rule: Y (and `weapalt`) from the
@@ -1600,19 +1600,19 @@ hip and aimed, at the action's first command, inside it, on the command
 before the close note, on it (the NAC: instant, not closed) and after it; a
 sprint inside it and a sprint then Y; YY; a frag; the trigger held from inside
 it and tapped on its end; a spent pull held through its end (MW2's lock there:
-the switch begun out of a full-auto spray under an M16 burst's pull); the
+the SF begun out of a full-auto spray under an M16 burst's pull); the
 close note's event on a NAC; a freeze; a knife and a reload on every command
-of it, with Sleight of Hand too. Back on the G19 after a NAC the switch is lost
+of it, with Sleight of Hand too. Back on the G19 after an SF NAC the SF is lost
 (rule (e)): its mode as it was, nothing worked again, a new press a whole
-switch from 0 (where the pump is owed and worked from its open note).
-`TestSwitchEdges` pins the switch's own press: on an empty G19's last think it
+SF from 0 (where the pump is owed and worked from its open note).
+`TestSFEdges` pins the SF's own press: on an empty G19's last think it
 is reloaded out of on the next (step 4e), and pressed again on its end it
-starts the next. `weapon_pose_test.c`'s `TestSwitchPicture` holds its picture
+starts the next. `weapon_pose_test.c`'s `TestSFPicture` holds its picture
 to the pump's at 8, 16 and 33ms: released into a drop, carried by a sprint,
 kept through the sprint swap's holster, eased home from YY, taking over a
 sprint YY's ease home at the move layer's crossfade (beside the SPAS's shot),
 never snapping, and the idle at rest after it, though `weaponAnimSeq` still
-names the switch (after it played out, after YY lost it, on the next gun).
+names the SF (after it played out, after YY lost it, on the next gun).
 
 `dev/tests/burst_test.c` (in `run-masterkey`) drives MW2's burst fire on the
 M16 rifle through the real `Pmove` and the client's selection at 8, 16 and
@@ -1629,7 +1629,7 @@ MW2's code); the use/reload bit on the server and in a client's replay; the
 rifle's reserve at spawn, first raise, reload and sprint times; a
 trigger worked as the bots work theirs (`BG_TriggerNeedsRelease`) on every
 fire type; and the G19 beside it (`TestG19`: semi one shot a pull and auto a
-shot every fire time, its mode switch's press, click and end, never a burst
+shot every fire time, its SF's press, click and end, never a burst
 pending, with a pending pull left over from the rifle and without one, the
 whole playerstate compared command for command; and the trigger held through
 the swap from the rifle in each mode). Every count and time is read from the

@@ -205,8 +205,9 @@ typedef enum {
 						// state because it obeys different rules to firing: it
 						// cannot fire, it CAN be holstered out of, and the
 						// chamber note clears its lock the same way a mag-in
-						// clears a reload's. The selector's switch is worked in
-						// it too (owner's rule), playing its own segment
+						// clears a reload's. The SF (the G19's select-fire
+						// switch) is worked in it too (owner's rule), playing
+						// its own segment
 	WEAPON_RELOADING,
 	WEAPON_SPRINT_IN,	// lowering into the sprint carry - a timed action with
 						// its own lock, so anything that clears the lock (the
@@ -399,7 +400,7 @@ typedef enum {
 	ASEQ_FIRE = RSEQ_COUNT,
 	ASEQ_SELECT_AUTO, ASEQ_SELECT_SEMI
 } reloadSeq_t;
-// The selector's switch, either way: a segment WEAPON_BOLTING plays (BG_ActionLength).
+// The SF, either way: a segment WEAPON_BOLTING plays (BG_ActionLength).
 #define BG_IS_SELECT_SEQ(seq) ((seq) == ASEQ_SELECT_AUTO || (seq) == ASEQ_SELECT_SEMI)
 
 typedef struct {

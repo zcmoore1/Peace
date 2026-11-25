@@ -133,65 +133,72 @@ class. The new loadout arrives on the next spawn (next round in S&D), not instan
 
 In Edit Loadout, choose **Pistols → G19** in either slot and equip **Select Fire**
 under Attachments. The G19 starts in semi-auto. Tap D-pad Right or H from the hip
-or while aiming. The HUD changes at the click, 240 ms into the 400 ms animation.
-Starting a sprint lets the animation finish before the gun lowers. Swapping on
-the command that crosses the click takes the next gun out immediately and keeps
-the old mode. An earlier or later swap uses the normal holster. Returning to the
-G19 starts the next switch from the beginning.
+or while aiming to start an SF (the G19's select-fire switch). The HUD changes
+at the click, 240 ms into the 400 ms animation. Starting a sprint lets the
+animation finish before the gun lowers. Swapping on the command that crosses
+the click takes the next gun out immediately and keeps the old mode. An earlier
+or later swap uses the normal holster. Returning to the G19 starts the next SF
+from the beginning.
 
-The switch is worked like a pump or a bolt (the owner's rule, "Switch NAC";
-MW2 has no selector, so this is Peace's own; `dev/MW2_DIFFERENCES.md`). It is
-`WEAPON_BOLTING` playing the switch's own segment, and the click is that
+The SF is worked like a pump or a bolt (the owner's rule, the SF NAC; MW2
+has no selector, so this is Peace's own; `dev/MW2_DIFFERENCES.md`). It is
+`WEAPON_BOLTING` playing the SF's own segment, and the click is that
 segment's close note, so everything the pump or bolt allows or refuses during
-its action the switch allows or refuses the same way, by the same code:
+its action the SF allows or refuses the same way, by the same code:
 
-- **The switch NAC.** A swap (Y or `weapalt`) whose command crosses the
+- **The SF NAC.** A swap (Y or `weapalt`) whose command crosses the
   click is instant, and the mode is not changed, exactly as a pump NAC leaves
-  the pump owed. From the hip or aimed: aim stays on through the switch.
+  the pump owed. From the hip or aimed: aim stays on through the SF.
   Equipment pressed on that command is in hand at once too, and a ladder
   grabbed on it empties the hands at once.
 - **Lose progress.** A swap before the click is the G19's whole holster and
-  the switch is lost; one a command after it is the whole holster and the new
-  mode is kept. Unlike a pump or bolt, a lost switch is not owed: back on the
+  the SF is lost; one a command after it is the whole holster and the new
+  mode is kept. Unlike a pump or bolt, a lost SF is not owed: back on the
   G19 nothing is worked again, the mode is the one it had, and a new press
-  starts a whole switch from 0.
-- **Sprint.** A sprint started inside the switch never lowers the gun: it
+  starts a whole SF from 0.
+- **Sprint.** A sprint started inside the SF never lowers the gun: it
   finishes and the gun lowers on the command after its end. A sprint and then
-  a swap is the swap's holster, with the switch's clip carried through it as
+  a swap is the swap's holster, with the SF's clip carried through it as
   a pump's is.
-- **YY** inside the switch has the gun back READY at once: before the click
-  in its old mode (no switch worked again, where a pump would be), after it
+- **YY** inside the SF has the gun back READY at once: before the click
+  in its old mode (no SF worked again, where a pump would be), after it
   in the new one. A **knife** waits for the click (pressed before it, or on
   it, it is lost; after it, it cuts the rest short). A **reload** is taken at
-  once, as out of a pump; before the click the switch is lost, on or after it
+  once, as out of a pump; before the click the SF is lost, on or after it
   the new mode is kept. (A pump or bolt left owed by an early reload is paid
-  when the reload ends; a lost switch is not owed, so the mode stays as it
-  was.) The **trigger** fires nothing inside the switch, and is taken on its
-  last command; a trigger still down from a spent pull (a burst, say, and the
-  switch begun out of a full-auto spray under it) is held there by MW2's lock
-  until it is let go, as at the end of a pump. The **freeze** lets the switch
-  run to its end.
+  partway through the reload, by the reload's delayed action: the gun's own
+  action length on the reload clock, capped by the first round or the end of
+  the reload's start segment (CLAUDE.md, "The reload's delayed action is
+  MW2's"; `PM_ReloadSettleCrossed`). At 16 ms commands, with the reload
+  pressed on the action's third command, the SPAS's pump is paid 18 commands
+  after the press and its reload ends 79 after it; the M300's bolt is paid 32
+  after it and its reload ends 93 after it. A lost SF is not owed, so nothing
+  is paid and the mode stays as it was.) The **trigger** fires nothing inside
+  the SF, and is taken on its last command; a trigger still down from a spent
+  pull (a burst, say, and the SF begun out of a full-auto spray under it) is
+  held there by MW2's lock until it is let go, as at the end of a pump. The
+  **freeze** lets the SF run to its end.
 - **Its edges.** An empty G19 with rounds in reserve, its selector pressed on
-  the think its last shot's lock runs out, starts the switch and is reloaded
+  the think its last shot's lock runs out, starts the SF and is reloaded
   out of it on the next think, as an empty SPAS is reloaded out of its pump:
-  the switch is lost and the mode unchanged. A selector pressed again on the
-  switch's last command starts the next switch there, as a trigger tapped
+  the SF is lost and the mode unchanged. A selector pressed again on the
+  SF's last command starts the next SF there, as a trigger tapped
   there fires.
-- **The picture.** The switch's clip runs on its segment's length, as the
-  fire clip does, so it reaches its last pose about 17 ms before the switch
+- **The picture.** The SF's clip runs on its segment's length, as the
+  fire clip does, so it reaches its last pose about 17 ms before the SF
   ends and holds it; the mode, the fitted semi/auto model and the HUD still
   change on the click's command.
 
-`dev/tests/switch_test.c` runs the SPAS's pump, the M300's bolt and the G19's
-switch through the same inputs at 8, 16 and 33 ms commands and requires the
-same commands relative to each action's own close note (`TestSwitchEdges`
-pins the two edges); `weapon_pose_test.c`'s `TestSwitchPicture` holds the
+`dev/tests/sf_test.c` runs the SPAS's pump, the M300's bolt and the G19's
+SF through the same inputs at 8, 16 and 33 ms commands and requires the
+same commands relative to each action's own close note (`TestSFEdges`
+pins the two edges); `weapon_pose_test.c`'s `TestSFPicture` holds the
 picture to the pump's at 8, 16 and 33 ms,
-`ladder_test.c`'s `TestSwitchLadderLikePump` the ladder, and
-`fake_reload_test.c`'s `TestSwitchOutOfAShot` a switch prediction was
+`ladder_test.c`'s `TestSFLadderLikePump` the ladder, and
+`fake_reload_test.c`'s `TestSFOutOfAShot` an SF prediction was
 corrected away from (played through, never snapped). Played through, that
 picture's own run commits the mode at the click, so the fitted semi/auto model
-shows the new mode from the click until the picture hands back at the switch's
+shows the new mode from the click until the picture hands back at the SF's
 end, while the HUD keeps the mode the server has (an open question for the
 owner; a pump played through has no visible commit).
 

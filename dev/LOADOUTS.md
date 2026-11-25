@@ -80,8 +80,13 @@ perk mask is a predicted/replayed playerstate field. The current build (MW2's
 event rings: four playerstate events and every entity's own ring, with the
 view kick's cgame import and client-side bullets, MW2's spawn class speed and
 stance, the M16's per-instance underbarrel ammunition, MW2's mode switch, its
-frozen flag, its held trigger, the G19's select fire and MW2's burst fire)
-uses protocol **94**, game **-23**. Protocol 94 / game -23 added MW2's burst
+frozen flag, its held trigger, the G19's select fire, MW2's burst fire and the
+G19's select-fire switch (SF) worked as a bolt) uses protocol **94**, game
+**-24**. Game -24 is the SF worked as a bolt: it left its own state,
+`WEAPON_SELECTING`, for `WEAPON_BOLTING` playing its own segment (G19 Select
+Fire, below), so a weaponstate value's meaning changed and a game module and
+a cgame from different builds would disagree; the wire is unchanged, so the
+protocol stays 94. Protocol 94 / game -23 added MW2's burst
 fire: a burst gun's pending trigger pull, `PWF_PENDING_PULL` in `weapFlags`
 (now 5 bits; MW2's `weapHandFlags` bit 0, netfield 0x7427E0).
 Protocol 93 adds the select-fire button latch, two animation sequences and the
@@ -133,18 +138,19 @@ class. The new loadout arrives on the next spawn (next round in S&D), not instan
 
 In Edit Loadout, choose **Pistols → G19** in either slot and equip **Select Fire**
 under Attachments. The G19 starts in semi-auto. Tap D-pad Right or H from the hip
-or while aiming to start an SF (the G19's select-fire switch). The HUD changes
-at the click, 240 ms into the 400 ms animation. Starting a sprint lets the
-animation finish before the gun lowers. Swapping on the command that crosses
-the click takes the next gun out immediately and keeps the old mode. An earlier
-or later swap uses the normal holster. Returning to the G19 starts the next SF
-from the beginning.
+or while aiming to start an SF. The HUD changes at the click, 240 ms into the
+400 ms animation. Starting a sprint lets the animation finish before the gun
+lowers. Swapping on the command that crosses the click takes the next gun out
+immediately and keeps the old mode. An earlier or later swap uses the normal
+holster. Returning to the G19 starts the next SF from the beginning.
 
 The SF is worked like a pump or a bolt (the owner's rule, the SF NAC; MW2
 has no selector, so this is Peace's own; `dev/MW2_DIFFERENCES.md`). It is
-`WEAPON_BOLTING` playing the SF's own segment, and the click is that
-segment's close note, so everything the pump or bolt allows or refuses during
-its action the SF allows or refuses the same way, by the same code:
+`WEAPON_BOLTING` playing the SF's own segment (game -24, protocol 94
+unchanged: a weaponstate value's meaning changed when the SF's own state,
+`WEAPON_SELECTING`, went; above), and the click is that segment's close
+note, so everything the pump or bolt allows or refuses during its action the
+SF allows or refuses the same way, by the same code:
 
 - **The SF NAC.** A swap (Y or `weapalt`) whose command crosses the
   click is instant, and the mode is not changed, exactly as a pump NAC leaves

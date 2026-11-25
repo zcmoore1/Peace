@@ -1286,13 +1286,16 @@ source for MW2 behaviour; the owner rejects it.
   stats remain signed int16: their bit 15 must stay unused.
 - `weaponAnimSeq` uses 3 bits for three reload segments, fire and the two G19 selector directions.
 - `weaponstate` — 4 bits, values 0-9 (`WEAPON_LADDER` the last; the G19's
-  SF is `WEAPON_BOLTING`).
+  SF is `WEAPON_BOLTING`). GAME_VERSION -24 (protocol 94 unchanged): the SF
+  left its own state, `WEAPON_SELECTING`, for `WEAPON_BOLTING` on its own
+  segment, so a weaponstate value's meaning changed and a game module and a
+  cgame from different builds would disagree.
 - `weaponAction` — a separate 11-bit predicted/networked field: action type (2),
   fired latch (1), previous action buttons (3), cancel return acknowledgement,
   swap edge latch, post-throw recovery, `WA_LEFT_EMPTY`, and `WA_ATTACK_HELD`
   (the last step's trigger, MW2's `pm->oldcmd`, for a reload's fresh press;
   written every step and kept through a freeze). Protocol 94 (GAME_VERSION
-  -23) requires client, server and all modules rebuilt together. Older
+  -24) requires client, server and all modules rebuilt together. Older
   builds/demos are incompatible.
 - `weaponShotCount` — MW2's `weapState[hand].weaponShotCount` (ps+0x200, its
   netfield's 3 bits, 0x742600): the shots of this pull of the trigger, 0 to

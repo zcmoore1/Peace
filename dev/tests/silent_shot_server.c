@@ -195,7 +195,7 @@ void SS_Reset( int gun, int lethal, int levelTime ) {
  InitBodyQue();
  damageTraces=0; shooterGun=gun;
 }
-void SS_Command( int client, const usercmd_t *cmd, ssThink_t *out ) {
+void SS_Command( int client, const usercmd_t *cmd, ssCommand_t *out ) {
  playerState_t *ps=&clients[client].ps;
  int before=ps->eventSequence, traces=damageTraces, i;
  nextCmd=*cmd;

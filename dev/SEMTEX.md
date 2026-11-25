@@ -15,7 +15,7 @@ The cancel is MW2's offhand state machine's (owner's rule: do what MW2 does).
 During the gun's quick drop (MW2's INIT) and the pullback (PREPARE) Y cancels
 whatever the buttons (`577daa-577dde`). Once the Semtex is in hand and ready
 (HOLD), MW2 throws first (`578f00-578f69`): unless an offhand button is down on
-that command and one was on the command before (`PM_OffhandHeld`), that think
+that command and one was on the command before (`PM_OffhandHeld`), that command
 is the throw, and only then is Y read. The offhand buttons are the lethal and
 the tactical, either one (MW2's mask `0xc000`, `578f2d-578f3f`), and the two
 commands are asked separately, so holding the tactical button alone keeps the
@@ -37,7 +37,7 @@ none of them.
 
 After emission, Y updates the selected slot/HUD immediately but queues the
 physical swap. The throw completes, the original gun recovers, then the normal
-weapon drop starts on the think after its raise lock expires (that think is
+weapon drop starts on the command after its raise lock expires (that command is
 still MW2's OFFHAND_END, which its change check refuses, iw4x 0x578BEA-0x578BF2).
 A second Y toggles
 the pending slot modulo two and can cancel that queued swap. An emitted
@@ -52,9 +52,9 @@ and YY cannot cancel the gun's quick raise after a cancel or a throw.
 pre-throw cancel without changing selection. A return-acknowledgement bit handles
 stale slot requests. `WA_RECOVERING` pins the physical weapon through post-throw
 recovery without overwriting the requested selection - only when the Semtex
-left a gun: from an empty hand the hand is back the think it empties, as with
-every offhand, and a queued Y draws from it two thinks after it empties (the
-think after is MW2's one-think OFFHAND_END delay, `OffHandEnd` with weapon 0,
+left a gun: from an empty hand the hand is back the command it empties, as with
+every offhand, and a queued Y draws from it two commands after it empties (the
+command after is MW2's one-command OFFHAND_END delay, `OffHandEnd` with weapon 0,
 0x577A1A-0x577A2A, whose change check refuses it).
 
 ## Timings / art

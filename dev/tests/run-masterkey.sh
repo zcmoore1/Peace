@@ -24,6 +24,6 @@ out/tests/burst-test
 # The SF (the G19's select-fire switch) worked as a bolt (owner's rule): beside the SPAS's pump and the M300's bolt
 ${CC:-cc} $flags dev/tests/sf_test.c code/cgame/cg_playerstate.c dev/tests/pickup_pmove_driver.c $game $common -Wl,--gc-sections -lm -o out/tests/sf-test
 out/tests/sf-test
-# What a weapon state's last think does (MW2's ProcessHand), through the real Pmove.
+# What a weapon state's last command does (MW2's ProcessHand), through the real Pmove.
 ${CC:-cc} $flags dev/tests/state_end_test.c $game $common -Wl,--gc-sections -lm -o out/tests/state-end-test
 out/tests/state-end-test

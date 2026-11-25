@@ -15,7 +15,7 @@
  * wall behind bounces back to crouch (FORCE_CROUCH 3) with no hint; a hold
  * across death fires while dead, and at the respawn the reset stands the
  * toggle before PMF_RESPAWNED lets go, so the player spawns standing; a prone
- * turn held into a wall raises EV_STANCE_INVALID every blocked think and
+ * turn held into a wall raises EV_STANCE_INVALID every blocked command and
  * "Prone Blocked" blinks for as long as it lasts; +stance pressed while
  * sprinting crouches and ends the sprint, and its hold reaches prone; a held
  * +movedown never cancels the jump, as a held +prone does not: +gostand under
@@ -125,7 +125,7 @@ static void Box( float x0, float y0, float z0, float x1, float y1, float z1 ) {
 #define FRAME 8
 static playerState_t sv;
 static usercmd_t cmd;
-static int now, events[EV_STANCE_INVALID + 1][4], invalidThinks, jumps;
+static int now, events[EV_STANCE_INVALID + 1][4], invalidCommands, jumps;
 static void Spawn( void ) {
 	bg_class_t loadout = *BG_Class( 0 );
 	int count = sv.persistant[PERS_SPAWN_COUNT];
@@ -156,7 +156,7 @@ static void CountEvents( const playerState_t *before ) {
 		if ( ev == EV_STANCE_INVALID ) invalid++;
 		if ( ev == EV_JUMP ) jumps++;
 	}
-	if ( invalid ) invalidThinks++;
+	if ( invalid ) invalidCommands++;
 }
 /* one frame: the caller has queued its events between Begin and Frame */
 static void Begin( void ) { now += FRAME; FlowClientBegin( FRAME ); }
@@ -210,7 +210,7 @@ static void TestSprintFromCrouch( void ) {
 			/* a held key refuses the reset: the crouch level ends the sprint on
 			 * the next command, and the player crouches once the stand leg the
 			 * sprint started has run out (MW2 moves the stance's target only
-			 * between legs): on that think the crouch leg starts from the
+			 * between legs): on that command the crouch leg starts from the
 			 * standing eye */
 			CHECK( Frame() == ( BUTTON_CROUCH | BUTTON_TEMP_STANCE ) );
 			CHECK( !( sv.pm_flags & ( PMF_SPRINTING | PMF_DUCKED ) ) && sv.viewHeightLerpTarget == BG_EYE_STAND );
@@ -294,7 +294,7 @@ static void TestDeathRespawn( void ) {
 
 /* 5: a prone turn held into a wall for more than the hint's time. Prone
  * between two walls just wider than the body behind it, the stick turns the
- * view a degree a frame: once the body can turn no further, every think is
+ * view a degree a frame: once the body can turn no further, every command is
  * blocked and raises EV_STANCE_INVALID 3; the hint arms on the first, keeps
  * its stamp while shown, and is armed again by the first event after the draw
  * clears it, so "Prone Blocked" blinks for as long as the block lasts. */
@@ -306,15 +306,15 @@ static void TestTurnBlocked( void ) {
 	Box( -BG_PRONE_FEET_DIST - 20, -100, 0, -PLAYER_WIDTH - 1, -BG_PRONE_TRACE_HALF - 1, 200 );
 	Begin(); FlowClientCommand( "toggleprone\n" ); CHECK( Frame() == BUTTON_PRONE );
 	CHECK( Settle( PRONE_VIEWHEIGHT ) && ( sv.pm_flags & PMF_PRONE ) );
-	invalidThinks = 0;
+	invalidCommands = 0;
 	for ( t = 0; t < 3 * FlowHintMs(); t += FRAME ) {
-		int before = invalidThinks;
+		int before = invalidCommands;
 		Begin(); FlowTurn( -1 ); Frame();
-		if ( invalidThinks > before ) {
+		if ( invalidCommands > before ) {
 			if ( first < 0 ) first = t;
 			blockedFrames++;
 		} else if ( first >= 0 ) {
-			CHECK( 0 );	/* once blocked, every think stays blocked while the stick pushes */
+			CHECK( 0 );	/* once blocked, every command stays blocked while the stick pushes */
 		}
 		if ( first >= 0 ) {
 			if ( FlowHintStamp() != stamp && FlowHintType() ) { stamp = FlowHintStamp(); stamps++; CHECK( stamp == now ); }
@@ -326,7 +326,7 @@ static void TestTurnBlocked( void ) {
 	}
 	CHECK( first >= 0 && blockedFrames * FRAME > FlowHintMs() && FlowHintType() == FlowHintProneType() );
 	CHECK( stamps >= 2 && shownFrames > 0 && sv.pm_flags & PMF_PRONE );
-	printf( "a prone turn blocked for %d ms: EV_STANCE_INVALID on every think, the hint armed %d times\n",
+	printf( "a prone turn blocked for %d ms: EV_STANCE_INVALID on every command, the hint armed %d times\n",
 		blockedFrames * FRAME, stamps );
 }
 
@@ -384,7 +384,7 @@ static void TestHeldStanceKeyJump( void ) {
 		Begin(); FlowClientCommand( "-gostand 97 0\n" ); Frame();
 	}
 	/* a ladder face just ahead: crouched by the held +movedown, forward grabs
-	 * it, and from the next think the strip stands the player every think
+	 * it, and from the next command the strip stands the player every command
 	 * (FORCE_STAND, which the held key refuses), climbing */
 	Start(); Settle0();
 	Box( PLAYER_WIDTH + 1, -100, 0, PLAYER_WIDTH + 41, 100, 1000 ); boxSurface[boxes - 1] = SURF_LADDER;

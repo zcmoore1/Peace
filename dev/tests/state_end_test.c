@@ -1,14 +1,14 @@
-/* What MW2 does on the think a weapon state ends, through the real Pmove at
+/* What MW2 does on the command a weapon state ends, through the real Pmove at
  * 8, 16 and 33ms commands.
  *
  * MW2's ProcessHand (iw4x 0x579450) handles a state whose time has run out
  * in its state switch (the jump table at 0x5793D8) and returns before
- * ShouldBeFiring (0x5794B4-0x5794B6): on that think the gun neither fires nor
- * starts anything the switch did not, and every check of the think saw the
+ * ShouldBeFiring (0x5794B4-0x5794B6): on that command the gun neither fires nor
+ * starts anything the switch did not, and every check of the command saw the
  * old state. Its checks run first, in this order (PM_Weapon 0x44C380):
  * sprint 0x578060, offhand 0x579030, change 0x578BC0 (the double-tap cancel
- * inside it, 0x578D00), reload 0x578670, knife 0x577670 (passed the think's
- * delayedAction, 0x44C4E3-0x44C4FC), then the hand. A think whose weapon
+ * inside it, 0x578D00), reload 0x578670, knife 0x577670 (passed the command's
+ * delayedAction, 0x44C4E3-0x44C4FC), then the hand. A command whose weapon
  * delay runs out skips the hand's time gate (0x579474), so the switch runs on
  * whatever state the checks left (path A).
  *
@@ -89,8 +89,8 @@ static void Frame(void) {
 	}
 }
 /* Whole commands a lock of that length keeps: stamped on command c, it runs
- * out on command c + Thinks(ms). */
-static int Thinks(int ms) { return (ms + msec - 1) / msec; }
+ * out on command c + Commands(ms). */
+static int Commands(int ms) { return (ms + msec - 1) / msec; }
 static int Other(int gun) { return gun == WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN; }
 static int Owes(int gun) { return (ps.stats[STAT_UNCHAMBERED] & (1 << gun)) != 0; }
 static int Open(int gun) { int open = PM_ShotLength(gun); return open < 0 ? 0 : open; }
@@ -98,7 +98,7 @@ static int ActionLength(int gun) { return BG_WeaponFireLength(gun) - Open(gun); 
 
 /* Into the sprint carry. With 'shoot', the gun's shot comes first and a
  * sprint tapped during it takes the gun once the shot is over (on a pump or
- * bolt gun the READY think after it: MW2's sprint check runs before its
+ * bolt gun the READY command after it: MW2's sprint check runs before its
  * rechamber check), so its action is still owed. */
 static void IntoTheCarry(int gun, int shoot) {
 	int t, owed = shoot && BG_WeaponFireLength(gun) > 0;
@@ -114,25 +114,25 @@ static void IntoTheCarry(int gun, int shoot) {
 	   Sprint_State_Loop zeroes the time again (0x577F82) */
 	CHECK(ps.weaponstate == WEAPON_SPRINTING && ps.weaponTime == 0 && Owes(gun) == owed);
 }
-/* Run the sprint-out stamped on the last command to the think before its
- * last, checking it holds every think. */
+/* Run the sprint-out stamped on the last command to the command before its
+ * last, checking it holds every command. */
 static void ThroughTheSprintOut(int gun) {
 	int k;
 	CHECK(ps.weaponstate == WEAPON_SPRINT_OUT && ps.weaponTime == BG_WeaponSprintOutTime(gun));
-	for (k = 1; k < Thinks(BG_WeaponSprintOutTime(gun)); k++) {
+	for (k = 1; k < Commands(BG_WeaponSprintOutTime(gun)); k++) {
 		Frame();
 		CHECK(ps.weaponstate == WEAPON_SPRINT_OUT && ps.weaponTime == BG_WeaponSprintOutTime(gun) - k * msec);
 	}
 }
 
-/* D1. SPRINT_DROP's last think: MW2's switch makes the gun READY in
+/* D1. SPRINT_DROP's last command: MW2's switch makes the gun READY in
  * PM_Weapon_Idle (0x5793D8 entry 25 -> 0x579279 -> 0x5777A0), with no time
  * over (the crossing dropped the overshoot, 0x578B71, and PM_Weapon_Idle
- * zeroes weaponTime and weaponDelay, 0x5777CE-0x5777D8), and the think
+ * zeroes weaponTime and weaponDelay, 0x5777CE-0x5777D8), and the command
  * is over. The rechamber check ran first and starts nothing out of
  * SPRINT_DROP (0x575B77), the auto reload refuses the sprint states
  * (0x578872-0x57887A), and nothing fires: an owed pump or bolt, the shot and
- * an empty magazine's reload all come on the next think. A reload asked for
+ * an empty magazine's reload all come on the next command. A reload asked for
  * on it is taken (the reload check runs first and takes the sprint states,
  * 0x575E8E-0x575EA8). */
 static void TestSprintOutEnds(int gun) {
@@ -147,7 +147,7 @@ static void TestSprintOutEnds(int gun) {
 		CHECK(ps.weaponstate == WEAPON_BOLTING && ps.weaponAnimTime == Open(gun));
 		CHECK(ps.weaponTime == ActionLength(gun) && fired[gun] == 1);
 	}
-	/* the trigger ends the sprint and is held: the shot is the think after */
+	/* the trigger ends the sprint and is held: the shot is the command after */
 	Setup(gun, Other(gun)); IntoTheCarry(gun, 0);
 	buttons = BUTTON_ATTACK; Frame();
 	CHECK(!(ps.pm_flags & PMF_SPRINTING));
@@ -157,7 +157,7 @@ static void TestSprintOutEnds(int gun) {
 	CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && fired[gun] == 0);
 	Frame();
 	CHECK(ps.weaponstate == WEAPON_FIRING && fired[gun] == 1);
-	/* the last round went in the sprint: the empty gun reloads the think after */
+	/* the last round went in the sprint: the empty gun reloads the command after */
 	Setup(gun, Other(gun)); ps.ammo[gun] = 1;
 	IntoTheCarry(gun, 1);
 	CHECK(ps.ammo[gun] == 0 && ps.ammoReserve[gun] > 0);
@@ -167,7 +167,7 @@ static void TestSprintOutEnds(int gun) {
 	CHECK(ps.weaponstate == WEAPON_READY && ps.ammo[gun] == 0);
 	Frame();
 	CHECK(ps.weaponstate == WEAPON_RELOADING && ps.weaponAnimSeq == RSEQ_START && ps.weaponAnimTime == 0);
-	/* a reload pressed on the last think is taken on it, in MW2 as here */
+	/* a reload pressed on the last command is taken on it, in MW2 as here */
 	Setup(gun, Other(gun)); ps.ammo[gun] = BG_WeaponMagSize(gun) - 1;
 	IntoTheCarry(gun, 0);
 	forward = 0; Frame();
@@ -180,18 +180,18 @@ static void TestSprintOutEnds(int gun) {
  * nothing while sprinting in SPRINT_RAISE, SPRINT_LOOP or SPRINT_DROP
  * (0x5780F4-0x578107), so the sprint-out runs to its end, PM_Weapon_Idle
  * readies the gun, and Sprint_State_Raise starts the whole sprint entry from
- * READY on the next think (0x5780FE -> 0x577EE0). */
+ * READY on the next command (0x5780FE -> 0x577EE0). */
 static void TestSprintAgainInTheSprintOut(int gun) {
 	int k, half;
 	Setup(gun, Other(gun)); IntoTheCarry(gun, 0);
 	forward = 0; Frame();
 	CHECK(ps.weaponstate == WEAPON_SPRINT_OUT && !(ps.pm_flags & PMF_SPRINTING));
-	half = Thinks(BG_WeaponSprintOutTime(gun)) / 2;
+	half = Commands(BG_WeaponSprintOutTime(gun)) / 2;
 	CHECK(half >= 1);
 	for (k = 1; k < half; k++) Frame();
 	forward = 127; buttons = BUTTON_SPRINT; Frame(); buttons = 0;	/* a fresh press */
 	CHECK((ps.pm_flags & PMF_SPRINTING) && ps.weaponstate == WEAPON_SPRINT_OUT);
-	for (k = half + 1; k < Thinks(BG_WeaponSprintOutTime(gun)); k++) {
+	for (k = half + 1; k < Commands(BG_WeaponSprintOutTime(gun)); k++) {
 		Frame();
 		CHECK((ps.pm_flags & PMF_SPRINTING) && ps.weaponstate == WEAPON_SPRINT_OUT &&
 			ps.weaponTime == BG_WeaponSprintOutTime(gun) - k * msec);
@@ -204,10 +204,10 @@ static void TestSprintAgainInTheSprintOut(int gun) {
 
 /* D3. The gun's quick raise after the knife (MW2's MELEE_END) or equipment
  * (OFFHAND_END), and an empty hand's return (OFFHAND_END with weapon 0, a
- * one-think weaponDelay, 0x577A1A-0x577A2A): MW2's change check refuses
+ * one-command weaponDelay, 0x577A1A-0x577A2A): MW2's change check refuses
  * those states whatever their time (0x578BC9-0x578BF2), so a swap queued
- * behind the return begins from READY on the think after it ends, and
- * equipment pressed on that think still comes out (its offhand check takes
+ * behind the return begins from READY on the command after it ends, and
+ * equipment pressed on that command still comes out (its offhand check takes
  * them, 0x579086-0x579096). */
 static void ToTheQuickRaise(int gun, int press) {
 	int t;
@@ -221,10 +221,10 @@ static void TestReturnEnds(int gun) {
 	const int offhands[] = { BUTTON_LETHAL, BUTTON_TACTICAL };
 	int p, k, t, lethal, equip;
 	for (p = 0; p < ARRAY_LEN(presses); p++) {
-		/* a Y in the quick raise: the drop starts the think after it ends */
+		/* a Y in the quick raise: the drop starts the command after it ends */
 		Setup(gun, Other(gun)); ToTheQuickRaise(gun, presses[p]);
 		slot = SLOT_SECONDARY;
-		for (k = 1; k < Thinks(BG_WeaponQuickRaiseTime(gun)); k++) {
+		for (k = 1; k < Commands(BG_WeaponQuickRaiseTime(gun)); k++) {
 			Frame();
 			CHECK(ps.weapon == gun && ps.weaponstate == WEAPON_RAISING);
 		}
@@ -235,17 +235,17 @@ static void TestReturnEnds(int gun) {
 		CHECK(!(ps.weaponAction & WA_TYPE_MASK));
 		Frame();
 		CHECK(ps.weapon == gun && ps.weaponstate == WEAPON_DROPPING && ps.weaponTime == BG_WeaponDropTime(gun));
-		/* equipment pressed on that last think comes out on it, on the quick drop */
+		/* equipment pressed on that last command comes out on it, on the quick drop */
 		Setup(gun, Other(gun)); ToTheQuickRaise(gun, presses[p]);
 		CHECK(ps.ammo[WP_FLASH] > 0);
-		for (k = 1; k < Thinks(BG_WeaponQuickRaiseTime(gun)); k++) Frame();
+		for (k = 1; k < Commands(BG_WeaponQuickRaiseTime(gun)); k++) Frame();
 		buttons = BUTTON_TACTICAL; Frame(); buttons = 0;
 		CHECK((ps.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == WA_TACTICAL);
 		CHECK(ps.weapon == gun && ps.weaponstate == WEAPON_DROPPING && ps.weaponTime == BG_WeaponQuickDropTime(gun));
 	}
 	/* equipment out of an empty hand, the lethal or the tactical, comes back
 	 * to one (MW2's OffHandEnd with weapon 0 does not look at the offhand,
-	 * 0x577A10-0x577A2A); a gun selected all along is drawn the think after
+	 * 0x577A10-0x577A2A); a gun selected all along is drawn the command after
 	 * the hand's return ends, on its ordinary raise */
 	for (p = 0; p < ARRAY_LEN(offhands); p++) {
 		Setup(gun, Other(gun));
@@ -257,13 +257,13 @@ static void TestReturnEnds(int gun) {
 		for (t = 0; t < 20000 && ps.weapon != WP_NONE; t += msec) Frame();
 		CHECK(ps.weapon == WP_NONE && ps.weaponstate == WEAPON_READY && fired[equip] == 1);	/* E */
 		CHECK((ps.weaponAction & (WA_FIRED | WA_LEFT_EMPTY)) == (WA_FIRED | WA_LEFT_EMPTY));
-		Frame();	/* E+1: OFFHAND_END's delay think, nothing begins */
+		Frame();	/* E+1: OFFHAND_END's delay command, nothing begins */
 		CHECK(ps.weapon == WP_NONE && ps.weaponstate == WEAPON_READY && !(ps.weaponAction & WA_TYPE_MASK));
 		Frame();	/* E+2: the gun's ordinary draw */
 		CHECK(ps.weapon == gun && ps.weaponstate == WEAPON_RAISING && ps.weaponTime == BG_WeaponDrawTime(&ps));
 		CHECK(ps.weaponTime == BG_WeaponRaiseTime(gun));
 	}
-	/* that think is the end of OFFHAND_END's one-think delay: equipment
+	/* that command is the end of OFFHAND_END's one-command delay: equipment
 	 * pressed on it, with a use hint (no sea lion), is prepared on it. MW2's
 	 * offhand check takes OFFHAND_END and OffHandInit stamps the empty hand's
 	 * drop, then the hand's switch, its time gate skipped for the delay
@@ -288,12 +288,12 @@ static void TestReturnEnds(int gun) {
 
 /* With no use hint, equipment comes straight out of an empty hand
  * (CheckForOffHand's OffHandPrepare, 0x5791B0-0x5791CE: hint 0x7FF and
- * weapon 0). On the think the hand's return ends, the run-out of
- * OFFHAND_END's one-think delay, the hand's switch then runs on
+ * weapon 0). On the command the hand's return ends, the run-out of
+ * OFFHAND_END's one-command delay, the hand's switch then runs on
  * OFFHAND_PREPARE whatever its time (0x579474), and that state's case is
  * OffHandHold (the entry for state 17, 0x5792DA -> 0x577920): the equipment
- * is in hand and ready on that think, its fuse written (0x577958-0x577961),
- * its prepare never played. A think later no delay runs out, and the prepare
+ * is in hand and ready on that command, its fuse written (0x577958-0x577961),
+ * its prepare never played. A command later no delay runs out, and the prepare
  * plays whole. */
 static void TestStraightOutOfTheReturn(int gun) {
 	int late, t, lethal;
@@ -321,17 +321,17 @@ static void TestStraightOutOfTheReturn(int gun) {
 		}
 		CHECK(ps.weaponstate == WEAPON_READY && ps.weaponTime == 0);
 		CHECK(ps.grenadeTimeLeft == BG_OffhandFuseTime(WP_FLASH));
-		Frame();	/* the button is up: HOLD's first think throws it */
+		Frame();	/* the button is up: HOLD's first command throws it */
 		CHECK(fired[WP_FLASH] == 1);
 	}
 }
 
-/* A knife pressed on the think after equipment's return to an empty hand is
- * lost, as in MW2: that think is OFFHAND_END (state 21) with weapon 0, whose
- * one-think delay runs out on it (OffHandEnd, 0x577A1A-0x577A2A, the same
+/* A knife pressed on the command after equipment's return to an empty hand is
+ * lost, as in MW2: that command is OFFHAND_END (state 21) with weapon 0, whose
+ * one-command delay runs out on it (OffHandEnd, 0x577A1A-0x577A2A, the same
  * for every offhand, the flash as the frag), and MW2's knife check refuses
- * the offhand states (0x5776AE-0x5776B6) and any think a delay runs out on
- * (0x5776ED). A think later the hand is READY with no delay, and the knife
+ * the offhand states (0x5776AE-0x5776B6) and any command a delay runs out on
+ * (0x5776ED). A command later the hand is READY with no delay, and the knife
  * comes out. */
 static void TestKnifeAfterTheReturn(int gun) {
 	const int offhands[] = { BUTTON_LETHAL, BUTTON_TACTICAL };
@@ -366,13 +366,13 @@ static void TestKnifeAfterTheReturn(int gun) {
  * 0x578DC3), or, with no knife model to raise, PM_Weapon_Idle at once
  * (0x578DF3-0x578DF7: READY, no time, no delay, 0x5777C7-0x5777D8). With no
  * gun to raise Peace's knife ends in that Idle: the hand empty and READY on
- * the knife's last think, and the think after an ordinary READY think, with
+ * the knife's last command, and the command after an ordinary READY command, with
  * no delay running out on it and in no state MW2's knife check refuses (it
- * refuses a delay think and the melee and offhand states, 0x577693-0x5776F2,
- * this think none of them). So a knife pressed there comes out, a gun asked for all
+ * refuses a delay command and the melee and offhand states, 0x577693-0x5776F2,
+ * this command none of them). So a knife pressed there comes out, a gun asked for all
  * along is drawn there, and equipment with no use hint comes straight out of
  * the empty hand and plays its prepare. (Equipment's own return to an empty
- * hand is OFFHAND_END's one-think delay: TestReturnEnds, TestKnifeAfterTheReturn.) */
+ * hand is OFFHAND_END's one-command delay: TestReturnEnds, TestKnifeAfterTheReturn.) */
 static void TestKnifeBackToAnEmptyHand(int gun) {
 	int what, t;
 	for (what = 0; what < 3; what++) {
@@ -382,7 +382,7 @@ static void TestKnifeBackToAnEmptyHand(int gun) {
 		buttons = BUTTON_MELEE; Frame(); buttons = 0;
 		CHECK(ps.weapon == WP_KNIFE && ps.weaponstate == WEAPON_RAISING && (ps.weaponAction & WA_LEFT_EMPTY));
 		for (t = 0; t < 20000 && ps.weapon != WP_NONE; t += msec) Frame();
-		/* E: the knife's last think, the hand empty and READY */
+		/* E: the knife's last command, the hand empty and READY */
 		CHECK(ps.weapon == WP_NONE && ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && fired[WP_KNIFE] == 1);
 		CHECK((ps.weaponAction & (WA_TYPE_MASK | WA_FIRED | WA_LEFT_EMPTY)) == (WA_MELEE | WA_FIRED | WA_LEFT_EMPTY));
 		if (what == 0) {
@@ -409,12 +409,12 @@ static void TestKnifeBackToAnEmptyHand(int gun) {
  * hand and never changes its weapon, so every check that reads the weapon
  * reads 0. With no use hint, CheckForOffHand takes OffHandPrepare at once
  * (0x5791B0-0x5791CE): the equipment comes out on its press and plays its
- * prepare, and on the knife's hit think, a delay think, the hand's switch
+ * prepare, and on the knife's hit command, a delay command, the hand's switch
  * runs OffHandHold on it (0x579474, 0x5792DA): in hand and ready there, its
  * prepare unplayed, no hit. With a hint, OffHandInit stamps weapon 0's
  * 100 ms (0x578E70-0x578ED3), not a gun's quick drop. Its end is OffHandEnd
  * with weapon 0 (0x577A1A-0x577A2A): the hand empty again, OFFHAND_END's
- * one-think delay, then a gun the command names on its ordinary raise, or,
+ * one-command delay, then a gun the command names on its ordinary raise, or,
  * with a stale command, the hand stays empty. */
 static void KnifeFromAnEmptyHand(int gun, int hint) {
 	Setup(gun, Other(gun));
@@ -427,9 +427,9 @@ static void KnifeFromAnEmptyHand(int gun, int hint) {
 }
 static void TestEquipmentOverTheKnifeFromAnEmptyHand(int gun) {
 	int when, hint, k, t, lethal, hit, raise, st;
-	hit = Thinks(BG_MELEE_DELAY);	/* the hit's think, counted from K */
-	CHECK(hit > 2 && Thinks(BG_MELEE_TIME) > hit + 2);
-	/* when 0: in the knife's draw (K+2); 1: on its hit's think; 2: after the hit (H+2) */
+	hit = Commands(BG_MELEE_DELAY);	/* the hit's command, counted from K */
+	CHECK(hit > 2 && Commands(BG_MELEE_TIME) > hit + 2);
+	/* when 0: in the knife's draw (K+2); 1: on its hit's command; 2: after the hit (H+2) */
 	for (when = 0; when < 3; when++) for (hint = 0; hint < 2; hint++) {
 		KnifeFromAnEmptyHand(gun, hint);
 		lethal = BG_LethalWeapon(&ps);
@@ -441,10 +441,10 @@ static void TestEquipmentOverTheKnifeFromAnEmptyHand(int gun) {
 		CHECK((ps.weaponAction & (WA_TYPE_MASK | WA_FIRED | WA_LEFT_EMPTY)) == (WA_LETHAL | WA_LEFT_EMPTY));
 		CHECK(fired[WP_KNIFE] == (when == 2));
 		if (when == 1 && !hint) {
-			/* the hit's think: in hand and ready on it, the fuse written */
+			/* the hit's command: in hand and ready on it, the fuse written */
 			CHECK(ps.weapon == lethal && ps.weaponstate == WEAPON_READY && ps.weaponTime == 0);
 			CHECK(prepared[lethal] == 1 && ps.grenadeTimeLeft == BG_OffhandFuseTime(lethal));
-			Frame();	/* the button is up: HOLD's first think throws it */
+			Frame();	/* the button is up: HOLD's first command throws it */
 			CHECK(fired[lethal] == 1 && fired[WP_KNIFE] == 0);
 			continue;
 		}
@@ -453,7 +453,7 @@ static void TestEquipmentOverTheKnifeFromAnEmptyHand(int gun) {
 			CHECK(ps.weapon == WP_KNIFE && ps.weaponstate == WEAPON_DROPPING);
 			CHECK(ps.weaponTime == BG_EMPTY_HAND_OFFHAND_TIME && BG_HolsterTime(&ps) == BG_EMPTY_HAND_OFFHAND_TIME);
 			CHECK(BG_ViewmodelWeapon(&ps) == WP_NONE && prepared[lethal] == 0);
-			for (k = 1; k < Thinks(BG_EMPTY_HAND_OFFHAND_TIME); k++) {
+			for (k = 1; k < Commands(BG_EMPTY_HAND_OFFHAND_TIME); k++) {
 				Frame();
 				CHECK(ps.weapon == WP_KNIFE && ps.weaponstate == WEAPON_DROPPING && prepared[lethal] == 0);
 			}
@@ -462,13 +462,13 @@ static void TestEquipmentOverTheKnifeFromAnEmptyHand(int gun) {
 		/* straight out, or after the drop (or the hit's path A with a hint): the prepare plays */
 		CHECK(ps.weapon == lethal && ps.weaponstate == WEAPON_RAISING && ps.weaponTime == raise);
 		CHECK(prepared[lethal] == 1 && (ps.weaponAction & WA_LEFT_EMPTY));
-		for (k = 1; k < Thinks(raise); k++) { Frame(); CHECK(ps.weapon == lethal && ps.weaponstate == WEAPON_RAISING); }
+		for (k = 1; k < Commands(raise); k++) { Frame(); CHECK(ps.weapon == lethal && ps.weaponstate == WEAPON_RAISING); }
 		Frame();
 		CHECK(ps.weapon == lethal && ps.weaponstate == WEAPON_READY && ps.weaponTime == 0);
 		Frame();
 		CHECK(fired[lethal] == 1 && fired[WP_KNIFE] == (when == 2));
 	}
-	/* the end: the hand empty again, OFFHAND_END's delay think, then the gun
+	/* the end: the hand empty again, OFFHAND_END's delay command, then the gun
 	   the command names on its ordinary raise, or none with a stale command */
 	for (st = 0; st < 2; st++) {
 		KnifeFromAnEmptyHand(gun, 0);
@@ -483,7 +483,7 @@ static void TestEquipmentOverTheKnifeFromAnEmptyHand(int gun) {
 		}
 		CHECK(ps.weapon == WP_NONE && ps.weaponstate == WEAPON_READY && ps.weaponTime == 0 && fired[lethal] == 1);	/* E */
 		CHECK((ps.weaponAction & (WA_TYPE_MASK | WA_FIRED | WA_LEFT_EMPTY)) == (WA_LETHAL | WA_FIRED | WA_LEFT_EMPTY));
-		Frame();	/* E+1: OFFHAND_END's delay think */
+		Frame();	/* E+1: OFFHAND_END's delay command */
 		CHECK(ps.weapon == WP_NONE && ps.weaponstate == WEAPON_READY && !(ps.weaponAction & WA_TYPE_MASK));
 		Frame();	/* E+2 */
 		if (!stale) {
@@ -491,7 +491,7 @@ static void TestEquipmentOverTheKnifeFromAnEmptyHand(int gun) {
 			CHECK(ps.weaponTime == BG_WeaponDrawTime(&ps) && ps.weaponTime == BG_WeaponRaiseTime(gun));
 			continue;
 		}
-		for (k = 0; k < Thinks(BG_WeaponRaiseTime(gun)) + Thinks(BG_WeaponQuickRaiseTime(gun)); k++) {
+		for (k = 0; k < Commands(BG_WeaponRaiseTime(gun)) + Commands(BG_WeaponQuickRaiseTime(gun)); k++) {
 			CHECK(ps.weapon == WP_NONE && ps.weaponstate == WEAPON_READY && !(ps.weaponAction & WA_TYPE_MASK));
 			Frame();
 		}
@@ -501,14 +501,14 @@ static void TestEquipmentOverTheKnifeFromAnEmptyHand(int gun) {
 
 /* MW2's crossing drops what a weaponTime overshot by in every state its
  * held-trigger lock does not take (PM_Weapon_WeaponTimeAdjust, 0x578B71):
- * whatever handler runs on that think finds 0 and assigns its own whole time.
+ * whatever handler runs on that command finds 0 and assigns its own whole time.
  * A raise's end (FinishWeaponRaise, 0x576720) assigns none, so the gun is
  * READY with no time over: an ordinary raise, a first raise and the
  * Masterkey's alternate raise (whose drop is 0, so it starts on the press). */
 static void RaiseToItsEnd(int weapon, int raise) {
 	int k;
 	CHECK(ps.weapon == weapon && ps.weaponstate == WEAPON_RAISING && ps.weaponTime == raise);
-	for (k = 1; k < Thinks(raise); k++) { Frame(); CHECK(ps.weapon == weapon && ps.weaponstate == WEAPON_RAISING); }
+	for (k = 1; k < Commands(raise); k++) { Frame(); CHECK(ps.weapon == weapon && ps.weaponstate == WEAPON_RAISING); }
 	Frame();
 	CHECK(ps.weapon == weapon && ps.weaponstate == WEAPON_READY && ps.weaponTime == 0);
 	Frame();
@@ -538,8 +538,8 @@ static void TestAltRaiseEnds(void) {
 /* A reload's end is the same crossing (0x578B71) before FinishReloadEnd
  * readies the gun (0x5769A0): READY with no time over, also where no note of
  * the end zeroes its time (the Masterkey's end has none), the reload button
- * held through it: a reload asked for on the end's think is refused (MW2 asks
- * a reloading gun nothing), so that think's READY with nothing to fire zeroes
+ * held through it: a reload asked for on the end's command is refused (MW2 asks
+ * a reloading gun nothing), so that command's READY with nothing to fire zeroes
  * the time. */
 static void TestReloadEnds(int gun) {
 	int t;
@@ -587,17 +587,17 @@ static void TestHoldIsWhole(int gun) {
 		Frame();	/* the button is up: the throw */
 		CHECK(fired[equip] == 1 && ps.weapon == equip && ps.weaponstate == WEAPON_FIRING);
 		CHECK(ps.weaponTime == BG_QUICK_ACTION_HOLD);
-		for (k = 1; k < Thinks(BG_QUICK_ACTION_HOLD); k++) {
+		for (k = 1; k < Commands(BG_QUICK_ACTION_HOLD); k++) {
 			Frame();
 			CHECK(ps.weapon == equip && ps.weaponstate == WEAPON_FIRING && ps.weaponTime == BG_QUICK_ACTION_HOLD - k * msec);
 		}
 		Frame();	/* the hold's crossing: the rapid drop, whole */
 		CHECK(ps.weapon == equip && ps.weaponstate == WEAPON_DROPPING && ps.weaponTime == BG_RAPID_DROP_TIME);
 		CHECK(BG_HolsterTime(&ps) == BG_RAPID_DROP_TIME);
-		for (k = 1; k < Thinks(BG_RAPID_DROP_TIME); k++) { Frame(); CHECK(ps.weapon == equip && ps.weaponstate == WEAPON_DROPPING); }
+		for (k = 1; k < Commands(BG_RAPID_DROP_TIME); k++) { Frame(); CHECK(ps.weapon == equip && ps.weaponstate == WEAPON_DROPPING); }
 		Frame();
 		CHECK(ps.weapon == gun && ps.weaponstate == WEAPON_RAISING && ps.weaponTime == quick);
-		for (k = 1; k < Thinks(quick); k++) { Frame(); CHECK(ps.weapon == gun && (ps.weaponAction & WA_TYPE_MASK)); }
+		for (k = 1; k < Commands(quick); k++) { Frame(); CHECK(ps.weapon == gun && (ps.weaponAction & WA_TYPE_MASK)); }
 		Frame();	/* the recovery's end: READY, the latch clear, nothing over */
 		CHECK(ps.weapon == gun && ps.weaponstate == WEAPON_READY && ps.weaponTime == 0);
 		CHECK(!(ps.weaponAction & WA_TYPE_MASK));
@@ -606,10 +606,10 @@ static void TestHoldIsWhole(int gun) {
 
 /* D4. YY while sprinting: MW2's double-tap cancel is in its change check,
  * after its sprint check (0x44C4CA, 0x44C4D7), which refused the drop
- * (0x5780C6). So the YY think is READY: an owed action starts on it
+ * (0x5780C6). So the YY command is READY: an owed action starts on it
  * (CheckForRechamber from READY, 0x575B77) and holds the sprint off until it
  * ends (the sprint check refuses RECHAMBERING, 0x57807D); with none owed the
- * sprint entry comes on the next think. */
+ * sprint entry comes on the next command. */
 static void TestYYWhileSprinting(int gun) {
 	int owed, k;
 	for (owed = 0; owed < 2; owed++) {
@@ -626,7 +626,7 @@ static void TestYYWhileSprinting(int gun) {
 			continue;
 		}
 		CHECK(ps.weaponstate == WEAPON_BOLTING && ps.weaponAnimTime == Open(gun) && ps.weaponTime == ActionLength(gun));
-		for (k = 1; k < Thinks(ActionLength(gun)); k++) {
+		for (k = 1; k < Commands(ActionLength(gun)); k++) {
 			Frame();
 			CHECK(ps.weaponstate == WEAPON_BOLTING && (ps.pm_flags & PMF_SPRINTING));
 		}
@@ -639,13 +639,13 @@ static void TestYYWhileSprinting(int gun) {
 
 /* D5. A gun with no fire clip, its last round's lock running out: MW2's auto
  * reload refuses FIRING (0x57886D) and its trigger-up ShouldBeFiring only
- * readies the gun (0x576D99-0x576DA3), so the reload is the think after; a
- * held trigger reloads on that think, through FireWeapon's ammo check
+ * readies the gun (0x576D99-0x576DA3), so the reload is the command after; a
+ * held trigger reloads on that command, through FireWeapon's ammo check
  * (0x5770C0-0x5770C9). The machinegun (m4_mp); the Quake 3 guns with a
  * magazine go the same way. A burst gun (the M16 rifle, m16_shotgun_mp's
- * 3-Round Burst) is READY in its cooldown at the top of that think, its burst
+ * 3-Round Burst) is READY in its cooldown at the top of that command, its burst
  * ended by the empty clip (0x576A8A, 0x578939-0x5789CD), and the auto reload
- * takes that READY gun on that same think (0x578845-0x578889), the trigger up
+ * takes that READY gun on that same command (0x578845-0x578889), the trigger up
  * or down; the reload begins a new pull (0x575EFE). */
 static void TestLastRoundEnds(int gun) {
 	int held, k, lock, type = BG_WeaponFireType(gun);
@@ -657,7 +657,7 @@ static void TestLastRoundEnds(int gun) {
 		lock = ps.weaponTime;	/* the gun's own fire lock, as pmove stamped it */
 		CHECK(fired[gun] == 1 && ps.weaponstate == WEAPON_FIRING && ps.ammo[gun] == 0 && lock > 0);
 		if (!held) buttons = 0;
-		for (k = 1; k < Thinks(lock); k++) { Frame(); CHECK(ps.weaponstate == WEAPON_FIRING); }
+		for (k = 1; k < Commands(lock); k++) { Frame(); CHECK(ps.weaponstate == WEAPON_FIRING); }
 		Frame();
 		if (held || burst) {
 			CHECK(ps.weaponstate == WEAPON_RELOADING && ps.weaponAnimTime == 0);
@@ -670,12 +670,12 @@ static void TestLastRoundEnds(int gun) {
 	}
 }
 
-/* D6. Equipment pressed on the think the knife hits: the knife's draw is
- * MW2's meleeDelay (MeleeInit 0x577581-0x577599), and on the think it runs
+/* D6. Equipment pressed on the command the knife hits: the knife's draw is
+ * MW2's meleeDelay (MeleeInit 0x577581-0x577599), and on the command it runs
  * out the offhand check (which takes MELEE_INIT) runs OffHandInit, then the
  * hand's switch, the time gate skipped for the delay (0x579474), prepares the
- * equipment on that same think (0x5792C7 -> OffHandPrepare 0x577800): no
- * quick drop, and no hit. A think sooner the knife is cut on the gun's quick
+ * equipment on that same command (0x5792C7 -> OffHandPrepare 0x577800): no
+ * quick drop, and no hit. A command sooner the knife is cut on the gun's quick
  * drop, as ever. */
 static void TestEquipmentOnTheHit(int gun) {
 	int early, k, hit, lethal;
@@ -684,7 +684,7 @@ static void TestEquipmentOnTheHit(int gun) {
 		lethal = BG_LethalWeapon(&ps);
 		buttons = BUTTON_MELEE; Frame(); buttons = 0;	/* P */
 		CHECK(ps.weapon == WP_KNIFE && ps.weaponstate == WEAPON_RAISING && ps.weaponTime == BG_MELEE_DELAY);
-		hit = Thinks(BG_MELEE_DELAY);	/* the hit's think, H, counted from P */
+		hit = Commands(BG_MELEE_DELAY);	/* the hit's command, H, counted from P */
 		CHECK(hit > 1);
 		for (k = 1; k < hit - early; k++) Frame();
 		buttons = BUTTON_LETHAL; Frame(); buttons = 0;
@@ -695,36 +695,36 @@ static void TestEquipmentOnTheHit(int gun) {
 			continue;
 		}
 		CHECK(ps.weapon == WP_KNIFE && ps.weaponstate == WEAPON_DROPPING && ps.weaponTime == BG_WeaponQuickDropTime(gun));
-		for (k = 1; k < Thinks(BG_WeaponQuickDropTime(gun)); k++) { Frame(); CHECK(ps.weapon == WP_KNIFE && !prepared[lethal]); }
+		for (k = 1; k < Commands(BG_WeaponQuickDropTime(gun)); k++) { Frame(); CHECK(ps.weapon == WP_KNIFE && !prepared[lethal]); }
 		Frame();
 		CHECK(ps.weapon == lethal && ps.weaponstate == WEAPON_RAISING && prepared[lethal] == 1 && fired[WP_KNIFE] == 0);
 	}
-	/* with nothing pressed, that think is the hit */
+	/* with nothing pressed, that command is the hit */
 	Setup(gun, Other(gun));
 	buttons = BUTTON_MELEE; Frame(); buttons = 0;
-	for (k = 1; k < Thinks(BG_MELEE_DELAY); k++) { Frame(); CHECK(fired[WP_KNIFE] == 0); }
+	for (k = 1; k < Commands(BG_MELEE_DELAY); k++) { Frame(); CHECK(fired[WP_KNIFE] == 0); }
 	Frame();
 	CHECK(fired[WP_KNIFE] == 1 && ps.weapon == WP_KNIFE);
 }
 
-/* D7. The knife on a reload's delayed-action think: MW2's knife check refuses
- * any think whose weapon delay runs out (0x5776ED-0x5776F2, passed
+/* D7. The knife on a reload's delayed-action command: MW2's knife check refuses
+ * any command whose weapon delay runs out (0x5776ED-0x5776F2, passed
  * max(delayedAction), 0x44C4E3-0x44C4FC). In a reload that is its round
  * (the add delay) and an owed action's settle (PM_SetWeaponReloadAddAmmoDelay
  * 0x575C50), and the hand's switch then seats the round (FinishReload,
- * 0x579232) or pays the pump (ReloadDelayedAction, 0x5768C5). The think
+ * 0x579232) or pays the pump (ReloadDelayedAction, 0x5768C5). The command
  * before it takes the knife, as ever. */
-/* The commands from the reload's press to its first round's think. A round in
- * a loop pass is counted from the think the start ended: each segment starts
+/* The commands from the reload's press to its first round's command. A round in
+ * a loop pass is counted from the command the start ended: each segment starts
  * afresh there (MW2's PM_SetReloadingState gives it its whole time, 0x575E20,
  * after the crossing dropped the start's overshoot, 0x578B71). */
 static int FirstRound(int gun) {
 	const bg_weaponNote_t *n;
 	for (n = PM_SegNotes(gun, RSEQ_START); n->note != WNOTE_NONE; n++)
-		if (n->note == WNOTE_MAG_IN) return Thinks(BG_ReloadTime(&ps, n->time));
+		if (n->note == WNOTE_MAG_IN) return Commands(BG_ReloadTime(&ps, n->time));
 	for (n = PM_SegNotes(gun, RSEQ_LOOP); n->note != WNOTE_NONE; n++)
 		if (n->note == WNOTE_MAG_IN)
-			return Thinks(BG_ReloadSegmentTime(&ps, RSEQ_START)) + Thinks(BG_ReloadTime(&ps, n->time));
+			return Commands(BG_ReloadSegmentTime(&ps, RSEQ_START)) + Commands(BG_ReloadTime(&ps, n->time));
 	return -1;
 }
 /* MW2's settle (PM_ReloadSettleCrossed's rule, from the tables): the gun's
@@ -751,9 +751,9 @@ static void TestKnifeOnADelay(int gun) {
 			/* reload out of the shot: the settle pays the owed pump or bolt */
 			buttons = BUTTON_ATTACK; Frame();
 			CHECK(fired[gun] == 1 && Owes(gun));
-			when = Thinks(Settle(gun));
+			when = Commands(Settle(gun));
 		} else {
-			ps.ammo[gun] = BG_WeaponMagSize(gun) - 2;	/* the first round's think */
+			ps.ammo[gun] = BG_WeaponMagSize(gun) - 2;	/* the first round's command */
 			when = FirstRound(gun);
 		}
 		CHECK(when > 1);
@@ -780,8 +780,8 @@ static void TestKnifeOnADelay(int gun) {
  * (FinishReload stamps reloadEndTime alone, 0x5785EB-0x578606;
  * PM_SetWeaponReloadAddAmmoDelay gives one only to RELOADING and
  * RELOAD_START, 0x575C50), and its knife check takes a reload state on any
- * think no delay runs out on (0x577734-0x577755, 0x5776ED). So the knife
- * comes out on that note's think, as on the think before it. */
+ * command no delay runs out on (0x577734-0x577755, 0x5776ED). So the knife
+ * comes out on that note's command, as on the command before it. */
 static int EndNote(int gun) {
 	const bg_weaponNote_t *n;
 	for (n = PM_SegNotes(gun, RSEQ_END); n->note != WNOTE_NONE; n++)
@@ -799,7 +799,7 @@ static void TestKnifeOnTheEndsNote(int gun) {
 		for (t = 0; t < 20000 && ps.weaponAnimSeq != RSEQ_END; t += msec) Frame();
 		CHECK(ps.weaponstate == WEAPON_RELOADING && ps.weaponAnimSeq == RSEQ_END && ps.weaponAnimTime < msec);
 		CHECK(ps.ammo[gun] == BG_WeaponMagSize(gun));
-		/* to the think before the one that crosses the note (early: two before) */
+		/* to the command before the one that crosses the note (early: two before) */
 		while (ps.weaponAnimTime + (1 + early) * msec < close) Frame();
 		CHECK(ps.weaponstate == WEAPON_RELOADING && ps.weaponAnimSeq == RSEQ_END &&
 			ps.weaponAnimTime + early * msec < close);
@@ -810,18 +810,18 @@ static void TestKnifeOnTheEndsNote(int gun) {
 }
 
 /* The held trigger at these ends (MW2's PM_Weapon_WeaponTimeAdjust,
- * 0x5788B0, run before every check, 0x44C42B). On the think a state's
+ * 0x5788B0, run before every check, 0x44C42B). On the command a state's
  * weaponTime runs out with the trigger down, the pull's shots all fired
  * (ShotLimitReached 0x5769E0), the command naming the gun and a round in it,
  * the time becomes 1 (0x578AE6): FIRING and the melee states go READY
  * (0x578B16-0x578B39), the offhand states are never locked (0x578A94), any
  * other state keeps its state (0x578B25-0x578B28), and the 1 runs out on the
- * next think, which asks again. A think that asks with the trigger up zeroes
+ * next command, which asks again. A command that asks with the trigger up zeroes
  * the count and the time (0x578B51-0x578B71). A single-shot gun's pull is
  * spent by its shot; a frag thrown out of the lock with the trigger held all
  * along keeps it spent (its return is an offhand state, so it stays unlocked
  * and the time is zeroed with the count kept, 0x578B51-0x578B71), and a
- * trigger let go on the think after the return asks nothing (no time runs
+ * trigger let go on the command after the return asks nothing (no time runs
  * out), so the pull is still spent with the trigger up. */
 static void ShootHeldToTheLock(int gun) {
 	int t;
@@ -837,7 +837,7 @@ static void SpentWithTheTriggerUp(int gun) {
 	CHECK((ps.weaponAction & WA_TYPE_MASK) == WA_LETHAL);
 	buttons = BUTTON_ATTACK;
 	for (t = 0; t < 20000 && !(ps.weapon == gun && ps.weaponstate == WEAPON_READY); t += msec) Frame();
-	/* the return's last think: READY, nothing fired, the pull still spent */
+	/* the return's last command: READY, nothing fired, the pull still spent */
 	CHECK(fired[lethal] == 1 && fired[gun] == 1 && ps.weaponShotCount == 1 && !(ps.weaponAction & WA_TYPE_MASK));
 	buttons = 0; Frame();
 	CHECK(ps.weaponstate == WEAPON_READY && ps.weaponShotCount == 1 && fired[gun] == 1);
@@ -847,21 +847,21 @@ static void TestHeldTriggerAtTheEnds(int gun) {
 	CHECK(BG_ShotLimitReached(BG_WeaponFireType(gun), 1) && BG_WeaponFireLength(gun) > 0);
 
 	/* D1 under the lock: the trigger pressed in the sprint entry ends the
-	   sprint, and with the pull spent the sprint-out's last think locks it
+	   sprint, and with the pull spent the sprint-out's last command locks it
 	   (SPRINT_DROP keeps its state with weaponTime 1) for as long as the
 	   trigger stays down; let go, it ends as ever, READY and nothing fired
-	   (PM_Weapon_Idle), and a fresh pull fires on the next think */
+	   (PM_Weapon_Idle), and a fresh pull fires on the next command */
 	Setup(gun, other); SpentWithTheTriggerUp(gun);
 	forward = 127; buttons = BUTTON_SPRINT; Frame(); buttons = 0;
 	CHECK((ps.pm_flags & PMF_SPRINTING) && ps.weaponstate == WEAPON_SPRINT_IN);
-	CHECK(Thinks(BG_WeaponSprintInTime(gun)) > 2);
+	CHECK(Commands(BG_WeaponSprintInTime(gun)) > 2);
 	Frame();
 	buttons = BUTTON_ATTACK; Frame();
 	CHECK(!(ps.pm_flags & PMF_SPRINTING));
 	ThroughTheSprintOut(gun);
 	Frame();
 	CHECK(ps.weaponstate == WEAPON_SPRINT_OUT && ps.weaponTime == 1 && fired[gun] == 1);
-	for (k = 0; k < Thinks(BG_WeaponFireLength(gun)); k++) {
+	for (k = 0; k < Commands(BG_WeaponFireLength(gun)); k++) {
 		Frame();
 		CHECK(ps.weaponstate == WEAPON_SPRINT_OUT && ps.weaponTime == 1 && fired[gun] == 1);
 	}
@@ -869,8 +869,8 @@ static void TestHeldTriggerAtTheEnds(int gun) {
 	CHECK(ps.weaponstate == WEAPON_READY && ps.weaponShotCount == 0 && fired[gun] == 1);
 	buttons = BUTTON_ATTACK; Frame();
 	CHECK(ps.weaponstate == WEAPON_FIRING && fired[gun] == 2);
-	/* the pull not spent (the shot's own last think let go): the same press
-	   ends the sprint-out on its time, and the trigger fires the think after */
+	/* the pull not spent (the shot's own last command let go): the same press
+	   ends the sprint-out on its time, and the trigger fires the command after */
 	Setup(gun, other); IntoTheCarry(gun, 0);
 	CHECK(ps.weaponShotCount == 0);
 	buttons = BUTTON_ATTACK; Frame();
@@ -878,11 +878,11 @@ static void TestHeldTriggerAtTheEnds(int gun) {
 	Frame();
 	CHECK(ps.weaponstate == WEAPON_READY && fired[gun] == 0);
 
-	/* D4 with the trigger: pressed on the YY think, it ends the sprint first
+	/* D4 with the trigger: pressed on the YY command, it ends the sprint first
 	   (PM_UpdateSprint), the cancel readies the gun, and the hand fires on
-	   that think (ShouldBeFiring), or, owing its action, starts the action
+	   that command (ShouldBeFiring), or, owing its action, starts the action
 	   from READY and fires nothing (CheckForRechamber first, 0x579464); that
-	   action's end is no lock (the shot's own last think let go ended its
+	   action's end is no lock (the shot's own last command let go ended its
 	   pull) and fires as a rechamber's end does */
 	for (owed = 0; owed < 2; owed++) {
 		Setup(gun, other); IntoTheCarry(gun, owed);
@@ -895,23 +895,23 @@ static void TestHeldTriggerAtTheEnds(int gun) {
 			continue;
 		}
 		CHECK(ps.weaponstate == WEAPON_BOLTING && ps.weaponAnimTime == Open(gun) && fired[gun] == 1);
-		for (k = 1; k < Thinks(ActionLength(gun)); k++) Frame();
+		for (k = 1; k < Commands(ActionLength(gun)); k++) Frame();
 		CHECK(ps.weaponstate == WEAPON_BOLTING && fired[gun] == 1);
 		Frame();
 		CHECK(ps.weaponstate == WEAPON_FIRING && Owes(gun) && fired[gun] == 2);
 	}
 
 	/* D6 with the trigger: the knife out of the lock, the trigger held, and
-	   a frag on the hit's think, which is prepared there; the gun's return
+	   a frag on the hit's command, which is prepared there; the gun's return
 	   after the throw ends READY and unlocked (an offhand state), nothing
-	   fired, and the held trigger fires on the next think (no time ran out,
+	   fired, and the held trigger fires on the next command (no time ran out,
 	   so nothing asks: ShouldBeFiring is a level test, 0x576CC0) */
 	Setup(gun, other); lethal = BG_LethalWeapon(&ps);
 	ShootHeldToTheLock(gun);
 	buttons = BUTTON_ATTACK | BUTTON_MELEE; Frame();	/* P */
 	CHECK(ps.weapon == WP_KNIFE && ps.weaponstate == WEAPON_RAISING && ps.weaponTime == BG_MELEE_DELAY);
 	buttons = BUTTON_ATTACK;
-	for (k = 1; k < Thinks(BG_MELEE_DELAY); k++) Frame();
+	for (k = 1; k < Commands(BG_MELEE_DELAY); k++) Frame();
 	buttons = BUTTON_ATTACK | BUTTON_LETHAL; Frame();	/* H */
 	CHECK(ps.weapon == lethal && ps.weaponstate == WEAPON_RAISING && prepared[lethal] == 1 && fired[WP_KNIFE] == 0);
 	buttons = BUTTON_ATTACK;
@@ -921,23 +921,23 @@ static void TestHeldTriggerAtTheEnds(int gun) {
 	CHECK(ps.weaponstate == WEAPON_FIRING && fired[gun] == 2);
 
 	/* the reload's delayed action, the trigger held from the shot: a Y on
-	   the settle's think is the instant swap (MW2's path A), and the other
+	   the settle's command is the instant swap (MW2's path A), and the other
 	   gun's raise ends READY, unlocked, since the reload began a new pull
 	   (PM_BeginWeaponReload zeroes the count, 0x575EFE): the held trigger
-	   fires on the next think. (The same raise with the pull spent waits
+	   fires on the next command. (The same raise with the pull spent waits
 	   under the lock: trigger_test.c.) */
 	Setup(gun, other);
 	buttons = BUTTON_ATTACK; Frame();
 	buttons = BUTTON_ATTACK | BUTTON_RELOAD; Frame();	/* R */
 	CHECK(ps.weaponstate == WEAPON_RELOADING && Owes(gun) && ps.weaponShotCount == 0);
 	buttons = BUTTON_ATTACK;
-	for (k = 1; k < Thinks(Settle(gun)); k++) Frame();
+	for (k = 1; k < Commands(Settle(gun)); k++) Frame();
 	CHECK(ps.weaponstate == WEAPON_RELOADING && Owes(gun));
 	slot = SLOT_SECONDARY; Frame();
 	CHECK(ps.weapon == other && ps.weaponstate == WEAPON_RAISING && Owes(gun));
 	raise = ps.weaponTime;
 	CHECK(raise == BG_WeaponDrawTime(&ps) && raise > msec);
-	for (k = 1; k < Thinks(raise); k++) Frame();
+	for (k = 1; k < Commands(raise); k++) Frame();
 	CHECK(ps.weaponstate == WEAPON_RAISING && fired[other] == 0);
 	Frame();
 	CHECK(ps.weaponstate == WEAPON_READY && fired[other] == 0);
@@ -976,6 +976,6 @@ int main(void) {
 		TestHeldTriggerAtTheEnds(WP_SHOTGUN);
 		TestHeldTriggerAtTheEnds(WP_M40A3);
 	}
-	printf("PASS: %d checks of what a weapon state's last think does, at 8, 16 and 33ms commands\n", checks);
+	printf("PASS: %d checks of what a weapon state's last command does, at 8, 16 and 33ms commands\n", checks);
 	return 0;
 }

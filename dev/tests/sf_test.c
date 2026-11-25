@@ -8,7 +8,7 @@
  *
  * Every answer is a command counted from the action's own landmarks, read off
  * a run with nothing else pressed: S its first command (the pump's or the
- * bolt's READY think after the shot, where step 4d starts it; the selector's
+ * bolt's READY command after the shot, where step 4d starts it; the selector's
  * own command), C the command its close note crosses (the bolt or the pump
  * paid; the click, the mode committed) and E the command it ends READY on.
  * The three guns must give the same answers, and the answers must be the
@@ -126,7 +126,7 @@ typedef struct { int weapon, state, wt, at, seq, closed, ads, sprint, action, fi
 static rec_t R[MAXREC];
 static int nR;
 
-/* One client frame: bound commands, the command, the server's think, the draw. */
+/* One client frame: bound commands, the command, the server running it, the draw. */
 static void Frame(int buttons, int keys) {
 	int seq;
 	rec_t *r;
@@ -354,8 +354,8 @@ static void YY(int at, int k, int answer[ANSWERS]) {
 
 /* A knife pressed on command k: taken on S (the READY gun, or before the
  * selector's press), lost from S+1 through C (the action's close note still
- * ahead, and C a weapon delay's think: MW2's knife refuses a pending delay,
- * 0x577734, and the think one runs out on, 0x5776ED; the action closes on C
+ * ahead, and C a weapon delay's command: MW2's knife refuses a pending delay,
+ * 0x577734, and the command one runs out on, 0x5776ED; the action closes on C
  * all the same), taken after C, cutting the rest short, the action closed. */
 static void Knife(int at, int k, int answer[ANSWERS]) {
 	Clear(); Press(k, BUTTON_MELEE, 0);
@@ -368,7 +368,7 @@ static void Knife(int at, int k, int answer[ANSWERS]) {
 }
 
 /* A frag pressed on command k: the gun's quick drop, and the frag in hand
- * after it, the action not closed; pressed on C the close note's think finishes
+ * after it, the action not closed; pressed on C the close note's command finishes
  * that drop at once (MW2's path A) and the frag is in hand on C, the action
  * still not closed; after C, closed. */
 static void Frag(int at, int k, int answer[ANSWERS]) {
@@ -424,7 +424,7 @@ static void Trigger(int at, int k, int answer[ANSWERS]) {
  * Shot, of a pull already spent (the trigger went down for an M16 burst, and
  * Y back to the G19 under it sprays, counting nothing). The action's E is counted from
  * its first command, as in the run with nothing pressed (the held trigger
- * starts the pump a think sooner, on the shot's own crossing). */
+ * starts the pump a command sooner, on the shot's own crossing). */
 static void HeldThroughEnd(int at, int k, int answer[ANSWERS]) {
 	int n, s = -1, e, release, shots = 0;
 	Clear(); Setup(); nR = 0;
@@ -445,7 +445,7 @@ static void HeldThroughEnd(int at, int k, int answer[ANSWERS]) {
 		Frame(BUTTON_ATTACK, IN_Y);
 		for (n = 0; n < Frames(3000) && shots < 3; n++) { Frame(BUTTON_ATTACK, 0); shots += R[nR - 1].fired; }
 		CHECK(shots == 3 && PS->weapon == G->weapon);
-		/* the selector on the spray's next free think, the trigger still down */
+		/* the selector on the spray's next free command, the trigger still down */
 		for (n = 0; n < Frames(2000) && s < 0; n++) {
 			int press = PS->weaponTime <= msec && !( PS->weapFlags & PWF_SELECTOR_HELD );
 			Frame(BUTTON_ATTACK | (press ? BUTTON_SELECTFIRE : 0), 0);
@@ -462,7 +462,7 @@ static void HeldThroughEnd(int at, int k, int answer[ANSWERS]) {
 	e = s + (E - S);
 	release = e + Frames(1000);
 	while (nR < release) Frame(BUTTON_ATTACK, 0);
-	Frame(0, 0);	/* let go: the lock's think ends the pull */
+	Frame(0, 0);	/* let go: the lock's command ends the pull */
 	Frame(BUTTON_ATTACK, 0);
 	answer[0] = R[e - 1].state == WEAPON_BOLTING && R[e].state == WEAPON_READY && R[e].wt == 1 && R[e].closed;
 	for (n = s + 1; n < release; n++) answer[1] += R[n].fired;
@@ -566,10 +566,10 @@ static void TestReturn(void) {
 
 /* Two edges of the SF's own press, each the bolt's code at work (rule
  * (f)), on the G19 alone: a pump or a bolt is started by step 4d, before the
- * reload and the fire checks of its think, the SF by its press, after
- * them. An empty G19 with rounds in reserve, the selector pressed on the think
+ * reload and the fire checks of its command, the SF by its press, after
+ * them. An empty G19 with rounds in reserve, the selector pressed on the command
  * its last shot's lock runs out (still FIRING there, which the auto reload
- * refuses): the SF starts, and on the next think step 4e reloads the empty
+ * refuses): the SF starts, and on the next command step 4e reloads the empty
  * gun out of it, as it reloads an empty SPAS out of its pump; the SF is
  * lost, the mode as it was. And the selector pressed again on the SF's
  * last command, E: the SF has ended READY there (step 4c), so the press
@@ -578,7 +578,7 @@ static void TestSFEdges(void) {
 	int n, k = -1, end;
 	G = &guns[GUNS - 1]; Landmarks();
 	CHECK(G->attachment && S == 0);
-	where = "selector on the empty gun's last think";
+	where = "selector on the empty gun's last command";
 	Clear(); Setup(); nR = 0;
 	for (n = 0; n < Frames(60000) && PS->ammo[G->weapon] > 1; n++) Frame(n & 1 ? 0 : BUTTON_ATTACK, 0);
 	CHECK(PS->ammo[G->weapon] == 1 && PS->ammoReserve[G->weapon] > 0);

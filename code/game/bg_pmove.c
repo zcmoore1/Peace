@@ -33,7 +33,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 pmove_t		*pm;
 pml_t		pml;
 
-// The command as the player sent it, for Pmove's frozen thinks: PMF_FROZEN
+// The command as the player sent it, for Pmove's frozen commands: PMF_FROZEN
 // masks pm->cmd in place, and MW2 masks only its cmd, never its oldcmd
 // (PmoveSingle 574419; CoD4's ClientThink_real copies the raw command into
 // oldcmd). So what a frozen player holds is still held when the freeze
@@ -452,8 +452,8 @@ MW2's PM_CmdScaleForStance (0x572C50): the stance's share of the walk, keyed
 to the eye. Into prone the crouch's scale ramps down to prone's over the
 crouch-to-prone leg, and out of it up again over the prone-to-crouch leg,
 linear in the leg's time; otherwise the eye target's own scale. A leg's first
-think (no time in it yet) takes the target's flat scale, as MW2's does. It is
-read from the playerstate every think, never stored, so substeps and the
+command (no time in it yet) takes the target's flat scale, as MW2's does. It is
+read from the playerstate every Pmove step, never stored, so substeps and the
 prediction replay cannot compound it.
 ============
 */
@@ -566,7 +566,7 @@ static float PM_AirScale( int forwardmove, int rightmove ) {
 PM_SetMovementDir
 
 Determine the rotation of the legs relative
-to the facing dir, from this think's moves (a prone crawl stop zeroes them)
+to the facing dir, from this Pmove step's moves (a prone crawl stop zeroes them)
 ================
 */
 static void PM_SetMovementDir( void ) {
@@ -894,7 +894,7 @@ static void PM_AirMove( void ) {
 	PM_Friction();
 
 	// MW2's Jump_Check refuses a jump already down on the command before, and
-	// only a walking or ladder think checks: a press made in the air is spent
+	// only a command on the ground or on a ladder checks: a press made in the air is spent
 	// by the time the ground is reached. It takes a fresh press there.
 	if ( pm->cmd.upmove >= 10 ) {
 		pm->ps->pm_flags |= PMF_JUMP_HELD;
@@ -908,7 +908,7 @@ static void PM_AirMove( void ) {
 	}
 
 	// pml.rightmove: a take-off from a sprint keeps the walk's sprint strafe
-	// for this think, as MW2's air move reads the command its walk scaled.
+	// for this Pmove step, as MW2's air move reads the command its walk scaled.
 	fmove = pml.forwardmove;
 	smove = pml.rightmove;
 
@@ -957,7 +957,7 @@ static void PM_AirMove( void ) {
 
 	// MW2's PM_AirMove (0x573151-0x57321E): prone in the air with no room for
 	// the body (the entry's check, 0x570700), it crouches at once if the
-	// crouch box fits - even mid-leg, where the eye's next think reverses -
+	// crouch box fits - even mid-leg, where the eye's next command reverses -
 	// and resets the client's stance. MW2 leaves its bounds to the next
 	// PM_CheckDuck; Peace's box follows the flags now (BG_PlayerBox, the one
 	// box rule), so the entity and everyone's traces agree with the flags.
@@ -1163,7 +1163,7 @@ static void PM_WalkMove( void ) {
 		return;
 	}
 
-	// MW2's Jump_ApplySlowdown: the first walking think after a jump lands cuts
+	// MW2's Jump_ApplySlowdown: the first command on the ground after a jump lands cuts
 	// all of the velocity, harder when it landed a step above the take-off, and
 	// starts the slowdown that the friction and the next jump read.
 	if ( pm->ps->jumpLand < 0 ) {
@@ -1479,7 +1479,7 @@ static void PM_CrashLand( void ) {
 	delta = vel + t * acc;
 	// MW2's PM_CrashLand: a landing from BG_HARD_LAND_HEIGHT or more keeps 0.67
 	// of all the velocity - every jump's landing, before the slowdown's own
-	// cut on the next walking think - and raises the landing event (its sound
+	// cut on the next command on the ground - and raises the landing event (its sound
 	// and the view's dip). Water breaks the fall.
 	hard = pm->ps->gravity > 0 && pm->waterlevel <= 1 &&
 	       delta * delta / ( 2.0f * pm->ps->gravity ) >= BG_HARD_LAND_HEIGHT;
@@ -1807,7 +1807,7 @@ rules (PmoveSingle 0x57448B-0x574782). dev/STANCE.md has the whole design.
 Eye heights here are MW2 units above the feet (BG_EYE_*); ps->viewheight is
 the same eye above Peace's origin, MINS_Z's 24 lower, exact in float both
 ways. MW2 keeps a running leg's start time; Peace keeps the time since it
-started (viewHeightLerpTime), advanced once a think at the top of
+started (viewHeightLerpTime), advanced once a Pmove step at the top of
 PM_CheckDuck by pml.msec, which is MW2's serverTime - lerpTime: Pmove's
 chopped steps sum to the command. A leg is running while
 viewHeightLerpTarget is set (MW2: lerpTime != 0). Nothing here is a clock the
@@ -1915,9 +1915,9 @@ MW2's eye (0x570270-0x5706F1), on ps->viewheight. The stance eyes run their
 legs on MW2's tables: a running leg's height is its table at the percent of
 its length gone (whole percent, truncated); when it is done the eye sits at
 its end. A target the other way reverses the running leg from the mirrored
-percent, and that think the eye keeps the old leg's height (MW2 computes the
+percent, and on that command the eye keeps the old leg's height (MW2 computes the
 new leg's and discards it). With no leg running and the eye off its target, a
-leg starts, which moves the eye from the next think. The dead eye falls at
+leg starts, which moves the eye from the next command. The dead eye falls at
 BG_EYE_DEAD_RATE. MW2's eye 0 (viewheight MINS_Z) and target 0 mean "never
 set": the eye jumps to the target.
 ==============
@@ -1986,7 +1986,7 @@ static void PM_ViewHeightAdjust( void ) {
 					ps->viewHeightLerpDown ) / 100;
 			}
 		} else if ( !ps->viewHeightLerpTarget && cur != (float)target ) {
-			// start a leg: the eye moves from the next think
+			// start a leg: the eye moves from the next command
 			ps->viewHeightLerpTime = 0;
 			if ( target == BG_EYE_PRONE ) {
 				ps->viewHeightLerpDown = 1;
@@ -2374,7 +2374,7 @@ static void PM_ProneSlowdown( void ) {
 ==============
 PM_ProneEntry
 
-MW2's (0x570830), on the think the prone flag first appears: a moving
+MW2's (0x570830), on the command the prone flag first appears: a moving
 player drops a held aim, the prone box settles up 10 and back down (out of a
 slope), the body takes the view's yaw and the ground's pitch, and the pitch
 clamp centres there, within 45 of the view.
@@ -2423,7 +2423,7 @@ PM_StanceForceStand
 
 MW2's sprint out of a crouch or prone (PM_CheckDuck 0x570B7B): standing at
 once, the eye's leg turned or started (its clock already advanced this
-think), and the client's stance reset to stand.
+command), and the client's stance reset to stand.
 ==============
 */
 static void PM_StanceForceStand( void ) {
@@ -2444,7 +2444,7 @@ is from a held key), crouch (never refused, but out of prone only with room),
 or neither (stand, else crouch, from prone or a crouch, with room). The eye's
 target follows only between legs, and the flags and box follow the target -
 so a request mid-leg waits, and the first leg of stand to prone asks for room
-again every think. Spectators stand and the dead keep their flags. While
+again every command. Spectators stand and the dead keep their flags. While
 PMF_RESPAWNED nothing is asked, and on a ladder the bits are stripped.
 Sets mins, maxs and the eye.
 ==============
@@ -2503,7 +2503,7 @@ static void PM_CheckDuck( void ) {
 	}
 
 	if ( ( ps->pm_flags & PMF_SPRINTING ) && ( ps->pm_flags & ( PMF_PRONE | PMF_DUCKED ) ) ) {
-		// MW2 0x570B7B; normally the sprint's start think has done it
+		// MW2 0x570B7B; normally the sprint's first command has done it
 		PM_StanceForceStand();
 		return;
 	}
@@ -2587,7 +2587,7 @@ static void PM_CheckDuck( void ) {
 ==============
 PM_UpdatePronePitch
 
-MW2's (0x5723C0), every think while prone, after the ground trace. In the
+MW2's (0x5723C0), every command while prone, after the ground trace. In the
 air the body is checked again (BG_CheckProne already prone, off the ground,
 the ground's own walkability if there is a plane) and a body with no room
 resets the client to crouch; MW2 does the same on unwalkable ground, which
@@ -2730,17 +2730,17 @@ static void PM_ProneMoveOverride( void ) {
 PM_ProneViewAngles
 
 MW2's prone view (0x571ED0, inside its view update, after the pitch clamp),
-once a think and only here: Peace runs PM_UpdateViewAngles more than once.
+once a Pmove step and only here: Peace runs PM_UpdateViewAngles more than once.
 While prone the body turns toward the view at BG_PRONE_TURN_RATE, when the
 view is near the cap, the player moves, or the command asks for prone (every
 prone command does, so it always follows); each step is checked
 (BG_CheckProneTurned), backing off a degree at a time toward the body, then
 at the 45 reach at the view and at the new yaw. A body still off the view is
-then synced within this think: while a check fails the view is pushed toward
+then synced within this command: while a check fails the view is pushed toward
 the body a degree a loop, and a body check that fails moves the yaw tried by
 the new difference. The view stays within BG_PRONE_YAW_CAP of the body; when
 anything was blocked, EV_STANCE_INVALID tells the client (the hint), and a
-small turn the same way since the last think is mostly undone. The pitch
+small turn the same way since the last command is mostly undone. The pitch
 stays within BG_PRONE_PITCH_CAP of proneTorsoPitch. MW2 adds its pushes to
 delta_angles; Peace writes the final angles as the ladder clamp does.
 ==============
@@ -2879,7 +2879,7 @@ static void PM_Footsteps( void ) {
 		return;
 	}
 
-	// if not trying to move (this think's moves: a prone crawl stop zeroes them)
+	// if not trying to move (this Pmove step's moves: a prone crawl stop zeroes them)
 	if ( !pml.forwardmove && !pml.rightmove ) {
 		if (  pm->xyspeed < 5 ) {
 			if ( pm->xyspeed < 1 ) {
@@ -3152,7 +3152,7 @@ static const bg_weaponNote_t bgnotes_shell_end[] = {
    is the same note, in the same place in PM_Weapon, that opens the cancel
    window on a reload - which is why the pump can be swap-cancelled without a
    line of code that knows what a pump is. A transition that finishes on the
-   note's own think leaves before step 4, so the gun still owes its action.
+   note's own command leaves before step 4, so the gun still owes its action.
 
    The remaining time after the chamber note is settle. The gun cannot fire
    during it because step 7 returns on WEAPON_BOLTING - the STATE holds the
@@ -3244,7 +3244,7 @@ int BG_WeaponFireLength( int weapon ) {
    is not quite how the Quake 3 guns always fired: like every gun's, their shot
    is given its whole time (the crossing drops the overshoot, MW2's 578b71, in
    PM_WeaponTimeAdjust, with the fire path's zero as a backstop), so
-   a held one fires every ceil(time / msec) thinks where it used to average its
+   a held one fires every ceil(time / msec) commands where it used to average its
    time: the lightning gun's 50ms every 2 commands at 33ms, the plasma gun's
    100ms every 4. The generated guns take theirs from their weapon.json: the
    M16 rifle is m16_shotgun_mp's 3-Round Burst. */
@@ -3341,15 +3341,15 @@ qboolean BG_BurstFirePending( const playerState_t *ps ) {
 }
 
 /* A trigger worked by a program and not a finger (the game's bots): whether it
-   must come up on this think for the gun to fire again. MW2's fire is a level
+   must come up on this command for the gun to fire again. MW2's fire is a level
    test of the trigger, and what stops a held one is the lock
    (PM_WeaponTimeAdjust): once the pull's shots have all left
    (BG_ShotLimitReached on the gun in hand's fire type) a trigger still down
-   fires nothing more, so one that was down on the last think is let go for
+   fires nothing more, so one that was down on the last command is let go for
    this one, as a player lets go between pulls. One that is already up is
-   pressed whatever the count says: a pull ends only on a think a state's time
+   pressed whatever the count says: a pull ends only on a command a state's time
    runs out with the trigger up (or with a burst gun's fresh press), and a gun
-   at rest has no such think. A full-auto gun never needs it. */
+   at rest has no such command. A full-auto gun never needs it. */
 qboolean BG_TriggerNeedsRelease( const playerState_t *ps, qboolean held ) {
 	if ( !held || ps->weapon <= WP_NONE || ps->weapon >= MAX_WEAPONS ) {
 		return qfalse;
@@ -3371,7 +3371,7 @@ static const bg_weaponNote_t bgnotes_g19_mag[] = {
 /* The SF (the G19's select-fire switch) is worked as a bolt is (owner's
    rule, the SF NAC, Peace's own: MW2 has no selector): one segment,
    WEAPON_BOLTING, whose close note is the click. Like the bolt's it carries
-   no rounds (param 0): it releases the lock on its think and only queues what
+   no rounds (param 0): it releases the lock on its command and only queues what
    it closes, the slot's mode, which step 4 commits at the chambering's commit
    point. */
 static const bg_weaponNote_t bgnotes_g19_switch[] = {
@@ -3555,7 +3555,7 @@ static const int bg_weaponQuickRaiseTime[MAX_WEAPONS] = {
 
 // MW2's altDropTime and altRaiseTime (its weapon files): one gun changing firing
 // mode. altDropTime is 0 in every MW2 multiplayer weapon file, so the mode
-// changes on the think the change begins and only the raise takes time (730
+// changes on the command the change begins and only the raise takes time (730
 // both ways for a rifle and its Masterkey). A gun with no other mode never
 // reads its row.
 static const int bg_weaponAltDropTime[MAX_WEAPONS] = {
@@ -3611,7 +3611,7 @@ int BG_WeaponReloadTime( int weapon ) {
 
 // Sprint transitions. Same shape as drop/raise: a real per-weapon time that is
 // always stamped, never zero. The instant version is not authored anywhere - it
-// only happens when something else clears the lock in the same think.
+// only happens when something else clears the lock in the same command.
 static const int bg_weaponSprintInTime[MAX_WEAPONS] = {
 	150, 150, 200, 200, 250, 250, 200, 250, 200, 300, 120,
 #ifdef MISSIONPACK
@@ -3709,7 +3709,7 @@ int BG_HolsterTime( const playerState_t *ps ) {
 BG_LadderHolsterDown
 
 The ladder's drop has run its time and only the held trigger's lock keeps
-it a drop (PM_WeaponTimeAdjust re-arms weaponTime 1 on every think, for as
+it a drop (PM_WeaponTimeAdjust re-arms weaponTime 1 on every command, for as
 long as the trigger stays down): the ladder's own holster, or a gun's drop it
 found running and left its time (PM_LadderKeepsDrop), which reads the same
 with the ladder held. MW2 starts its quick-drop animation once,
@@ -3728,7 +3728,7 @@ the gun's fire type as its slot's mode gives it (BG_SlotFireType) and a round
 in the clip (PM_WeaponTimeAdjust's conditions, as far as the playerState
 carries them; the command's gun is not in it). With the trigger still down on
 the next command no new pull can latch before the lock asks (the press needs
-it up on this one), so with those the next think keeps it; without them it is
+it up on this one), so with those the next command keeps it; without them it is
 a holster in its last millisecond, still drawn.
 ==============
 */
@@ -3761,8 +3761,8 @@ int BG_WeaponRaiseTime( int weapon ) {
 	if ( weapon < 0 || weapon >= MAX_WEAPONS ) return WEAPON_MIN_SWAP_TIME;
 	t = bg_weaponRaiseTime[weapon];
 	// An offhand's prepare is no deploy but its holdFireTime, which may be 0:
-	// the throwing knife is in HOLD on the think it is pressed (MW2's
-	// OffHandInit, Prepare and Hold in one think). Nothing is put down for it.
+	// the throwing knife is in HOLD on the command it is pressed (MW2's
+	// OffHandInit, Prepare and Hold in one command). Nothing is put down for it.
 	if ( BG_OffhandHeldToThrow( weapon ) ) return t;
 	return ( t < WEAPON_MIN_SWAP_TIME ) ? WEAPON_MIN_SWAP_TIME : t;
 }
@@ -4321,7 +4321,7 @@ MW2's BG_GetViewmodelWeaponIndex (0x4be4d0): the offhand from its prepare
 (weapFlags & 2, set in OffHandPrepare at 57781f) to OffHandEnd, otherwise
 the gun. Peace's ps.weapon is that offhand over the same span: a grenade's
 quick drop keeps the gun, and the throwing knife is in hand on its press
-(BG_OffhandPreparesAtOnce, OffHandInit's same-think Prepare). MW2's knife is
+(BG_OffhandPreparesAtOnce, OffHandInit's same-command Prepare). MW2's knife is
 no weapon change (MeleeInit writes over the gun's state,
 BG_QuickActionInPlace), so under it the view reads the gun it was written
 over, or none from an empty hand.
@@ -4733,9 +4733,9 @@ PM_ShotOver
 The shot of a gun with a worked action is over once its fire clip's clock has
 reached the open note (MW2's fireTime: the shot ends there, the action is what
 follows). Read from the gun's table; a gun with no open note shoots until its
-lock runs out, so its shot is never over here. True only on the think the
+lock runs out, so its shot is never over here. True only on the command the
 clock gets there (MW2's FIRING with its weaponTime run out): with the trigger
-held MW2's lock makes the gun READY at the top of that think
+held MW2's lock makes the gun READY at the top of that command
 (PM_WeaponTimeAdjust); otherwise step 4f leaves it READY at the end of it, or,
 frozen, keeps it there.
 ===============
@@ -4770,13 +4770,13 @@ static qboolean PM_ShotOver( void ) {
 ===============
 BG_ShotAwaitsAction
 
-The think between a shot and its action: MW2's READY think, owing the
-rechamber (ShouldBeFiring at the shot's last think, 576d99-576da3; the
+The command between a shot and its action: MW2's READY command, owing the
+rechamber (ShouldBeFiring at the shot's last command, 576d99-576da3; the
 rechamber from READY on the next, 575b77). Step 4f leaves the gun READY with
 the fire clip's clock where the shot stopped it, at the open note, and nothing
 else is READY with a fire clock running. Picture only: pmove works an owed
 action from READY whatever the clock says, and cgame keeps playing the one
-fire clip across this think instead of easing the shot out into idle.
+fire clip across this command instead of easing the shot out into idle.
 ===============
 */
 qboolean BG_ShotAwaitsAction( const playerState_t *ps ) {
@@ -4811,7 +4811,7 @@ starts on such a gun, the action is settled after the gun's OWN action length
 counted on the reload's clock, but never later than the reload start's first
 round or its end. Derived from the gun's tables; no time is written here.
 
-True on the think the reload clock crosses that point.
+True on the command the reload clock crosses that point.
 ===============
 */
 static qboolean PM_ReloadSettleCrossed( int oldElapsed ) {
@@ -4845,12 +4845,12 @@ static qboolean PM_ReloadSettleCrossed( int oldElapsed ) {
 ===============
 PM_RunWeaponNotes
 
-Fire every note the anim clock crossed this think, for the segment currently
+Fire every note the anim clock crossed this command, for the segment currently
 playing. Crossing test only.
 
 Notes release the busy lock now, but only queue ammo/chamber completion.
 PM_Weapon commits those effects after transitions have had a chance to finish.
-The returned chamber completion lives only for this think, like its note.
+The returned chamber completion lives only for this command, like its note.
 ===============
 */
 static qboolean PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
@@ -4874,8 +4874,8 @@ static qboolean PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 		case WNOTE_BOLT_OPEN:
 			// Where the shot ends and the action starts (PM_ShotLength). The
 			// note moves nothing: the shot ends READY in step 4f, after this
-			// think's checks, and the action starts from READY in step 4d on a
-			// later think, at this note (MW2's ShouldBeFiring, then
+			// command's checks, and the action starts from READY in step 4d on a
+			// later command, at this note (MW2's ShouldBeFiring, then
 			// CheckForRechamber); with the trigger held, from the READY MW2's
 			// lock left at the top of this one (PM_WeaponTimeAdjust).
 			break;
@@ -4891,7 +4891,7 @@ static qboolean PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 			if ( n->param != 0 || n->note == WNOTE_MAG_IN ) {
 				pm->ps->pm_flags |= PMF_PENDING_MAG;
 			}
-			pm->ps->weaponTime = 0;			// busy lock released on this think
+			pm->ps->weaponTime = 0;			// busy lock released on this command
 			PM_AddEvent( EV_WEAPON_NOTETRACK );
 			if ( pm->debugLevel ) {
 				Com_Printf( "%i:MAG_IN wpn %i seq %i elapsed %i add %i\n",
@@ -4911,24 +4911,24 @@ static qboolean PM_RunWeaponNotes( int oldElapsed, int newElapsed ) {
 ===============
 PM_WeaponDelayEnds
 
-MW2's delayedAction: whether a weapon delay runs out on this think
+MW2's delayedAction: whether a weapon delay runs out on this command
 (PM_Weapon_WeaponTimeAdjust's return, 578b7b-578bab, taken before any check,
 44c42b). Peace's delays are the notes that release the lock - a reload's
 round (WNOTE_MAG_IN) and the bolt (WNOTE_BOLT_CLOSED, the selector's click
 too: the SF is worked as a bolt), exactly as PM_RunWeaponNotes crosses
 them, but not the close note of a shell gun's reload end: that is Peace's own data, and MW2's RELOAD_END has no delay
 (FinishReload stamps reloadEndTime alone, 5785eb-578606; only RELOADING and
-RELOAD_START get one, 575c50), so its knife check takes that think
+RELOAD_START get one, 575c50), so its knife check takes that command
 (577734-577755); the reload's settle of an owed action
 (PM_ReloadSettleCrossed, MW2's reload delayed action); the knife's draw,
 MW2's meleeDelay (MeleeInit arms it as the weapon delay, 577581-577599; its
-hit, MeleeFire, comes on the think it runs out); and an empty hand's return
+hit, MeleeFire, comes on the command it runs out); and an empty hand's return
 from equipment, MW2's OffHandEnd with weapon 0, which stamps no raise but a
-one-think delay in OFFHAND_END (577a1a-577a2a): it runs out on the think
-after the hand empties, the think the latch clears. Not the knife's return to
+one-command delay in OFFHAND_END (577a1a-577a2a): it runs out on the command
+after the hand empties, the command the latch clears. Not the knife's return to
 an empty hand: MW2's knife ends in MeleeEnd, which stamps no delay
 (578dc3, or PM_Weapon_Idle's 5777d8 with no knife model to raise), so no
-think after it is a delay think (see PM_UpdateWeaponAction).
+command after it is a delay command (see PM_UpdateWeaponAction).
 Read once the clocks have run.
 ===============
 */
@@ -4968,7 +4968,7 @@ weaponDelay, which its knife check refuses outside the reload states
 exactly the action's debt: the action only starts at its open note owing it
 (step 4d), and only the close note's commit pays it. The SF is worked the
 same way (owner's rule), with the click as its close note. The
-close note's own think is refused as a delay think (PM_WeaponDelayEnds).
+close note's own command is refused as a delay command (PM_WeaponDelayEnds).
 ===============
 */
 static qboolean PM_ActionOpen( void ) {
@@ -4992,7 +4992,7 @@ PM_AdvanceReloadSegments
 Walk the reload forward whenever the clock runs past the segment it is in.
 The loop repeats purely on "is there anything left to load" - there is no
 weapon-type test anywhere, which is why a magazine gun runs the loop once and
-a shell gun runs it until the tube is full. Each segment starts on the think
+a shell gun runs it until the tube is full. Each segment starts on the command
 the one before it ended, with its whole length to run.
 
 The trigger stops a segmented (interruptible) reload as MW2's does: it is
@@ -5000,7 +5000,7 @@ asked to stop, and the segment it is in plays out, its round included.
 A fresh press asks (MW2's PM_Weapon_CheckForReload, 578724-5787ad: this
 command's fire button against the last's): in the loop at once, in the start
 only once more than 0.4 of it has gone (5787a0, 0.4 at 795d98; a press before
-that is forgotten). A trigger down on the think the start or a loop pass ends
+that is forgotten). A trigger down on the command the start or a loop pass ends
 asks too (FinishReloadStart 5783de-5783fc, FinishReload 578564-578582). Asked,
 the start goes to the end if the magazine has a round, otherwise through one
 more pass (578403-57843e, PM_SetReloadingState keeps the request), and a pass
@@ -5020,7 +5020,7 @@ static void PM_AdvanceReloadSegments( qboolean attackPressed ) {
 		if ( pm->ps->weaponAnimSeq == RSEQ_START ) {
 			int start = BG_ReloadSegmentTime( pm->ps, RSEQ_START );
 			// MW2's (iReloadStartTime - weaponTime) / iReloadStartTime > 0.4,
-			// this think's time already counted: elapsed / length > 2/5
+			// this command's time already counted: elapsed / length > 2/5
 			if ( start > 0 && pm->ps->weaponAnimTime * 5 > start * 2 ) {
 				pm->ps->weapFlags |= PWF_RELOAD_INTERRUPT;
 			}
@@ -5036,7 +5036,7 @@ static void PM_AdvanceReloadSegments( qboolean attackPressed ) {
 			if ( pm->ps->weaponAnimTime < length ) {
 				return;						// still playing
 			}
-			// The next segment starts afresh on this think, as MW2's reload
+			// The next segment starts afresh on this command, as MW2's reload
 			// states do: WeaponTimeAdjust drops what the last one overshot
 			// by (578b71) and PM_SetReloadingState gives the next its whole
 			// time (575e20). (A magazine's reload is one segment.)
@@ -5071,11 +5071,11 @@ static void PM_AdvanceReloadSegments( qboolean attackPressed ) {
 			// MW2's crossing drops what the end overshot by (578b71) before
 			// FinishReloadEnd readies the gun (5769a0). An end with no note
 			// to zero its time (the Masterkey's) still has its overshoot
-			// here, but this think always goes on to the fire path (a reload
+			// here, but this command always goes on to the fire path (a reload
 			// asked on it is refused, as MW2 asks a reloading gun nothing),
 			// whose READY with nothing to fire zeroes it, or whose shot
 			// (or an owed action, step 4d) assigns its whole time: the gun
-			// leaves the think with no time over.
+			// leaves the command with no time over.
 			pm->ps->weaponstate    = WEAPON_READY;
 			pm->ps->weaponAnimTime = -1;
 			pm->ps->weaponAnimSeq  = RSEQ_START;
@@ -5108,8 +5108,8 @@ static int PM_HeldActionButtons( void ) {
 // (mask 0xc000) - is down on this command and one was on the command before
 // (heldBefore: weaponAction's held bits as the last command left them,
 // 578f2d-578f3f). The two commands are asked separately, so lethal then
-// tactical still holds. Any other HOLD think throws it, and does so before the
-// cancel is read (578f41-578f52), so a Y on that think is spent on nothing.
+// tactical still holds. Any other command in HOLD throws it, and does so before the
+// cancel is read (578f41-578f52), so a Y on that command is spent on nothing.
 // With holdButtonToThrow 0 the throw waits for that, never for a timer.
 static qboolean PM_OffhandHeld( int heldBefore ) {
 	return ( heldBefore & 6 ) && ( pm->cmd.buttons & ( BUTTON_LETHAL | BUTTON_TACTICAL ) );
@@ -5135,15 +5135,15 @@ static void PM_OffhandEnd( void ) {
 	}
 }
 
-// Whether step 1 may begin a weapon change this think. A shot's fire lock
+// Whether step 1 may begin a weapon change this command. A shot's fire lock
 // holds a swap (MW2's CheckForChangeWeapon refuses FIRING), but not a knife or
 // grenade still to come: MW2's melee and offhand checks take FIRING, and its
 // offhand check MELEE_FIRE, the knife's hold after its hit, as well.
 // MW2 refuses only while the shot has time left (578c0a-578c31): a change
-// asked for during the shot begins on the shot's last think, before the
+// asked for during the shot begins on the shot's last command, before the
 // rechamber can start (575b77: only from READY), and leaves the action owed.
-// On a gun with a fire clip that think is the one its clock reaches the open
-// note (PM_ShotOver). A change first asked for on the think after it takes the
+// On a gun with a fire clip that command is the one its clock reaches the open
+// note (PM_ShotOver). A change first asked for on the command after it takes the
 // READY gun step 4f left (MW2's change check runs before its rechamber check,
 // 44c4d7), so it too is a whole drop with the action owed.
 static qboolean PM_WeaponChangeOpen( void ) {
@@ -5158,14 +5158,14 @@ PM_UpdateGrenadeThrow
 
 MW2's (577bc0), for an offhand in hand and not yet thrown. HOLD entry wrote
 its fuseTime into grenadeTimeLeft; only a cookOffHold offhand (the frag)
-counts it down, by each think's msec, so it explodes fuseTime after HOLD
+counts it down, by each command's msec, so it explodes fuseTime after HOLD
 entry whenever it is let go. Run out in hand, it is MW2's grenade suicide: -1,
 the predictable EV_GRENADE_SUICIDE with the grenade as its parm (577c37
 passes offHandIndex: the server kills its holder, and the death drop sets that
-grenade off at once) and the grenade spent (577c37-577c75). The next think
+grenade off at once) and the grenade spent (577c37-577c75). The next Pmove step
 ends the offhand, as a Y cancel does (OffHandEnd, 577bf7), and keeps the -1.
-That think may be a later step of this same command, run before the server
-reads the event, which is why the event names the grenade. Either think is
+That step may be a later one of this same command, run before the server
+reads the event, which is why the event names the grenade. Either step is
 over at once: returns qtrue.
 
 The throw is Peace's release command (MW2's fireDelay is not modelled), so
@@ -5222,7 +5222,7 @@ static qboolean PM_OtherModeRequested( void ) {
 static void PM_UpdateWeaponAction( void ) {
 	// MW2's knife check refuses every raise and drop, a quick action's return
 	// and the command it ends on included. A drop the requested slot has come
-	// back from is not refused: YY readies the gun in this same think (below),
+	// back from is not refused: YY readies the gun in this same command (below),
 	// as MW2's weapon change runs before its knife. For the same reason a swap
 	// step 1 begins on this very command is a drop already. The gun's other
 	// mode is another weapon to MW2: asking for it is a change, not a return.
@@ -5276,12 +5276,12 @@ static void PM_UpdateWeaponAction( void ) {
 		pm->ps->weaponstate == WEAPON_LADDER;
 	if (BG_RequestedSlot(pm->ps, pm->cmd.weapon) == pm->ps->stats[STAT_ACTIVE_SLOT]) returning = 0;
 	// A requested slot change waits for the ORIGINAL gun to finish recovery.
-	// Clear on the ready boundary; its normal holster starts on the think after
+	// Clear on the ready boundary; its normal holster starts on the command after
 	// (pml.recoveryEnds holds it on this one).
 	pml.recoveryEnds = qfalse;
 	if (recovering && pm->ps->weapon == BG_ActiveSlotWeapon(pm->ps) &&
 		pm->ps->weaponstate == WEAPON_RAISING && pm->ps->weaponTime <= 0) {
-		recovering = 0;		// the latch clears below on this think too
+		recovering = 0;		// the latch clears below on this command too
 	}
 	if ( ladder && !( action & WA_TYPE_MASK ) ) {
 		action = 0;
@@ -5292,26 +5292,26 @@ static void PM_UpdateWeaponAction( void ) {
 		// back in hand and fully drawn: that whole recovery keeps the latch, and
 		// the latch is what blocks sprint (PM_CheckSprint) - MW2's recovery draw
 		// is the normal draw, except you cannot sprint through it. A holster out
-		// of that draw that YY returns is the gun ready again this same think.
-		// The think the gun's quick raise runs out is still MW2's MELEE_END or
+		// of that draw that YY returns is the gun ready again this same command.
+		// The command the gun's quick raise runs out is still MW2's MELEE_END or
 		// OFFHAND_END: its state switch ends it (PM_Weapon_Idle, 579279) and
 		// its change check refuses those states whatever their time
 		// (578bc9-578bf2, the ladder's drop included), so no weapon change
 		// begins on it (pml.recoveryEnds). Equipment does: MW2's offhand
 		// check takes both (579086-579096). An empty hand's return is the
 		// same: MW2's OffHandEnd with weapon 0 stamps no raise, only a
-		// one-think weaponDelay in OFFHAND_END (577a1a-577a2a), and on the
-		// think that delay runs out the change check still refuses the state
-		// before the switch ends it, so the latch clearing here, the think
-		// after the hand emptied, is that think. The knife's quick raise ended
+		// one-command weaponDelay in OFFHAND_END (577a1a-577a2a), and on the
+		// command that delay runs out the change check still refuses the state
+		// before the switch ends it, so the latch clearing here, the command
+		// after the hand emptied, is that command. The knife's quick raise ended
 		// under the held trigger's lock is READY already (PM_WeaponTimeAdjust:
 		// MW2's lock readies MELEE_END before every check, 578b25-578b39), so
-		// its change check takes that think (578c0a-578c47): no recoveryEnds.
+		// its change check takes that command (578c0a-578c47): no recoveryEnds.
 		// Nor the knife's return to an empty hand, which is Peace's own (MW2
 		// always has a gun under its knife): with no gun to raise it is
 		// MW2's MeleeEnd with no knife model, PM_Weapon_Idle on the knife's
-		// last think (578df3-578df7: READY, no time, no delay, 5777c7-5777d8),
-		// so the think after is an ordinary READY think, no delay running out
+		// last command (578df3-578df7: READY, no time, no delay, 5777c7-5777d8),
+		// so the command after is an ordinary READY command, no delay running out
 		// on it (PM_WeaponDelayEnds) and nothing refused: a knife pressed on
 		// it comes out, a gun asked for is drawn, equipment comes out as from
 		// any empty hand.
@@ -5323,7 +5323,7 @@ static void PM_UpdateWeaponAction( void ) {
 			action = 0;
 		}
 		// Only a gun the Semtex left is recovered before a queued slot. An
-		// empty hand is back the think after it empties, as after any
+		// empty hand is back the command after it empties, as after any
 		// equipment (above).
 		if (pm->ps->weapon == WP_SEMTEX && (action & WA_FIRED) && !leftEmpty &&
 			pm->ps->weaponstate == WEAPON_FIRING && pm->ps->weaponTime <= 0) recovering = WA_RECOVERING;
@@ -5343,11 +5343,11 @@ static void PM_UpdateWeaponAction( void ) {
 			// rechamber's bolt-close, so a press before WNOTE_BOLT_CLOSED is lost
 			// and one after it cuts the rest of the cycle short; the SF,
 			// worked as a bolt, waits for its click the same way. Nor on
-			// any think a weapon delay runs out (5776ed-5776f2: MW2 passes its
-			// knife check the think's delayedAction, 44c4e3-44c4fc): on a
+			// any command a weapon delay runs out (5776ed-5776f2: MW2 passes its
+			// knife check the command's delayedAction, 44c4e3-44c4fc): on a
 			// reload's round or its settle
 			// the press is lost and the round seats or the action is paid, and
-			// on the think equipment's return to an empty hand ends (its
+			// on the command equipment's return to an empty hand ends (its
 			// OFFHAND_END, refused by its state as well, 5776ae-5776b6).
 			// Equipment pressed with the knife wins: MW2 checks its offhands first.
 			qboolean boltOpen = PM_ActionOpen();
@@ -5381,7 +5381,7 @@ static void PM_UpdateWeaponAction( void ) {
 				// EV_SWITCH_OFFHAND (579168), then OffHandInit's start of the
 				// switch and its ADS reset (578e10, 578e5e) unless the offhand
 				// comes straight out. OffHandPrepare adds EV_PREP_OFFHAND when
-				// its pull begins (PM_FinishWeaponChange): this think for one
+				// its pull begins (PM_FinishWeaponChange): this command for one
 				// coming straight out or the throwing knife, after the quick
 				// drop for the rest. The knife is MeleeInit, not an offhand.
 				if ( nextAction != WA_MELEE ) {
@@ -5439,13 +5439,13 @@ static void PM_UpdateWeaponAction( void ) {
 	}
 	if ( prepare ) {
 		PM_FinishWeaponChange();
-		// On a think a weapon delay runs out (the one after an empty hand's
-		// return, OFFHAND_END's one-think delay), MW2's hand switch runs
+		// On a command a weapon delay runs out (the one after an empty hand's
+		// return, OFFHAND_END's one-command delay), MW2's hand switch runs
 		// whatever the lock (579474) on the OFFHAND_PREPARE its offhand check
 		// left (OffHandPrepare, 5791ce or 578ef2), and that state's case is
 		// OffHandHold (the table's entry for state 17, 5792da -> 577920): in
 		// hand and ready, the fuse written, the prepare never played. Step 6
-		// does that on this think. A prepare step 3 begins after a drop is
+		// does that on this command. A prepare step 3 begins after a drop is
 		// OFFHAND_INIT's case on the switch's one pass, and plays.
 		if ( pml.delayedAction && BG_OffhandHeldToThrow( pm->ps->weapon ) ) {
 			pm->ps->weaponTime = 0;
@@ -5510,7 +5510,7 @@ void BG_UpdateActivate( playerState_t *ps, bg_activate_t *use, int buttons,
 ===============
 PM_DesiredWeapon
 
-What the player wants in their hands this think. Normally that is whatever the
+What the player wants in their hands this command. Normally that is whatever the
 client selected (cmd.weapon, which weapnext toggles between the two slots), but
 a latched melee or equipment press requests that instead.
 
@@ -5529,7 +5529,7 @@ stamps no holster at all, rather than a zero one.
 // quick raise after one included. So while a quick action is latched it wants
 // its knife or equipment, and once that has fired, the gun it left: a slot
 // asked for meanwhile waits until that gun is fully drawn (the latch clears
-// on the ready boundary), then its ordinary holster starts on the next think
+// on the ready boundary), then its ordinary holster starts on the next command
 // (step 1 holds it on the boundary itself, pml.recoveryEnds).
 static int PM_DesiredWeapon( void ) {
 	int special = PM_ActionWeapon();
@@ -5566,13 +5566,13 @@ PM_BeginWeaponChange
 
 Always stamps the real shared holster time. Changing to a faster destination
 may shorten a drop already in progress; it never skips the drop. If a note
-clears the lock in the same think, the drop finishes early on its own.
+clears the lock in the same command, the drop finishes early on its own.
 
 A change between the two firing modes of the gun in hand is MW2's alt switch
 (PM_BeginWeaponChange 5760b2-576104, BG_IsAltSwitch 479b80): its drop is the
 gun's altDropTime and its raise the new mode's altRaiseTime, and a sprinting
 player gets the ordinary drop and raise instead. Nothing here knows the times:
-MW2's data makes the drop 0, so step 3 finishes it on this think.
+MW2's data makes the drop 0, so step 3 finishes it on this command.
 ===============
 */
 static void PM_BeginWeaponChange( int weapon ) {
@@ -5632,7 +5632,8 @@ static void PM_BeginWeaponChange( int weapon ) {
 	pm->ps->weaponTime  = BG_HolsterTime( pm->ps );
 	pm->ps->weaponstate = WEAPON_DROPPING;
 	PM_StartTorsoAnim( TORSO_DROP );
-	PM_SetProneMoveOverride();	// MW2's drop (0x576096); a drop is quiet, so the next think lets it go
+	// MW2's drop (0x576096); a drop is quiet, so the next command lets it go
+	PM_SetProneMoveOverride();
 }
 
 
@@ -5683,7 +5684,7 @@ static void PM_FinishWeaponChange( void ) {
 		pm->ps->weaponTime = BG_WeaponDrawTime( pm->ps );
 	}
 	// MW2's raise and OffHandPrepare stop a prone crawl (0x57627D, 0x577865):
-	// a gun's raise only until the next think (it is quiet), a knife or an
+	// a gun's raise only until the next command (it is quiet), a knife or an
 	// offhand through its quick raise
 	PM_SetProneMoveOverride();
 	// An offhand's draw is its prepare, MW2's OffHandPrepare (5778e6): its
@@ -5694,36 +5695,36 @@ static void PM_FinishWeaponChange( void ) {
 }
 
 // An alternate holster DESTINATION, not an alternate reload or swap. Leave the
-// animation clock live until the ordinary note pass has run this think.
+// animation clock live until the ordinary note pass has run this command.
 // Like any weapon change it waits for a latched quick action, the gun's quick
 // raise after it included (PM_UpdateWeaponAction): the drop starts on the
-// think after the latch clears, if the ladder is still held (MW2's change
+// command after the latch clears, if the ladder is still held (MW2's change
 // check, the ladder's branch included, refuses MELEE_END and OFFHAND_END on
-// the think they end, 578bc9-578bf2; it starts from READY on the next). The
+// the command they end, 578bc9-578bf2; it starts from READY on the next). The
 // knife's quick raise that ends under the held trigger's lock is READY to that
 // check already (PM_WeaponTimeAdjust, 578b25-578b39), which takes READY with
-// time and no delay (578c0a-578c47): the drop starts on that think.
+// time and no delay (578c0a-578c47): the drop starts on that command.
 //
 // The holster is MW2's ladder drop, an ordinary weapon change to weapon 0
 // with the command still naming the gun (CheckForChangeWeapon's ladder
 // branch, 578c72-578c78 into 578c54-578c67: PM_BeginWeaponChange( pm, 0,
 // quick )). So it is behind the change gate like a swap (578c0a-578c41,
 // PM_WeaponChangeOpen): a ladder grabbed during a shot takes the gun on the
-// shot's last think, not before, and leaves its action owed (the drop comes
-// before the rechamber check, 44c4d7). It begins only on a think the weapon
+// shot's last command, not before, and leaves its action owed (the drop comes
+// before the rechamber check, 44c4d7). It begins only on a command the weapon
 // code finds the ladder held: MW2's PM_Weapon reads PMF_LADDER as the move
-// left it, and a jump off on the grab's own think has cleared it by then
-// (Jump_PushOffLadder, 56db85), so that think drops nothing. It ends only at
+// left it, and a jump off on the grab's own command has cleared it by then
+// (Jump_PushOffLadder, 56db85), so that command drops nothing. It ends only at
 // weaponTime 0 (FinishWeaponChange on a ladder makes the weapon 0, 576388:
 // WEAPON_LADDER), which the held trigger's lock never lets it reach
 // (PM_LockGun). And it is the ladder's only while the ladder is held
 // (PM_LadderLeft).
 // Like every check of MW2's PM_Weapon it is not run while a burst is pending
 // (44c444-44c4b3; pml.burstPending): a burst gun's other shots leave on the
-// ladder, and the drop begins on the think the last one's time runs out, the
+// ladder, and the drop begins on the command the last one's time runs out, the
 // burst cooldown's READY, which the gate takes (578c0a-578c47).
 //
-// A gun's drop already running on a think that finds the ladder held is not
+// A gun's drop already running on a command that finds the ladder held is not
 // begun again: MW2's PM_BeginWeaponChange returns for any drop state before
 // it looks at anything else (575f96-575fb1), so a swap's drop keeps the time
 // and the kind it had. While the ladder is held it is the ladder's all the
@@ -5734,7 +5735,7 @@ static void PM_FinishWeaponChange( void ) {
 // names is raised when the ladder is left, on its ordinary raise. The lock
 // asks it like any drop (the command names another gun unless it came back).
 // Left before it ends it is the swap's drop again, with the time it has left
-// (PM_LadderKeepsDrop reads the ladder each think; nothing is marked).
+// (PM_LadderKeepsDrop reads the ladder each command; nothing is marked).
 // Equipment's drop is none of this: MW2's offhand states are refused by the
 // change check, the ladder's branch included (578bcf-578c04), and the grenade
 // comes out on the ladder.
@@ -5770,17 +5771,17 @@ static qboolean PM_LadderWeapon( void ) {
 PM_LadderLeft
 
 A ladder's holster still going down, or hung under the held trigger's lock,
-on a think that finds the ladder left. Nothing in MW2's drop remembers the
-ladder: every think on it takes the ladder branch again, where
+on a command that finds the ladder left. Nothing in MW2's drop remembers the
+ladder: every command on it takes the ladder branch again, where
 PM_BeginWeaponChange returns for a running drop (575f96-575fb1), and the first
-think with PMF_LADDER clear does not take it (578c72-578c78). What is left is
+command with PMF_LADDER clear does not take it (578c72-578c78). What is left is
 an ordinary drop of the gun in hand: with the command still naming that gun
-MW2's double-tap cancel makes it READY with no time on that think
+MW2's double-tap cancel makes it READY with no time on that command
 (578d00-578d41, PM_Weapon_Idle 5777c7-5777d8), the cancel YY takes, with no
 raise anywhere on it; with the command naming another gun the drop runs out
 its time and raises that one (575f96, 57928c). So the mark goes here, before
-any check of the think reads it, and the rest is the code a swap's drop has
-already: an owed pump or bolt starts from that READY on that think (step 4d),
+any check of the command reads it, and the rest is the code a swap's drop has
+already: an owed pump or bolt starts from that READY on that command (step 4d),
 a held trigger fires (the lock was only the time), a knife pressed on it comes
 out and equipment takes the drop.
 
@@ -5801,11 +5802,11 @@ static void PM_LadderLeft( void ) {
 ===============
 PM_WeaponTimeRanOut
 
-MW2's crossing: the think on which the state's weaponTime runs out
+MW2's crossing: the command on which the state's weaponTime runs out
 (PM_Weapon_WeaponTimeAdjust, 578914-578933). A shot with a fire clip runs out
-on the think its clock reaches the open note (PM_ShotOver: MW2's fireTime),
-its action on the think the clock reaches the clip's length (step 4c: MW2's
-rechamberTime); anything else on the think its lock goes from above 0 to 0 or
+on the command its clock reaches the open note (PM_ShotOver: MW2's fireTime),
+its action on the command the clock reaches the clip's length (step 4c: MW2's
+rechamberTime); anything else on the command its lock goes from above 0 to 0 or
 below. A reload's segments end on their own clock and never meet the lock
 (the reload began a new pull, PM_BeginReload), and the knife's draw is MW2's
 meleeDelay, no weaponTime at all.
@@ -5867,8 +5868,8 @@ static int PM_LockGun( void ) {
 PM_WeaponTimeAdjust
 
 MW2's held trigger, against a press (PM_Weapon_WeaponTimeAdjust 5788b0,
-5789dd-578b71), asked on the think a state's time runs out and before anything
-else in the think. MW2's fire is a level test of the trigger (ShouldBeFiring
+5789dd-578b71), asked on the command a state's time runs out and before anything
+else in the command. MW2's fire is a level test of the trigger (ShouldBeFiring
 576cc0); what makes a gun fire once a pull is this lock. With the trigger down
 (578a2b-578a52), the pull's shots all fired (ShotLimitReached 5769e0, counted
 in weaponShotCount), the command still naming the gun (578abc-578aca) and a
@@ -5876,8 +5877,8 @@ round in its magazine (BG_GetAmmoInClip 43aad0, 578ad0-578ae1), the gun's time
 becomes 1 (578ae6). The shot over and the knife's end leave the gun READY
 (578b16-578b39), the action over leaves it READY as well (FinishRechamber
 578b06-578b0f, step 4c), and anything else keeps its state with the 1 (a raise
-stays a raise, 578b25-578b28). The 1 runs out on the next think, which asks
-again, so the gun does nothing for as long as the trigger stays down. A think
+stays a raise, 578b25-578b28). The 1 runs out on the next command, which asks
+again, so the gun does nothing for as long as the trigger stays down. A command
 that asks with the trigger up ends the pull: its count goes back to 0
 (578b51-578b67). Any crossing the lock does not take drops what the time
 overshot by (578b71): MW2 never leaves a weaponTime below 0, and every state
@@ -5893,10 +5894,10 @@ The lock is only ever that time, so whatever zeroes the time lets the gun
 fire: YY's return, a grenade's, a change or a reload (MW2's PM_Weapon_Idle
 and PM_BeginWeaponReload). An action's end keeps its 1 to step 4c, which
 makes it READY: its close note, the only thing in between that gives a lock
-away, always crosses on an earlier think.
+away, always crosses on an earlier command.
 
 A burst gun (fireType 2-, 3- or 4-Round Burst) meets MW2's cooldown first
-(578939-5789cd): on the think its shot's time runs out with no burst pending
+(578939-5789cd): on the command its shot's time runs out with no burst pending
 (BG_BurstFirePending: the pull's shots all fired, or the clip run dry), the
 gun is READY with BG_BURST_FIRE_COOLDOWN on its time, whatever the trigger
 does, and nothing else is asked. Between a burst's shots a burst is pending:
@@ -5906,7 +5907,7 @@ cooldown's own crossing, READY, is any other gun's: a trigger held since the
 burst's first shot is locked, one let go ends the pull. A fresh press made
 since the pull's first shot (PWF_PENDING_PULL, PM_UpdatePendingTriggerPull)
 keeps the lock off (5789dd), and with the trigger down it ends the pull as a
-release would (578b51-578b67): the next burst starts on that think.
+release would (578b51-578b67): the next burst starts on that command.
 ===============
 */
 static void PM_WeaponTimeAdjust( int oldTime ) {
@@ -5957,7 +5958,7 @@ static void PM_WeaponTimeAdjust( int oldTime ) {
 			PM_StartTorsoAnim( TORSO_STAND );
 		}
 		// The shot keeps its clock at the open note, where step 4d starts
-		// the action from this READY on this same think (MW2's
+		// the action from this READY on this same command (MW2's
 		// CheckForRechamber, 575b07-575ba9: READY, no weaponDelay).
 		pm->ps->weaponstate = WEAPON_READY;
 		break;
@@ -5977,9 +5978,9 @@ static void PM_WeaponTimeAdjust( int oldTime ) {
 ===============
 PM_UpdatePendingTriggerPull
 
-MW2's PM_Weapon_UpdatePendingTriggerPull (576ad0), run each think just before
+MW2's PM_Weapon_UpdatePendingTriggerPull (576ad0), run each command just before
 the time step (44c40a): with a burst gun (576ae9-576af1), a trigger that is
-down on this think and was up on the last (pm->oldcmd, 576b1f-576b27) is a
+down on this command and was up on the last (pm->oldcmd, 576b1f-576b27) is a
 pending pull (576b29). It asks about MW2's ps->weapon, which its knife and its
 offhands never replace: the gun in hand here, or the slot's gun under the knife
 or equipment. With no gun there is nothing to latch (576ad3-576adb): an empty
@@ -6010,7 +6011,7 @@ PM_TorsoAnimation
 ==============
 */
 static void PM_TorsoAnimation( void ) {
-	// The READY think between a shot and its owed action (step 4f) keeps the
+	// The READY command between a shot and its owed action (step 4f) keeps the
 	// attack torso, as the action after it does: the Quake 3 torso is Peace's
 	// picture, and it leaves the attack pose when the whole cycle is over.
 	if ( pm->ps->weaponstate == WEAPON_READY && !BG_ShotAwaitsAction( pm->ps ) ) {
@@ -6038,7 +6039,7 @@ Sets or clears PMF_SPRINTING each tick, as MW2's PM_UpdateSprint:
     button, the knife or equipment buttons, holding jump, too little
     forward, deep water, running out of sprint time; a crouch or prone bit
     ends one but does not keep one from starting, which stands the player up
-    (with room) on its first think
+    (with room) on its first command
   - MW2's sprint time: BG_SPRINT_TIME of it, used while sprinting and
     refilled 1:1 while not; a start needs more than BG_SPRINT_MIN_TIME left
   - on the ground or in the air alike (MW2)
@@ -6053,7 +6054,7 @@ static void PM_CheckSprint( void ) {
 	qboolean quick = ( pm->ps->weaponAction & WA_TYPE_MASK ) || BG_IsActionWeapon( pm->ps->weapon );
 	qboolean blocked, ended, wantSprint;
 
-	// The sprint time: the think just moved was sprinted or rested. Spent, the
+	// The sprint time: the command just moved was sprinted or rested. Spent, the
 	// sprint ends like any other and its held button waits to come up.
 	if ( sprinting ) {
 		pm->ps->sprintUsed += pml.msec;
@@ -6107,7 +6108,7 @@ static void PM_CheckSprint( void ) {
 
 	// A quick action, knife or equipment, ends a sprint and keeps one from
 	// starting - except that MW2's start gate skips that test in the air after
-	// a jump. Such a sprint lasts one think (PM_UpdateWeaponAction ends it, as
+	// a jump. Such a sprint lasts one command (PM_UpdateWeaponAction ends it, as
 	// MW2's end gate does the next), and its held button then waits to come up.
 	// Out of a crouch or prone it needs room to stand (MW2's PM_CanStand,
 	// 0x56EDE0) and stands up on the spot (PM_StanceForceStand): the client's
@@ -6157,7 +6158,7 @@ static void PM_CheckSprint( void ) {
 // reproduced by loosening this gate.
 //
 // The sprint's own weapon states do not stop aim: the aim button ends the
-// sprint (PM_CheckSprint, first) and aim starts that same think while the gun
+// sprint (PM_CheckSprint, first) and aim starts that same command while the gun
 // comes out of the carry, as MW2's ADS check never tests them. The sprint-out
 // still holds the trigger.
 qboolean BG_CanAimDownSights( const playerState_t *ps ) {
@@ -6199,7 +6200,7 @@ static void PM_CheckADS( void ) {
 	// MW2's prone aim (PM_UpdateAimDownSightFlag 0x4BDDC0): lying down with an
 	// unscoped gun, an aim held since the command before does not start while
 	// crawling, and an aim stops the crawl (PMF_PRONEMOVE_OVERRIDDEN, read by
-	// the next think). A scoped gun aims and crawls. MW2 decides this before
+	// the next command). A scoped gun aims and crawls. MW2 decides this before
 	// the move; Peace, as for every aim, after it.
 	if ( canADS && ( pm->ps->pm_flags & PMF_PRONE ) && !PM_UsingSniperScope() ) {
 		if ( BG_PREVCMD_ADS( pm->ps ) && ( pml.forwardmove || pml.rightmove ) ) {
@@ -6275,12 +6276,12 @@ static void PM_Weapon( void ) {
 	// reload check then (44c444-44c4b3), and that check is the only place
 	// its Pmove reads or clears the bit (PM_Weapon_CheckForReload,
 	// 5786e3-5786f6), so a pending burst leaves the bit exactly as it found
-	// it, for the first think after the burst's last shot to take.
+	// it, for the first command after the burst's last shot to take.
 	// (BG_BurstFirePending answers here as it will after the time step, which
 	// changes neither the gun nor its magazine and zeroes the count only when
 	// no burst is pending.) A reload press of the weapon's own is not read
 	// either (the same check's button test, 5786cd): asked again on every
-	// think, it is taken once the burst's last shot has left if it is still
+	// command, it is taken once the burst's last shot has left if it is still
 	// down then.
 	if ( BG_BurstFirePending( pm->ps ) ) {
 		reload = qfalse;
@@ -6290,8 +6291,8 @@ static void PM_Weapon( void ) {
 		reload = qtrue;
 	}
 	// MW2 asks a reloading gun nothing, even when its reload ends on this
-	// command: its reload's last think ends READY and fires nothing
-	// (PM_Weapon_StateSwitch, 579246), and a held trigger fires on the think
+	// command: its reload's last command ends READY and fires nothing
+	// (PM_Weapon_StateSwitch, 579246), and a held trigger fires on the command
 	// after. Peace's own rule: the trigger may fire on that command, so a held
 	// trigger and reload alternate. (A held trigger also stops MW2's segmented
 	// reload at the end of the segment it is in: PM_AdvanceReloadSegments.)
@@ -6336,13 +6337,13 @@ static void PM_Weapon( void ) {
 	     pm->ps->weaponAnimTime >= 0 ) {
 		pm->ps->weaponAnimTime += pml.msec;		// no clamp - overshoot carries
 		// ...but not from the shot into the action. MW2's shot ends READY on
-		// its last think (ShouldBeFiring, 576d99-576da3) and its rechamber
-		// starts only from READY, on the think after (CheckForRechamber,
+		// its last command (ShouldBeFiring, 576d99-576da3) and its rechamber
+		// starts only from READY, on the command after (CheckForRechamber,
 		// 575b77-575ba9), so nothing of the action can happen on the shot's
-		// last think, whatever takes the gun there. The action here is the
+		// last command, whatever takes the gun there. The action here is the
 		// rest of the fire clip: the shot's clock stops at the open note, step
 		// 4f leaves the gun READY there, and step 4d starts the action from
-		// that note on a later think.
+		// that note on a later command.
 		if ( pm->ps->weaponstate == WEAPON_FIRING && pm->ps->weaponAnimSeq == ASEQ_FIRE ) {
 			int shot = PM_ShotLength( pm->ps->weapon );
 			if ( shot >= 0 && pm->ps->weaponAnimTime > shot ) {
@@ -6360,8 +6361,8 @@ static void PM_Weapon( void ) {
 	}
 
 	// MW2 counts a cooking grenade down here, after the timers and before
-	// any of its checks, and a think it ends is over (PM_UpdateGrenadeThrow,
-	// 44c3f7). That think's buttons are still the last ones the next think
+	// any of its checks, and a command it ends is over (PM_UpdateGrenadeThrow,
+	// 44c3f7). That command's buttons are still the last ones the next command
 	// compares with, as MW2's oldcmd always is.
 	if ( PM_UpdateGrenadeThrow() ) {
 		pm->ps->weaponAction = ( pm->ps->weaponAction & ~( WA_HELD_MASK | WA_SWAP_HELD | WA_ATTACK_HELD ) ) |
@@ -6372,7 +6373,7 @@ static void PM_Weapon( void ) {
 	}
 
 	// MW2's held-trigger lock, decided here, after the timers and before any
-	// check of the think (PM_Weapon_WeaponTimeAdjust, 44c42b). A burst gun's
+	// check of the command (PM_Weapon_WeaponTimeAdjust, 44c42b). A burst gun's
 	// pending pull is latched just before it (44c40a).
 	attackBefore = ( pm->ps->weaponAction & WA_ATTACK_HELD ) != 0;
 	PM_UpdatePendingTriggerPull( attackBefore );
@@ -6417,9 +6418,9 @@ static void PM_Weapon( void ) {
 		pm->ps->weaponAnimTime = -1;
 		pm->ps->pm_flags &= ~PMF_PENDING_MAG;
 		PM_StartTorsoAnim( TORSO_STAND );
-		// Continue into the normal fire gate this think. Chamber debt, ammo
+		// Continue into the normal fire gate this command. Chamber debt, ammo
 		// and ladder rules remain authoritative. The sprint pose waits for the
-		// next think: MW2's double-tap cancel is in its change check
+		// next command: MW2's double-tap cancel is in its change check
 		// (578d00-578d41), which runs after its sprint check (44c4ca, 44c4d7),
 		// and that check refused the drop it found (5780c6).
 		yyReturned = qtrue;
@@ -6429,12 +6430,12 @@ static void PM_Weapon( void ) {
 	//    a frozen player with a gun in hand (CheckForChangeWeapon, 578cbf); a
 	//    swap already going down finishes, and so does a knife or grenade
 	//    already asked for, which are no weapon change in MW2. Nor on the
-	//    think the return from a knife or equipment ends, the gun's quick
-	//    raise or, after equipment, an empty hand's one think
+	//    command the return from a knife or equipment ends, the gun's quick
+	//    raise or, after equipment, an empty hand's one command
 	//    (pml.recoveryEnds): MW2's change
 	//    check refuses MELEE_END and OFFHAND_END whatever their time
 	//    (578bc9-578bf2), so a swap queued behind it begins from READY on the
-	//    next think; equipment pressed on that think is no weapon change and
+	//    next command; equipment pressed on that command is no weapon change and
 	//    comes out.
 	if ( !ladderWeapon && !pml.burstPending && PM_WeaponChangeOpen() &&
 	     !( ( pm->ps->pm_flags & PMF_FROZEN ) && pm->ps->weapon != WP_NONE &&
@@ -6454,29 +6455,29 @@ static void PM_Weapon( void ) {
 	// 1b. Sprint posture. Lowering into and rising out of the sprint carry are
 	//     timed weapon actions that ALWAYS stamp a real per-weapon time, exactly
 	//     like a holster. Stamped here - before the notes - so the mag-in note
-	//     can take the lock away in the same think. Nothing here knows that is
+	//     can take the lock away in the same command. Nothing here knows that is
 	//     possible; it just stamps honestly and lets step 3b notice.
 	//     This is MW2's PM_Weapon_CheckForSprint (578060): no sprint pose out
 	//     of the shot or the action (FIRING 6, RECHAMBERING 7), nor out of a
 	//     raise or drop, so a switch resolves first. The sprint flag, its speed
 	//     and its meter still run (PM_CheckSprint: MW2's start and end gates,
 	//     56ED10/56ED80, never test those states).
-	//     MW2's shot ends READY, owing its action, at the end of its last think
+	//     MW2's shot ends READY, owing its action, at the end of its last command
 	//     (ShouldBeFiring, 576d99-576da3), and on the next the sprint check
 	//     runs before the rechamber can start (575A30 starts it only from
 	//     READY), so a sprint that is on then takes the READY gun first and
 	//     the action stays owed; step 4d works all of it once the gun is back
-	//     up. Here the shot's last think is the one its clock reaches the open
+	//     up. Here the shot's last command is the one its clock reaches the open
 	//     note (PM_ShotOver): still FIRING, it does not lower; step 4f leaves
-	//     it READY, and the think after lowers before step 4d. Once the action
+	//     it READY, and the command after lowers before step 4d. Once the action
 	//     is under way the sprint waits: you run while it finishes, and the
-	//     gun lowers on the think after step 4c ends it, already chambered. So
+	//     gun lowers on the command after step 4c ends it, already chambered. So
 	//     no sprint lock is ever stamped while BOLTING, and the close note
 	//     never has one to take away.
 	//     A sprint on again during the sprint-out changes nothing (MW2's check
 	//     does nothing while sprinting in SPRINT_RAISE, _LOOP or _DROP,
-	//     5780f4-578107): the gun comes all the way up, and the think after
-	//     the sprint-out ends lowers it again from READY. Nor does the think YY
+	//     5780f4-578107): the gun comes all the way up, and the command after
+	//     the sprint-out ends lowers it again from READY. Nor does the command YY
 	//     returns the gun lower it (its double-tap cancel comes after this
 	//     check, 44c4d7).
 	if ( !ladderWeapon && !yyReturned && pm->ps->weaponstate != WEAPON_DROPPING && pm->ps->weaponstate != WEAPON_RAISING &&
@@ -6498,30 +6499,30 @@ static void PM_Weapon( void ) {
 
 	// 2. Then the anim's notes run. Gated on the anim clock being live, not on
 	//    weaponstate - step 1 may have just flipped us to DROPPING, and the
-	//    reload's mag-in note still has to land on this think for the race to
+	//    reload's mag-in note still has to land on this command for the race to
 	//    exist at all. MAG_IN zeroes the lock the holster just stamped.
 	if ( pm->ps->weaponAnimTime >= 0 ) {
 		chamberClosed = PM_RunWeaponNotes( oldElapsed, pm->ps->weaponAnimTime );
 	}
 	// 2b. The reload's delayed action on a gun that owes its pump or bolt lands
-	//     like any note: the lock goes on that think, so a holster stamped in
+	//     like any note: the lock goes on that command, so a holster stamped in
 	//     step 1 is spent and finishes in step 3. What it settles waits for
 	//     step 4, with the fill.
 	reloadSettled = PM_ReloadSettleCrossed( oldElapsed );
 	if ( reloadSettled ) {
 		pm->ps->weaponTime = 0;
 	}
-	// 2c. On any think a weapon delay runs out, MW2's state switch runs on
+	// 2c. On any command a weapon delay runs out, MW2's state switch runs on
 	//     whatever state its checks left, whatever its time (ProcessHand,
 	//     579474), so a drop begun on it finishes on it: path A. The notes
 	//     and the settle above have taken its lock already. The knife's draw
 	//     has no note: it is MW2's meleeDelay, and equipment pressed on the
-	//     think it ends (MW2's offhand check takes MELEE_INIT, 579086-579096;
-	//     OffHandInit's quick drop, 578ea0-578ea6) is prepared on that think
+	//     command it ends (MW2's offhand check takes MELEE_INIT, 579086-579096;
+	//     OffHandInit's quick drop, 578ea0-578ea6) is prepared on that command
 	//     (OFFHAND_INIT's case, 5792c7 -> OffHandPrepare 577800), the knife
 	//     never hitting. Nor has an empty hand's return from equipment, the
-	//     one-think delay of MW2's OFFHAND_END with weapon 0 (577a1a-577a2a):
-	//     equipment pressed on the think it runs out with a use hint is
+	//     one-command delay of MW2's OFFHAND_END with weapon 0 (577a1a-577a2a):
+	//     equipment pressed on the command it runs out with a use hint is
 	//     prepared on it, its empty hand's drop spent (with no hint it comes
 	//     straight out and is in hand at once, PM_UpdateWeaponAction). So
 	//     their drop's lock goes here, and step 3 finishes it.
@@ -6531,7 +6532,7 @@ static void PM_Weapon( void ) {
 
 	// Same finish-before-fill ordering as any holster. No knowledge of reload
 	// timing: the shared note runner above is the only thing that can clear the
-	// freshly stamped positive lock on the grab think.
+	// freshly stamped positive lock on the grab's command.
 	if ( ladderWeapon ) {
 		// the ladder's own holster, or a drop it found running (PM_LadderKeepsDrop)
 		if ( pm->ps->weaponstate == WEAPON_DROPPING && pm->ps->weaponTime <= 0 ) {
@@ -6543,7 +6544,7 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
-	// 3. A holster whose lock is already spent finishes NOW, this think, and
+	// 3. A holster whose lock is already spent finishes NOW, this command, and
 	//    returns - so the queued fill in step 4 is never reached. Nothing here
 	//    knows what a NAC is; it is just a drop that had its lock taken away.
 	if ( pm->ps->weaponstate == WEAPON_DROPPING && pm->ps->weaponTime <= 0 ) {
@@ -6553,15 +6554,15 @@ static void PM_Weapon( void ) {
 
 	// 3b. A sprint transition whose lock is already spent completes NOW and
 	//     returns - so the queued fill below is never reached. Identical shape
-	//     to the holster above: if the mag-in note cleared the lock this think,
+	//     to the holster above: if the mag-in note cleared the lock this command,
 	//     the lower-into-sprint collapses to nothing and the rounds are lost.
 	//     The sprint-out returns too: MW2's SPRINT_DROP ends in its state
 	//     switch (PM_Weapon_Idle, 0x5793D8 entry 25 -> 579279 -> 5777a0) and
-	//     the think is over (5794b4-5794b6). Its rechamber check ran first and
+	//     the command is over (5794b4-5794b6). Its rechamber check ran first and
 	//     starts nothing out of SPRINT_DROP (575b77), and its auto reload
 	//     refuses it (578872-57887a), so the shot, an owed pump or bolt and an
-	//     empty magazine's reload all wait for the next think, from READY. A
-	//     reload asked for on this think is taken: MW2's reload check runs
+	//     empty magazine's reload all wait for the next command, from READY. A
+	//     reload asked for on this command is taken: MW2's reload check runs
 	//     before the switch and takes the sprint states (575e8e-575ea8).
 	//     Either end leaves no time over: MW2's crossing drops what the time
 	//     overshot by (WeaponTimeAdjust, 578b71), and the switch's
@@ -6605,8 +6606,8 @@ static void PM_Weapon( void ) {
 	//    the state alone is what keeps the gun from firing during the tail.
 	//    The selector's click is the SF's close note: what it commits
 	//    here is the slot's mode, so a swap, equipment or a ladder that took
-	//    the gun on its think (the SF NAC) left the mode as it was, and
-	//    one a think later keeps it (owner's rule: the SF is a bolt).
+	//    the gun on its command (the SF NAC) left the mode as it was, and
+	//    one a command later keeps it (owner's rule: the SF is a bolt).
 	if ( chamberClosed || reloadSettled ) {
 		pm->ps->stats[STAT_UNCHAMBERED] &= ~( 1 << pm->ps->weapon );
 	}
@@ -6634,11 +6635,11 @@ static void PM_Weapon( void ) {
 	//     was already given away by the chamber note, and the settle after it
 	//     still has to play. Same shape as advancing a reload segment. The
 	//     SF ends here too, at its own segment's length
-	//     (BG_ActionLength), and its last think goes on as a bolt's does: a
+	//     (BG_ActionLength), and its last command goes on as a bolt's does: a
 	//     reload or the trigger asked for on it is taken on it. Ended
 	//     with the trigger still down from the shot, the gun is READY under
 	//     MW2's lock (FinishRechamber with weaponTime 1, 578b06-578b0f, put on
-	//     at the top of this think): step 5 holds it, and it fires nothing
+	//     at the top of this command): step 5 holds it, and it fires nothing
 	//     until the trigger is let go.
 	if ( pm->ps->weaponstate == WEAPON_BOLTING && pm->ps->weaponAnimTime >= 0 &&
 	     pm->ps->weaponAnimTime >= BG_ActionLength( pm->ps ) ) {
@@ -6654,12 +6655,12 @@ static void PM_Weapon( void ) {
 	//     (575ba9) for rechamberTime (575bd2), the fire clip's length after its
 	//     open note, with the bolt rechamberBoltTime in, or 1 when that is 0
 	//     (575bd8-575c03): the close note's place after the open note. So the
-	//     bolt is taken on the think after this one at the earliest, and the
-	//     gun is READY ceil(rechamberTime / msec) thinks after this one.
+	//     bolt is taken on the command after this one at the earliest, and the
+	//     gun is READY ceil(rechamberTime / msec) commands after this one.
 	//
 	//     Nothing here knows why the bit is set. The shot that just ended (4f
-	//     left it READY on its last think, or the held trigger's lock on that
-	//     very think, PM_WeaponTimeAdjust), a swap, a sprint, a knife or
+	//     left it READY on its last command, or the held trigger's lock on that
+	//     very command, PM_WeaponTimeAdjust), a swap, a sprint, a knife or
 	//     equipment, a death, a dropped weapon picked back up - they all leave
 	//     the same bit, so they all get the same answer without being
 	//     enumerated. The one way to not end up here is to have let the close
@@ -6696,13 +6697,13 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
-	// 4f. The shot's last think (PM_ShotOver), the trigger let go, ends READY,
+	// 4f. The shot's last command (PM_ShotOver), the trigger let go, ends READY,
 	//     owing the action, and nothing more happens on it: MW2's
 	//     ShouldBeFiring makes the shot READY once its weaponTime has run out
-	//     (576d99-576da3), after every check of that think, and fires nothing.
+	//     (576d99-576da3), after every check of that command, and fires nothing.
 	//     So a change, a knife, equipment or a reload already took the gun out
-	//     of the shot above, the sprint waits for the next think (MW2's sprint
-	//     check refuses FIRING), and the action is not started on this think:
+	//     of the shot above, the sprint waits for the next command (MW2's sprint
+	//     check refuses FIRING), and the action is not started on this command:
 	//     step 4d starts it from READY on the next (MW2's rechamber, 575b77),
 	//     unless a change, a sprint, a knife, equipment or a reload takes the
 	//     READY gun first and leaves it owed (MW2 checks all of them before its
@@ -6711,16 +6712,16 @@ static void PM_Weapon( void ) {
 	//     ShouldBeFiring (579505): the shot stays over and FIRING, its action
 	//     not started, until the freeze lifts.
 	//     The trigger still down from the shot: a gun with a round was locked
-	//     READY at the top of this think, and step 4d has started its action
+	//     READY at the top of this command, and step 4d has started its action
 	//     already (MW2's CheckForRechamber from that READY, 575b07-575ba9, a
-	//     think sooner than with the trigger let go). One still here has
+	//     command sooner than with the trigger let go). One still here has
 	//     nothing in its magazine, or nothing left to lock (no single shot):
-	//     MW2's ShouldBeFiring holds it FIRING and fires it on this think
+	//     MW2's ShouldBeFiring holds it FIRING and fires it on this command
 	//     (576d3f-576d62), so it goes on to the fire gates, where an empty
 	//     magazine reloads from the shot, the action still owed, or, with
 	//     nothing in reserve, dry-fires (PM_Weapon_CheckFiringAmmo, 576fe0).
 	//     So does a shot that ran out frozen, the trigger down as the freeze
-	//     lifts: the frozen think found the trigger up (the command keeps
+	//     lifts: the frozen command found the trigger up (it keeps
 	//     none) and ended the pull, so nothing locks, and it fires again,
 	//     its action still owed, as MW2's.
 	if ( PM_ShotOver() ) {
@@ -6739,10 +6740,10 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
-	// 6. Stock transitions. A raise that ends is ready from the next think,
+	// 6. Stock transitions. A raise that ends is ready from the next command,
 	//    with no time over (PM_WeaponTimeAdjust dropped it, MW2's 578b71
 	//    before FinishWeaponRaise, 576720). The knife's draw is no raise but
-	//    MW2's meleeDelay, which ends in the hit on the think it runs out
+	//    MW2's meleeDelay, which ends in the hit on the command it runs out
 	//    (MeleeFire), so the knife goes on to fire.
 	if ( pm->ps->weaponstate == WEAPON_RAISING ) {
 		pm->ps->weaponstate = WEAPON_READY;
@@ -6753,7 +6754,7 @@ static void PM_Weapon( void ) {
 		}
 		// An offhand's prepare that ends is MW2's OffHandHold (577920): in
 		// hand, waiting for the release, with its fuse (577958-577961). Only
-		// a cooking one counts it down from the next think.
+		// a cooking one counts it down from the next command.
 		if ( BG_OffhandHeldToThrow( pm->ps->weapon ) && PM_ActionWeapon() == pm->ps->weapon &&
 		     !( pm->ps->weaponAction & WA_FIRED ) ) {
 			pm->ps->grenadeTimeLeft = BG_OffhandFuseTime( pm->ps->weapon );
@@ -6773,10 +6774,10 @@ static void PM_Weapon( void ) {
 	}
 
 	// Auto-reload: magazine empty and reserve available. Not out of the shot
-	// with the trigger up, on the think its lock runs out (a gun with no fire
+	// with the trigger up, on the command its lock runs out (a gun with no fire
 	// clip): MW2's auto reload refuses FIRING (57886d) and its trigger-up
 	// ShouldBeFiring only makes the gun READY (576d99-576da3), so the reload
-	// comes on the next think (step 4e). A held trigger reloads on this one,
+	// comes on the next command (step 4e). A held trigger reloads on this one,
 	// through the fire path's ammo check below (FireWeapon's, 5770c0-5770c9).
 	if ( BG_WeaponMagSize( pm->ps->weapon ) > 0 &&
 	     pm->ps->ammo[pm->ps->weapon] <= 0 &&
@@ -6865,12 +6866,12 @@ static void PM_Weapon( void ) {
 	// player's own cgame to a gun with ammo (CG_OutOfAmmoChange), and adds
 	// BG_DRY_FIRE_TIME to the weapon's time (5770af), which MW2 has at 0 by
 	// then (WeaponTimeAdjust zeroes a spent time, 578b71), so a held trigger
-	// raises it again on the first think that has run out. The state is left
+	// raises it again on the first command that has run out. The state is left
 	// as it is: with the trigger down MW2's ShouldBeFiring (576cc0) has not
 	// touched it, so out of the shot (step 4f) it stays FIRING, which takes
 	// no change and no sprint until the time has run out. MW2 also clears the
 	// rechamber here (BG_ClearRechamber, 577094) and plays the idle (5770a0):
-	// a gun that dry-fires on its last round's last think, the trigger held
+	// a gun that dry-fires on its last round's last command, the trigger held
 	// from the shot, never works that action. Out of READY there is never one
 	// owed (step 4d has started it first). Equipment keeps its own count and
 	// never gets here empty.
@@ -7039,9 +7040,9 @@ static void PM_Weapon( void ) {
 	}
 
 	// A gun's shot is given its whole time (MW2's PM_Weapon_StartFiring
-	// assigns iFireTime, 576e9c-576e9f): the think the last one's ran out,
+	// assigns iFireTime, 576e9c-576e9f): the command the last one's ran out,
 	// PM_Weapon_WeaponTimeAdjust dropped what it overshot by (578b71). So a
-	// held full-auto gun fires every ceil(fireTime / msec) thinks. The knife's
+	// held full-auto gun fires every ceil(fireTime / msec) commands. The knife's
 	// time is MW2's one meleeTime from the press, of which its draw has
 	// counted down the part already gone (its draw is MW2's meleeDelay, no
 	// crossing, PM_WeaponTimeRanOut). Equipment's time starts at 0: its
@@ -7347,14 +7348,14 @@ void PmoveSingle (pmove_t *pmove) {
 		pm->cmd.upmove = 0;
 	}
 
-	// this think's moves, which the walk's sprint strafe may scale and a
+	// this Pmove step's moves, which the walk's sprint strafe may scale and a
 	// prone crawl stop zeroes
 	pml.rightmove = pm->cmd.rightmove;
 	pml.forwardmove = pm->cmd.forwardmove;
 
 	// MW2's order (PmoveSingle 0x57448B-0x574782): the crawl rules, the view
 	// (with the prone turn and clamps), then a stopped crawl's zeroing, all
-	// on the stance the last think left. A dead player waiting for a round
+	// on the stance the last command left. A dead player waiting for a round
 	// (PM_FREEZE) and the intermission move nothing at all; MW2's frozen
 	// player (PMF_FROZEN) is PM_NORMAL and runs all of it.
 	if ( pm->ps->pm_type != PM_FREEZE && pm->ps->pm_type != PM_INTERMISSION &&
@@ -7444,7 +7445,7 @@ void PmoveSingle (pmove_t *pmove) {
 	PM_SetWaterLevel();
 	PM_CheckLadder();
 	if ( !(pm->ps->stats[STAT_LADDER] & LADDER_ATTACHED) ) PM_GroundTrace();
-	// Clamp on the contact think too; delta_angles prevents mouse wind-up.
+	// Clamp on the command that grabs the ladder too; delta_angles prevents mouse wind-up.
 	PM_UpdateViewAngles( pm->ps, &pm->cmd );
 
 	// sprint and ADS: evaluate before weapon so weapon logic sees current flags
@@ -7453,9 +7454,9 @@ void PmoveSingle (pmove_t *pmove) {
 
 	// weapons
 	PM_Weapon();
-	// PM_CheckSprint's airborne start under a quick action ends this same think
+	// PM_CheckSprint's airborne start under a quick action ends this same command
 	// (PM_UpdateWeaponAction), also when PM_Weapon returned before it ran (the
-	// use-item press, or a think a cooking frag ends, PM_UpdateGrenadeThrow).
+	// use-item press, or a command a cooking frag ends, PM_UpdateGrenadeThrow).
 	if ( ( pm->ps->pm_flags & PMF_SPRINTING ) &&
 	     ( ( pm->ps->weaponAction & WA_TYPE_MASK ) || BG_IsActionWeapon( pm->ps->weapon ) ) ) {
 		if ( pm->cmd.buttons & BUTTON_SPRINT ) pm->ps->weapFlags |= PWF_SPRINT_RELEASE;
@@ -7486,8 +7487,8 @@ PM_KeepHeldThroughFreeze
 
 MW2's oldcmd is the command as it came, frozen or not: a button held through
 a freeze was down on the last command, so when the freeze lifts it is no new
-press. Peace keeps that record in the player state, written from the command
-each think; a frozen think wrote it from the mask, which reads every held
+press. Peace keeps that record in the player state, written from every
+command; a frozen command wrote it from the mask, which reads every held
 button as let go. So after a frozen command the record is written again from
 the command as it came: the knife and equipment buttons, Y and the trigger
 (weaponAction), jump (PMF_JUMP_HELD) and sprint (PWF_SPRINT_RELEASE). A knife,

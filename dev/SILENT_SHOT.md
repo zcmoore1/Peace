@@ -27,14 +27,14 @@ All addresses are MW2's `iw4x.exe`; the kick's decode is in
 
 1. **The playerstate's ring of four predictable events.** `MAX_PS_EVENTS` 4;
    MW2's add (0x4bd150) writes `events[seq & 3]` and steps an 11-bit
-   sequence. The shot think adds one event, `EV_FIRE_WEAPON` (MW2's
+   sequence. The shot command adds one event, `EV_FIRE_WEAPON` (MW2's
    `EV_SV_FIRE_WEAPON`, 0x5771c0).
-2. **The knife's press is four events on one think,** in MW2's order and with
+2. **The knife's press is four events on one command,** in MW2's order and with
    MW2's parms (`PM_UpdateWeaponAction`'s latch, `PM_FinishWeaponChange`):
    CheckForOffHand's `EV_SWITCH_OFFHAND` (579168), OffHandInit's
    `EV_WEAPON_SWITCH_STARTED` (578e10) and `EV_RESET_ADS` (578e5e), and,
    because the throwing knife is weapClass 9 (578eec), OffHandPrepare's
-   `EV_PREP_OFFHAND` (5778e6) on the same think. A frag, flash, Semtex or
+   `EV_PREP_OFFHAND` (5778e6) on the same command. A frag, flash, Semtex or
    Tactical Insertion press is three: its prepare waits for the gun's quick
    drop. Straight out of an empty hand or `OFFHAND_END` (5791ce, the sea lion)
    it is two. Each event has MW2's function (see CLAUDE.md, "Events are MW2's
@@ -174,7 +174,7 @@ viewer out of the S&D round stands in the line of fire, unlinked with no
 health, as `G_SNDClientEndFrame` leaves one. Their client draws every bullet
 through the absent body, exactly as it draws them for the same viewer off the
 line, on into the victim or past it (another player's shot is drawn from what
-the entity carries, exact only when it shows the shot's own think, so at
+the entity carries, exact only when it shows the shot's own command, so at
 other `SILENTSHOT_SVFPS` rates a pellet can land beside the victim). The same
 viewer alive in that spot takes them, as the server's bullets do.
 

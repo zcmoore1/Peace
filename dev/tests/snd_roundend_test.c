@@ -331,7 +331,7 @@ static void ResetMatch(void) {
   clients[i].sess.sessionTeam=i==VICTIM ? TEAM_BLUE : TEAM_RED;
  }
  shooterButtons=shooterForward=shooterUp=victimButtons=0; shooterView=atVictim; shooterWeapon=WP_SHOTGUN;
- /* the spawn's own think reads the client's last command (trap_GetUsercmd):
+ /* the spawn's own ClientThink reads the client's last command (trap_GetUsercmd):
   * none yet, not one left over from another case's clock */
  memset(&nextCmd,0,sizeof(nextCmd)); nextCmd.serverTime=now;
 }
@@ -772,7 +772,7 @@ static void Prematch(void) {
  live=snd.deadline;
  CHECK(level.time<live && Frozen(SHOOTER) && Frozen(VICTIM) && Frozen(MATE));	/* from the frame they spawn in */
  /* on the floor through the countdown, as MW2's spawns are, not hanging
-  * where the lift left them (the frozen thinks run no gravity) */
+  * where the lift left them (the frozen commands run no gravity) */
  Run(500); for(i=0;i<3;i++) CHECK(clients[i].ps.groundEntityNum!=ENTITYNUM_NONE && clients[i].ps.origin[2]<24.5f && Frozen(i));
  live=snd.deadline;
  Place(SHOOTER,0,0);

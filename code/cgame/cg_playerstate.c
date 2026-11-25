@@ -544,7 +544,7 @@ void CG_TransitionPlayerState( playerState_t *ps, playerState_t *ops ) {
 	CG_CheckPlayerstateEvents( ps, ops );
 
 	// The eye needs no smoothing here: pmove moves it along MW2's curve every
-	// think (PM_ViewHeightAdjust), and an unpredicted view lerps it between
+	// command (PM_ViewHeightAdjust), and an unpredicted view lerps it between
 	// snapshots (CG_InterpolatePlayerState).
 }
 

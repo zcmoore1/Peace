@@ -156,9 +156,9 @@ static void TestYY(void) {
  CHECK(fired[WP_MACHINEGUN]==0);
  /* MW2's double-tap cancel is in its change check, after its sprint check
   * (iw4x 0x44C4CA, 0x44C4D7; the sprint check refused the drop, 0x5780C6):
-  * the YY think readies the gun and the rest of it runs as READY, so even
+  * the YY command readies the gun and the rest of it runs as READY, so even
   * with the sprint flag on a held trigger fires there, and with none the
-  * sprint pose comes on the next think. */
+  * sprint pose comes on the next command. */
  Ready(WP_MACHINEGUN,WP_SHOTGUN);
  Toggle(); Step(1); Toggle(); ps.pm_flags|=PMF_SPRINTING;
  move.cmd.buttons=BUTTON_ATTACK; Step(1);
@@ -232,8 +232,8 @@ static void TestActions(void) {
  /* A ladder grabbed with the knife out takes nothing from it: MW2's ladder
   * drop is a weapon change, refused in the melee states and the quick raise
   * after them (CheckForChangeWeapon 578bc0-578c04), the quick raise's last
-  * think included. The knife lands, the gun comes back, and the ladder drop
-  * starts on the think after the latch would clear with no ladder (i 0),
+  * command included. The knife lands, the gun comes back, and the ladder drop
+  * starts on the command after the latch would clear with no ladder (i 0),
   * from READY. Nothing new starts on the ladder meanwhile. */
  for(i=0;i<2;i++) {
   Ready(WP_MACHINEGUN,WP_SHOTGUN);
@@ -432,9 +432,9 @@ static void TestRecovery(void) {
   }
  }
  /* A swap asked for during the recovery draw waits (MW2's CheckForChangeWeapon
-  * refuses the gun's quick raise after a knife, its last think included,
+  * refuses the gun's quick raise after a knife, its last command included,
   * 0x578BC9-0x578BE4): the draw runs on, and once the gun is up the ordinary
-  * holster starts from READY on the next think, not melee's. */
+  * holster starts from READY on the next command, not melee's. */
  {
   int t;
   Ready(WP_SHOTGUN, WP_MACHINEGUN);
@@ -491,7 +491,7 @@ static void TestRecovery(void) {
    for (t = 0; t < 200; t++) RStep();
    move.cmd.weapon = WP_MACHINEGUN;
    for (t = 0; t < 9000 && ps.weaponstate == WEAPON_RAISING; t++) RStep();
-   CHECK(ps.weaponstate == WEAPON_READY);	/* OFFHAND_END's last think begins nothing */
+   CHECK(ps.weaponstate == WEAPON_READY);	/* OFFHAND_END's last command begins nothing */
    RStep();
    CHECK(ps.weaponstate == WEAPON_DROPPING && ps.weaponTime > BG_RAPID_DROP_TIME);
    if (yy) { move.cmd.weapon = WP_SHOTGUN; RStep(); CHECK(ps.weapon == WP_SHOTGUN && ps.weaponstate == WEAPON_READY); }
@@ -507,7 +507,7 @@ static void SprintStep(int msec) {
  pml.groundPlane=qtrue; move.cmd.forwardmove=127;
  CheckSprint(); Step(msec);
 }
-/* One think with chosen movement, sprint held unless 'held' is clear. */
+/* One command with chosen movement, sprint held unless 'held' is clear. */
 static void SprintMove(int held, int forward, int up, int ground) {
  move.cmd.buttons=held ? BUTTON_SPRINT : 0;
  move.cmd.forwardmove=forward; move.cmd.upmove=up; pml.groundPlane=ground;
@@ -530,10 +530,10 @@ static void TestSprintTransitions(void) {
   CHECK(fired[weapon]==1 && ps.ammo[weapon]==ammo-1);
   CHECK(!(ps.pm_flags&PMF_SPRINTING));
   /* Keeping sprint held still requests sprint; presentation cannot erase the
-   * real sprint lock. Releasing input allows ordinary same-think YY firing.
-   * The YY think itself readies the gun: MW2's double-tap cancel comes after
+   * real sprint lock. Releasing input allows ordinary same-command YY firing.
+   * The YY command itself readies the gun: MW2's double-tap cancel comes after
    * its sprint check (iw4x 0x44C4CA, 0x44C4D7), so the gun lowers again on
-   * the next think, with the whole sprint entry. */
+   * the next command, with the whole sprint entry. */
   Ready(weapon,other); move.cmd.buttons=BUTTON_SPRINT; SprintStep(1);
   Toggle(); SprintStep(1); Toggle(); SprintStep(1);
   CHECK(ps.weaponstate==WEAPON_READY && ps.weaponTime==0 && (ps.pm_flags&PMF_SPRINTING));
@@ -548,7 +548,7 @@ static void TestSprintTransitions(void) {
  CHECK(fired[WP_SHOTGUN]==0 && ps.weaponstate==WEAPON_BOLTING);
  CHECK(ps.stats[STAT_UNCHAMBERED]&(1<<WP_SHOTGUN));
  /* Action press arrives after PM_CheckSprint. It must clear sprint in that
-  * very think, not leave a one-frame opening for equipment retention. */
+  * very command, not leave a one-frame opening for equipment retention. */
  for(i=0;i<ARRAY_LEN(buttons);i++) {
   Ready(WP_MACHINEGUN,WP_SHOTGUN); move.cmd.buttons=BUTTON_SPRINT; SprintStep(1);
   move.cmd.buttons|=buttons[i]; SprintStep(1);
@@ -705,7 +705,7 @@ static void TestSprintTime(void) {
  CHECK(ps.sprintUsed==0);
 }
 /* MW2's start gate skips the knife and equipment states in the air after a
- * jump: the sprint starts, the quick action ends it that think, and a held
+ * jump: the sprint starts, the quick action ends it that command, and a held
  * button then waits to come up. Off a ledge (no jump) nothing starts. */
 static void TestAirSprintDuringAction(void) {
  int i;
@@ -827,10 +827,10 @@ static void TestGrenadeKeepsRecoveryHolster(void) {
   Run(BG_WeaponQuickRaiseTime(gun)/2);
   CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_RAISING &&
    (ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==((f ? WA_LETHAL : WA_MELEE)|WA_FIRED));
-  /* MW2 refuses the change until the gun is up, its quick raise's last think
+  /* MW2 refuses the change until the gun is up, its quick raise's last command
    * included (MELEE_END and OFFHAND_END end in PM_Weapon_Idle, iw4x
    * 0x579279, and the change check refuses them, 0x578BC9-0x578BF2), then it
-   * is an ordinary holster, from READY on the next think. */
+   * is an ordinary holster, from READY on the next command. */
   Toggle(); Step(1);
   CHECK(ps.weapon==gun && ps.weaponstate==WEAPON_RAISING);
   for(t=0;t<12000 && ps.weaponstate==WEAPON_RAISING;t++) Step(1);
@@ -885,7 +885,7 @@ static void TestNoSwapInQuickAction(void) {
   Toggle(); Step(1); Toggle(); Step(1);	/* YY: nothing to cancel */
   CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);
   for(t=0;t<12000 && ps.weaponstate==WEAPON_RAISING;t++) Step(1);
-  /* the quick raise's last think readies the gun and begins nothing (MW2's
+  /* the quick raise's last command readies the gun and begins nothing (MW2's
    * change check refuses MELEE_END and OFFHAND_END, 0x578BC9-0x578BF2) */
   CHECK(ps.weaponstate==WEAPON_READY && !(ps.weaponAction&WA_TYPE_MASK));
   Step(1);
@@ -961,8 +961,8 @@ static void TestThrowingKnife(void) {
  int i,t,pull;
  for(i=0;i<3;i++) {
   /* out at once from a gun at rest, held as long as the button is: its
-   * holdFireTime is 0, so it is in HOLD on the press think (MW2's OffHandInit,
-   * Prepare and Hold in one think), with its fuseTime, the flight lifetime */
+   * holdFireTime is 0, so it is in HOLD on the press command (MW2's OffHandInit,
+   * Prepare and Hold in one command), with its fuseTime, the flight lifetime */
   KnifeReady(1,hints[i]);
   move.cmd.buttons=BUTTON_LETHAL; Step(1);
   CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_READY);
@@ -1163,7 +1163,7 @@ static void TestTacticalInsertion(void) {
    for(t=press+release[i];t<20000 && !fired[WP_TACTICAL_INSERTION];t++) {
     Step(1); if(!fired[WP_TACTICAL_INSERTION]) CHECK(ps.weaponstate!=WEAPON_FIRING);
    }
-   /* commands after the press: MW2's PREPARE ends in HOLD, which throws next think */
+   /* commands after the press: MW2's PREPARE ends in HOLD, which throws next command */
    CHECK(t-press==BG_WeaponQuickDropTime(gun)+BG_INSERTION_IGNITE_MS+1 && ps.ammo[WP_TACTICAL_INSERTION]==0);
   }
   /* Y cancels it before the release, in the drop, the ignite and held: the
@@ -1270,7 +1270,7 @@ static void TestTacticalInsertion(void) {
      CHECK(!(spawned.stats[STAT_WEAPONS]&(1<<WP_TACTICAL_INSERTION)) && BG_LethalWeapon(&spawned)==WP_FRAG); } }
 }
 /* MW2's offhand HOLD (578f00-578f69) throws before it reads Y. With
- * holdButtonToThrow 0 - every offhand's - it throws on any HOLD think unless
+ * holdButtonToThrow 0 - every offhand's - it throws on any command in HOLD unless
  * an offhand button, the lethal or the tactical, is down on that command and
  * one was on the one before (578f2d-578f3f, mask 0xc000); only then is the
  * cancel bit read (578f41-578f52), and only by an offhand whose data says
@@ -1364,7 +1364,7 @@ static void TestHoldThrowsBeforeCancel(void) {
   move.cmd.buttons=BUTTON_WEAPON_SWAP; Step(1); ThrownNotCancelled(offhand);
   /* a plain tap: never thrown early, never held - queued through the drop and
    * the prepare (PulledOut fails on a throw there), thrown on HOLD's first
-   * command (MW2's OffHandStart, the think after OffHandHold) */
+   * command (MW2's OffHandStart, the command after OffHandHold) */
   HeldLethalReady(offhand); PulledOut(offhand,0);
   move.cmd.buttons=0; Step(1); ThrownNotCancelled(offhand);
   if(BG_WeaponRaiseTime(offhand)>0) {
@@ -1379,7 +1379,7 @@ static void TestHoldThrowsBeforeCancel(void) {
    CHECK(!fired[offhand] && ps.weapon==offhand && ps.weaponstate==WEAPON_READY && ps.ammo[offhand]==1);
    move.cmd.buttons=0; Step(1); ThrownNotCancelled(offhand);
    /* a tap, then the button pressed again on HOLD's first command: the
-    * command before had it up, so that think throws */
+    * command before had it up, so that command throws */
    HeldLethalReady(offhand); PulledOut(offhand,0);
    move.cmd.buttons=button; Step(1); ThrownNotCancelled(offhand);
    /* ... and pressed again with Y on that command: thrown all the same */
@@ -1412,7 +1412,7 @@ static void TestHoldThrowsBeforeCancel(void) {
    for(t=0;t<20000 && !(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_RAISING);t++) Step(1);
    CHECK(t<20000 && ps.weaponTime>=BG_WeaponQuickRaiseTime(WP_SHOTGUN)-1);
    for(t=0;t<20000 && ps.weaponstate==WEAPON_RAISING;t++) Step(1);
-   CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_READY);	/* OFFHAND_END's last think */
+   CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_READY);	/* OFFHAND_END's last command */
    Step(1);
    CHECK(ps.weapon==WP_SHOTGUN && ps.weaponstate==WEAPON_DROPPING && ps.weaponTime==BG_WeaponDropTime(WP_SHOTGUN));
    for(t=0;t<20000 && ps.weapon!=WP_MACHINEGUN;t++) Step(1);
@@ -1462,15 +1462,15 @@ static void TestHoldThrowsBeforeCancel(void) {
 }
 /* MW2's cook (cookOffHold 1: the frag alone). OffHandHold writes fuseTime
  * (3500) into grenadeTimeLeft at HOLD entry; PM_UpdateGrenadeThrow counts it
- * down by each think's msec from the next think, before anything else the
- * think does, so the frag explodes 3500 after HOLD entry whenever it is let go:
+ * down by each command's msec from the next command, before anything else the
+ * command does, so the frag explodes 3500 after HOLD entry whenever it is let go:
  * a release throws it with what is left (the server's fuse), and the countdown
  * stops at the throw. Held to the end it is MW2's grenade suicide: -1, the
  * predictable EV_GRENADE_SUICIDE and the frag spent (577c37-577c75), and a
- * release on that very think loses to it. The event names the frag (MW2's
+ * release on that very command loses to it. The event names the frag (MW2's
  * parm, offHandIndex), so the server's death drop never has to find it in
  * hand. A hand that lives (the server kills it unless in god mode) ends it on
- * the next think as a cancel does: the gun's quick raise, nothing thrown. The
+ * the next command as a cancel does: the gun's quick raise, nothing thrown. The
  * -1 stays, as MW2's OffHandEnd never writes it, until the next offhand's
  * start clears it (OffHandInit). Every other offhand keeps its whole fuseTime,
  * held as long as you like. Every time here is the data's. */
@@ -1498,7 +1498,7 @@ static void TestFragCook(void) {
  /* HOLD entry is the gun's quick drop and the frag's prepare after the press */
  entry=FragHeld(WP_SHOTGUN,1);
  CHECK(entry==BG_WeaponQuickDropTime(WP_SHOTGUN)+BG_WeaponRaiseTime(WP_FRAG));
- /* released k ms after HOLD entry: thrown on that think with fuse-k left,
+ /* released k ms after HOLD entry: thrown on that command with fuse-k left,
   * which the countdown never touches again */
  { const int when[]={1,2,100,1750,fuse-2,fuse-1};
    for(k=0;k<ARRAY_LEN(when);k++) {
@@ -1509,23 +1509,23 @@ static void TestFragCook(void) {
     Run(fuse); CHECK(ps.grenadeTimeLeft==fuse-when[k] && !suicides);
     Returned(); CHECK(fired[WP_FRAG]==1 && ps.weapon==WP_SHOTGUN);
    } }
- /* held to the end, at every think length: the think its fuse runs out on is
+ /* held to the end, at every command length: the command its fuse runs out on is
   * the suicide - nothing thrown, the frag spent, -1 left - and that is all the
-  * think does. A hand that lives ends it on the next think: the gun's quick
+  * command does. A hand that lives ends it on the next command: the gun's quick
   * raise straight away, no throw, no fuse; then the gun is back as after any
   * cancel, the latch held until it is drawn. */
  for(m=0;m<ARRAY_LEN(msecs);m++) for(k=0;k<2;k++) {
-  int thinks=0;
+  int commands=0;
   msec=msecs[m];
   FragHeld(WP_SHOTGUN,msec);
-  while(ps.grenadeTimeLeft>0 && thinks<20000) {
+  while(ps.grenadeTimeLeft>0 && commands<20000) {
    int left=ps.grenadeTimeLeft;
-   /* k: let go on the very think it runs out */
+   /* k: let go on the very command it runs out */
    if(k && left<=msec) move.cmd.buttons=0;
-   Step(msec); thinks++;
+   Step(msec); commands++;
    if(left>msec) CHECK(ps.grenadeTimeLeft==left-msec && !suicides && !fired[WP_FRAG]);
   }
-  CHECK(thinks==(fuse+msec-1)/msec);	/* the think whose msec takes it to 0 or past */
+  CHECK(commands==(fuse+msec-1)/msec);	/* the command whose msec takes it to 0 or past */
   CHECK(ps.grenadeTimeLeft==-1 && suicides==1 && !fired[WP_FRAG] && ps.ammo[WP_FRAG]==1);
   CHECK(ps.weapon==WP_FRAG && ps.weaponstate==WEAPON_READY && (ps.weaponAction&(WA_TYPE_MASK|WA_FIRED))==WA_LETHAL);
   /* the suicide names the frag that cooked out (MW2's parm, 577c37) */
@@ -1543,7 +1543,7 @@ static void TestFragCook(void) {
  }
  /* one command over several pmove steps (pmove_fixed, or a hitch past 66ms,
   * here n steps of 8 on the same buttons): a cook-out on any step but the
-  * last is followed, on that same command, by the next think's OffHandEnd,
+  * last is followed, on that same command, by the next Pmove step's OffHandEnd,
   * before the server reads the command's events. The -1 and the event's frag
   * survive it, so the server's death drop still has both. Without a gun the
   * hand is empty again at once, the latch gone a step later. */
@@ -1584,8 +1584,8 @@ static void TestFragCook(void) {
   * weapon change, refused in every offhand state, 578bc0-578c04): the fuse
   * runs on, the release throws with what is left (k 0) or the frag goes off
   * in the hand at the end of it (k 1), and the ladder drop waits for the
-  * gun's quick raise, starting on the think after the latch would clear with
-  * no ladder (i 0): that think is OFFHAND_END's last, which MW2's change
+  * gun's quick raise, starting on the command after the latch would clear with
+  * no ladder (i 0): that command is OFFHAND_END's last, which MW2's change
   * check, the ladder's branch included, refuses (578bc9-578bf2) */
  for(k=0;k<2;k++) {
   int clear=0;
@@ -1776,7 +1776,7 @@ static void TestSeaLion(void) {
  * selection is stale the hand stays empty and the slot keeps its first raise.
  * Y while the lethal is out, before or after its throw, draws the other slot
  * straight from the empty hand, never the replaced slot's gun first, and every
- * lethal empties the hand and starts that draw on the same thinks after its
+ * lethal empties the hand and starts that draw on the same commands after its
  * throw. */
 static void TestLethalFromEmptyHand(void) {
  const int lethals[]={WP_FRAG,WP_SEMTEX,WP_THROWING_KNIFE};
@@ -1826,15 +1826,15 @@ static void TestLethalFromEmptyHand(void) {
  * in the same call (578eec) out of every state its offhand check takes, so it
  * is in hand on the press and the gun is never lowered. What the gun was doing
  * is abandoned as by any swap: a reload keeps only the rounds its fill already
- * put in, and one whose note lands on the press think is lost with it (MW2's
- * hand step on that think, 44c56a-44c571); it starts again from 0. An action
+ * put in, and one whose note lands on the press command is lost with it (MW2's
+ * hand step on that command, 44c56a-44c571); it starts again from 0. An action
  * still open stays owed and is worked from 0 once the gun is back. The trigger
  * is held throughout and nothing fires but the knife, once. */
 static void KnifeOutAndBack(int gun) {
  int t, shots=fired[gun], ammo=ps.ammo[gun], reserve=ps.ammoReserve[gun];
  int owed=ps.stats[STAT_UNCHAMBERED]&(1<<gun);
  move.cmd.buttons=BUTTON_LETHAL|BUTTON_ATTACK; Step(1);
- /* holdFireTime 0: in hand and in HOLD on the press think */
+ /* holdFireTime 0: in hand and in HOLD on the press command */
  CHECK(ps.weapon==WP_THROWING_KNIFE && ps.weaponstate==WEAPON_READY &&
   ps.weaponTime==BG_THROWING_KNIFE_PULL_MS && ps.weaponAnimTime==-1);
  Run(100);
@@ -1860,8 +1860,8 @@ static void TestKnifeOutOfReload(void) {
   start=BG_ReloadSegmentTime(&ps,RSEQ_START);
   CHECK(Note(gun,RSEQ_START,WNOTE_MAG_IN)<0);	/* the first round is the loop's */
   seat=start+BG_ReloadTime(&ps,Note(gun,RSEQ_LOOP,WNOTE_MAG_IN));
-  /* mid-start, the think before the first round seats, the think it seats on,
-   * and the think after */
+  /* mid-start, the command before the first round seats, the command it seats on,
+   * and the command after */
   press=when ? seat+when-2 : start/2;
   PM_BeginReload(); Run(press-1);
   CHECK(ps.weaponstate==WEAPON_RELOADING && ps.weaponAnimSeq==(when ? RSEQ_LOOP : RSEQ_START));
@@ -1878,7 +1878,7 @@ static void TestKnifeOutOfReload(void) {
  }
 }
 /* A reload out of the shot owes the pump or bolt until its delayed action
- * settles it on the reload clock; a knife before that think, or on it, leaves
+ * settles it on the reload clock; a knife before that command, or on it, leaves
  * the action owed. */
 static void TestKnifeOutOfReloadSettle(void) {
  const int guns[]={WP_SHOTGUN,WP_M40A3};
@@ -1896,7 +1896,7 @@ static void TestKnifeOutOfReloadSettle(void) {
   CHECK(fired[gun]==1 && ps.weaponstate==WEAPON_RELOADING && ps.weaponAnimTime==0 &&
    (ps.stats[STAT_UNCHAMBERED]&(1<<gun)));
   ammo=ps.ammo[gun]; total=ammo+ps.ammoReserve[gun];
-  /* before it settles, the think it settles on, and the think after */
+  /* before it settles, the command it settles on, and the command after */
   Run(when ? settle+when-2 : settle/2);
   CHECK(ps.weaponstate==WEAPON_RELOADING && ps.ammo[gun]==ammo);
   CHECK(!!(ps.stats[STAT_UNCHAMBERED]&(1<<gun))==(when<2));
@@ -1911,7 +1911,7 @@ static void TestKnifeOutOfReloadSettle(void) {
   CHECK(ps.weaponstate==WEAPON_READY && !(ps.stats[STAT_UNCHAMBERED]&(1<<gun)) && fired[gun]==1);
  }
 }
-/* Out of the shot's fire lock, out of the pump or bolt, on the think it closes
+/* Out of the shot's fire lock, out of the pump or bolt, on the command it closes
  * and after: the action is owed unless its close landed before the press. */
 static void TestKnifeOutOfAction(void) {
  const int guns[]={WP_SHOTGUN,WP_M40A3};
@@ -1924,8 +1924,8 @@ static void TestKnifeOutOfAction(void) {
   CHECK(open>0 && close>open && close<BG_WeaponFireLength(gun));
   move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0;
   CHECK(fired[gun]==1 && ps.weaponAnimTime==0);
-  /* 1ms thinks to the one before the press: into the shot, or through its
-   * last think (READY, the clock at the open note) and the action's start
+  /* 1ms commands to the one before the press: into the shot, or through its
+   * last command (READY, the clock at the open note) and the action's start
    * from READY at that note, into the action */
   Run(when ? press : press-1);
   CHECK(ps.weaponstate==states[when] && ps.weaponAnimTime==press-1);
@@ -2007,10 +2007,10 @@ static void TestActionOutOfShot(void) {
   CHECK(!!(ps.stats[STAT_UNCHAMBERED]&(1<<gun))==owed);
   if(!buttons[b]) {
    /* The shot of a gun with a worked action is over at its open note (MW2's
-    * fireTime), and the swap begins on that think, before the action can.
+    * fireTime), and the swap begins on that command, before the action can.
     * A burst gun's (the M16 rifle, m16_shotgun_mp) waits for the burst: MW2
     * runs no change check while one is pending (0x44C444-0x44C4B3), so the
-    * swap begins on the think the last shot's time runs out. */
+    * swap begins on the command the last shot's time runs out. */
    int shot=Note(gun,ASEQ_FIRE,WNOTE_BOLT_OPEN);
    Toggle();
    for(t=0;t<12000 && ps.weaponstate!=WEAPON_DROPPING;t++) {
@@ -2081,7 +2081,7 @@ static void TestSprintLatch(void) {
   CHECK(!(ps.pm_flags&PMF_SPRINTING));
   SprintMove(1,127,0,0); CHECK(ps.pm_flags&PMF_SPRINTING);
  }
- /* The aim button ends a latched sprint and aims that same think, as MW2's
+ /* The aim button ends a latched sprint and aims that same command, as MW2's
   * ADS check ignores the sprint's weapon states; the sprint-out still holds
   * the trigger until the gun is up. */
  Ready(WP_MACHINEGUN,WP_SHOTGUN);
@@ -2352,7 +2352,7 @@ static void TestLedgeClearsLanding(void) {
 /* MW2's camera bob (BG_GetPlayerViewOrigin): its curve and amplitudes, the
  * 8-unit cap, and the snap - the cycle holds still in the air, so a sprint
  * switching there moves the eye. Its cadence (PM_Footsteps): speed over the
- * posture's most, times MW2's rate, truncated each think. */
+ * posture's most, times MW2's rate, truncated each command. */
 static void TestViewBob(void) {
  const float speed=BG_PLAYER_SPEED, c0=BG_ViewBobCycle(&ps);
  float c,v,h,vs,hs;
@@ -2372,7 +2372,7 @@ static void TestViewBob(void) {
  CHECK(fabs(BG_HorizontalViewBob(&ps,c,1000,0)-sin(c)*8)<1e-3f);		/* capped */
  ps.pm_flags=PMF_DUCKED;
  CHECK(fabs(BG_HorizontalViewBob(&ps,c,speed,0)-sin(c)*0.0075f*speed)<1e-3f);
- /* Cadence: a think at the posture's full speed, MW2's PM_GetMaxSpeed:
+ /* Cadence: a command at the posture's full speed, MW2's PM_GetMaxSpeed:
   * the sprint, aim, crouch and back scales, and MW2's own mix of the strafe
   * and back scales for a diagonal or a strafe. */
  for(i=0;i<9;i++) {
@@ -2405,7 +2405,7 @@ static void TestViewBob(void) {
  pml.msec=8;
  ps.velocity[0]=BG_PLAYER_SPEED; ps.groundEntityNum=ENTITYNUM_NONE; PM_Footsteps(); CHECK(ps.bobCycle==50);
  ps.groundEntityNum=0; ps.velocity[0]=0; move.cmd.forwardmove=pml.forwardmove=0; PM_Footsteps(); CHECK(ps.bobCycle==0);
- /* Over a second of running the cycle keeps MW2's per-think truncation. */
+ /* Over a second of running the cycle keeps MW2's per-command truncation. */
  Ready(WP_M40A3,WP_MACHINEGUN); ps.speed=BG_PLAYER_SPEED; ps.groundEntityNum=0; ps.velocity[0]=BG_PLAYER_SPEED;
  move.cmd.forwardmove=pml.forwardmove=127; pml.msec=8; ps.bobCycle=0; before=0;
  for(steps=0;steps<100;steps++) { PM_Footsteps(); before+=(int)(0.335f*8); }
@@ -2430,12 +2430,12 @@ static void FloorTrace(trace_t *tr, const vec3_t start, const vec3_t mins,
 static void FloorMove(int buttons, int up) {
  move.cmd.buttons=buttons; move.cmd.forwardmove=127; move.cmd.upmove=up;
  move.cmd.serverTime=ps.commandTime+8; Pmove(&move);
- /* The airborne sprint under a quick action never outlives its think. */
+ /* The airborne sprint under a quick action never outlives its command. */
  CHECK(!((ps.pm_flags&PMF_SPRINTING) && ((ps.weaponAction&WA_TYPE_MASK) || BG_IsActionWeapon(ps.weapon))));
 }
 /* Knife, jump, let jump go in the air with sprint held - also with the use-item
  * button, which returns from PM_Weapon before its action update runs. */
-static void TestAirSprintEndsSameThink(void) {
+static void TestAirSprintEndsSameCommand(void) {
  int extra,t;
  for(extra=0;extra<2;extra++) {
   Ready(WP_MACHINEGUN,WP_SHOTGUN);
@@ -2476,7 +2476,7 @@ static void FlatMove(int forward, int right, int up, int buttons, int msec) {
 static float FlatSpeed(void) { return sqrt(ps.velocity[0]*ps.velocity[0]+ps.velocity[1]*ps.velocity[1]); }
 typedef struct { float steady, t90, t99, dist1; } runStats_t;
 /* Run from rest for 2s; aim is taken standing still first, so the run is
- * aimed from its first think (MW2 decides aim before the move, Peace after). */
+ * aimed from its first command (MW2 decides aim before the move, Peace after). */
 static runStats_t FlatRun(int primary, int forward, int right, int up, int buttons) {
  runStats_t r={0,0,0,0}; float x0,y0,v[250]; int t,n;
  FlatReady(primary,primary==WP_MACHINEGUN ? WP_SHOTGUN : WP_MACHINEGUN);
@@ -2507,8 +2507,8 @@ static void FlatStop(int buttons, float *ms, float *dist) {
 }
 /* MW2's walk through the real Pmove against MW2's own arithmetic at 8ms (the
  * decoded rules in float32 with the round-to-nearest snap: wf16's mw2sim.py,
- * its published results), to one think: MW2 decides the sprint before the
- * move and Peace after it, so Peace's sprint pays off a think later. */
+ * its published results), to one command: MW2 decides the sprint before the
+ * move and Peace after it, so Peace's sprint pays off a command later. */
 static void TestWalkMatchesMW2(void) {
  static const struct { int primary, forward, right, up, buttons; float steady, t90, t99, dist1; } runs[] = {
   { WP_M40A3, 127, 0, 0, 0, 190, 160, 184, 175.1f },			/* walk */
@@ -2535,7 +2535,7 @@ static void TestWalkMatchesMW2(void) {
  * snaps: run, sprint, crouch, aim, crouched aim, a half stick crouched. The
  * class is the primary's at spawn: the secondary in hand keeps it (only its
  * own aim scale counts), and so does a gun picked up into the primary slot. */
-/* the engine snaps each think to whole units, so a steady speed is MW2's
+/* the engine snaps each command to whole units, so a steady speed is MW2's
  * number to within half a unit (123.5 lands on 123: 0.65f is under 0.65) */
 static int Near(float v, float want) { return fabs(v-want)<=0.5f; }
 static float Steady(int forward, int right, int up, int buttons) {
@@ -2581,9 +2581,9 @@ static void TestClassSpeeds(void) {
  CHECK(Near(Steady(127,0,0,0),152*1.07f));
 }
 /* MW2's sprint strafe: rightmove 127 becomes 84 while sprinting, before the
- * jump check, on this think's copy. W+D sprints 33.5 degrees off forward at
+ * jump check, on this Pmove step's copy. W+D sprints 33.5 degrees off forward at
  * the full sprint, a 132ms command (two Pmove substeps) scales it once, and
- * a jump out of it keeps the bend for its take-off think only. */
+ * a jump out of it keeps the bend for its take-off Pmove step only. */
 static void TestSprintStrafe(void) {
  const float bend=atan2(84,127)*180/M_PI;
  int msec,t;
@@ -2921,7 +2921,7 @@ int main(void) {
  TestG19Selector();
  TestClasses(); TestYY(); TestReloadTail(); TestActions(); TestSprintTransitions();
  TestSprintLatch(); TestSprintTime(); TestAirSprintDuringAction(); TestKnifeInBolt(); TestActionOutOfShot(); TestEquipmentBeatsKnife(); TestEquipmentCutsKnife(); TestSwapBeatsKnife(); TestOtherGunRaise(); TestGrenadeKeepsHolster(); TestGrenadeKeepsRecoveryHolster(); TestGrenadeOutOfRaise(); TestNoSwapInQuickAction(); TestSemtexCancelKeepsLock(); TestThrowingKnife(); TestTacticalInsertion(); TestHoldThrowsBeforeCancel(); TestFragCook(); TestSeaLion(); TestLethalFromEmptyHand(); TestKnifeOutOfReload(); TestKnifeOutOfReloadSettle(); TestKnifeOutOfAction(); TestKnifeInKnife(); TestMeleeNoDrop(); TestKnifeTimeline(); TestRecovery();
- TestMovementScale(); TestWalkMatchesMW2(); TestClassSpeeds(); TestSprintStrafe(); TestPitchClamp(); TestBodyHeights(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameThink(); TestWaterEndsJump(); TestAirSprintSwap(); TestHeldThroughRespawn(); TestFrozen();
+ TestMovementScale(); TestWalkMatchesMW2(); TestClassSpeeds(); TestSprintStrafe(); TestPitchClamp(); TestBodyHeights(); TestAirSprint(); TestAirControl(); TestSprintCancelsAirAim(); TestLedgeClearsLanding(); TestViewBob(); TestAirSprintEndsSameCommand(); TestWaterEndsJump(); TestAirSprintSwap(); TestHeldThroughRespawn(); TestFrozen();
  printf("PASS: %d class, YY and quick-action checks\n",checks);
  return 0;
 }

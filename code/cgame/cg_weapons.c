@@ -1559,7 +1559,7 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	// picture: MW2's drop animation played out and holds its last frame, the
 	// gun stowed, for as long as the trigger is held (BG_LadderHolsterDown).
 	// The state is still the drop and the gun still in hand: pmove gives it
-	// back on the think the ladder is left, and the layers below, kept
+	// back on the command the ladder is left, and the layers below, kept
 	// running, carry the picture on from the drop's end. It stays stowed for
 	// what is left of that drop when equipment takes it on the leaving
 	// command (CG_WeapAnim_LadderStowed).
@@ -3060,7 +3060,7 @@ CG_EntityShot
 
 Someone else's shot, from their entity's event: its snapped origin, its eye
 (origin2[2], the shooter's ps.viewheight, unsnapped: the eye the server's
-muzzle used, on every think of a stance's eye curve), its aim (snapped to
+muzzle used, on every command of a stance's eye curve), its aim (snapped to
 whole degrees), the time of its last command and the spread its motion and
 stance show. The stance is MW2's EF_CROUCHING and EF_PRONE, written from the
 flags the shot's spread read. Aiming is not on the entity, so it is the hip's.

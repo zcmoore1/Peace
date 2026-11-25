@@ -6,7 +6,7 @@
  * CG_OutOfAmmoChange and cycle (cg_weapons.c, MW2's 0x5A07C0 and 0x59ED40)
  * select. The client's frame order is moni_test.c's: a frame's bound commands,
  * its command (built with the weapon cgame set when it last drew), the
- * server's think (Pmove, then the use step), then cgame plays the predicted
+ * server running it (Pmove, then the use step), then cgame plays the predicted
  * state's new out-of-ammo events, as CG_CheckPlayerstateEvents does, and sets
  * the next command's weapon. The other events are counted, not played: their
  * pictures and sounds are not under test. Y and the alt toggle are the real
@@ -158,7 +158,7 @@ static void PlayEvents(int from) {
 }
 
 #define IN_Y 1
-/* One client frame: bound commands, the command, the server's think, the draw. */
+/* One client frame: bound commands, the command, the server running it, the draw. */
 static void Frame(int buttons, int keys) {
 	int from;
 	if (keys & IN_Y) CG_NextWeapon_f();
@@ -180,7 +180,7 @@ static void Settle(void) {
 	int t;
 	for (t = 0; t < 5000; t++) {
 		Frame(0, 0);
-		/* not the READY think between a shot and the action it owes */
+		/* not the READY command between a shot and the action it owes */
 		if (PS->weaponstate == WEAPON_READY && PS->weapon == cg.weaponSelect &&
 		    !BG_ShotAwaitsAction(PS)) return;
 	}

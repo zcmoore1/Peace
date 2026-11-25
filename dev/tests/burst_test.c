@@ -1,7 +1,7 @@
 /* MW2's burst fire, through the real code: the real full Pmove, the real
  * CG_EntityEvent for the player's own out-of-ammo events and the real
  * selection handlers (cg_weapons.c), in trigger_test.c's frame order (a
- * frame's bound commands, its command, the server's think, then the draw that
+ * frame's bound commands, its command, the server running it, then the draw that
  * plays the new events and sets the next command's weapon), at 8, 16 and 33ms
  * commands.
  *
@@ -12,12 +12,12 @@
  * 0x576A70): the gun fires as each shot's time runs out whatever the trigger
  * does (ShouldBeFiring, 0x576D3F-0x576D62) and PM_Weapon runs none of its
  * checks (0x44C444-0x44C4B3), so nothing asked for inside the burst begins
- * before its last shot has left. On the think the last shot's time runs out
+ * before its last shot has left. On the command the last shot's time runs out
  * the gun is READY with the cooldown, player_burstFireCooldown's 0.2s, on its
  * time (WeaponTimeAdjust, 0x578939-0x5789CD). A fresh press made after the
  * pull's first shot is latched (UpdatePendingTriggerPull, 0x576AD0): at the
  * cooldown's end a held trigger with the latch starts the next burst on that
- * think, one held without it is locked like any single-shot gun's
+ * command, one held without it is locked like any single-shot gun's
  * (0x5789DD-0x578B71), and only a pull's first shot clears the latch
  * (0x576FB0).
  *
@@ -243,7 +243,7 @@ static void Wire(playerState_t *decoded) {
 }
 
 /* The burst in commands, the first shot's own command 0: a shot takes c of
- * them (its whole fireTime, 0x576E9C, given on the think the last one's ran
+ * them (its whole fireTime, 0x576E9C, given on the command the last one's ran
  * out), the cooldown begins on 3c and runs out on C. Every length is the
  * game's: the rifle's fire time from its generated data and the cooldown's
  * constant, both checked against what pmove stamps. */
@@ -846,7 +846,7 @@ static void TestCarriedCount(void) {
 /* A ladder grabbed inside the burst (MW2's ladder holster is its change check's
  * ladder branch, 0x578C72, skipped with the rest while a burst is pending,
  * 0x44C444-0x44C4B3): the burst plays out on the ladder, its shots on c and
- * 2c, and the drop begins on the think the last shot's time runs out, the
+ * 2c, and the drop begins on the command the last shot's time runs out, the
  * cooldown's first: MW2's change gate refuses the shot while it has time left
  * (0x578C31) and takes the cooldown's READY (0x578C0A-0x578C47). The count
  * and the pending pull are not the ladder's to write (section 3 of the
@@ -997,9 +997,9 @@ static void TestRifleData(void) {
 
 /* A trigger worked by a program, as the game's bots work theirs
  * (BotPullTrigger, ai_dmq3.c, through the one shared rule,
- * BG_TriggerNeedsRelease): pressed on every think but one that finds the
- * trigger down from the last think with the pull's shots all fired, which
- * lets it up for that think. A bot thinks every 100ms over 50ms server
+ * BG_TriggerNeedsRelease): pressed on every AI frame but one that finds the
+ * trigger down from the last AI frame with the pull's shots all fired, which
+ * lets it up for that AI frame. A bot's AI runs every 100ms over 50ms server
  * commands; so driven, the burst rifle fires burst after burst and every
  * Single Shot gun shot after shot, where a trigger simply held fires one
  * pull's worth and no more; a full-auto gun is never let go. */
@@ -1008,7 +1008,7 @@ static void TestBotTrigger(void) {
 	int g, f, v;
 	msec = 50;
 	for (g = 0; g < ARRAY_LEN(guns); g++) for (v = 0; v < 2; v++) {	/* 1: simply held */
-		int gun = guns[g], held = 0, thinkEvery = 2, n = 400, pull = 1, releases = 0;
+		int gun = guns[g], held = 0, aiFrameEvery = 2, n = 400, pull = 1, releases = 0;
 		int type = BG_WeaponFireType(gun);
 		while (type != BG_FIRE_FULLAUTO && !BG_ShotLimitReached(type, pull)) pull++;
 		if (gun == WP_M16 || gun == WP_MASTERKEY) SetupClass(WP_M16, WP_SHOTGUN, 0, gun == WP_MASTERKEY);
@@ -1017,7 +1017,7 @@ static void TestBotTrigger(void) {
 		if (gun != WP_M16 && gun != WP_MASTERKEY) SetAmmo(0, BG_WeaponMagSize(gun), 0, 0, 0);
 		CHECK(PS->weapon == gun);
 		for (f = 0; f < n && PS->ammo[gun] > 0; f++) {
-			if (f % thinkEvery == 0) {
+			if (f % aiFrameEvery == 0) {
 				qboolean release = !v && BG_TriggerNeedsRelease(PS, held);
 				releases += release;
 				held = !release;
@@ -1034,10 +1034,10 @@ static void TestBotTrigger(void) {
 		}
 	}
 	/* A trigger that is up is pressed whatever the count says: a pull ends
-	 * only on a think a state's time runs out with the trigger up, and a gun
-	 * at rest has no such think. The rifle after YY inside its cooldown is
+	 * only on a command a state's time runs out with the trigger up, and a gun
+	 * at rest has no such command. The rifle after YY inside its cooldown is
 	 * READY with no time and its count still at the limit (above): the
-	 * program's next think presses, and the rifle fires. */
+	 * program presses on the next command, and the rifle fires. */
 	msec = rates[0]; Rate(msec);
 	Rifle(); Pull(); RestOfBurst(0);
 	Frame(0, IN_Y); CooldownBegins();

@@ -46,14 +46,14 @@ static qboolean CG_WeapPicture_GunAction( const playerState_t *ps ) {
 	if ( ps->weapon <= WP_NONE || ps->weapon >= WP_NUM_WEAPONS || BG_IsActionWeapon( ps->weapon ) ) {
 		return qfalse;
 	}
-	// The shot's READY think (BG_ShotAwaitsAction) is still the shot: its
-	// pump or bolt follows on the next think.
+	// The shot's READY command (BG_ShotAwaitsAction) is still the shot: its
+	// pump or bolt follows on the next command.
 	return ps->weaponstate == WEAPON_RELOADING || ps->weaponstate == WEAPON_FIRING ||
 		ps->weaponstate == WEAPON_BOLTING || BG_ShotAwaitsAction( ps );
 }
 
 // A new action of the held gun, not the pump continuing the same shot, across
-// the shot's READY think or straight over it. The SF (the G19's select-fire
+// the shot's READY command or straight over it. The SF (the G19's select-fire
 // switch), also worked in WEAPON_BOLTING, is no pump: begun out of a shot it is
 // a new action.
 static qboolean CG_WeapPicture_BeganAction( const playerState_t *before, const playerState_t *after ) {

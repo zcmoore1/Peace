@@ -185,8 +185,8 @@ SF allows or refuses the same way, by the same code:
   held there by MW2's lock until it is let go, as at the end of a pump. The
   **freeze** lets the SF run to its end.
 - **Its edges.** An empty G19 with rounds in reserve, its selector pressed on
-  the think its last shot's lock runs out, starts the SF and is reloaded
-  out of it on the next think, as an empty SPAS is reloaded out of its pump:
+  the command its last shot's lock runs out, starts the SF and is reloaded
+  out of it on the next command, as an empty SPAS is reloaded out of its pump:
   the SF is lost and the mode unchanged. A selector pressed again on the
   SF's last command starts the next SF there, as a trigger tapped
   there fires.
@@ -251,14 +251,14 @@ During a fire/bolt cycle the sprint flag runs (speed, meter) while pmove keeps
 what the gun is doing: as MW2's `PM_Weapon_CheckForSprint`, step 1b never
 lowers a shot in progress or `WEAPON_BOLTING`, just as it never lowers a raise
 or a drop. MW2's shot ends READY with the action owed at the end of its last
-think (the think the fire clock reaches the open note, `PM_ShotOver`), and on
+command (the command the fire clock reaches the open note, `PM_ShotOver`), and on
 the next its sprint check comes before the rechamber, so a sprint on by that
-READY think lowers the gun there: the picture carries the fire clip it was
-showing (still on screen across the READY think, `BG_ShotAwaitsAction`), the
+READY command lowers the gun there: the picture carries the fire clip it was
+showing (still on screen across the READY command, `BG_ShotAwaitsAction`), the
 action stays owed, and once the gun is back up it plays the whole action from
 its open note (MW2's rechamber from READY), never the shot again. A
 sprint begun once the action is under way lets the fire clip play to its end;
-the cycle ends `WEAPON_READY` and chambered, and the next think starts the
+the cycle ends `WEAPON_READY` and chambered, and the next command starts the
 sprint entry from rest. A sprint therefore never cuts the pump or bolt, and
 the close note never meets a sprint lock. A reload is still lowered at once
 (MW2's sprint raise is taken out of its reload states).
@@ -266,9 +266,9 @@ the close note never meets a sprint lock. A reload is still lowered at once
 Sprint + Y and sprint + YY use the ordinary cycle/drop-cancellation path.
 On cancellation a retained draw/drop or sprint transition returns along its
 visible clip. A swap does not end a sprint (a sprint latches, as in MW2), so
-its entry resumes without jumping back to frame zero: the YY think readies the
+its entry resumes without jumping back to frame zero: the YY command readies the
 gun (MW2's double-tap cancel comes after its sprint check, iw4x 0x44C4D7, so
-a pump or bolt still owed is worked first) and the next think lowers it again
+a pump or bolt still owed is worked first) and the next command lowers it again
 from the pose its return shows. Sprint, Y, end the
 sprint (a fresh sprint press, aim, letting go of forward), Y brings the
 retained entry, carry or exit home through the same move-layer return, as
@@ -312,7 +312,7 @@ flash, Semtex, throwing knife, Tactical Insertion) goes the other way, through
 MW2's offhand machine with each item's own weapon data (the IW4 dump's
 `weapons/mp` files; the table in `bg_loadout.c` and the raise table in
 `bg_pmove.c`): the gun goes down on its quick drop (250ms; the throwing knife
-comes straight out, and an item pressed on the knife's hit think is prepared
+comes straight out, and an item pressed on the knife's hit command is prepared
 on it, as MW2's meleeDelay running out spends the drop), then the item's prepare, its holdFireTime (600ms for the
 frag, flash and Semtex, none for the throwing knife, the TI's 2.63s ignite).
 Then it waits in hand (MW2's HOLD) while an offhand button - the lethal or the
@@ -339,8 +339,8 @@ the gun's quick raise, as MW2's ladder drop is a weapon change, and nothing new 
 ladder. (That same change waits out a shot, hangs under the held trigger's lock and is cancelled
 back to the gun, with no raise, when the ladder is left before it ends: `dev/LADDERS.md`.)
 Every knife and grenade defers a Y until the gun it
-left is fully back on its quick raise, and the swap begins on the think after
-(MW2's CheckForChangeWeapon refuses that raise's last think too); YY cannot
+left is fully back on its quick raise, and the swap begins on the command after
+(MW2's CheckForChangeWeapon refuses that raise's last command too); YY cannot
 cancel that raise. The Semtex's hold/release and pre-throw cancel (MW2's: in
 the drop or the pull Y always cancels; once held ready only while an offhand
 button is still down, so letting go with Y on one command throws) are

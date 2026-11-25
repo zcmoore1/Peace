@@ -158,7 +158,7 @@ static void TestHeld(int gun) {
   ready=rendered[1]; CHECK(ready.origin[2]>first.origin[2]+15);
  } else {
   /* holdFireTime 0 (the throwing knife's): it is in HOLD, ready, on its press
-   * think, so it is never drawn raising. The picture still plays the authored
+   * command, so it is never drawn raising. The picture still plays the authored
    * pull-out at its own length from when it is first shown, smoothly, then
    * holds where the pull ends. */
   int start;
@@ -375,7 +375,7 @@ static void TestLadderViewEdges(void) {
  CHECK((viewPs.stats[STAT_LADDER]&LADDER_HOLSTER) && !BG_LadderHolsterDown(&viewPs) && low>23);
  CHECK(ViewStepMs(11)==-1 && viewPs.weaponstate==WEAPON_LADDER);
  /* With the trigger held and the pull spent the lock keeps that 1 on the
-  * next think: it has run out, the gun out of view. */
+  * next command: it has run out, the gun out of view. */
  ViewBegin(); CHECK(ViewStep()==0); ViewSpendPull();
  viewPs.stats[STAT_LADDER]|=LADDER_ATTACHED;
  CHECK(ViewStepMs(11)==0 && viewPs.weaponstate==WEAPON_DROPPING && viewPs.weaponTime==BG_LADDER_DROP_TIME);
@@ -401,7 +401,7 @@ static void TestLadderViewEdges(void) {
  /* Equipment pressed on the command the ladder is left, out of that hang: it
   * takes the drop as it is, its last 1ms, with the ladder's mark gone (MW2's
   * OffHandInit keeps a running drop's time), and is prepared on the next
-  * command. The gun, stowed through the hang, is not drawn for that think. */
+  * command. The gun, stowed through the hang, is not drawn for that command. */
  viewPs.stats[STAT_LADDER]&=~LADDER_ATTACHED; view.cmd.buttons=BUTTON_ATTACK|BUTTON_LETHAL;
  CHECK(viewPs.ammo[WP_FRAG]>0);
  low=ViewStep();

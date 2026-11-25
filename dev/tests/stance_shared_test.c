@@ -250,7 +250,7 @@ static void TestHitVolumeGeometry(void) {
 	const float yaws[] = { 0, 37.5f, 90, 181.25f, 300 }, pitches[] = { 0, -12, 9.5f };
 	playerState_t ps; entityState_t es; bgHitVolume_t vols[BG_MAX_HIT_VOLUMES]; vec3_t mins, maxs, p, f, r, u, ang;
 	int y, pi, k, n, o, b;
-	/* over the box: a leg's first think reaches the old box's top exactly */
+	/* over the box: a leg's first command reaches the old box's top exactly */
 	memset(&ps, 0, sizeof(ps)); ps.pm_type = PM_NORMAL; ps.stats[STAT_HEALTH] = 100;
 	VectorSet(ps.origin, 64, -32, 24);
 	ps.pm_flags = PMF_DUCKED; ps.viewheight = DEFAULT_VIEWHEIGHT;

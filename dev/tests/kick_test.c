@@ -165,7 +165,7 @@ static void Frame( int buttons ) {
 	now += FRAME;
 	KickTestFinishMove( &lastCmd, now, view, BG_SlotCommand( &ps, slot ) );	/* the client's command */
 	lastCmd.buttons = buttons;
-	move.cmd = lastCmd; KickPmove( &move );	/* the server's and the prediction's think */
+	move.cmd = lastCmd; KickPmove( &move );	/* the server's and the prediction's Pmove of it */
 	frameFired = -1;	/* what pmove fired this command, if anything */
 	for ( seq = old.eventSequence; seq < ps.eventSequence; seq++ ) {
 		if ( ps.events[seq & ( MAX_PS_EVENTS - 1 )] == EV_FIRE_WEAPON ) { frameFired = ps.weapon; fires[ps.weapon]++; raised++; }

@@ -2977,7 +2977,7 @@ hud_720.menu): "Prone Blocked" while a prone turn is blocked, and MW2's two
 blocked-stance texts, which no Peace event arms. Shown CG_INVALID_HINT_MS
 from when it was armed, then cleared here, by the draw, and nowhere else; its
 alpha ramps from 0 to 1 every CG_INVALID_HINT_BLINK_MS of that. So an event
-every think shows three ramps, and the first event after the clear arms it
+every command shows three ramps, and the first event after the clear arms it
 again: it blinks for as long as the block lasts. MW2 shows it unless a menu
 is up or a client is spectated (the item's visible when: !ui_active() &&
 !spectatingclient()); the scoreboard does not hide it. While it is hidden this

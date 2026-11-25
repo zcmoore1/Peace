@@ -1,4 +1,4 @@
-/* Actual client selection handlers, snapshot validation and weapon thinks.
+/* Actual client selection handlers, snapshot validation and weapon steps.
  * A delayed snapshot must never undo a more recent mode press or Y. The cycle
  * is MW2's: an underbarrel's Y is its rifle, the rifle's Y is the next gun,
  * and the cycle brings a gun back in its own mode. */
@@ -91,7 +91,7 @@ static void TestRapidModeInput(void) {
 	CG_AltWeapon_f();
 	ExpectIntent(0,WP_M16);
 	CHECK(!swapPresses);
-	/* An actual mode change is there on its first think (MW2's altDropTime),
+	/* An actual mode change is there on its first command (MW2's altDropTime),
 	 * and MW2's toggle is refused all through its raise: no way back, no shot. */
 	CG_AltWeapon_f(); Step(1,0);
 	CHECK(cg.predictedPlayerState.weapon==WP_MASTERKEY);
@@ -118,7 +118,7 @@ static void TestCycle(void) {
 	CG_AltWeapon_f(); Settle();
 	CHECK(cg.predictedPlayerState.weapon==WP_MASTERKEY);
 	CHECK(!(snapshot.ps.slotFlags[0]&BG_GUN_ALTERNATE)); /* server still behind */
-	/* The underbarrel's Y is its rifle: the mode change, there on its think. */
+	/* The underbarrel's Y is its rifle: the mode change, there on its command. */
 	CG_NextWeapon_f(); ExpectIntent(0,WP_M16); Step(1,0);
 	CHECK(cg.predictedPlayerState.weapon==WP_M16);
 	CHECK(cg.predictedPlayerState.weaponstate==WEAPON_RAISING && cg.predictedPlayerState.weaponDraw==WDRAW_ALT);
@@ -126,7 +126,7 @@ static void TestCycle(void) {
 	CG_NextWeapon_f(); ExpectIntent(1,WP_SHOTGUN); Step(1,0);
 	CHECK(cg.predictedPlayerState.weapon==WP_M16 && cg.predictedPlayerState.weaponstate==WEAPON_DROPPING);
 	CHECK(cg.predictedPlayerState.weaponTime==BG_WeaponDropTime(WP_M16));
-	/* A third is back on the rifle still in hand: ready on that think, and it fires. */
+	/* A third is back on the rifle still in hand: ready on that command, and it fires. */
 	CG_NextWeapon_f(); ExpectIntent(0,WP_M16);
 	rounds=cg.predictedPlayerState.ammo[WP_M16];
 	Step(1,BUTTON_ATTACK);

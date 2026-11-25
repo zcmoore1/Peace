@@ -38,7 +38,7 @@ void trap_SnapVector( float *v ) {
 /*
  * Everything below is derived from the shipped tables rather than written as a
  * literal. These tests exist to pin down ORDERING - what happens on the same
- * think as what - and ordering has to keep holding when a weapon is retimed.
+ * command as what - and ordering has to keep holding when a weapon is retimed.
  * An earlier version of this file hardcoded 500/550/350 and started failing the
  * moment the real MW2 lengths landed, which said nothing about the behaviour.
  */
@@ -57,26 +57,26 @@ static int NoteTime( int weapon, int seq, int note ) {
 	return -1;
 }
 
-/* MW2's fire cycle, counted in thinks of 'step' after the shot's own think
- * (think 0). The shot's clock stops at the open note, and its last think ends
+/* MW2's fire cycle, counted in commands of 'step' after the shot's own command
+ * (command 0). The shot's clock stops at the open note, and its last command ends
  * READY owing the action (ShouldBeFiring, iw4x 0x576D99-0x576DA3); the action
- * starts from READY on the next think, at the open note (CheckForRechamber,
+ * starts from READY on the next command, at the open note (CheckForRechamber,
  * 0x575B77-0x575BA9: rechamberTime, the fire clip after its open note), is
- * bolted on the think the clock crosses the close note (the bolt delay,
- * 0x575BD8-0x575C03, taken at 0x575ABD-0x575ACC) and ends READY on the think
+ * bolted on the command the clock crosses the close note (the bolt delay,
+ * 0x575BD8-0x575C03, taken at 0x575ABD-0x575ACC) and ends READY on the command
  * it reaches the clip's length. */
-static int Thinks( int ms, int step ) {
+static int Commands( int ms, int step ) {
 	return ( ms + step - 1 ) / step;
 }
-static int ShotEndThink( int weapon, int step ) {
-	return Thinks( NoteTime( weapon, ASEQ_FIRE, WNOTE_BOLT_OPEN ), step );
+static int ShotEndCommand( int weapon, int step ) {
+	return Commands( NoteTime( weapon, ASEQ_FIRE, WNOTE_BOLT_OPEN ), step );
 }
-static int CloseThink( int weapon, int step ) {
-	return ShotEndThink( weapon, step ) + 1 + Thinks( NoteTime( weapon, ASEQ_FIRE, WNOTE_BOLT_CLOSED ) -
+static int CloseCommand( int weapon, int step ) {
+	return ShotEndCommand( weapon, step ) + 1 + Commands( NoteTime( weapon, ASEQ_FIRE, WNOTE_BOLT_CLOSED ) -
 		NoteTime( weapon, ASEQ_FIRE, WNOTE_BOLT_OPEN ), step );
 }
-static int CycleEndThink( int weapon, int step ) {
-	return ShotEndThink( weapon, step ) + 1 + Thinks( BG_WeaponFireLength( weapon ) -
+static int CycleEndCommand( int weapon, int step ) {
+	return ShotEndCommand( weapon, step ) + 1 + Commands( BG_WeaponFireLength( weapon ) -
 		NoteTime( weapon, ASEQ_FIRE, WNOTE_BOLT_OPEN ), step );
 }
 /* The action alone, worked from READY: rechamberTime. */
@@ -147,10 +147,10 @@ static void RunFor( int duration, int step ) {
  * trigger down as the start or a pass ends asks too (FinishReloadStart
  * 0x5783DE-0x5783FC, FinishReload 0x578564-0x578582). Then the end plays, and
  * a trigger still held fires on the reload's last command (the owner's
- * choice; MW2 fires the think after). Each segment starts afresh on the think
+ * choice; MW2 fires the command after). Each segment starts afresh on the command
  * the one before it ended (MW2's crossing drops the overshoot, 0x578B71, and
  * PM_SetReloadingState gives the next its whole time, 0x575E20): it ends on
- * the first think at or past its start plus its length. */
+ * the first command at or past its start plus its length. */
 static int reloadElapsed;	/* ms of reload run since BeginReload */
 static void ReloadStep( int msec ) {
 	Step( msec );
@@ -159,22 +159,22 @@ static void ReloadStep( int msec ) {
 static void ReloadTo( int elapsed ) {
 	while ( reloadElapsed < elapsed ) ReloadStep( 1 );
 }
-/* The thinks run 1ms apart up to 'fine' and 'step' apart after it: the first
+/* The commands run 1ms apart up to 'fine' and 'step' apart after it: the first
    one at or past 't'. */
-static int ThinkAt( int t, int fine, int step ) {
+static int CommandAt( int t, int fine, int step ) {
 	return t <= fine ? t : fine + ( t - fine + step - 1 ) / step * step;
 }
-/* Where the end begins after the start and 'passes' passes, on those thinks. */
+/* Where the end begins after the start and 'passes' passes, on those commands. */
 static int EndBegins( int passes, int fine, int step ) {
-	int t = ThinkAt( Seg( WP_SHOTGUN, RSEQ_START ), fine, step );
-	while ( passes-- > 0 ) t = ThinkAt( t + Seg( WP_SHOTGUN, RSEQ_LOOP ), fine, step );
+	int t = CommandAt( Seg( WP_SHOTGUN, RSEQ_START ), fine, step );
+	while ( passes-- > 0 ) t = CommandAt( t + Seg( WP_SHOTGUN, RSEQ_LOOP ), fine, step );
 	return t;
 }
 /* The reload stops after the start and 'passes' passes with 'loaded' shells,
-   plays its end, and the trigger, held from now on, fires on its last think. */
+   plays its end, and the trigger, held from now on, fires on its last command. */
 static void StopsAndFires( int passes, int loaded, int reserve, int step ) {
 	const int stop = EndBegins( passes, reloadElapsed, step );
-	const int end = ThinkAt( stop + Seg( WP_SHOTGUN, RSEQ_END ), reloadElapsed, step );
+	const int end = CommandAt( stop + Seg( WP_SHOTGUN, RSEQ_END ), reloadElapsed, step );
 	testMove.cmd.buttons = BUTTON_ATTACK;
 	while ( reloadElapsed < end ) {
 		CHECK( shots == 0 && testPs.weaponstate == WEAPON_RELOADING );
@@ -196,8 +196,8 @@ static void StopsAndFires( int passes, int loaded, int reserve, int step ) {
 static void TestAttackInterrupt( int step ) {
 	const int start = Seg( WP_SHOTGUN, RSEQ_START ), loop = Seg( WP_SHOTGUN, RSEQ_LOOP );
 	const int seats = ShellSeats( 1 ), i0 = 1;
-	/* the start's first think, its 0.4 and just past, the pass before its
-	   shell, the shell's own think and after it */
+	/* the start's first command, its 0.4 and just past, the pass before its
+	   shell, the shell's own command and after it */
 	const int times[] = { i0, start * 2 / 5, start * 2 / 5 + 1, start - 1,
 		( start + seats ) / 2, seats - 1, seats, seats + 1, start + loop - 1 };
 	int i;
@@ -239,7 +239,7 @@ static void TestReleasedAttack( int step ) {
 		ReloadStep( 1 );
 		testMove.cmd.buttons = 0;
 		stop = EndBegins( passes, reloadElapsed, step );
-		end = ThinkAt( stop + Seg( WP_SHOTGUN, RSEQ_END ), reloadElapsed, step );
+		end = CommandAt( stop + Seg( WP_SHOTGUN, RSEQ_END ), reloadElapsed, step );
 		while ( reloadElapsed < end ) {
 			CHECK( testPs.weaponstate == WEAPON_RELOADING );
 			CHECK( ( testPs.weaponAnimSeq == RSEQ_END ) == ( reloadElapsed >= stop ) );
@@ -248,7 +248,7 @@ static void TestReleasedAttack( int step ) {
 		CHECK( testPs.weaponstate == WEAPON_READY && shots == 0 );
 		CHECK( testPs.ammo[WP_SHOTGUN] == loaded && testPs.ammoReserve[WP_SHOTGUN] == 10 - ( loaded - 3 ) );
 	}
-	/* The start's 0.4 is of its own length: a press on its first think is
+	/* The start's 0.4 is of its own length: a press on its first command is
 	   below it at every rate a client sends. */
 	CHECK( 66 * 5 <= start * 2 );
 }
@@ -271,7 +271,7 @@ static void TestNaturalEnd( int loaded, int reserve, int step ) {
 static void TestMagazineUnchanged( int step ) {
 	BeginReload( WP_MACHINEGUN, 3, 40 );
 	testMove.cmd.buttons = BUTTON_ATTACK;
-	/* First think enters its zero-length START -> LOOP. */
+	/* First command enters its zero-length START -> LOOP. */
 	RunFor( NoteTime( WP_MACHINEGUN, RSEQ_LOOP, WNOTE_MAG_IN ) - 1, 1 );
 	CHECK( testPs.weaponstate == WEAPON_RELOADING );
 	CHECK( testPs.weaponAnimSeq == RSEQ_LOOP );
@@ -287,7 +287,7 @@ static void TestMagazineUnchanged( int step ) {
 
 static void TestSwapSprintPreserved( int sprint, int offset ) {
 	int remaining;
-	/* Interrupt on the think the SECOND shell would seat. */
+	/* Interrupt on the command the SECOND shell would seat. */
 	BeginReload( WP_SHOTGUN, 3, 10 );
 	RunFor( ShellSeats( 2 ) - 1 + offset, 1 );
 	if ( sprint ) {
@@ -370,11 +370,11 @@ static void TestPumpIsItsOwnState( int step ) {
 	ReadyToFire();
 	testMove.cmd.buttons = 0;
 
-	/* The shot itself, to the think before its last. */
-	for ( t = 1; t < ShotEndThink( WP_SHOTGUN, step ); t++ ) Step( step );
+	/* The shot itself, to the command before its last. */
+	for ( t = 1; t < ShotEndCommand( WP_SHOTGUN, step ); t++ ) Step( step );
 	CHECK( testPs.weaponstate == WEAPON_FIRING && testPs.weaponAnimTime < open );
 
-	/* Its last think ends READY, owing the action, the clock at the open
+	/* Its last command ends READY, owing the action, the clock at the open
 	   note (MW2's ShouldBeFiring): nothing of the action yet. */
 	Step( step );
 	CHECK( testPs.weaponstate == WEAPON_READY && testPs.weaponTime == 0 );
@@ -386,10 +386,10 @@ static void TestPumpIsItsOwnState( int step ) {
 	Step( step );
 	CHECK( testPs.weaponstate == WEAPON_BOLTING && !BG_ShotAwaitsAction( &testPs ) );
 	CHECK( testPs.weaponAnimTime == open && testPs.weaponTime == ActionLength( WP_SHOTGUN ) );
-	for ( t = ShotEndThink( WP_SHOTGUN, step ) + 2; t < CycleEndThink( WP_SHOTGUN, step ); t++ ) {
+	for ( t = ShotEndCommand( WP_SHOTGUN, step ) + 2; t < CycleEndCommand( WP_SHOTGUN, step ); t++ ) {
 		Step( step );
 		CHECK( testPs.weaponstate == WEAPON_BOLTING );
-		CHECK( !!( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN) ) == ( t < CloseThink( WP_SHOTGUN, step ) ) );
+		CHECK( !!( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN) ) == ( t < CloseCommand( WP_SHOTGUN, step ) ) );
 	}
 
 	/* Only when the whole action has played does the gun come back up. */
@@ -401,14 +401,14 @@ static void TestPumpIsItsOwnState( int step ) {
 /* A frozen player's shot (MW2's PMF_FROZEN): MW2's hand step returns before
    ShouldBeFiring (0x579505), so a shot that runs out frozen stays FIRING,
    over, and its action never starts (CheckForRechamber starts it only from
-   READY, 0x575B77); the first think the freeze has lifted ends it READY, and
+   READY, 0x575B77); the first command the freeze has lifted ends it READY, and
    the next starts the action from READY at the open note. */
 static void TestFrozenShotEnd( int step ) {
 	int open = FireNote( WNOTE_BOLT_OPEN ), t;
 	ReadyToFire();
 	testMove.cmd.buttons = 0;
 	testPs.pm_flags |= PMF_FROZEN;
-	for ( t = 1; t < ShotEndThink( WP_SHOTGUN, step ) + 5; t++ ) {
+	for ( t = 1; t < ShotEndCommand( WP_SHOTGUN, step ) + 5; t++ ) {
 		Step( step );
 		CHECK( testPs.weaponstate == WEAPON_FIRING && !BG_ShotAwaitsAction( &testPs ) );
 		CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN) );
@@ -422,7 +422,7 @@ static void TestFrozenShotEnd( int step ) {
 	CHECK( testPs.weaponTime == ActionLength( WP_SHOTGUN ) && shots == 1 );
 
 	/* The trigger down as the freeze lifts: the shot ran out frozen, where
-	   MW2's command keeps no trigger, so that think's lock found it up and the
+	   MW2's command keeps no trigger, so that command's lock found it up and the
 	   pull was over (WeaponTimeAdjust 0x578B51-0x578B67); unfrozen, the gun is
 	   still FIRING and its time has run out, and MW2's ShouldBeFiring fires it
 	   again (0x576D3F-0x576D62), the action still owed: CheckForRechamber
@@ -431,7 +431,7 @@ static void TestFrozenShotEnd( int step ) {
 	ReadyToFire();
 	testMove.cmd.buttons = 0;
 	testPs.pm_flags |= PMF_FROZEN;
-	for ( t = 1; t < ShotEndThink( WP_SHOTGUN, step ) + 5; t++ ) Step( step );
+	for ( t = 1; t < ShotEndCommand( WP_SHOTGUN, step ) + 5; t++ ) Step( step );
 	CHECK( testPs.weaponstate == WEAPON_FIRING && testPs.weaponShotCount == 0 && shots == 1 );
 	testPs.pm_flags &= ~PMF_FROZEN;
 	testMove.cmd.buttons = BUTTON_ATTACK;
@@ -442,17 +442,17 @@ static void TestFrozenShotEnd( int step ) {
 }
 
 static void TestPumpCannotBeShortCircuited( void ) {
-	int t, heldEnd = ShotEndThink( WP_SHOTGUN, 1 ) + Thinks( ActionLength( WP_SHOTGUN ), 1 );
+	int t, heldEnd = ShotEndCommand( WP_SHOTGUN, 1 ) + Commands( ActionLength( WP_SHOTGUN ), 1 );
 	/* Holding fire must not produce a second shot before the cycle is over -
 	   the chamber note gives the lock away partway through, so if anything
 	   were gated on the lock alone this is where it would double-fire. Nor
 	   after it: the SPAS is single shot (spas12_mp), and MW2's lock holds a
 	   gun whose trigger is still down from its shot READY with weaponTime 1
 	   (WeaponTimeAdjust, iw4x 0x5789DD-0x578AE6), its pump started from that
-	   READY on the shot's last think. The pump ends READY under the lock, and
+	   READY on the shot's last command. The pump ends READY under the lock, and
 	   only a release and a new pull fire again. */
 	ReadyToFire();
-	for ( t = 1; t < heldEnd + 3 * Thinks( BG_WeaponFireLength( WP_SHOTGUN ), 1 ); t++ ) {
+	for ( t = 1; t < heldEnd + 3 * Commands( BG_WeaponFireLength( WP_SHOTGUN ), 1 ); t++ ) {
 		Step( 1 );
 		CHECK( shots == 1 );
 		if ( t >= heldEnd ) CHECK( testPs.weaponstate == WEAPON_READY && testPs.weaponTime == 1 );
@@ -466,12 +466,12 @@ static void TestPumpCannotBeShortCircuited( void ) {
 }
 
 static void TestPumpCancelIsFree( void ) {
-	/* Swap requested on the think the round chambers. The holster stamps its
+	/* Swap requested on the command the round chambers. The holster stamps its
 	   normal time, the note takes that lock away, and the swap completes on
-	   the same think - the identical collision that cancels a reload. */
+	   the same command - the identical collision that cancels a reload. */
 	ReadyToFire();
 	testMove.cmd.buttons = 0;
-	RunFor( CloseThink( WP_SHOTGUN, 1 ) - 1, 1 );
+	RunFor( CloseCommand( WP_SHOTGUN, 1 ) - 1, 1 );
 	CHECK( testPs.weaponstate == WEAPON_BOLTING );
 	CHECK( testPs.weapon == WP_SHOTGUN );
 	CHECK( testPs.weaponAnimTime + 1 == FireNote( WNOTE_BOLT_CLOSED ) );
@@ -483,12 +483,12 @@ static void TestPumpCancelIsFree( void ) {
 }
 
 static void TestPumpSwapBeforeChamberCosts( void ) {
-	/* Same input one think earlier is an ordinary swap: the holster keeps its
+	/* Same input one command earlier is an ordinary swap: the holster keeps its
 	   full time. If this ever passes instantly the window has stopped being a
 	   window and the cancel has become a free swap. */
 	ReadyToFire();
 	testMove.cmd.buttons = 0;
-	RunFor( CloseThink( WP_SHOTGUN, 1 ) - 2, 1 );
+	RunFor( CloseCommand( WP_SHOTGUN, 1 ) - 2, 1 );
 	testMove.cmd.weapon = WP_MACHINEGUN;
 	Step( 1 );
 	CHECK( testPs.weaponstate == WEAPON_DROPPING );
@@ -516,7 +516,7 @@ static void TestEarlyCancelCostsTheWholeCycle( void ) {
 	   This is what stops the cancel window being a free swap at any time. */
 	ReadyToFire();
 	testMove.cmd.buttons = 0;
-	RunFor( CloseThink( WP_SHOTGUN, 1 ) - 2, 1 );
+	RunFor( CloseCommand( WP_SHOTGUN, 1 ) - 2, 1 );
 	CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN) );
 	SwapAwayAndBack();
 	CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN) );
@@ -543,7 +543,7 @@ static void TestExactCancelCostsTheWholeCycle( void ) {
 	   returns before the chamber commit. Coming back owes the entire cycle. */
 	ReadyToFire();
 	testMove.cmd.buttons = 0;
-	RunFor( CloseThink( WP_SHOTGUN, 1 ) - 1, 1 );
+	RunFor( CloseCommand( WP_SHOTGUN, 1 ) - 1, 1 );
 	testMove.cmd.weapon = WP_MACHINEGUN;
 	Step( 1 );
 	CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN) );
@@ -564,11 +564,11 @@ static void TestExactCancelCostsTheWholeCycle( void ) {
 }
 
 static void TestLateCancelKeepsTheRound( void ) {
-	/* One think late, chamber completion is already committed. The outgoing
+	/* One command late, chamber completion is already committed. The outgoing
 	   holster keeps its real duration and returning does not owe another pump. */
 	ReadyToFire();
 	testMove.cmd.buttons = 0;
-	RunFor( CloseThink( WP_SHOTGUN, 1 ), 1 );
+	RunFor( CloseCommand( WP_SHOTGUN, 1 ), 1 );
 	testMove.cmd.weapon = WP_MACHINEGUN;
 	Step( 1 );
 	CHECK( !(testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN)) );
@@ -587,7 +587,7 @@ static void TestReloadChambersTheGun( void ) {
 	   gone - no code says so, the note just lands. */
 	ReadyToFire();
 	testMove.cmd.buttons = 0;
-	RunFor( CloseThink( WP_SHOTGUN, 1 ) - 2, 1 );
+	RunFor( CloseCommand( WP_SHOTGUN, 1 ) - 2, 1 );
 	CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN) );
 	SwapAwayAndBack();
 
@@ -602,20 +602,20 @@ static void TestChamberDebtIsPerWeapon( void ) {
 	   is per weapon precisely because you carry two. */
 	ReadyToFire();
 	testMove.cmd.buttons = 0;
-	RunFor( CloseThink( WP_SHOTGUN, 1 ) - 2, 1 );
+	RunFor( CloseCommand( WP_SHOTGUN, 1 ) - 2, 1 );
 	CHECK(  ( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_SHOTGUN)    ) );
 	CHECK( !( testPs.stats[STAT_UNCHAMBERED] & (1 << WP_MACHINEGUN) ) );
 }
 
 /* Exercise both authored actions through the actual input/slot engine. A
-   step is a simulation think: early, exact and late mean one whole think
-   either side of the close note, including thinks longer than a millisecond.
+   step is a simulation command: early, exact and late mean one whole command
+   either side of the close note, including commands longer than a millisecond.
    Mode 3 uses two instances of the same base gun, so debt cannot accidentally
    migrate to the newly selected instance when the shared working bit changes.
    Mode 1, the sprint, is not a transition out of the action at all (MW2's
    PM_Weapon_CheckForSprint returns on RECHAMBERING): the gun keeps working
-   it, the close note commits on its own think, and the gun lowers only once
-   the cycle is over, so nothing is owed whichever think the sprint began on. */
+   it, the close note commits on its own command, and the gun lowers only once
+   the cycle is over, so nothing is owed whichever command the sprint began on. */
 static void TestChamberCompletionOrdering( int weapon, int mode, int offset, int step, int perk ) {
 	bg_weaponInstance_t original, other;
 	int sameBase = mode == 3;
@@ -643,9 +643,9 @@ static void TestChamberCompletionOrdering( int weapon, int mode, int offset, int
 	CHECK( shots == 1 && testPs.ammo[weapon] == originalAmmo );
 	CHECK( close > 2 * step );
 	CHECK( close - step > NoteTime( weapon, ASEQ_FIRE, WNOTE_BOLT_OPEN ) );
-	/* 1ms thinks into the action: the shot's READY think, then the action's
-	   clock from the open note, so the press think's clock ends early on the
-	   think before the close note's, exact on it, late on the one after. */
+	/* 1ms commands into the action: the shot's READY command, then the action's
+	   clock from the open note, so the press command's clock ends early on the
+	   command before the close note's, exact on it, late on the one after. */
 	RunFor( close - (1 - offset) * step + 1, 1 );
 	CHECK( testPs.weaponstate == WEAPON_BOLTING && testPs.weaponAnimTime == close - (1 - offset) * step );
 	if ( mode == 1 ) testPs.pm_flags |= PMF_SPRINTING;
@@ -665,7 +665,7 @@ static void TestChamberCompletionOrdering( int weapon, int mode, int offset, int
 		CHECK( testPs.weaponstate == WEAPON_BOLTING );
 		for ( t = 0; t < BG_WeaponFireLength( weapon ) && testPs.weaponstate == WEAPON_BOLTING; t += step )
 			Step( step );
-		/* The cycle ends READY; the next think lowers it with the whole entry. */
+		/* The cycle ends READY; the next command lowers it with the whole entry. */
 		CHECK( testPs.weaponstate == WEAPON_READY && testPs.weaponAnimTime == -1 );
 		CHECK( !(testPs.stats[STAT_UNCHAMBERED] & (1 << weapon)) );
 		Step( step );
@@ -699,7 +699,7 @@ static void TestChamberCompletionOrdering( int weapon, int mode, int offset, int
 	if ( owesCycle ) {
 		/* Only a swap or a ladder owes it here (a sprint waited for the
 		   cycle). A raise reaches READY and returns, so it reaches the debt
-		   gate on the next think. */
+		   gate on the next command. */
 		if ( testPs.weaponstate == WEAPON_READY ) Step( 1 );
 		CHECK( testPs.weaponstate == WEAPON_BOLTING &&
 			testPs.weaponAnimTime == NoteTime( weapon, ASEQ_FIRE, WNOTE_BOLT_OPEN ) );
@@ -737,9 +737,9 @@ static void MoveTick( int msec ) {
 }
 
 /* Actual Pmove calls CheckADS before Weapon. Holding aim through an ordinary
-   holster clears aim on the intervening thinks, but a completed handoff on
-   the close-note think still observes the outgoing gun's aim permission.
-   The next movement think sees the raise and clears that permission. */
+   holster clears aim on the intervening commands, but a completed handoff on
+   the close-note command still observes the outgoing gun's aim permission.
+   The next movement command sees the raise and clears that permission. */
 static void TestAimSwapOrdering( int offset, int ads ) {
 	int elapsed;
 	bg_weaponInstance_t original;
@@ -752,7 +752,7 @@ static void TestAimSwapOrdering( int offset, int ads ) {
 	testMove.tracemask = MASK_PLAYERSOLID;
 	testPs.speed = BG_PLAYER_SPEED;
 	testPs.groundEntityNum = ENTITYNUM_NONE;
-	for ( elapsed = 0; elapsed < CloseThink( WP_SHOTGUN, 1 ) - 1 + offset; elapsed++ ) MoveTick( 1 );
+	for ( elapsed = 0; elapsed < CloseCommand( WP_SHOTGUN, 1 ) - 1 + offset; elapsed++ ) MoveTick( 1 );
 	CHECK( !!(testPs.pm_flags & PMF_ADS) == ads );
 	testMove.cmd.weapon = BG_SLOT_COMMAND + SLOT_SECONDARY;
 	MoveTick( 1 );
@@ -884,8 +884,8 @@ static void ShootGun( int weapon ) {
 	CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) );
 	testMove.cmd.buttons = 0;
 }
-/* Reload on the very next think: it starts at once, the action still owed -
-   unless the action's own close note falls on that think, which settles it
+/* Reload on the very next command: it starts at once, the action still owed -
+   unless the action's own close note falls on that command, which settles it
    first (a gun whose bolt is 1ms into its action, as MW2's Masterkey). */
 static void ReloadAtOnce( void ) {
 	int close = GunNote( bg_weaponFire[fireGun].notes, WNOTE_BOLT_CLOSED );
@@ -917,18 +917,18 @@ static void TestShootReload( int step ) {
 		CHECK( 1 + reset < close );
 		CHECK( reset < Seg( w, RSEQ_START ) + GunNote( PM_SegNotes( w, RSEQ_LOOP ), WNOTE_MAG_IN ) );
 
-		/* Reload is taken during the blast, on its last think, on the READY
-		   think after it and during the pump/bolt alike (MW2's reload check
+		/* Reload is taken during the blast, on its last command, on the READY
+		   command after it and during the pump/bolt alike (MW2's reload check
 		   takes FIRING, READY and RECHAMBERING, 0x575E8E-0x575EA8). */
 		ShootGun( w ); RunFor( 1, step ); ReloadAtOnce();
-		ShootGun( w ); RunFor( ShotEndThink( w, 1 ) - 1, 1 );
+		ShootGun( w ); RunFor( ShotEndCommand( w, 1 ) - 1, 1 );
 		CHECK( testPs.weaponstate == WEAPON_FIRING ); ReloadAtOnce();
-		ShootGun( w ); RunFor( ShotEndThink( w, 1 ), 1 );
+		ShootGun( w ); RunFor( ShotEndCommand( w, 1 ), 1 );
 		CHECK( testPs.weaponstate == WEAPON_READY && BG_ShotAwaitsAction( &testPs ) ); ReloadAtOnce();
-		ShootGun( w ); RunFor( ShotEndThink( w, 1 ) + 1, 1 );
+		ShootGun( w ); RunFor( ShotEndCommand( w, 1 ) + 1, 1 );
 		CHECK( testPs.weaponstate == WEAPON_BOLTING ); ReloadAtOnce();
 
-		/* The fastest NAC: Y on the think the reload resets the action. The
+		/* The fastest NAC: Y on the command the reload resets the action. The
 		   swap is instant, but the reload never got to settle the action, so
 		   coming back costs the whole pump or bolt from the top. */
 		ShootGun( w ); ReloadAtOnce();
@@ -941,7 +941,7 @@ static void TestShootReload( int step ) {
 			int t;
 			testMove.cmd.weapon = w;
 			for ( t = 0; t < 10000 && !( testPs.weapon == w && testPs.weaponstate == WEAPON_READY ); t++ ) Step( 1 );
-			Step( 1 );	/* the first think at rest finds the debt and works the action from its top */
+			Step( 1 );	/* the first command at rest finds the debt and works the action from its top */
 			CHECK( testPs.weapon == w && testPs.weaponstate == WEAPON_BOLTING &&
 				testPs.weaponAnimTime == GunNote( bg_weaponFire[w].notes, WNOTE_BOLT_OPEN ) );
 			CHECK( testPs.weaponTime == ActionLength( w ) );
@@ -953,8 +953,8 @@ static void TestShootReload( int step ) {
 			testMove.cmd.buttons = 0;
 		}
 
-		/* One think earlier it is an ordinary swap: the window is a window.
-		   (A reset on the reload's first think has no earlier think: a swap
+		/* One command earlier it is an ordinary swap: the window is a window.
+		   (A reset on the reload's first command has no earlier command: a swap
 		   already waiting when the reload starts always meets it. That is the
 		   whole of MW2's Moni, and dev/tests/moni_test.c presses it.) */
 		if ( reset > 1 ) {
@@ -965,7 +965,7 @@ static void TestShootReload( int step ) {
 			CHECK( testPs.weaponTime == BG_WeaponDropTime( w ) );
 		}
 
-		/* The Fayde: one think late, YY - the gun is ready, no pump owed, and
+		/* The Fayde: one command late, YY - the gun is ready, no pump owed, and
 		   it fires long before the pump or bolt would have let it. */
 		ShootGun( w ); ReloadAtOnce();
 		RunFor( reset, 1 );
@@ -1004,7 +1004,7 @@ static void TestShootReload( int step ) {
 		/* An ordinary reload of a chambered gun gains nothing at that point:
 		   no lock is released, so Y there is an ordinary holster. */
 		ShootGun( w );
-		RunFor( CycleEndThink( w, 1 ), 1 );
+		RunFor( CycleEndCommand( w, 1 ), 1 );
 		CHECK( testPs.weaponstate == WEAPON_READY && !( testPs.stats[STAT_UNCHAMBERED] & (1 << w) ) );
 		testMove.cmd.buttons = BUTTON_RELOAD; Step( 1 ); testMove.cmd.buttons = 0;
 		CHECK( testPs.weaponstate == WEAPON_RELOADING );
@@ -1014,18 +1014,18 @@ static void TestShootReload( int step ) {
 		CHECK( testPs.weaponTime == BG_WeaponDropTime( w ) );
 
 		/* Reload is taken out of the pump even after the action has closed. */
-		ShootGun( w ); RunFor( CloseThink( w, 1 ), 1 );
+		ShootGun( w ); RunFor( CloseCommand( w, 1 ), 1 );
 		CHECK( testPs.weaponstate == WEAPON_BOLTING && !( testPs.stats[STAT_UNCHAMBERED] & (1 << w) ) );
 		testMove.cmd.buttons = BUTTON_RELOAD; Step( 1 ); testMove.cmd.buttons = 0;
 		CHECK( testPs.weaponstate == WEAPON_RELOADING && testPs.weaponAnimSeq == RSEQ_START );
 
 		/* The last round: an empty gun reloads itself once the shot is over,
-		   never out of the shot. Its last think ends READY owing the action
+		   never out of the shot. Its last command ends READY owing the action
 		   (MW2's auto reload refuses FIRING, 0x578845-0x57887A); the next
 		   reloads before the action can start (CheckForReload runs before
 		   CheckForRechamber), the action still owed. */
 		ShootGun( w ); testPs.ammo[w] = 0;
-		RunFor( ShotEndThink( w, 1 ) - 1, 1 );
+		RunFor( ShotEndCommand( w, 1 ) - 1, 1 );
 		CHECK( testPs.weaponstate == WEAPON_FIRING );
 		Step( 1 );
 		CHECK( testPs.weaponstate == WEAPON_READY && ( testPs.stats[STAT_UNCHAMBERED] & (1 << w) ) );
@@ -1047,22 +1047,22 @@ static void TestShootReload( int step ) {
  * MW2's PM_Weapon_CheckForSprint (iw4x 0x578060) returns while the gun is
  * FIRING or RECHAMBERING, and its sprint gates never test those states: the
  * sprint runs and the gun keeps what it is doing. MW2's shot ends READY with
- * the action owed at the end of its last think (ShouldBeFiring,
- * 0x576D99-0x576DA3), and on the next think the sprint check comes before
+ * the action owed at the end of its last command (ShouldBeFiring,
+ * 0x576D99-0x576DA3), and on the next command the sprint check comes before
  * CheckForRechamber (0x575a30, which starts the action only from READY). So:
- *  - a sprint on by that READY think - begun in the shot, on its last think
- *    or on the READY think itself - takes the gun there, and the action is
+ *  - a sprint on by that READY command - begun in the shot, on its last command
+ *    or on the READY command itself - takes the gun there, and the action is
  *    still owed: once the gun is back up it works ALL of it (a deferral that
- *    costs the whole action, never a cancel). The shot's last think, still
+ *    costs the whole action, never a cancel). The shot's last command, still
  *    FIRING, does not lower.
  *  - a sprint begun once the action is under way waits for it - in the
- *    action, on the think before the close note, on the close think (the
- *    owner's "bolt NAC into a sprint") or on the think after it - and the gun
+ *    action, on the command before the close note, on the close note's command (the
+ *    owner's "bolt NAC into a sprint") or on the command after it - and the gun
  *    lowers chambered, owing nothing: the close note never meets a sprint lock. */
 enum { SP_SHOT, SP_SHOT_END, SP_SHOT_READY, SP_ACTION, SP_BEFORE_CLOSE, SP_ON_CLOSE, SP_AFTER_CLOSE, SP_COUNT };
-/* One think: PM_Weapon alone with the flag set, or the whole Pmove with a
+/* One command: PM_Weapon alone with the flag set, or the whole Pmove with a
    real sprint press, where PM_CheckSprint raises the flag itself. */
-static void CycleThink( int full, int step ) {
+static void CycleCommand( int full, int step ) {
 	int sequence = testPs.eventSequence;
 	if ( !full ) {
 		Step( step );
@@ -1082,39 +1082,39 @@ static void SprintOutAndFire( int weapon, int full, int step, int owed ) {
 	int t, worked = 0;
 	if ( full ) testMove.cmd.forwardmove = 0;
 	else testPs.pm_flags &= ~PMF_SPRINTING;
-	CycleThink( full, step );
+	CycleCommand( full, step );
 	CHECK( !( testPs.pm_flags & PMF_SPRINTING ) );
 	CHECK( testPs.weaponstate == WEAPON_SPRINT_OUT );
 	CHECK( testPs.weaponTime == BG_WeaponSprintOutTime( weapon ) );
 	for ( t = 0; t < BG_WeaponSprintOutTime( weapon ) && testPs.weaponstate == WEAPON_SPRINT_OUT; t += step )
-		CycleThink( full, step );
+		CycleCommand( full, step );
 	CHECK( !!( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) ) == owed );
-	/* the sprint-out's last think ends READY, and that think is over: MW2's
+	/* the sprint-out's last command ends READY, and that command is over: MW2's
 	   SPRINT_DROP ends in its state switch (PM_Weapon_Idle, 0x5793D8 entry
 	   25), which returns before anything fires (0x5794B4-0x5794B6), after a
 	   rechamber check that starts nothing out of SPRINT_DROP (0x575B77) */
 	CHECK( testPs.weaponstate == WEAPON_READY && testPs.weaponAnimTime == -1 && shots == 1 );
 	if ( owed ) {
-		/* the next think hands the ready gun to the debt gate, which starts
+		/* the next command hands the ready gun to the debt gate, which starts
 		   the action alone: from the open note, rechamberTime */
-		CycleThink( full, step );
+		CycleCommand( full, step );
 		CHECK( testPs.weaponstate == WEAPON_BOLTING );
 		CHECK( testPs.weaponAnimTime == GunNote( bg_weaponFire[weapon].notes, WNOTE_BOLT_OPEN ) );
 		CHECK( testPs.weaponTime == ActionLength( weapon ) );
 		testMove.cmd.buttons = BUTTON_ATTACK;
 		while ( testPs.weaponstate == WEAPON_BOLTING ) {
 			CHECK( shots == 1 );
-			CycleThink( full, step ); worked += step;
+			CycleCommand( full, step ); worked += step;
 		}
-		/* the whole action, and the trigger fires on the think it ends */
+		/* the whole action, and the trigger fires on the command it ends */
 		CHECK( worked >= ActionLength( weapon ) && worked < ActionLength( weapon ) + step );
 		CHECK( shots == 2 && testPs.weaponstate == WEAPON_FIRING );
 	} else {
 		CHECK( testPs.weaponstate == WEAPON_READY );
-		CycleThink( full, step );
+		CycleCommand( full, step );
 		CHECK( testPs.weaponstate == WEAPON_READY );	/* no action worked again */
 		testMove.cmd.buttons = BUTTON_ATTACK;
-		CycleThink( full, step );
+		CycleCommand( full, step );
 		CHECK( shots == 2 && testPs.weaponstate == WEAPON_FIRING );
 	}
 	CHECK( testPs.ammo[weapon] == BG_WeaponMagSize( weapon ) - 2 );
@@ -1124,11 +1124,11 @@ static void TestSprintOverTheCycle( int weapon, int point, int step, int full ) 
 	int open = GunNote( bg_weaponFire[weapon].notes, WNOTE_BOLT_OPEN );
 	int close = GunNote( bg_weaponFire[weapon].notes, WNOTE_BOLT_CLOSED );
 	int length = BG_WeaponFireLength( weapon );
-	/* MW2's thinks after the shot's: its last, the READY think that starts the
+	/* MW2's commands after the shot's: its last, the READY command that starts the
 	   action, the bolt and the end */
-	int shotEnd = ShotEndThink( weapon, step ), start = shotEnd + 1;
-	int bolt = CloseThink( weapon, step ), end = CycleEndThink( weapon, step );
-	int press[SP_COUNT], lowered, think, t;
+	int shotEnd = ShotEndCommand( weapon, step ), start = shotEnd + 1;
+	int bolt = CloseCommand( weapon, step ), end = CycleEndCommand( weapon, step );
+	int press[SP_COUNT], lowered, command, t;
 	CHECK( 0 < open && open < close && close < length );
 	CHECK( start < bolt && bolt < end );
 	press[SP_SHOT] = shotEnd / 2;
@@ -1138,9 +1138,9 @@ static void TestSprintOverTheCycle( int weapon, int point, int step, int full ) 
 	press[SP_BEFORE_CLOSE] = bolt - 1;
 	press[SP_ON_CLOSE] = bolt;
 	press[SP_AFTER_CLOSE] = bolt + 1;
-	/* A shot of one think has no think inside it; a bolt that closes on the
-	   action's first think after its start (MW2's Masterkey, 1ms in) leaves
-	   no think inside the action before it. */
+	/* A shot of one command has no command inside it; a bolt that closes on the
+	   action's first command after its start (MW2's Masterkey, 1ms in) leaves
+	   no command inside the action before it. */
 	if ( point == SP_SHOT && press[point] < 1 ) return;
 	if ( ( point == SP_ACTION || point == SP_BEFORE_CLOSE ) && press[point] <= start ) return;
 	CHECK( press[SP_AFTER_CLOSE] < end );
@@ -1156,35 +1156,35 @@ static void TestSprintOverTheCycle( int weapon, int point, int step, int full ) 
 		testPs.groundEntityNum = ENTITYNUM_NONE;	/* MW2's sprint starts in the air too */
 		testMove.cmd.forwardmove = 127;
 	}
-	for ( think = 1; think < press[point]; think++ ) CycleThink( full, step );
+	for ( command = 1; command < press[point]; command++ ) CycleCommand( full, step );
 	if ( full ) testMove.cmd.buttons = BUTTON_SPRINT;	/* a tap: the sprint latches */
 	else testPs.pm_flags |= PMF_SPRINTING;
 
-	/* Every think until the READY think (lowered) or the cycle's end: the gun
-	   stays in the shot, ends it READY on its last think with the clock at the
+	/* Every command until the READY command (lowered) or the cycle's end: the gun
+	   stays in the shot, ends it READY on its last command with the clock at the
 	   open note, or works the action from that note, and the close note
-	   settles the debt on its own think. */
-	for ( think = press[point]; ; think++ ) {
-		CycleThink( full, step );
+	   settles the debt on its own command. */
+	for ( command = press[point]; ; command++ ) {
+		CycleCommand( full, step );
 		testMove.cmd.buttons = 0;
 		CHECK( testPs.pm_flags & PMF_SPRINTING );
-		/* The sprint meter runs from the think after the press, as it always does. */
-		if ( full ) CHECK( testPs.sprintUsed == ( think - press[point] ) * step );
+		/* The sprint meter runs from the command after the press, as it always does. */
+		if ( full ) CHECK( testPs.sprintUsed == ( command - press[point] ) * step );
 		CHECK( shots == 1 );
-		if ( lowered ? think >= start : think >= end ) break;
-		if ( think < shotEnd ) {
-			CHECK( testPs.weaponstate == WEAPON_FIRING && testPs.weaponAnimTime == think * step );
-		} else if ( think == shotEnd ) {
-			/* the shot's last think does not lower (MW2's sprint check refuses FIRING) */
+		if ( lowered ? command >= start : command >= end ) break;
+		if ( command < shotEnd ) {
+			CHECK( testPs.weaponstate == WEAPON_FIRING && testPs.weaponAnimTime == command * step );
+		} else if ( command == shotEnd ) {
+			/* the shot's last command does not lower (MW2's sprint check refuses FIRING) */
 			CHECK( testPs.weaponstate == WEAPON_READY && testPs.weaponAnimTime == open );
 		} else {
 			CHECK( testPs.weaponstate == WEAPON_BOLTING );
-			CHECK( testPs.weaponAnimTime == open + ( think - start ) * step );
+			CHECK( testPs.weaponAnimTime == open + ( command - start ) * step );
 		}
-		CHECK( !!( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) ) == ( think < bolt ) );
+		CHECK( !!( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) ) == ( command < bolt ) );
 	}
 	if ( lowered ) {
-		/* The READY think lowers the gun with the gun's whole sprint entry,
+		/* The READY command lowers the gun with the gun's whole sprint entry,
 		   before the action can start: the clock stays where the shot ended,
 		   and the pump or bolt is still owed. */
 		CHECK( testPs.weaponstate == WEAPON_SPRINT_IN );
@@ -1192,22 +1192,22 @@ static void TestSprintOverTheCycle( int weapon, int point, int step, int full ) 
 		CHECK( testPs.weaponAnimTime == open );
 		CHECK( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) );
 	} else {
-		/* The think the cycle reaches its length: READY and chambered, not lowered. */
+		/* The command the cycle reaches its length: READY and chambered, not lowered. */
 		CHECK( testPs.weaponstate == WEAPON_READY && testPs.weaponAnimTime == -1 );
 		CHECK( !( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) ) );
-		/* The next think lowers it, with the gun's whole sprint entry. */
-		CycleThink( full, step );
+		/* The next command lowers it, with the gun's whole sprint entry. */
+		CycleCommand( full, step );
 		CHECK( testPs.pm_flags & PMF_SPRINTING );
 		CHECK( testPs.weaponstate == WEAPON_SPRINT_IN );
 		CHECK( testPs.weaponTime == BG_WeaponSprintInTime( weapon ) );
 	}
 	for ( t = 0; t < BG_WeaponSprintInTime( weapon ) && testPs.weaponstate == WEAPON_SPRINT_IN; t += step )
-		CycleThink( full, step );
+		CycleCommand( full, step );
 	CHECK( testPs.weaponstate == WEAPON_SPRINTING && testPs.weaponAnimTime == -1 );
 	CHECK( !!( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) ) == lowered );
 	CHECK( shots == 1 );
 
-	/* End the sprint (let go of forward). Lowered on the READY think, the gun
+	/* End the sprint (let go of forward). Lowered on the READY command, the gun
 	   works its whole action before it fires again; lowered after the cycle,
 	   it owes nothing and the next trigger fires at once. */
 	SprintOutAndFire( weapon, full, step, lowered );
@@ -1240,7 +1240,7 @@ static void TestSprintDefersAnOwedAction( int weapon ) {
 	Step( 1 );
 	CHECK( testPs.weaponstate == WEAPON_SPRINT_OUT );
 	RunFor( BG_WeaponSprintOutTime( weapon ), 1 );
-	/* the sprint-out's last think ends READY and is over (MW2's SPRINT_DROP
+	/* the sprint-out's last command ends READY and is over (MW2's SPRINT_DROP
 	   ends in PM_Weapon_Idle); the next hands the ready gun to the debt gate,
 	   which works the action alone, from its open note */
 	CHECK( testPs.weaponstate == WEAPON_READY && ( testPs.stats[STAT_UNCHAMBERED] & (1 << weapon) ) );

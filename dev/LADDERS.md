@@ -66,17 +66,17 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
   `PM_LockGun`, `PM_LadderLeft`):
   - **It waits out a shot.** The branch is behind the change gate
     (0x578C0A-0x578C41, `PM_WeaponChangeOpen`): a ladder grabbed during a shot
-    takes the gun on the shot's last think, not before, and ahead of the
+    takes the gun on the shot's last command, not before, and ahead of the
     rechamber check (0x44C4D7), so the pump or bolt stays owed. A full-auto gun
     grabbed while firing goes down at the running shot's end instead of firing
-    the next one. It begins only on a think the weapon code finds the ladder
+    the next one. It begins only on a command the weapon code finds the ladder
     held: a grab and a jump off on one command put nothing down (MW2's jump
     clears PMF_LADDER before `PM_Weapon`, `Jump_PushOffLadder` 0x56DB85).
   - **The held trigger's lock takes it.** A drop ends only at weaponTime 0
     (`ProcessHand` 0x579474, `FinishWeaponChange` 0x576370: weapon 0, here
     `WEAPON_LADDER`). With the trigger down, the pull's shots all fired, the
     command naming the gun and a round in the clip, `WeaponTimeAdjust` makes the
-    time 1 on every think and leaves a drop a drop (0x578A94-0x578AE6,
+    time 1 on every command and leaves a drop a drop (0x578A94-0x578AE6,
     0x578B25-0x578B28). So after a SPAS, M300 or Masterkey shot with the trigger
     never let go, the holster hangs for as long as it is held: the gun goes
     down on screen and stays down (MW2's drop animation plays once and holds
@@ -85,11 +85,11 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
     runs out on its time whatever the trigger. A command naming another gun
     fails the lock too (0x578AC4; Peace's client sends Y on a ladder, MW2's
     does not).
-  - **Leaving cancels it, with no raise.** On the think the ladder is found
+  - **Leaving cancels it, with no raise.** On the command the ladder is found
     left with the holster still going down or hung, it is an ordinary drop of
     the gun the command names, and MW2's double-tap cancel, the one YY takes,
     makes that gun READY with no time (0x578D00-0x578D41, `PM_Weapon_Idle`
-    0x5777C7-0x5777D8). The rest of that think is the READY gun's: an owed pump
+    0x5777C7-0x5777D8). The rest of that command is the READY gun's: an owed pump
     or bolt starts, whole (`CheckForRechamber` from READY, 0x575B77), or a held
     trigger fires (`ShouldBeFiring` is a level test, 0x576CC0; the lock was only
     the time). A knife pressed on it comes out, a reload is taken, and
@@ -97,7 +97,7 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
     (MW2's offhand check runs before the cancel). With the command naming
     another gun the drop runs out the time it had and raises that one.
   - **A drop already running keeps its time.** The ladder branch asks for the
-    change to weapon 0 on every think, and MW2's `PM_BeginWeaponChange` returns
+    change to weapon 0 on every command, and MW2's `PM_BeginWeaponChange` returns
     for any drop state before it looks at anything else (0x575F96-0x575FB1).
     So a swap's drop under way at the grab is not begun again and not
     restamped as the 100ms holster (`PM_LadderKeepsDrop`; Peace restamped it
@@ -121,11 +121,11 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
   ladder branch 0x578C72). So the knife lands, a cooking frag's fuse runs on and
   it is thrown on its release or goes off in the hand, a Semtex is thrown or
   Y-cancelled, and the gun comes back on its quick raise. The ladder drop then
-  starts on the think after the quick-action latch clears, as a queued swap
-  does, if the ladder is still held: the latch's last think is MW2's MELEE_END
+  starts on the command after the quick-action latch clears, as a queued swap
+  does, if the ladder is still held: the latch's last command is MW2's MELEE_END
   or OFFHAND_END, which the change check, its ladder branch included, refuses
   (0x578BC9-0x578BF2). (The knife's quick raise that ends under a held
-  trigger's lock is READY on that think already, 0x578B25-0x578B39, so the drop
+  trigger's lock is READY on that command already, 0x578B25-0x578B39, so the drop
   starts on it; so does the knife's own end under the lock, which is READY
   with no quick raise, 0x578B2A-0x578B39.) Jump off first and there is no
   ladder drop at all.
@@ -137,22 +137,22 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
 
   | the ladder was grabbed | on the ladder | the jump's command, trigger still held |
   |---|---|---|
-  | during the shot | the drop begins on the shot's last think; hung; the action owed | the pump or bolt starts, whole |
+  | during the shot | the drop begins on the shot's last command; hung; the action owed | the pump or bolt starts, whole |
   | in the action, before the bolt | the drop begins at once; the bolt is never taken; hung; owed | the pump or bolt starts, whole |
-  | on the bolt's own think (the Masterkey: the think after the shot's last) | **empty hands at once**, the action owed; nothing hangs | **the gun's whole raise**, which then waits under the lock until the trigger is let go; the pump starts the think after |
+  | on the bolt's own command (the Masterkey: the command after the shot's last) | **empty hands at once**, the action owed; nothing hangs | **the gun's whole raise**, which then waits under the lock until the trigger is let go; the pump starts the command after |
   | in the action, after the bolt | the drop begins at once; the rest of the action is given up; hung; chambered | the shot (the pull's second; its own action follows, then the lock) |
   | after the action | hung; chambered | the shot |
 
   The third row is the one way a held trigger still pays a raise, and it is
-  MW2's: a drop begun on the think a weapon delay runs out is finished by that
-  delayed action on the same think (its path A, 0x579474, 0x57928C, the
+  MW2's: a drop begun on the command a weapon delay runs out is finished by that
+  delayed action on the same command (its path A, 0x579474, 0x57928C, the
   mechanism of the bolt cancel and the Moni), so the hands are empty before
-  any crossing could hang it. It is one think wide; a think earlier or later
+  any crossing could hang it. It is one command wide; a command earlier or later
   the gun is back at once.
 - A grab inside a burst takes nothing from it. MW2 runs no change check, its
   ladder branch included, while a burst is pending (iw4x.exe
   0x44C444-0x44C4B3), so the M16 rifle's burst plays out on the ladder, its
-  other shots leaving by themselves, and the drop begins on the think the last
+  other shots leaving by themselves, and the drop begins on the command the last
   shot's time runs out, the burst cooldown's first (the change gate refuses a
   shot with time left, 0x578C31, and takes the cooldown's READY;
   `PM_LadderWeapon`'s `pml.burstPending`; `burst_test.c`'s `TestLadder`). With
@@ -184,7 +184,7 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
   that holster gives the gun back READY in the mode it had: a lost SF is not
   owed). Grabbed on the click's own command, the click takes the holster's
   lock, so the hands are empty on that command, and the mode is not committed
-  (the ladder's block ends the think before step 4's commit, as it leaves a
+  (the ladder's block ends the command before step 4's commit, as it leaves a
   pump owed). Grabbed after the click, the mode is the new one already and
   stays.
 - The original reload helpers, swap helpers, note runner and their non-ladder
@@ -195,7 +195,7 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
   reload (its rounds lost) or a sprint-out cut short by a brief touch ends
   READY, as in MW2 within its 250ms.
   A prematurely interrupted bolt still owes its entire cycle, a grab on the
-  close note's own think included.
+  close note's own command included.
 - Gun use, ADS and sprint are blocked while attached, and no knife or equipment
   starts there (whether MW2's client sends those buttons on a ladder is
   unsettled); one already under way at the grab finishes first, as above. Real
@@ -233,15 +233,15 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
     by the fire type the slot's mode gives (`BG_SlotFireType`, as the lock
     reads it), a round in the clip. With the trigger up, or a fresh press
     latched inside the M16 rifle's burst, that frame is a holster in its last
-    millisecond and is drawn. `ladder_test.c` runs the next think on a copy
-    after every think that leaves a ladder's drop at weaponTime 1 or less
+    millisecond and is drawn. `ladder_test.c` runs the next command on a copy
+    after every command that leaves a ladder's drop at weaponTime 1 or less
     with the trigger down (`PictureAgrees`), so the picture's hang and
     pmove's never disagree. With them it is stowed one frame before the
-    lock first re-arms it (the next think keeps it; the gun is 99% down).
+    lock first re-arms it (the next command keeps it; the gun is 99% down).
   - **Equipment pressed on the leaving command out of a hang** takes the drop
     and its last 1ms for itself, the ladder's mark gone (MW2's `OffHandInit`
     keeps a running drop's time), and is prepared on the next command. The
-    gun stays out of view for that think (`CG_WeapAnim_LadderStowed`): MW2's
+    gun stays out of view for that command (`CG_WeapAnim_LadderStowed`): MW2's
     drop animation played out long before and nothing starts it again.
   - **A swap's drop the ladder found running** (above) is drawn as the swap's
     drop, at its own rate to its own end, with no ladder lowering; the gun is
@@ -273,13 +273,13 @@ falling contact at the base, jump separation, the 128 jump push, the ±100 yaw
 clamp, prediction replay, mode changes, reload/bolt note ordering, and grabs with
 the knife out, a frag cooking (thrown, cooked out, or the ladder left again
 first) and a Semtex held (thrown or Y-cancelled): the fuse runs on, nothing new
-starts, and the ladder drop never comes before the think after the quick-action latch clears. Existing weapon/sight tests remain.
+starts, and the ladder drop never comes before the command after the quick-action latch clears. Existing weapon/sight tests remain.
 MW2's ladder with the trigger held (`TestHeldTriggerHolster` and the tests it
 runs) is driven the same way, every command worked out from the game's tables:
 the SPAS, the M300 and the Masterkey hung with the pull spent for no time, 3
 seconds and 10, the jump firing or starting the pump on its own command; the
-grab during the shot, before the bolt (and on the think before the bolt's), on
-the bolt's think and on the think after it; the
+grab during the shot, before the bolt (and on the command before the bolt's), on
+the bolt's command and on the command after it; the
 trigger let go on the ladder and on the jump's command; a full-auto gun never
 hung; a holster left with the trigger up; the grab and the jump on one command;
 the top climbed off with the trigger held (every way off is the same cancel);

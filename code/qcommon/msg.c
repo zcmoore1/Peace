@@ -1106,7 +1106,7 @@ netField_t	playerStateFields[] =
 { PSF(externalEventParm), 8 },
 { PSF(viewheight), 0 },	// a float: MW2's eye curve (ps+0x11C, a full float)
 // MW2's eye leg and prone body (its netfields for ps+0x118..0x128 and
-// +0x160..0x168), beside the eye: the leg changes on every think it runs,
+// +0x160..0x168), beside the eye: the leg changes on every command it runs,
 // and the delta sends every field up to the last one that changed.
 { PSF(viewHeightTarget), 8 },	// BG_EYE_*, 0..60 (MW2: signed 8)
 { PSF(viewHeightLerpTime), PS_EYE_LEG_BITS },	// ms into the leg, below BG_PRONE_LERP_MS

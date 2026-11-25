@@ -707,7 +707,7 @@ static void TestShortDropKept(void) {
  }
  CG_WeapAnim_RegisterClips(gun,0,NULL);
 }
-/* A short sprint, Y, end the sprint, Y: the real weapon think cancels the
+/* A short sprint, Y, end the sprint, Y: the real PM_Weapon cancels the
  * holster immediately. Its retained entry must travel home along the authored
  * motion in both native and frame-only rendering, with no gameplay lock.
  * PM_CheckSprint's flag is set and cleared directly here; how a sprint ends
@@ -837,7 +837,7 @@ static void SprintPosture(playerState_t *ps,int weapon,int posture,int quarter) 
  }
 }
 /* An ordinary sprint stop: pmove stamps the whole exit unless one is already
- * running, and READY follows the think its lock runs out. */
+ * running, and READY follows the command its lock runs out. */
 static int SprintExitFrames(playerState_t *ps,int weapon,modelPose_t *poses) {
  int n=0;
  ps->pm_flags=0;
@@ -855,13 +855,13 @@ static int SprintExitFrames(playerState_t *ps,int weapon,modelPose_t *poses) {
 /* A sprint over the shot or the action, through the real PM_Weapon. Pmove
  * keeps the shot to its end and the action to its end (MW2's
  * PM_Weapon_CheckForSprint returns on FIRING/RECHAMBERING). MW2's shot ends
- * READY on its last think and its sprint check comes before the rechamber on
+ * READY on its last command and its sprint check comes before the rechamber on
  * the next, so a sprint already on lowers the gun there, where the shot ended,
- * carrying the fire clip it was showing (the READY think between still shows
+ * carrying the fire clip it was showing (the READY command between still shows
  * it), and the action is still owed: once the gun is back up it plays the
  * whole action from its open note. A sprint begun in the action lets the fire clip
  * play to its end with no sprint posture over it, and the entry starts from
- * rest on the think after the cycle ends READY: the gun never drops into a
+ * rest on the command after the cycle ends READY: the gun never drops into a
  * carry over an unfinished pump or bolt. */
 static void TestSprintAfterTheCycle(int gun) {
  animLayer_t *base=&cg_weapLayers[LAYER_BASE],*sprint=&cg_weapLayers[LAYER_SPRINT];
@@ -881,7 +881,7 @@ static void TestSprintAfterTheCycle(int gun) {
   CHECK(flowPs.weaponstate==(press ? WEAPON_BOLTING : WEAPON_FIRING));
   flowPs.pm_flags|=PMF_SPRINTING;
   if(!press) {
-   /* the shot plays on to its end: its last think ends READY with the fire
+   /* the shot plays on to its end: its last command ends READY with the fire
     * clip still on screen at the open note, and the next lowers the gun
     * there, the action owed */
    for(t=0;t<10000;t+=8) {
@@ -900,7 +900,7 @@ static void TestSprintAfterTheCycle(int gun) {
    CHECK(flowPs.weaponstate==WEAPON_SPRINTING && (flowPs.stats[STAT_UNCHAMBERED]&(1<<gun)));
    for(t=0;t<2000;t+=8) FlowStep();
    CHECK(!cg_retainedActive && sprint->clip==WANIM_SPRINT_LOOP && sprint->weight==1);
-   /* back up: the sprint-out's last think ends READY and is over (MW2's
+   /* back up: the sprint-out's last command ends READY and is over (MW2's
     * SPRINT_DROP ends in PM_Weapon_Idle, iw4x 0x5793D8 entry 25), and the
     * next starts the whole action, from its open note on the fire clip (MW2's
     * rechamber from READY), the shot not played again */
@@ -925,7 +925,7 @@ static void TestSprintAfterTheCycle(int gun) {
    CHECK(base->clip==WANIM_FIRE && sprint->weight==0);
    CHECK(!cg_retainedActive || (retained->clip==WANIM_FIRE && fabs(retained->time-base->time)<.5f));
   }
-  /* The cycle's last think: chambered, still no sprint posture. */
+  /* The cycle's last command: chambered, still no sprint posture. */
   CHECK(flowPs.weaponstate==WEAPON_READY && !(flowPs.stats[STAT_UNCHAMBERED]&(1<<gun)));
   CHECK(sprint->weight==0);
   FlowStep();
@@ -937,10 +937,10 @@ static void TestSprintAfterTheCycle(int gun) {
  }
 }
 /* One fire clip from the shot to the action's end, through the real PM_Weapon
- * at 8ms. The shot's last think leaves the gun READY owing its action (MW2's
+ * at 8ms. The shot's last command leaves the gun READY owing its action (MW2's
  * ShouldBeFiring) with the clip's clock at the open note, and the action
- * starts from there on the next think: the picture stays on the fire clip at
- * that clock across the READY think, with no base-action release eased over
+ * starts from there on the next command: the picture stays on the fire clip at
+ * that clock across the READY command, with no base-action release eased over
  * it, and the release comes only when the action ends. */
 static void TestShotPictureAcrossReady(int gun) {
  animLayer_t *base=&cg_weapLayers[LAYER_BASE];
@@ -963,7 +963,7 @@ static void TestShotPictureAcrossReady(int gun) {
   CHECK(fabs(base->time-(float)flowPs.weaponAnimTime/BG_WeaponFireLength(gun)*len)<.01f);
   CHECK(cg_returnTime==RETURN_BLEND_MSEC && CG_WeapAnim_ReturnWeight()==0);
  }
- /* one READY think between the shot and its action, and the cycle's end is
+ /* one READY command between the shot and its action, and the cycle's end is
   * the release */
  CHECK(ready==1 && flowPs.weaponstate==WEAPON_READY && !(flowPs.stats[STAT_UNCHAMBERED]&(1<<gun)));
  CHECK(cg_returnTime==0 && base->clip==WANIM_IDLE);
@@ -1231,9 +1231,9 @@ static void TestSprintReentry(weapAnimDef_t *def) {
   }
 
   /* YY with the sprint still on: MW2's double-tap cancel is in its change
-   * check, after its sprint check (iw4x 0x44C4CA, 0x44C4D7), so the YY think
+   * check, after its sprint check (iw4x 0x44C4CA, 0x44C4D7), so the YY command
    * readies the gun, its picture returning along the entry it showed, and
-   * the next think lowers it again from that visible pose with the whole
+   * the next command lowers it again from that visible pose with the whole
    * entry lock. */
   FlowWorldBegin();flow.cmd.buttons=BUTTON_SPRINT;
   for(t=0;t<BG_WeaponSprintInTime(WP_SHOTGUN)/2;t+=8)FlowWorldStep(qtrue);
@@ -1251,7 +1251,7 @@ static void TestSprintReentry(weapAnimDef_t *def) {
 
   /* A sprint on again during the exit: MW2's sprint check does nothing while
    * sprinting in SPRINT_DROP (iw4x 0x5780F4-0x578107), so the exit plays to
-   * its end, the gun is ready for a think, and the next think's entry starts
+   * its end, the gun is ready for a command, and the next command's entry starts
    * at its authored ready pose, where the exit left it, never reversing the
    * exit part way. */
   FlowWorldBegin();flow.cmd.buttons=BUTTON_SPRINT;
@@ -1479,7 +1479,7 @@ static void TestModeSwitchPicture(void) {
  * as a grab and a jump leave it; ladder_test.c drives the real ladder and pins
  * the commands). The holster takes the gun down its drop clip and a further
  * lowering over its own time. Hung under the lock (weaponTime 1 on every
- * think) the picture stays at the drop's end, neither stopped part-way nor
+ * command) the picture stays at the drop's end, neither stopped part-way nor
  * back up, and the gun is out of view there (BG_LadderHolsterDown: MW2's drop
  * animation is started once and holds its last frame, 0x576149, 0x59B5E0).
  * Left with the trigger still down the gun is in hand at once, already firing
@@ -1514,7 +1514,7 @@ static void TestLadderHeldPicture(weapAnimDef_t *def,int gun) {
    CHECK(flowPs.weaponstate==WEAPON_FIRING && flowPs.weaponShotCount==1 && base->clip==WANIM_FIRE);
    if(way==LADDER_PIC_ACTION) {
     /* grabbed in the shot: the gun stays up and firing until the shot's last
-     * think, where the holster takes the lock's READY and the action is owed */
+     * command, where the holster takes the lock's READY and the action is owed */
     flowPs.stats[STAT_LADDER]|=LADDER_ATTACHED;
     for(t=0;t<10000 && flowPs.weaponstate==WEAPON_FIRING;t+=8) {
      CHECK(base->clip==WANIM_FIRE && move->weight==0 && CG_WeapAnim_LadderLower()==0 && !BG_LadderHolsterDown(&flowPs));
@@ -1545,7 +1545,7 @@ static void TestLadderHeldPicture(weapAnimDef_t *def,int gun) {
   }
   CHECK(move->weight==1 && lower>.4f);
   if(hung) {
-   /* the lock's 1, every think, for as long as the trigger is held: stowed */
+   /* the lock's 1, every command, for as long as the trigger is held: stowed */
    CHECK((flow.cmd.buttons&BUTTON_ATTACK) && flowPs.weaponShotCount==1);
    CHECK(lower>=.99f && last>=drop*.98f);
    for(t=0;t<3000;t+=8) {

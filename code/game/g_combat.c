@@ -472,7 +472,7 @@ reads it: a later pmove step of the same command may already have ended the
 offhand and brought the gun back, keeping the -1. player_die's own drop then
 finds no fuse. A holder this does not kill - god mode, or a death player_die
 would refuse (S&D between rounds) - keeps their life and the -1; pmove ends
-the offhand on its next think with nothing thrown.
+the offhand on its next step with nothing thrown.
 ==================
 */
 void G_GrenadeSuicide( gentity_t *ent, int weapon ) {

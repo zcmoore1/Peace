@@ -3563,7 +3563,7 @@ The trigger, worked as a player must work it. MW2's fire is a level test of
 the trigger, and a trigger kept down after the pull's shots have all left (a
 Single Shot gun's one, a burst gun's burst) fires nothing more until it has
 been let go (PM_WeaponTimeAdjust's lock). So a bot that pressed on its last
-think lets go on this one once the count says the pull is spent
+AI frame lets go on this one once the count says the pull is spent
 (BG_TriggerNeedsRelease, by the gun in hand's fire type, never its id), and
 presses again on the next. A full-auto gun is simply held.
 ==================

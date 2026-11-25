@@ -101,7 +101,7 @@ RELOADING for the full existing 350 ms closing segment, including its time
 after the bolt-closed note clears the busy timer. Only then can it fire.
 
 - Previously inserted shells remain loaded. An unfinished insertion is
-  abandoned; an insertion whose note crosses on this same think completes.
+  abandoned; an insertion whose note crosses on this same command completes.
 - With an empty tube, held attack loads one shell before entering END.
 - Attack during END does not restart the closing animation.
 - Holding attack fires when ready. Releasing it before ready leaves the gun

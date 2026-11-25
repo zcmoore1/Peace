@@ -112,14 +112,14 @@ static void TestModes(void) {
   * BurstFirePending, 576a70, fires with the trigger up, 576d4a), and the mode
   * switch asked for inside the burst waits for it (MW2 skips its change check
   * while a burst is pending, 44c444, and refuses FIRING with time left,
-  * 578c31): it begins on the think the last shot's time runs out, the
+  * 578c31): it begins on the command the last shot's time runs out, the
   * cooldown's first (578939-5789cd). */
  CHECK(BG_WeaponFireType(WP_M16)==BG_FIRE_BURST3 && BG_ShotLimitReached(BG_FIRE_BURST3,3) && !BG_ShotLimitReached(BG_FIRE_BURST3,2));
  move.cmd.weapon=BG_WeaponCommand(&ps,0,qtrue);
  Run(3*M16_FIRE_MS-1);
  CHECK(fired[WP_M16]==3 && ps.ammo[WP_M16]==M16_MAG_SIZE-3 && ps.weapon==WP_M16 && ps.weaponstate==WEAPON_FIRING);
  /* MW2's alt switch. Its drop is the gun's altDropTime, which MW2's data makes
-  * 0: the mode changes on the think it is asked for, and the new mode's
+  * 0: the mode changes on the command it is asked for, and the new mode's
   * altRaiseTime is the whole cost. */
  CHECK(BG_WeaponAltDropTime(WP_M16)==M16_ALT_DROP_MS && BG_WeaponAltDropTime(WP_MASTERKEY)==MASTERKEY_ALT_DROP_MS);
  CHECK(BG_WeaponAltRaiseTime(WP_M16)==M16_ALT_RAISE_MS && BG_WeaponAltRaiseTime(WP_MASTERKEY)==MASTERKEY_ALT_RAISE_MS);
@@ -219,16 +219,16 @@ static void TestNoteTransitions(void) {
  CHECK(Note(WP_MASTERKEY,RSEQ_START,WNOTE_MAG_IN)==MASTERKEY_RELOAD_START_ADD_MS);
  CHECK(Note(WP_MASTERKEY,RSEQ_LOOP,WNOTE_MAG_IN)==MASTERKEY_ROUND_IN_MS);
  CHECK(Note(WP_MASTERKEY,RSEQ_END,WNOTE_BOLT_CLOSED)<0 && Note(WP_MASTERKEY,RSEQ_END,WNOTE_MAG_IN)<0);
- /* A change on, before and after the pump's bolt think, at 1ms thinks: the
-  * shot's last think (its clock reaches the open note; it ends READY owing the
-  * pump, MW2's ShouldBeFiring 576d99-576da3), the READY think after it (the
+ /* A change on, before and after the pump's bolt command, at 1ms commands: the
+  * shot's last command (its clock reaches the open note; it ends READY owing the
+  * pump, MW2's ShouldBeFiring 576d99-576da3), the READY command after it (the
   * pump starts from READY at the open note, CheckForRechamber 575b77-575c03,
-  * its bolt delay 1ms), and the bolt think after that (575abd-575acc). To the
+  * its bolt delay 1ms), and the bolt command after that (575abd-575acc). To the
   * gun's other mode it is the mode change whenever it comes; to the other slot
-  * it is instant only on the bolt think (MW2's delayed action finishing the
-  * drop begun on its think, 579474 -> 57928c). Either way the pump is owed
-  * unless the bolt's think came first. One asked for before the shot is over
-  * waits for its last think; there, and on the READY think, it is the whole
+  * it is instant only on the bolt command (MW2's delayed action finishing the
+  * drop begun on its command, 579474 -> 57928c). Either way the pump is owed
+  * unless the bolt's command came first. One asked for before the shot is over
+  * waits for its last command; there, and on the READY command, it is the whole
   * drop (MW2's change check runs before its rechamber check, 44c4d7). */
  for(mode=0;mode<2;mode++) for(offset=-3;offset<=1;offset++) {
   int shotEnd=MASTERKEY_BOLT_OPEN_MS, bolt=shotEnd+2, before;
@@ -256,7 +256,7 @@ static void TestNoteTransitions(void) {
   else CHECK(ps.weaponstate==WEAPON_READY);
  }
  /* The same on a shell's note, in the start (MW2's reloadStartAddTime) and in
-  * the loop: the shell is in only if its think came first. */
+  * the loop: the shell is in only if its command came first. */
  for(mode=0;mode<2;mode++) for(offset=-1;offset<=1;offset++) {
   ModeReady(qtrue); ps.ammo[WP_MASTERKEY]=1;
   move.cmd.buttons=BUTTON_RELOAD; Step(1); move.cmd.buttons=0;
@@ -297,7 +297,7 @@ static void TestNoteTransitions(void) {
  CHECK(ps.weaponstate==WEAPON_RELOADING && ps.ammo[WP_MASTERKEY]==4);
  Step(1); CHECK(ps.weaponstate==WEAPON_READY && ps.ammoReserve[WP_MASTERKEY]==12);
  /* Rifle magazine: the mode change is there whenever it is asked for, and the
-  * magazine is in only if its note's think came first. */
+  * magazine is in only if its note's command came first. */
  for(offset=-1;offset<=1;offset++) {
   ModeReady(qfalse); ps.ammo[WP_M16]=7;
   move.cmd.buttons=BUTTON_RELOAD; Step(1); move.cmd.buttons=0;
@@ -342,14 +342,14 @@ static void TestWireAndReplay(void) {
  ps.slotFlags[1]=BG_GUN_GENERATION|BG_GUN_ALTERNATE|BG_GUN_ALT_UNCHAMBERED;
  ps.slotAltAmmo[1]=2; ps.slotAltReserve[1]=7;
  move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0;
- /* the shot's READY think travels as itself: READY, the pump owed, the fire
+ /* the shot's READY command travels as itself: READY, the pump owed, the fire
   * clock at the open note */
  Run(MASTERKEY_BOLT_OPEN_MS); from=ps;
  MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,NULL,&from);
  CHECK(!msg.overflowed); MSG_BeginReading(&msg); MSG_ReadDeltaPlayerstate(&msg,NULL,&decoded);
  CHECK(BG_ShotAwaitsAction(&from) && BG_ShotAwaitsAction(&decoded));
  CHECK(decoded.weaponstate==WEAPON_READY && decoded.weaponAnimTime==MASTERKEY_BOLT_OPEN_MS);
- Step(1); from=ps;	/* in the action, on the think before its bolt */
+ Step(1); from=ps;	/* in the action, on the command before its bolt */
  CHECK(ps.weaponstate==WEAPON_BOLTING && ps.weaponAnimTime==MASTERKEY_BOLT_OPEN_MS);
  MSG_Init(&msg,data,sizeof(data)); MSG_WriteDeltaPlayerstate(&msg,NULL,&from);
  CHECK(!msg.overflowed); MSG_BeginReading(&msg); MSG_ReadDeltaPlayerstate(&msg,NULL,&decoded);

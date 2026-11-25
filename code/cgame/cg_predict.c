@@ -282,7 +282,7 @@ static void CG_InterpolatePlayerState( qboolean grabAngles ) {
 	out->bobCycle = prev->ps.bobCycle + f * ( i - prev->ps.bobCycle );
 
 	// the eye between the two snapshots, as the origin: MW2's curve, which
-	// pmove runs every think, would otherwise step at the snapshot rate
+	// pmove runs every command, would otherwise step at the snapshot rate
 	// (picture only; a demo, a followed player, the killcam)
 	out->viewheight = prev->ps.viewheight + f * ( next->ps.viewheight - prev->ps.viewheight );
 

@@ -9,7 +9,7 @@ points along +X for the existing projectile/stick orientation. A hand-model
 
 The throwing pullout is original authored MD3 hand/tag motion. MW2's knife
 has no pull to fit it to: throwingknife_mp's holdFireTime is 0, so it is in
-hand and ready on the think it is pressed. The pullout still plays, as picture
+hand and ready on the command it is pressed. The pullout still plays, as picture
 only: `CG_WeapAnim_ActionFrame` samples it at its own authored length from
 when the picture first showed the knife, while the knife rests in hand, then
 holds its last frame (the held pose). Gameplay is ready all along, and a throw
@@ -33,10 +33,10 @@ provenance and regeneration are in `assets/source/throwingknife/README.md`.
   or not: `BG_OffhandPreparesAtOnce` feeds the same `prepare` gate as the sea
   lion. Its prepare is `BG_THROWING_KNIFE_PULL_MS`, throwingknife_mp's
   holdFireTime: 0. MW2's OffHandInit, Prepare and Hold all run on the press
-  think, so the knife is in hand and ready (HOLD) on it, with its fuseTime in
+  command, so the knife is in hand and ready (HOLD) on it, with its fuseTime in
   `ps.grenadeTimeLeft`, and the release is first read on the next command.
   `BG_WeaponRaiseTime` gives every offhand its own holdFireTime, never the
-  50ms swap floor; a raise of no length is ready on the think it is stamped.
+  50ms swap floor; a raise of no length is ready on the command it is stamped.
 - **Hold and throw.** The knife stays raised while an offhand button is held -
   the lethal or the tactical, either one, on this command and the one before
   (MW2's `0xc000` test, 578f2d-578f3f) - and is thrown on release, as every
@@ -59,7 +59,7 @@ provenance and regeneration are in `assets/source/throwingknife/README.md`.
   to the frag, which has none, so a press asks for nothing.
 - **Out of a busy gun.** The pull also comes straight out of a reload, a shot
   or a pump/bolt. A reload keeps only rounds whose fill landed before the
-  press; a note due on the press think is lost (MW2's same-think hand step).
+  press; a note due on the press command is lost (MW2's same-command hand step).
   The reload restarts from 0, and an open action stays owed in
   `STAT_UNCHAMBERED` and is worked whole, from its open note, when the gun is
   back (the shot is not played again).

@@ -2,13 +2,13 @@
  *
  * The world is a set of brushes traced as the engine traces a brush (the
  * clip of ladder_test.c's sloped boxes): floors, walls, ceilings, steps,
- * slopes, water and other players' bodies. Every think is
+ * slopes, water and other players' bodies. Every command is
  * serverTime = commandTime + msec through the real Pmove, every player is
  * spawned through BG_SpawnStance as ClientSpawn does, and every number is
  * read from the code: the eye tables and leg lengths (BG_EyeLegTime,
  * bg_eye*), BG_EYE_*, the BG_PRONE_* constants, BG_PLAYER_SPEED and the
- * scales. Times are counted in thinks: a leg of L ms started on think t0 ends
- * on think t0 + ceil(L / msec), whatever msec is. */
+ * scales. Times are counted in commands: a leg of L ms started on command t0 ends
+ * on command t0 + ceil(L / msec), whatever msec is. */
 #include "../../code/game/bg_pmove.c"
 #include "../../code/qcommon/cm_local.h"	/* SURFACE_CLIP_EPSILON: the test traces as the engine clips */
 
@@ -238,8 +238,8 @@ static void TestTables(void) {
 	CHECK(BG_PRONE_LERP_MS < (1 << PS_EYE_LEG_BITS));
 }
 
-/* Test 1: every think of each leg shows the table at 100 * elapsed / ms;
- * the start think does not move the eye, and the box changes on it. */
+/* Test 1: every command of each leg shows the table at 100 * elapsed / ms;
+ * a leg's first command does not move the eye, and the box changes on it. */
 static void LegCurve(int msec, int fromButtons, int toButtons, int lerpTarget, int down, float fromEye, int box) {
 	int t, ms = BG_EyeLegTime(lerpTarget, down), end = Ceil(ms, msec);
 	Floor(); Spawn(0, 0, STAND_Z, 0); Settle(msec);
@@ -266,7 +266,7 @@ static void TestEyeCurve(void) {
 	}
 }
 
-/* Tests 2 and 3: stand to prone and prone to stand, both legs, in thinks. */
+/* Tests 2 and 3: stand to prone and prone to stand, both legs, in commands. */
 static void TestStandProneStand(void) {
 	int i, t;
 	for (i = 0; i < ARRAY_LEN(msecs); i++) {
@@ -276,9 +276,9 @@ static void TestStandProneStand(void) {
 		CHECK(ps.viewHeightTarget == BG_EYE_CROUCH && ps.viewHeightLerpTarget == BG_EYE_CROUCH &&
 			move.maxs[2] == CROUCH_HEIGHT && (ps.pm_flags & PMF_DUCKED) && !(ps.pm_flags & PMF_PRONE));
 		for (t = 1; t < leg1; t++) { Cmd(msec, BUTTON_PRONE, 0, 0); CHECK(ps.viewHeightLerpTarget == BG_EYE_CROUCH && move.maxs[2] == CROUCH_HEIGHT); }
-		Cmd(msec, BUTTON_PRONE, 0, 0);	/* leg 1's last think: the eye at the crouch, no leg */
+		Cmd(msec, BUTTON_PRONE, 0, 0);	/* leg 1's last command: the eye at the crouch, no leg */
 		CHECK(Eye() == BG_EYE_CROUCH && !ps.viewHeightLerpTarget && move.maxs[2] == CROUCH_HEIGHT);
-		Cmd(msec, BUTTON_PRONE, 0, 0);	/* the next think: leg 2, the prone box, prone */
+		Cmd(msec, BUTTON_PRONE, 0, 0);	/* the next command: leg 2, the prone box, prone */
 		CHECK(ps.viewHeightTarget == BG_EYE_PRONE && ps.viewHeightLerpTarget == BG_EYE_PRONE &&
 			move.maxs[2] == PRONE_HEIGHT && (ps.pm_flags & PMF_PRONE) && Eye() == BG_EYE_CROUCH);
 		for (t = 1; t < leg2; t++) { Cmd(msec, BUTTON_PRONE, 0, 0); CHECK(ps.viewHeightLerpTarget == BG_EYE_PRONE); }
@@ -315,7 +315,7 @@ static void TestRequestWaits(void) {
 	CHECK(ps.viewHeightTarget == BG_EYE_STAND && ps.viewHeightLerpTarget == BG_EYE_STAND && move.maxs[2] == DEFAULT_HEIGHT);
 }
 
-/* Test 5: a sprint mid stand-to-crouch reverses the leg; the eye that think
+/* Test 5: a sprint mid stand-to-crouch reverses the leg; the eye on that command
  * is the old leg's (MW2 discards the new table's value). */
 static void TestReversal(void) {
 	int i, k;
@@ -387,10 +387,10 @@ static float RampUp(int elapsed) {	/* ... and prone-to-crouch */
 	float f = (float)elapsed / BG_PRONE_LERP_MS;
 	return (1.0f - f) * BG_PRONE_SPEED_SCALE + f * BG_CROUCH_SPEED_SCALE;
 }
-/* the walk's scale this think, as PM_WalkMove takes it */
+/* the walk's scale this command, as PM_WalkMove takes it */
 static float WalkSpeedNow(int forward, int right) { pm = &move; return PM_WalkScale(forward, right) * 127; }
 
-/* Test 8: the stance scale on every think of both prone legs; the walk and
+/* Test 8: the stance scale on every command of both prone legs; the walk and
  * the bob's most take it. */
 static void TestStanceScale(void) {
 	int i, t;
@@ -400,7 +400,7 @@ static void TestStanceScale(void) {
 		CHECK(BG_StanceScale(&ps) == 1.0f);
 		GoCrouch(msec);
 		CHECK(BG_StanceScale(&ps) == BG_CROUCH_SPEED_SCALE);
-		Cmd(msec, BUTTON_PRONE, 0, 0);	/* the leg's first think: the target's flat scale */
+		Cmd(msec, BUTTON_PRONE, 0, 0);	/* the leg's first command: the target's flat scale */
 		CHECK(ps.viewHeightLerpTarget == BG_EYE_PRONE && BG_StanceScale(&ps) == BG_PRONE_SPEED_SCALE);
 		for (t = 1; t < end; t++) {
 			Cmd(msec, BUTTON_PRONE, 0, 0);
@@ -409,7 +409,7 @@ static void TestStanceScale(void) {
 		}
 		Cmd(msec, BUTTON_PRONE, 0, 0);
 		CHECK(!ps.viewHeightLerpTarget && BG_StanceScale(&ps) == BG_PRONE_SPEED_SCALE);
-		Cmd(msec, BUTTON_CROUCH, 0, 0);	/* up: the first think is the crouch's */
+		Cmd(msec, BUTTON_CROUCH, 0, 0);	/* up: the first command is the crouch's */
 		CHECK(ps.viewHeightLerpTarget == BG_EYE_CROUCH && !ps.viewHeightLerpDown && BG_StanceScale(&ps) == BG_CROUCH_SPEED_SCALE);
 		for (t = 1; t < end; t++) {
 			Cmd(msec, BUTTON_CROUCH, 0, 0);
@@ -434,7 +434,7 @@ static float Crawl(int ms, int msec, int buttons, int forward, int right) {
 	CHECK(ps.groundEntityNum != ENTITYNUM_NONE && (ps.pm_flags & PMF_PRONE));
 	return FlatSpeed();
 }
-/* the engine snaps each think's speed to a whole unit: MW2's to within half */
+/* the engine snaps each command's speed to a whole unit: MW2's to within half */
 static int NearSpeed(float v, float want) { return fabs(v - want) <= 0.5f + 1e-3f; }
 
 /* Test 9: the steady crawls. */
@@ -458,8 +458,8 @@ static void TestCrawlSpeeds(void) {
 
 /* Test 10: prone's accel 19 from rest and the stop, against MW2's walk
  * arithmetic (friction with the stopspeed floor, accel at least as hard as
- * at stopspeed), snapped each think as the engine snaps. */
-static float ModelThinkRaw(float v, float wish, float dt) {
+ * at stopspeed), snapped each command as the engine snaps. */
+static float ModelCommandRaw(float v, float wish, float dt) {
 	float speed = fabs(v), drop, newspeed;
 	if (speed < 1) v = 0;
 	else {
@@ -473,7 +473,7 @@ static float ModelThinkRaw(float v, float wish, float dt) {
 	}
 	return v;
 }
-static float ModelThink(float v, float wish, float dt) { return rintf(ModelThinkRaw(v, wish, dt)); }
+static float ModelCommand(float v, float wish, float dt) { return rintf(ModelCommandRaw(v, wish, dt)); }
 static void TestCrawlAccel(void) {
 	int i;
 	for (i = 0; i < ARRAY_LEN(msecs); i++) {
@@ -485,14 +485,14 @@ static void TestCrawlAccel(void) {
 		CHECK(pm_proneaccelerate == 19.0f);
 		for (t = 0; t * msec < 1000; t++) {
 			Cmd(msec, BUTTON_PRONE, 127, 0);
-			v = ModelThink(v, wish, dt);
+			v = ModelCommand(v, wish, dt);
 			CHECK(ps.velocity[0] == v && ps.velocity[1] == 0);
 		}
 		steady = v;
-		/* the time to 90% and 99% is the model's (MW2's), think for think */
+		/* the time to 90% and 99% is the model's (MW2's), command for command */
 		Spawn(0, 0, STAND_Z, 0); Settle(msec); ProneRested(msec); v = 0;
 		for (t = 0; t * msec < 1000; t++) {
-			Cmd(msec, BUTTON_PRONE, 127, 0); v = ModelThink(v, wish, dt);
+			Cmd(msec, BUTTON_PRONE, 127, 0); v = ModelCommand(v, wish, dt);
 			if (t90 < 0 && FlatSpeed() >= 0.9f * steady) t90 = t;
 			if (t99 < 0 && FlatSpeed() >= 0.99f * steady) t99 = t;
 			if (m90 < 0 && v >= 0.9f * steady) m90 = t;
@@ -501,7 +501,7 @@ static void TestCrawlAccel(void) {
 		CHECK(t90 == m90 && t99 == m99 && t90 >= 0);
 		/* the stop */
 		for (t = 0; t * msec < 1000 && (v || FlatSpeed()); t++) {
-			Cmd(msec, BUTTON_PRONE, 0, 0); v = ModelThink(v, 0, dt);
+			Cmd(msec, BUTTON_PRONE, 0, 0); v = ModelCommand(v, 0, dt);
 			CHECK(ps.velocity[0] == v);
 		}
 		CHECK(v == 0 && FlatSpeed() == 0);
@@ -582,14 +582,14 @@ static void DropLast(void) { numBrushes--; }
 
 /* Tests 13-15: standing and crouching need room; refusals unless held. */
 static void TestRoom(void) {
-	/* prone under 69: up to a crouch silently; the next think says stand is blocked */
+	/* prone under 69: up to a crouch silently; the next command says stand is blocked */
 	Floor(); Spawn(0, 0, STAND_Z, 0); Settle(8); GoProne(8);
 	Ceiling(DEFAULT_HEIGHT - MINS_Z - 1);
 	Cmd(8, 0, 0, 0);
 	CHECK(StanceEvents() == 0 && (ps.pm_flags & PMF_DUCKED) && ps.viewHeightTarget == BG_EYE_CROUCH);
 	Cmd(8, 0, 0, 0);
 	CHECK(Raised(EV_STANCE_FORCE_CROUCH, BG_STANCE_PARM_STAND_BLOCKED) == 1 && StanceEvents() == 1);
-	/* prone under 49: neither fits, every think; never with a held key */
+	/* prone under 49: neither fits, every command; never with a held key */
 	Floor(); Spawn(0, 0, STAND_Z, 0); Settle(8); GoProne(8);
 	Ceiling(CROUCH_HEIGHT - MINS_Z - 1);
 	Cmd(8, 0, 0, 0); CHECK(Raised(EV_STANCE_FORCE_PRONE, BG_STANCE_PARM_STAND_BLOCKED) == 1 && (ps.pm_flags & PMF_PRONE));
@@ -599,7 +599,7 @@ static void TestRoom(void) {
 	Cmd(8, BUTTON_CROUCH, 0, 0); CHECK(Raised(EV_STANCE_FORCE_PRONE, BG_STANCE_PARM_CROUCH_BLOCKED) == 1 && (ps.pm_flags & PMF_PRONE));
 	Cmd(8, BUTTON_CROUCH, 0, 0); CHECK(Raised(EV_STANCE_FORCE_PRONE, BG_STANCE_PARM_CROUCH_BLOCKED) == 1);
 	Cmd(8, BUTTON_CROUCH | BUTTON_TEMP_STANCE, 0, 0); CHECK(StanceEvents() == 0 && (ps.pm_flags & PMF_PRONE));
-	/* Test 15: stand from a crouch under 69, every think; a held key says nothing */
+	/* Test 15: stand from a crouch under 69, every command; a held key says nothing */
 	Floor(); Spawn(0, 0, STAND_Z, 0); Settle(8); GoCrouch(8);
 	Ceiling(DEFAULT_HEIGHT - MINS_Z - 1);
 	Cmd(8, 0, 0, 0); CHECK(Raised(EV_STANCE_FORCE_CROUCH, BG_STANCE_PARM_STAND_BLOCKED) == 1 && (ps.pm_flags & PMF_DUCKED));
@@ -736,8 +736,8 @@ static void TestProneRefused(void) {
 	CHECK(Raised(EV_STANCE_FORCE_CROUCH, BG_STANCE_PARM_PRONE_BLOCKED) == 1 && (ps.pm_flags & PMF_DUCKED));
 	Cmd(8, BUTTON_PRONE | BUTTON_TEMP_STANCE, 0, 0);
 	CHECK(StanceEvents() == 0 && (ps.pm_flags & PMF_DUCKED));
-	/* asked in the air: nothing until a think whose stance check sees the
-	 * ground, the one after the think whose move lands */
+	/* asked in the air: nothing until a command whose stance check sees the
+	 * ground, the one after the command whose move lands */
 	Floor(); Spawn(0, 0, STAND_Z + 30, 0);
 	Cmd(8, 0, 0, 0); CHECK(ps.groundEntityNum == ENTITYNUM_NONE);
 	for (t = 0, landed = 0; t < 200 && !landed; t++) {
@@ -781,7 +781,7 @@ static void TestProneSteep(void) {
 }
 
 /* Test 19: crawling back into a wall stops at the legs' reach, undone each
- * think (origin and velocity), still pushing; forward is the box's slide. */
+ * command (origin and velocity), still pushing; forward is the box's slide. */
 static void TestCrawlIntoWall(void) {
 	float x, w = BG_PRONE_FEET_DIST + PLAYER_WIDTH;
 	int t;
@@ -822,7 +822,7 @@ static void TestProneStep(void) {
 		float z = ps.origin[2], v0 = ps.velocity[0], v, keep;
 		Cmd(8, BUTTON_PRONE, 127, 0);
 		if (ps.origin[2] - z > 1) {
-			v = ModelThinkRaw(v0, WalkSpeedNow(127, 0), 0.008f);
+			v = ModelCommandRaw(v0, WalkSpeedNow(127, 0), 0.008f);
 			keep = STEP_SPEED_KEEP + (1 - STEP_SPEED_KEEP) * (1 - (ps.origin[2] - z) / STEPSIZE_PRONE);
 			CHECK(NEAR(keep, 0.6f, 0.02f) && fabs(ps.velocity[0] - v * keep) <= 0.5f + 1e-3f);
 			break;
@@ -905,8 +905,8 @@ static void Pinch(void) {
 	AddBox(-4000, -4000, -1000, -PLAYER_WIDTH - 3, -BG_PRONE_TRACE_HALF + 1, 200);
 }
 
-/* Test 22 and 50: a turn into a wall stops the body and says so every think
- * it stays blocked; the view is pushed toward the body within the think,
+/* Test 22 and 50: a turn into a wall stops the body and says so every command
+ * it stays blocked; the view is pushed toward the body within the command,
  * delta_angles taking all of it. */
 static void TestTurnBlocked(void) {
 	int t, n;
@@ -927,7 +927,7 @@ static void TestTurnBlocked(void) {
 		Look(ps.viewangles[YAW] + 30);	/* keep turning into it */
 	}
 	CHECK(n == t);
-	printf("  a turn held into a wall for %dms: EV_STANCE_INVALID on all %d thinks\n", t * 8, n);
+	printf("  a turn held into a wall for %dms: EV_STANCE_INVALID on all %d commands\n", t * 8, n);
 }
 
 /* Test 22a: an unblocked small turn is kept whole; a blocked one's last
@@ -939,7 +939,7 @@ static void TestSmallTurns(void) {
 	view = ps.viewangles[YAW];
 	Look(view + 0.5f); Cmd(8, BUTTON_PRONE, 0, 0);
 	CHECK(NEAR(BG_AngleDelta(ps.viewangles[YAW], view), 0.5f, quantum));
-	/* blocked: the same think from the same state, run with two old views -
+	/* blocked: the same command from the same state, run with two old views -
 	 * one too far for the undo, one half a degree back toward the turn */
 	Slot(); Spawn(0, 0, STAND_Z, 0); GoProne(8);
 	Look(25); Cmd(8, BUTTON_PRONE, 0, 0);
@@ -997,7 +997,7 @@ static void TestPronePitch(void) {
 	CHECK(NEAR(ps.viewangles[PITCH], want - BG_PRONE_PITCH_CAP, quantum) || ps.viewangles[PITCH] >= -BG_VIEW_PITCH_UP - quantum);
 }
 
-/* Test 24: another view update in the same think, or the freeze, changes
+/* Test 24: another view update in the same command, or the freeze, changes
  * nothing of the prone view. */
 static void TestViewIdempotent(void) {
 	vec3_t v; int delta[3];
@@ -1019,7 +1019,7 @@ static void Toggle(void) { move.cmd.weapon = BG_ToggleSlotWeapon(&ps, move.cmd.w
 
 /* Test 26: a burst holds the crawl, a push in the shot does not crawl, the
  * crawl comes back with the gun ready. A pump gun's shot holds it to the
- * shot's last think; the READY think after it is quiet (MW2's 0x572AA0 takes
+ * shot's last command; the READY command after it is quiet (MW2's 0x572AA0 takes
  * READY, read at 0x57454E before the weapon), so the crawl comes back there
  * with no push, and the pump, which sets no stop (MW2's rechamber never calls
  * PM_SetProneMovementOverride, 0x461FE0), crawls on. */
@@ -1042,8 +1042,8 @@ static void TestCrawlBurst(void) {
 	Hold(100, 8, BUTTON_PRONE, 64, 0);
 	Cmd(8, BUTTON_PRONE | BUTTON_ATTACK, 64, 0); CHECK(Raised(EV_FIRE_WEAPON, -1) == 1);
 	for (t = 0; t < 200 && ps.weaponstate == WEAPON_FIRING; t++) { Cmd(8, BUTTON_PRONE, 64, 0); CHECK(Stopped() && Overridden()); }
-	CHECK(ps.weaponstate == WEAPON_READY && BG_ShotAwaitsAction(&ps));	/* the shot's last think */
-	Cmd(8, BUTTON_PRONE, 64, 0);	/* the READY think: no push needed, and the pump starts */
+	CHECK(ps.weaponstate == WEAPON_READY && BG_ShotAwaitsAction(&ps));	/* the shot's last command */
+	Cmd(8, BUTTON_PRONE, 64, 0);	/* the READY command: no push needed, and the pump starts */
 	CHECK(!Stopped() && !Overridden() && ps.weaponstate == WEAPON_BOLTING);
 	for (t = 0; t < 200 && ps.weaponstate == WEAPON_BOLTING; t++) { Cmd(8, BUTTON_PRONE, 64, 0); CHECK(!Stopped() && !Overridden()); }
 	CHECK(ps.weaponstate == WEAPON_READY);
@@ -1179,7 +1179,7 @@ static void CmdUp(int msec, int buttons, int forward, int up) {
 /* Tests 32, 33 and 51: sprint and the stance. */
 static void TestSprintStance(void) {
 	int t;
-	/* out of a crouch with room: standing on the start think, the reset sent */
+	/* out of a crouch with room: standing on the sprint's first command, the reset sent */
 	Floor(); Spawn(0, 0, STAND_Z, 0); Settle(8); GoCrouch(8);
 	Cmd(8, BUTTON_CROUCH | BUTTON_SPRINT, 127, 0);
 	CHECK((ps.pm_flags & PMF_SPRINTING) && !(ps.pm_flags & (PMF_DUCKED | PMF_PRONE)));
@@ -1202,7 +1202,7 @@ static void TestSprintStance(void) {
 	Ceiling(DEFAULT_HEIGHT - MINS_Z - 1);
 	Cmd(8, BUTTON_CROUCH | BUTTON_SPRINT, 127, 0);
 	CHECK(!(ps.pm_flags & PMF_SPRINTING) && (ps.pm_flags & PMF_DUCKED) && StanceEvents() == 0);
-	/* Test 33: a crouch or prone bit ends a running sprint and crouches that think */
+	/* Test 33: a crouch or prone bit ends a running sprint and crouches that command */
 	for (t = 0; t < 2; t++) {
 		int k;
 		Floor(); Spawn(0, 0, STAND_Z, 0); Settle(8);
@@ -1220,7 +1220,7 @@ static void TestSprintStance(void) {
 	CHECK((ps.pm_flags & PMF_SPRINTING) && !(ps.pm_flags & PMF_DUCKED) && Raised(EV_STANCE_FORCE_STAND, BG_STANCE_PARM_FORCED) == 1);
 }
 
-/* Test 34: no jump crouched or prone, the press spent; one on the first think standing. */
+/* Test 34: no jump crouched or prone, the press spent; one on the first command standing. */
 static void TestStanceJump(void) {
 	int prone;
 	for (prone = 0; prone < 2; prone++) {
@@ -1268,7 +1268,7 @@ static void Ladder(void) {
 static qboolean OnLadder(void) { return (ps.stats[STAT_LADDER] & LADDER_ATTACHED) != 0; }
 
 /* Tests 35 and 49: no ladder prone; a crouched grab is stood up, and a held
- * crouch on the ladder is told every think. */
+ * crouch on the ladder is told every command. */
 static void TestStanceLadder(void) {
 	int t, n;
 	Ladder(); Spawn(40 - PLAYER_WIDTH - 1, 0, STAND_Z, 0); Settle(8); ProneRested(8);
@@ -1279,7 +1279,7 @@ static void TestStanceLadder(void) {
 	CHECK(OnLadder());
 	Cmd(8, BUTTON_CROUCH, 127, 0);
 	CHECK(Raised(EV_STANCE_FORCE_STAND, BG_STANCE_PARM_FORCED) == 1 && !(ps.pm_flags & PMF_DUCKED) && ps.viewHeightTarget == BG_EYE_STAND);
-	/* +movedown held on the ladder: every think, the held key notwithstanding */
+	/* +movedown held on the ladder: every command, the held key notwithstanding */
 	for (t = 0, n = 0; t < 50 && OnLadder(); t++) {
 		Cmd(8, BUTTON_CROUCH | BUTTON_TEMP_STANCE, 127, 0);
 		if (OnLadder()) { CHECK(Raised(EV_STANCE_FORCE_STAND, BG_STANCE_PARM_FORCED) == 1); n++; }
@@ -1326,7 +1326,7 @@ static void TestRespawned(void) {
 
 /* ------------------------------------------------- revision 2's tests */
 
-/* Test 41: the first leg of stand to prone asks for room every think. */
+/* Test 41: the first leg of stand to prone asks for room every command. */
 static void TestFirstLegRecheck(void) {
 	int i;
 	for (i = 0; i < ARRAY_LEN(msecs); i++) {
@@ -1342,7 +1342,7 @@ static void TestFirstLegRecheck(void) {
 }
 
 /* Test 42: the air move's crouch mid 40 -> 11: the target goes to 40 mid
- * leg and the next think reverses it. */
+ * leg and the next command reverses it. */
 static void TestAirFallbackMidLeg(void) {
 	int frac, elapsed, msec = 8, i;
 	Floor(); Spawn(0, 0, STAND_Z, 0); Settle(msec); GoCrouch(msec);
@@ -1389,7 +1389,7 @@ static void TestProneFall(void) {
 	CHECK(stand == EV_FALL_SHORT && crouch == EV_FALL_MEDIUM && prone == stand);
 }
 
-/* Test 44 and D7: the over-the-box windows, in thinks from the tables, and
+/* Test 44 and D7: the over-the-box windows, in commands from the tables, and
  * the hit volume that covers them. */
 static void OverBoxWindow(int msec, int fromButtons, int toButtons, int lerpTarget, float boxTop) {
 	int t, ms = BG_EyeLegTime(lerpTarget, 1), over = 0, want = 0, first = -1, last = -1;
@@ -1417,7 +1417,7 @@ static void OverBoxWindow(int msec, int fromButtons, int toButtons, int lerpTarg
 		}
 	}
 	CHECK(over == want && first == 0);
-	printf("  %3dms thinks, %s: eye over the %.0f box top on thinks 0..%d (%dms of the %dms leg), muzzle %.0f over the base at first\n",
+	printf("  %3dms commands, %s: eye over the %.0f box top on commands 0..%d (%dms of the %dms leg), muzzle %.0f over the base at first\n",
 		msec, lerpTarget == BG_EYE_CROUCH ? "stand to crouch" : "crouch to prone", boxTop - MINS_Z, last, over * msec, ms,
 		muzzle0 - MINS_Z);
 }
@@ -1429,8 +1429,8 @@ static void TestOverBoxWindows(void) {
 	}
 }
 
-/* Test 45: the ring's four slots against stance events every think: a shot
- * on a command's first think, then a prone turn blocked for the rest. Only
+/* Test 45: the ring's four slots against stance events every Pmove step: a shot
+ * on a command's first Pmove step, then a prone turn blocked for the rest. Only
  * measured: the ring is MW2's and nothing special-cases it. The server reads
  * a command's last MAX_PS_EVENTS (ClientEvents), so a first shot pushed out
  * of them deals no damage. */
@@ -1444,13 +1444,13 @@ static void TestRingBudget(void) {
 			int k, seq, firstShot = -1, kept;
 			Floor(); Spawn(0, 0, STAND_Z, 0); Gun(WP_MACHINEGUN); Settle(8); GoProne(8); Pinch();
 			Cmd(8, BUTTON_PRONE, 0, 0);
-			CHECK(Raised(EV_STANCE_INVALID, BG_STANCE_PARM_PRONE_BLOCKED) == 1);	/* blocked every think */
+			CHECK(Raised(EV_STANCE_INVALID, BG_STANCE_PARM_PRONE_BLOCKED) == 1);	/* blocked every command */
 			move.pmove_fixed = fixed; move.pmove_msec = msecs[m];
 			seq = ps.eventSequence;
 			Cmd(cmdMs[i], BUTTON_PRONE | BUTTON_ATTACK, 0, 0);
 			move.pmove_fixed = 0;
 			CHECK(ps.ammo[WP_MACHINEGUN] < BG_WeaponMagSize(WP_MACHINEGUN));
-			/* the first think's events: the blocked turn (the view runs first), the shot */
+			/* the first Pmove step's events: the blocked turn (the view runs first), the shot */
 			CHECK(ps.eventSequence - seq >= 2);
 			for (k = seq; k < ps.eventSequence && firstShot < 0; k++)
 				if (k >= ps.eventSequence - MAX_PS_EVENTS &&
@@ -1478,7 +1478,7 @@ static void TestTurnCost(void) {
 	Look(ps.proneDirection + 30);
 	for (t = 0; t < 10; t++) Cmd(8, BUTTON_PRONE, 0, 0);
 	traceCount = 0; Cmd(8, BUTTON_PRONE, 0, 0); steady = traceCount;
-	printf("  prone turn cost: a flick into a wall %d traces a think (%d a second at 125fps), "
+	printf("  prone turn cost: a flick into a wall %d traces a command (%d a second at 125fps), "
 		"a turn held blocked %d (%d a second)\n", worst, worst * 125, steady, steady * 125);
 	CHECK(worst <= 1500 && steady <= 25);	/* the bounds set from the first run (1199, 17) */
 }

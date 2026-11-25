@@ -128,7 +128,7 @@ qboolean BG_OffhandPreparesAtOnce( int weapon ) {
 // MW2's knife is no weapon change: MeleeInit writes the melee state straight
 // over the gun's, and MeleeEnd writes the gun's quick raise straight over the
 // knife's. So the knife comes out on its press and puts nothing down after it;
-// its draw is meleeDelay, and it ends in the hit (MeleeFire) on that same think.
+// its draw is meleeDelay, and it ends in the hit (MeleeFire) on that same command.
 qboolean BG_QuickActionInPlace( int weapon ) {
 	return weapon == WP_KNIFE;
 }
@@ -161,7 +161,7 @@ static int BG_OffhandRow( int weapon ) {
 
 // Every offhand (holdButtonToThrow 0): once its prepare is over it waits in
 // hand, MW2's HOLD (578f00-578f69), while either offhand button is down on
-// this command and the one before, and is thrown on the first think it is not.
+// this command and the one before, and is thrown on the first command it is not.
 qboolean BG_OffhandHeldToThrow( int weapon ) {
 	return BG_OffhandRow( weapon ) >= 0;
 }

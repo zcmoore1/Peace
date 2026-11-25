@@ -188,7 +188,7 @@ static int Buttons(int now) {
  * recording starts. */
 static int ProbeKnifeLive(void) { return S.knifeAt == NONE || base == NONE || curNow - base >= S.knifeAt; }
 static int SvKnifeOut(void) { return svPs.weapon == WP_KNIFE || (svPs.weaponAction & (WA_TYPE_MASK | WA_FIRED)) == WA_MELEE; }
-static void ServerThink(usercmd_t *ucmd) {
+static void RunOnServer(usercmd_t *ucmd) {
 	pmove_t pm; int msec, wasKnife, rounds;
 	if (ucmd->serverTime > levelTime + 200) ucmd->serverTime = levelTime + 200;
 	if (ucmd->serverTime < levelTime - 1000) ucmd->serverTime = levelTime - 1000;
@@ -389,7 +389,7 @@ static void HostFrame(int now) {
 	int snap, cmd;
 	curNow = now;
 	while (sqHead < sqTail && sq[sqHead].arrive <= now) ReceiveSnapshot(sqHead++);	/* first event loop */
-	while (cqHead < cqTail && cq[cqHead].arrive <= now) ServerThink(&cq[cqHead++].cmd);
+	while (cqHead < cqTail && cq[cqHead].arrive <= now) RunOnServer(&cq[cqHead++].cmd);
 	snap = HostServerFrame(CL_FRAME);
 	if (snap >= 0) sq[snap].arrive = now + hostHold;
 	while (sqHead < sqTail && sq[sqHead].arrive <= now) ReceiveSnapshot(sqHead++);	/* second */
@@ -402,7 +402,7 @@ static void HostFrame(int now) {
 static void NetworkMs(int now) {
 	int cmd;
 	curNow = now;
-	while (cqHead < cqTail && cq[cqHead].arrive != PENDING && cq[cqHead].arrive <= now) ServerThink(&cq[cqHead++].cmd);
+	while (cqHead < cqTail && cq[cqHead].arrive != PENDING && cq[cqHead].arrive <= now) RunOnServer(&cq[cqHead++].cmd);
 	while (sqHead < sqTail && sq[sqHead].arrive <= now) ReceiveSnapshot(sqHead++);
 	if (now % SV_FRAME == 0) {
 		int snap;
@@ -437,7 +437,7 @@ void FakeReloadHostSnapshot(int i, int now) {	/* CL_PacketEvent */
 void FakeReloadHostCommand(int i, int now) {	/* SV_PacketEvent */
 	EngineStep(now, 1);
 	CHECK(i == cqHead && cq[i].arrive == now); cqHead++;
-	ServerThink(&cq[i].cmd);
+	RunOnServer(&cq[i].cmd);
 }
 int FakeReloadHostServer(int msec, int now) {	/* SV_Frame */
 	int snap;
@@ -893,10 +893,10 @@ static void TestPictureHandsBack(void) {
 }
 
 /* A shot the server never fired, on a gun with rounds left: the detached
- * picture plays the shot you were shown, the READY think after it (MW2's,
+ * picture plays the shot you were shown, the READY command after it (MW2's,
  * owing the action, the fire clock parked at the open note) and the whole
  * pump or bolt from there - one fire clip - and hands back only once the gun
- * is at rest. The READY think is not rest, and the action that follows it is
+ * is at rest. The READY command is not rest, and the action that follows it is
  * not something the picture's own run began. */
 static void TestPictureFinishesTheAction(void) {
 	playerState_t rest, base2, shot, pred, before;
@@ -944,7 +944,7 @@ static void TestPictureFinishesTheAction(void) {
 
 /* The SF (the G19's select-fire switch) is worked as a bolt (WEAPON_BOLTING,
  * owner's rule), so the picture treats it as an action of the gun: one begun
- * on the think a G19 shot's time runs out, straight out of FIRING, is a new
+ * on the command a G19 shot's time runs out, straight out of FIRING, is a new
  * action, not that shot's pump. A correction whose server fired but never
  * started the SF (the selector's press never reached it) then plays the SF you
  * were shown through, its own clip, to its end, and hands back at rest; it
@@ -1020,18 +1020,18 @@ static void TestSFOutOfAShot(void) {
 	GUN = keep;
 }
 
-/* The shot's READY think is still the shot (BG_ShotAwaitsAction): a correction
+/* The shot's READY command is still the shot (BG_ShotAwaitsAction): a correction
  * whose snapshot base lands exactly on it keeps the shot the picture began.
  * No network desync in this model moves a shot by a command (every action
- * after the READY think is longer than any base age it makes), so drive the
+ * after the READY command is longer than any base age it makes), so drive the
  * picture directly, as TestSwapOnlyCorrection does: frame 1 predicts the shot
  * a command late; frame 2's snapshot is the server's shot a command earlier,
- * its base exactly on that shot's READY think and newer than every command,
- * so prediction is that READY think while the picture's own run, a command
+ * its base exactly on that shot's READY command and newer than every command,
+ * so prediction is that READY command while the picture's own run, a command
  * behind, is still in the shot. Prediction kept the shot: the picture follows
  * it, and does not detach. The timings are the command spacing and the gun's
- * own shot, found by running to the READY think. */
-static void TestCorrectionOnTheReadyThink(void) {
+ * own shot, found by running to the READY command. */
+static void TestCorrectionOnTheReadyCommand(void) {
 	playerState_t rest, sv, shot, before;
 	pmove_t pm, model;
 	script_t idle = Script(ACT_NONE, X);
@@ -1055,7 +1055,7 @@ static void TestCorrectionOnTheReadyThink(void) {
 	CG_WeapPicture_Update(&shot, &model, 0, numCmds - 1, GetCmd);
 	CG_WeapPicture_Update(&shot, &model, 0, numCmds - 1, GetCmd);
 	CHECK(shot.weaponstate == WEAPON_FIRING && CG_WeapPicture_State(&shot) == &shot);
-	/* the server fired on command 0: its run to that shot's READY think */
+	/* the server fired on command 0: its run to that shot's READY command */
 	sv = rest;
 	for (k = 0; k < 600; k++) {
 		memset(&pm, 0, sizeof(pm)); pm.ps = &sv; pm.cmd = cmds[k];
@@ -1234,11 +1234,11 @@ static void TestClockBase(void) {
  * (0x5786E3-0x5786F6). So an X pressed inside a burst is cleared, on the
  * server, only by the use code after the first command X is up on; the
  * client's copy, brought by a snapshot taken while X was down, rides the rest
- * of the burst through the replay and is taken on the think after the last
+ * of the burst through the replay and is taken on the command after the last
  * shot leaves, out of the shot (PM_BeginWeaponReload takes FIRING, 0x575E92).
  * X let go before the last shot's command: the server never reloads and the
  * client plays a reload as the burst finishes. X still down on it: a real
- * reload on that same think, on both sides. +reload is the weapon's own
+ * reload on that same command, on both sides. +reload is the weapon's own
  * button, read by the same check as a level (0x5786CD): never a fake.
  *
  * The gun here is the M16 rifle, a 3-Round Burst in its weapon.json; every
@@ -1586,13 +1586,13 @@ int main(void) {
 	TestSwapOnlyCorrection();
 	TestPictureHandsBack();
 	TestPictureFinishesTheAction();
-	TestCorrectionOnTheReadyThink();
+	TestCorrectionOnTheReadyCommand();
 	TestSFOutOfAShot();
 	Windows();
 	FakeReloads(); FakeBullets(); FakeBulletWindows();
 	GUN = WP_M40A3; MeasureAnchors();
 	TestPictureFinishesTheAction();
-	TestCorrectionOnTheReadyThink();
+	TestCorrectionOnTheReadyCommand();
 	Windows();
 	FakeReloads(); FakeBullets(); FakeBulletWindows(); WildScopes();
 	Burstloads();

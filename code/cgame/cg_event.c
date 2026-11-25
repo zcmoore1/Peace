@@ -537,7 +537,7 @@ MW2's (0x587230): the weapon is stored every time; a parm of 1..3 arms type
 parm + 2, stamped now, unless that type is already set. A same-type event
 never restamps it: the type is cleared only by the draw (CG_DrawInvalidCmdHint)
 once it has shown CG_INVALID_HINT_MS, so a block that raises an event every
-think blinks on for as long as it lasts.
+command blinks on for as long as it lasts.
 ==============
 */
 void CG_SetInvalidCmdHint( int weapon, int parm ) {

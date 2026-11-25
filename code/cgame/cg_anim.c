@@ -120,11 +120,11 @@ static void CG_WeapAnim_ResetReturn(void) {
 	cg_animTimeValid = qfalse;
 }
 
-// The fire clip is the gun's picture: the shot, the action, and the think
+// The fire clip is the gun's picture: the shot, the action, and the command
 // between them, where pmove has the shot READY owing its action with the
-// clip's clock at the open note (BG_ShotAwaitsAction, MW2's READY think).
+// clip's clock at the open note (BG_ShotAwaitsAction, MW2's READY command).
 // On a pump gun the shot and the action are one authored animation, so the
-// picture keeps running across that think instead of easing out into idle.
+// picture keeps running across that command instead of easing out into idle.
 // MW2's dry fire out of the last round's shot (BG_DryFiring) is FIRING with
 // the idle playing (PM_Weapon_CheckFiringAmmo, 5770a0): no fire clip.
 // The SF (the G19's select-fire switch) is worked as a bolt is
@@ -521,7 +521,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	// Firing and pumping share one clip. On a pump gun the shot and the action
 	// working are a single authored animation; the split into two states is a
 	// gameplay distinction, not a second piece of art, so the picture just
-	// keeps running across the boundary, the shot's READY think included.
+	// keeps running across the boundary, the shot's READY command included.
 	// The SF plays its own clip, the way it moves.
 	if ( ps->weaponstate == WEAPON_BOLTING && BG_IS_SELECT_SEQ( ps->weaponAnimSeq ) ) {
 		baseClip = ps->weaponAnimSeq == ASEQ_SELECT_AUTO ? WANIM_SELECT_AUTO : WANIM_SELECT_SEMI;
@@ -721,7 +721,7 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 	// once when the ladder is left with the holster unfinished (PM_LadderLeft),
 	// and YY flows, it never snaps: with the gun READY the lowering comes home
 	// with the move layer's return, up the drop it went down. A shot or the
-	// action started on that think takes the picture instead. Out of a holster
+	// action started on that command takes the picture instead. Out of a holster
 	// still on screen that is the move layer's crossfade, from the pose shown;
 	// out of one run out and hung there was no gun on screen to flow from, and
 	// it is in hand at once, already firing or being worked (MW2 starts that

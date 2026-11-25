@@ -15,13 +15,13 @@
 
 /* ---- server: silent_shot_server.c, the game module ---- */
 typedef struct {
-	int		shots;		/* EV_FIRE_WEAPON raised by this think, with the gun */
-	int		presses;	/* EV_SWITCH_OFFHAND raised by this think */
-	int		events;		/* playerstate events raised by this think */
-	int		hits;		/* the think's shot traces that ended on something to be seen */
-} ssThink_t;
+	int		shots;		/* EV_FIRE_WEAPON raised by this command, with the gun */
+	int		presses;	/* EV_SWITCH_OFFHAND raised by this command */
+	int		events;		/* playerstate events raised by this command */
+	int		hits;		/* the command's shot traces that ended on something to be seen */
+} ssCommand_t;
 void SS_Reset( int gun, int lethal, int levelTime );
-void SS_Command( int client, const usercmd_t *cmd, ssThink_t *out );
+void SS_Command( int client, const usercmd_t *cmd, ssCommand_t *out );
 void SS_RunFrame( int levelTime );			/* G_RunFrame's entity pass and ClientEndFrame */
 int SS_Health( int client );
 int SS_TempEffects( void );					/* impact/tracer temp entities alive now */

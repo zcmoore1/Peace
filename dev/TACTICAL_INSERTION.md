@@ -39,16 +39,16 @@ classifiers in `bg_loadout.c` are its data:
   250ms for every MW2 gun), as MW2's OffHandInit; from an empty hand (a
   knife drawn out of one included: MW2's code reads weapon 0 under it),
   `BG_EMPTY_HAND_OFFHAND_TIME` with a use hint and none without one
-  (CheckForOffHand's OffHandPrepare, 0x5791B0-0x5791CE). On the think after
-  another offhand's return to the empty hand, MW2's one-think OFFHAND_END
+  (CheckForOffHand's OffHandPrepare, 0x5791B0-0x5791CE). On the command after
+  another offhand's return to the empty hand, MW2's one-command OFFHAND_END
   delay runs out and its switch runs whatever the lock (0x579474): with a hint
-  the drop is spent and the ignite starts on that think; with none the TI is
+  the drop is spent and the ignite starts on that command; with none the TI is
   in hand at once, its ignite never played (OFFHAND_PREPARE's case is
   OffHandHold, 0x5792DA).
 - **Ignite.** Its draw is `BG_INSERTION_IGNITE_MS` (2630, holdFireTime): MW2's
   OffHandPrepare. No release cuts it short: a tap is queued and the TI is
   thrown on the first command after the ignite ends (MW2's PREPARE ends in
-  HOLD, which throws on its next think). Held longer it stays in hand for good
+  HOLD, which throws on its next command). Held longer it stays in hand for good
   (holdButtonToThrow and cookOffHold 0: it never throws itself) until the
   release (`BG_OffhandHeldToThrow`, every offhand's rule). Held means an
   offhand button down on this command and the one before - the lethal or the

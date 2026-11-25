@@ -15,7 +15,7 @@
  *   teleport.
  * - The hint (0x587230, 0x58DB10): shown CG_INVALID_HINT_MS, its alpha a
  *   sawtooth of CG_INVALID_HINT_BLINK_MS from its stamp; an event on every
- *   think never restamps it while it is set, the draw clears it, and the
+ *   command never restamps it while it is set, the draw clears it, and the
  *   first event after that arms it afresh, so a continuous block blinks; a
  *   menu or a spectated client hides it (the draw does not run, so it is not
  *   cleared and not restamped), the scoreboard does not. */
@@ -202,7 +202,7 @@ static void TestInterpolatedEye( void ) {
 
 /* MW2's hint, through the real arm and draw, in cgame's frame order: the
  * frame's events (prediction) first, then the 2D draw. */
-#define FRAME 8	/* one 8 ms think, and one frame, per event */
+#define FRAME 8	/* one 8 ms command, and one frame, per event */
 static int Draw( void ) { drawnCount = 0; drawnAlpha = -1; CG_DrawInvalidCmdHint(); return drawnCount; }
 static float Sawtooth( int t, int stamp ) {
 	return (float)( ( t - stamp ) % CG_INVALID_HINT_BLINK_MS ) / CG_INVALID_HINT_BLINK_MS;
@@ -234,7 +234,7 @@ static void TestHint( void ) {
 		CG_SetInvalidCmdHint( WP_SHOTGUN, BG_STANCE_PARM_FORCED ); CHECK( Draw() == 0 && cg.invalidCmdHintWeapon == WP_SHOTGUN );
 	}
 
-	/* a block held for 3000 ms raises the event on every 8 ms think: the
+	/* a block held for 3000 ms raises the event on every 8 ms command: the
 	 * stamp holds while the hint is set, the draw clears it after
 	 * CG_INVALID_HINT_MS, and the next event arms it again. Every ramp of
 	 * every showing reaches near 1: it blinks, never stuck at 0. */

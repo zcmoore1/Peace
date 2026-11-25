@@ -1,4 +1,4 @@
-/* Keep the real private weapon think in its own TU: Q3 headers intentionally
+/* Keep the real private PM_Weapon in its own TU: Q3 headers intentionally
  * do not have include guards. No substitute state machine or gameplay hook. */
 #include "../../code/game/bg_pmove.c"
 void PickupWeaponStep(pmove_t *move, int msec) {

@@ -108,16 +108,16 @@ Everything here is MW2's code ported to Peace's pmove (`bg_pmove.c`, `bg_slidemo
 the exe addresses in the comments. Nothing names a glitch: drop shots, crouch spam, a queued
 prone and a sprint out of prone come out of these rules.
 
-**The order of a think** (MW2's PmoveSingle 0x57448B-0x574B53). `pml.forwardmove` and
-`pml.rightmove` are this think's copies of the command's moves; the command is never written.
+**The order of a Pmove step** (MW2's PmoveSingle 0x57448B-0x574B53). `pml.forwardmove` and
+`pml.rightmove` are this Pmove step's copies of the command's moves; the command is never written.
 Then:
 1. the crawl rules (`PM_ProneMoveOverride`) and the prone view (`PM_ProneViewAngles`), on the
-   stance the last think left; a stopped crawl zeroes the copies;
-2. `PM_CheckDuck`, before the ground trace, so prone asked for in the air comes on the think
+   stance the last command left; a stopped crawl zeroes the copies;
+2. `PM_CheckDuck`, before the ground trace, so prone asked for in the air comes on the command
    after the one whose move lands;
 3. after the ground trace, the prone body against the ground (`PM_UpdatePronePitch`);
 4. the move; `PM_AirMove` crouches a prone body with no room in the air;
-5. sprint and aim (after the move, Peace's documented "one think late"), then the weapon.
+5. sprint and aim (after the move, Peace's documented "one command late"), then the weapon.
 
 `Pmove` keeps MW2's `oldcmd` in `ps.prevCmd`: written once a command, and only if a step ran,
 so every chopped step compares with the command before.
@@ -132,17 +132,17 @@ so every chopped step compares with the command before.
 Room is the box at the origin with the trace mask less `CONTENTS_BODY`, so another player never
 keeps you down. The eye's target follows the flags only between legs, and the flags and the box
 (`BG_PlayerBox`) follow the target: a request mid-leg waits, stand to prone goes through a
-crouch, and the first leg asks for room again every think. A ladder strips the crouch and prone
-bits with `FORCE_STAND 0` every think (no held-key test). `PMF_RESPAWNED` ignores the bits and
+crouch, and the first leg asks for room again every command. A ladder strips the crouch and prone
+bits with `FORCE_STAND 0` every command (no held-key test). `PMF_RESPAWNED` ignores the bits and
 holds while the trigger or prone is down (MW2's 0x574617). Spectators stand; the dead keep their
 flags while the eye falls at 180 a second to `BG_EYE_DEAD`.
 
 **The eye** (`PM_ViewHeightAdjust`, 0x570270). The eye runs MW2's four waypoint tables, a leg at
-a time: stand-crouch legs 200ms, into and out of prone 400ms. A leg's start think does not move
+a time: stand-crouch legs 200ms, into and out of prone 400ms. A leg's first command does not move
 the eye; a running leg shows its table at the whole percent gone; a target the other way
 reverses the leg from the mirrored percent. The box drops at a leg's start while the eye follows
 the curve, so on the way down the eye is above the new box for 110ms of stand to crouch and
-106ms of crouch to prone (at 8ms thinks: whole thinks at other rates).
+106ms of crouch to prone (at 8ms commands: whole commands at other rates).
 
 **Prone.**
 - *Entry* (0x570830): a moving player drops a held aim (`EV_RESET_ADS`); the box settles up 10
@@ -160,15 +160,15 @@ the curve, so on the way down the eye is above the new box for 110ms of stand to
   accel 19; the step 10 (`STEPSIZE_PRONE`), the push down 9 as standing.
 - *The view* (0x571ED0): the body turns toward the view at 55 a second whenever the command asks
   for prone (always, lying down), each step checked; a turn into a wall stops and backs off, and
-  a body still off the view pushes the view toward it within the think. The view stays within
+  a body still off the view pushes the view toward it within the command. The view stays within
   85 of the body and 45 of `proneTorsoPitch` (delta_angles takes the excess); a blocked turn
-  raises `EV_STANCE_INVALID 3` every think and undoes 98% of a small turn the same way. The
+  raises `EV_STANCE_INVALID 3` every command and undoes 98% of a small turn the same way. The
   pitches follow the ground at 70 a second. The server's `SetClientViewAngle` keeps the same
   limits.
 - *The crawl and the gun*: a shot, the knife and every offhand stop the crawl
   (`PMF_PRONEMOVE_OVERRIDDEN`) until the stick is pushed further than on the command before or
   the weapon is quiet again; a magazine reload and a swap never stop it. A pump gun's shot ends
-  READY on its last think, as MW2's, and that READY think is quiet (MW2's 0x572AA0), so the
+  READY on its last command, as MW2's, and that READY command is quiet (MW2's 0x572AA0), so the
   crawl comes back there with no push; its pump or bolt, like MW2's rechamber, stops nothing. An unscoped aim stops it;
   an aim held since the command before does not start while crawling; a scoped gun crawls aimed.
 - *Water* is sampled from the standing eye in every stance (`BG_WATER_SAMPLE_EYE`), so neither a
@@ -177,7 +177,7 @@ the curve, so on the way down the eye is above the new box for 110ms of stand to
 **Interplay.**
 - Sprint: a crouch or prone bit ends a running sprint (MW2's end mask) but does not keep one from
   starting; one started out of a crouch or prone needs room to stand and stands the player up on
-  its first think with `FORCE_STAND 0`, which resets the client's stance before its next command.
+  its first command with `FORCE_STAND 0`, which resets the client's stance before its next command.
   A crouch and a sprint pressed on one command from standing therefore stand and sprint (MW2
   crouches: it decides the sprint before the move).
 - No jump unless standing (the press is spent); no ladder prone; a prone landing's fall damage
@@ -196,12 +196,12 @@ of the boxes and the world, then each linked player's extra volumes from `BG_Pla
 that player's entity and box (`r.currentOrigin`, `r.mins`, `r.maxs`); the nearest entry wins. The
 railgun, the lightning gun, knives, melee and missiles keep the box.
 
-**The event ring.** Stance events can come every think, so a command Pmove chops into several
+**The event ring.** Stance events can come every Pmove step, so a command Pmove chops into several
 steps can push its shot out of the last four events the server reads, as MW2's four slots would.
 Nothing special-cases it; `stance_test.c` prints the cases.
 
 Tests: `dev/tests/run-stance.sh` (and `.cmd` for the pmove half): `stance_test.c` drives the
-real Pmove through brushes traced as the engine traces them, every think counted from the
+real Pmove through brushes traced as the engine traces them, every command counted from the
 tables and constants; `stance_server_test.c` runs the real `ClientThink`, `G_ShotTrace`, the
 railgun and the knife (which keep the box) and `SetClientViewAngle`.
 
@@ -255,16 +255,16 @@ railgun and the knife (which keep the box) and `SetClientViewAngle`.
   Peace event arms them). The weapon is stored every time; a same-type event never restamps;
   the draw clears it `CG_INVALID_HINT_MS` (1800) after its stamp and draws white with alpha
   `((time - stamp) % 600) / 600` (`CG_INVALID_HINT_BLINK_MS`), small and shadowed at MW2's
-  `rect 0 -125` about the centre. So a block that raises the event every think blinks for as
+  `rect 0 -125` about the centre. So a block that raises the event every command blinks for as
   long as it lasts. Hidden while a menu is up or a client is spectated (the draw does not run,
   so it neither clears nor restamps); the scoreboard does not hide it.
-- **The eye.** Pmove moves `ps.viewheight` along MW2's curve every think, so cgame's duck ease
+- **The eye.** Pmove moves `ps.viewheight` along MW2's curve every command, so cgame's duck ease
   is gone (`DUCK_TIME`, `cg.duckChange`, `cg.duckTime`). An unpredicted view (a demo, a
   followed player, the killcam) lerps `viewheight` between snapshots, as the origin.
 - **Others' eye and stance.** Others' muzzles (`CG_CalcMuzzlePoint`, the lightning bolt) and
   their drawn shots (`CG_EntityShot`) start from the eye their entity carries (`origin2[2]`,
   the shooter's `ps.viewheight`, the server's muzzle eye), so a drop shot is drawn from the
-  server's eye on every think of both legs. Their spread's stance is MW2's `EF_CROUCHING` and
+  server's eye on every command of both legs. Their spread's stance is MW2's `EF_CROUCHING` and
   `EF_PRONE` (exact: no legs-anim lag). `CG_WaterLevel` samples at `BG_WATER_SAMPLE_EYE`. The
   viewed player's box is `BG_PlayerBox`.
 - **Drawn bullets hit the hit volumes** (owner's decision D7). `CG_ShotTrace` tests, for a
@@ -275,7 +275,7 @@ railgun and the knife (which keep the box) and `SetClientViewAngle`.
   `BG_PlayerHitVolumes` and `BG_HitVolumeTrace`: the nearest volume entered before what the
   engine trace hit is the hit, at its own fraction and face. Blood and impacts therefore land
   where the server's damage did, under the existing rule (exact when the entity shows the
-  shot's own think).
+  shot's own command).
 - **Third person** (`cg_players.c`, a placeholder; the owner's prone line in CLAUDE.md).
   `LEGS_IDLEPR`, `LEGS_CRAWL` and `LEGS_CRAWLB` are the standing idle, the crouch walk and the
   crouch walk reversed. A live player with `EF_PRONE` lies face down along `origin2[0..1]`

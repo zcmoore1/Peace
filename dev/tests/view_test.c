@@ -9,7 +9,7 @@
  *   never wider than the hip. The mouse follows tan(fov/2) / tan(65/2).
  * - The eye is the playerstate's viewheight above the origin, whatever pmove
  *   put there: nothing in the view assumes Quake 3's 26 (50 above the feet).
- *   A stance change is shown think by think as pmove moves the eye (MW2's
+ *   A stance change is shown command by command as pmove moves the eye (MW2's
  *   curve), first and third person alike, with no cgame ease; the dead eye
  *   falls at one rate.
  * Only the engine traps, the world and the weapon registry are stubbed. */
@@ -312,19 +312,19 @@ static void ThirdPersonEye(float height) {
 	NEAR(cg.refdef.vieworg[2], ps->origin[2] + height + 8, 1e-4);
 	cg.renderingThirdPerson = qfalse;
 }
-/* One stance change through the real Pmove, think by think until the eye
- * reaches its end: the box (the flags) changes on the first think, the eye
- * moves only one way and never past its end, and every think the first- and
+/* One stance change through the real Pmove, command by command until the eye
+ * reaches its end: the box (the flags) changes on the first command, the eye
+ * moves only one way and never past its end, and every command the first- and
  * third-person views stand exactly on the playerstate's eye (pmove's curve,
- * MW2's PM_ViewHeightAdjust; no cgame ease). Returns the thinks it took. */
+ * MW2's PM_ViewHeightAdjust; no cgame ease). Returns the commands it took. */
 static int Leg(pmove_t *move, int buttons, int upmove, float to) {
 	playerState_t *ps = &cg.predictedPlayerState;
 	float from = ps->viewheight, last = from;
-	int thinks = 0;
+	int commands = 0;
 	while (ps->viewheight != to) {
-		CHECK(thinks * 8 <= 2 * BG_PRONE_LERP_MS);	/* a leg is never longer than prone's */
+		CHECK(commands * 8 <= 2 * BG_PRONE_LERP_MS);	/* a leg is never longer than prone's */
 		Step(move, buttons, upmove);
-		thinks++;
+		commands++;
 		CHECK(!!(ps->pm_flags & PMF_DUCKED) == (to == CROUCH_VIEWHEIGHT));
 		if (to < from) CHECK(ps->viewheight <= last && ps->viewheight >= to);
 		else CHECK(ps->viewheight >= last && ps->viewheight <= to);
@@ -332,7 +332,7 @@ static int Leg(pmove_t *move, int buttons, int upmove, float to) {
 		ThirdPersonEye(ps->viewheight);
 		last = ps->viewheight;
 	}
-	return thinks;
+	return commands;
 }
 static void TestEye(void) {
 	static const float heights[] = { 36, 16, 31.5f, 8, 35.73f, -13, 2.0625f };	/* MW2's 60 and 40 above the feet, the curve's fractions, others */
@@ -348,7 +348,7 @@ static void TestEye(void) {
 	Eye(DEFAULT_VIEWHEIGHT);
 	/* crouch as a held +movedown sends it: MW2's crouch level with TEMP, and
 	 * Quake's upmove; pmove takes whichever it reads. The eye follows pmove
-	 * over as many thinks as pmove takes. */
+	 * over as many commands as pmove takes. */
 	down = Leg(&move, BUTTON_CROUCH | BUTTON_TEMP_STANCE, -127, CROUCH_VIEWHEIGHT);
 	Eye(CROUCH_VIEWHEIGHT);
 	up = Leg(&move, 0, 0, DEFAULT_VIEWHEIGHT);
@@ -362,7 +362,7 @@ static void TestEye(void) {
 		ThirdPersonEye(heights[i]);
 	}
 	ps->viewheight = DEFAULT_VIEWHEIGHT;
-	/* dead: the dead eye, from pmove too, falling at one rate (the last think
+	/* dead: the dead eye, from pmove too, falling at one rate (the last command
 	 * may stop short at the end) */
 	ps->pm_type = PM_DEAD; ps->stats[STAT_HEALTH] = 0;
 	snap.ps.stats[STAT_HEALTH] = 0;

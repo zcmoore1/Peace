@@ -52,8 +52,8 @@ static void TestSemtex(void) {
    CHECK(!fired[WP_SEMTEX]);
   }
   // Post-release Y selects immediately but does not interrupt the throw or
-  // original-gun raise. The new holster begins on the think after the ready
-  // boundary: that think is MW2's OFFHAND_END's last, which ends in
+  // original-gun raise. The new holster begins on the command after the ready
+  // boundary: that command is MW2's OFFHAND_END's last, which ends in
   // PM_Weapon_Idle (iw4x 0x579279) and which its change check refuses
   // (0x578BEA-0x578BF2).
   SemtexReady(gun); Hold(); move.cmd.buttons=0; Step(1);
@@ -133,8 +133,8 @@ static void TestSemtex(void) {
  /* A ladder grabbed with the Semtex held takes nothing from it (MW2's ladder
   * drop is a weapon change, refused in every offhand state): it is thrown on
   * the release, or Y cancels it (k 1), the gun comes back on its quick raise,
-  * and the ladder drop starts on the think after the latch clears (the
-  * quick raise's last think is OFFHAND_END's, which MW2's change check, the
+  * and the ladder drop starts on the command after the latch clears (the
+  * quick raise's last command is OFFHAND_END's, which MW2's change check, the
   * ladder's branch included, refuses: 0x578BEA-0x578BF2). */
  for(phase=0;phase<2;phase++) {
   SemtexReady(WP_SHOTGUN); Hold();

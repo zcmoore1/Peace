@@ -61,28 +61,28 @@ typedef struct {
 	int			previous_waterlevel;
 
 	vec3_t		ladderNormal;
-	qboolean	jumped;			// a jump left the ground this think
+	qboolean	jumped;			// a jump left the ground this Pmove step
 
-	// This think's copy of the command's rightmove, which MW2's sprint strafe
+	// This Pmove step's copy of the command's rightmove, which MW2's sprint strafe
 	// scales in PM_WalkMove (MW2 writes it into the command; Pmove's substeps
-	// reuse the command, so here it is a per-think copy that cannot compound).
+	// reuse the command, so here it is a per-step copy that cannot compound).
 	// The walk, the take-off's air move and the bob read it.
 	int			rightmove;
-	// This think's copy of the command's forwardmove. MW2's prone crawl stops
+	// This Pmove step's copy of the command's forwardmove. MW2's prone crawl stops
 	// (PmoveSingle 0x574570, 0x574769) zero the command; Peace zeroes these
 	// copies, so a chopped command's next step still reads the real one.
 	int			forwardmove;
 
-	// The weapon think's own facts about this think, set by PM_Weapon before
+	// PM_Weapon's own facts about this Pmove step, set by it before
 	// anything reads them. delayedAction is MW2's (PM_Weapon_WeaponTimeAdjust's
-	// return, 0x578B7B-0x578BAB): a weapon delay runs out on this think.
+	// return, 0x578B7B-0x578BAB): a weapon delay runs out on this command.
 	// recoveryEnds: the return from a knife or equipment (MW2's MELEE_END or
-	// OFFHAND_END: the gun's quick raise, or an empty hand's one think after
-	// equipment) ends on this think.
+	// OFFHAND_END: the gun's quick raise, or an empty hand's one command after
+	// equipment) ends on this command.
 	qboolean	delayedAction;
 	qboolean	recoveryEnds;
 	// burstPending: MW2's BurstFirePending (576a70) as PM_Weapon asks it once
-	// a think, after the time step and before its checks (44c444-44c4b3): a
+	// a Pmove step, after the time step and before its checks (44c444-44c4b3): a
 	// burst is under way and none of the checks is run.
 	qboolean	burstPending;
 } pml_t;

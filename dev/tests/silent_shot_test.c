@@ -5,7 +5,7 @@
  * But the round's killcam can show nothing of it and still show the view
  * kicked over. Nothing in the game names this. It emerges from MW2's pieces:
  *  - the playerstate's ring of four predictable events (MW2 0x4bd150). The
- *    knife's press raises four on one think: CheckForOffHand's
+ *    knife's press raises four on one command: CheckForOffHand's
  *    EV_SWITCH_OFFHAND, OffHandInit's EV_WEAPON_SWITCH_STARTED and
  *    EV_RESET_ADS, OffHandPrepare's EV_PREP_OFFHAND (579168, 578e10, 578e5e,
  *    5778e6). The killcam records one playerstate a server frame (sv_snapshot.c,
@@ -149,14 +149,14 @@ static int Buttons( int t ) {
 static float Kick( const playerState_t *ps, int axis ) { return AngleNormalize180( ps->viewangles[axis] - view[axis] ); }
 static int Traced( void ) { return getenv( "SILENTSHOT_TRACE" ) != NULL; }
 
-static void ServerThink( const usercmd_t *cmd ) {
-	ssThink_t think;
-	SS_Command( SS_SHOOTER, cmd, &think );
-	if ( think.shots ) { O.svShots++; O.svShotFrame = svFrames; O.svShotLevel = levelTime; O.svShotHits = think.hits; }
-	if ( think.presses ) { O.svPresses++; O.svPressFrame = svFrames; }
-	if ( Traced() && ( think.events || cmd->buttons ) )
-		printf( "  now %5d SV think st%d b%x: %d events, shot %d press %d (server frame %d)\n",
-			now, cmd->serverTime, cmd->buttons, think.events, think.shots, think.presses, svFrames );
+static void RunOnServer( const usercmd_t *cmd ) {
+	ssCommand_t result;
+	SS_Command( SS_SHOOTER, cmd, &result );
+	if ( result.shots ) { O.svShots++; O.svShotFrame = svFrames; O.svShotLevel = levelTime; O.svShotHits = result.hits; }
+	if ( result.presses ) { O.svPresses++; O.svPressFrame = svFrames; }
+	if ( Traced() && ( result.events || cmd->buttons ) )
+		printf( "  now %5d SV command st%d b%x: %d events, shot %d press %d (server frame %d)\n",
+			now, cmd->serverTime, cmd->buttons, result.events, result.shots, result.presses, svFrames );
 }
 
 static void Observe( int role, const ccFrame_t *f, int *lastSnapTime ) {
@@ -270,10 +270,10 @@ static void Run( int role ) {
 		if ( role == ROLE_SHOOTER ) {
 			while ( cqHead < cqTail && cq[cqHead].arrive != PENDING && cq[cqHead].arrive <= now ) {
 				kept[keptCount] = cq[cqHead]; kept[keptCount++].arrive = now;	/* when it ran */
-				ServerThink( &cq[cqHead++].cmd );
+				RunOnServer( &cq[cqHead++].cmd );
 			}
 		} else {
-			while ( k < keptCount && kept[k].arrive <= now ) ServerThink( &kept[k++].cmd );
+			while ( k < keptCount && kept[k].arrive <= now ) RunOnServer( &kept[k++].cmd );
 		}
 		/* snapshots reach the client */
 		while ( sqHead < sqTail && sq[sqHead & 7].arrive <= now ) {
@@ -427,7 +427,7 @@ static void FollowSwitch( int gun ) {
  * has no body there and its bullets go through, so the drawn ones must too:
  * exactly as they are drawn for the same viewer off the line. (Where they
  * land behind is the entity event's own business: exact only when the entity
- * shows the shot's think, so not every drawn bullet need reach the victim.)
+ * shows the shot's command, so not every drawn bullet need reach the victim.)
  * The same viewer alive, in the same place, takes them (the control). */
 static void OutOfRound( int gun ) {
 	int p, cases = 0, inLine = 0, through = 0;

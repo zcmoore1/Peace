@@ -3,7 +3,7 @@
  * and the server's real use/reload step (BG_UpdateActivate), run in the
  * client's frame order: a frame's bound commands run first (weapnext, weapalt),
  * its command is built with the weapon cgame set when it last drew, the server
- * thinks (Pmove, then the use step), and cgame draws and sets the next
+ * runs it (Pmove, then the use step), and cgame draws and sets the next
  * command's weapon. So a Y's selection goes out one command after its press,
  * and X (+usereload) is a reload press on the command after its own.
  *
@@ -84,7 +84,7 @@ static void Setup(int activeSlot, qboolean alternate) {
 #define IN_Y    1
 #define IN_ALT  2
 #define IN_PREV 4
-/* One client frame: bound commands, the command, the server's think, the draw. */
+/* One client frame: bound commands, the command, the server's run of it, the draw. */
 static void Frame(int buttons, int keys) {
 	if (keys & IN_Y) CG_NextWeapon_f();
 	if (keys & IN_PREV) CG_PrevWeapon_f();
@@ -138,7 +138,7 @@ static void TestCycle(void) {
 	CHECK(cg.weaponSelectSlot == 0 && cg.weaponSelect == WP_M16);	/* the press counts at once */
 	CHECK(PS->weapon == WP_MASTERKEY && PS->weaponstate == WEAPON_READY);	/* its command goes out next frame */
 	Frame(0, 0);
-	/* the mode changed on that one think; only the alt raise takes time */
+	/* the mode changed on that one command; only the alt raise takes time */
 	CHECK(PS->weapon == WP_M16 && PS->weaponstate == WEAPON_RAISING && PS->weaponDraw == WDRAW_ALT);
 	CHECK(PS->weaponTime == BG_WeaponAltRaiseTime(WP_M16));
 	CHECK(!(PS->slotFlags[0] & BG_GUN_ALTERNATE));
@@ -355,7 +355,7 @@ static void TestSpasPaysItsDrop(void) {
 		drop = BG_WeaponDropTime(WP_SHOTGUN);
 		CHECK(shot > 0 && close > shot && drop > 0);
 		end = Frames(shot);
-		/* every press before the pump's close note: that note's own think is the
+		/* every press before the pump's close note: that note's own command is the
 		 * bolt cancel, which is another thing and asks for no reload */
 		last = close / msec - 3;
 		CHECK(last > end);
@@ -416,13 +416,13 @@ static void TestPumpOwed(void) {
 		Frame(BUTTON_ATTACK, 0);
 		CHECK(PS->weaponstate == WEAPON_FIRING && Shells(0, qtrue) == BG_WeaponMagSize(WP_MASTERKEY) - 2);
 
-		/* Y's command on the READY think after the shot, or on the pump's bolt
-		 * think after that: the mode change, and the pump is owed */
+		/* Y's selection on the READY command after the shot, or on the pump's bolt
+		 * command after that: the mode change, and the pump is owed */
 		for (f = end; f <= end + 1; f++) {
 			run_t r = Shoot(0, qtrue, f, -1, -1, f + 8);
 			CHECK(r.change == f + 1 && r.changeTo == WP_M16 && Owes(0, qtrue));
 		}
-		/* Y's command arriving after the bolt think: nothing is owed */
+		/* Y's command arriving after the bolt command: nothing is owed */
 		for (f = end + 2; f * msec < fire - msec; f++) {
 			run_t r = Shoot(0, qtrue, f, -1, -1, f + 8);
 			CHECK(r.change == f + 1 && r.changeTo == WP_M16 && !Owes(0, qtrue));
@@ -451,12 +451,12 @@ static void TestPumpOwed(void) {
  * checks run before its rechamber check (44c4d7), so a change first seen on
  * the shot's last command or on the READY one is a whole drop with the action
  * owed, one first seen on the bolt's command is instant with it owed (the
- * bolt's delayed action finishes the drop begun on its think, 579474 ->
+ * bolt's delayed action finishes the drop begun on its command, 579474 ->
  * 57928c: model trace mk_rech_frame), and a later one is a whole drop with it
  * paid. A sprint takes the READY gun before the action starts and waits once
  * it is under way; a knife is taken from the shot and from the READY gun, and
- * refused while the bolt is pending (MW2's knife check refuses a delayed
- * action think and a weaponDelay still running, 5776ed, 577734-577753). */
+ * refused while the bolt is pending (MW2's knife check refuses a delayed-action
+ * command and a weaponDelay still running, 5776ed, 577734-577753). */
 typedef struct { int slot; qboolean alternate; int weapon, other; } pumpGun_t;
 static const pumpGun_t pumpGuns[] = {
 	{ 0, qtrue, WP_MASTERKEY, WP_SHOTGUN },
@@ -590,7 +590,7 @@ static void TestRechamberTiming(void) {
  * action owed (the command names the other gun: no lock); on the bolt's
  * command, now the one after the shot's last on the Masterkey, the instant
  * swap with it owed (the bolt's delayed action finishes the drop begun on its
- * think, 0x579474, 0x57928C); a command later a whole drop with it paid. */
+ * command, 0x579474, 0x57928C); a command later a whole drop with it paid. */
 static void TestHeldRechamber(void) {
 	static const int rates[] = { 8, 16, 33 };
 	int i, k, c, cmd;

@@ -96,7 +96,7 @@ scripts do every one of these with `+usereload`.
    finishes what you saw), until that run comes to rest or prediction starts a
    real action. It never detaches into an action that only its own run began.
    A shot's pump or bolt is the same action as the shot, across the READY
-   think between them (`BG_ShotAwaitsAction`), so a shot you were shown is
+   command between them (`BG_ShotAwaitsAction`), so a shot you were shown is
    drawn to the end of its action. A correction that only removes a swap is
    followed at once. A corrected snapshot keeps the action you were shown
    only if the server's state in it shows the same kind of action: a reload

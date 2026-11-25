@@ -33,7 +33,7 @@
  * over it while the eye is above it, a prone player's body), and the real
  * server's damage lands on what the mark says. A prone shooter's own shots
  * come from the float eye; others draw a drop shot (stand to prone while
- * firing) from the eye the entity carries (origin2[2]) on every think of both
+ * firing) from the eye the entity carries (origin2[2]) on every command of both
  * legs, and a settled prone shooter from the prone eye; a prone target's body
  * behind it stops the shooter's, a watcher's and its own drawn bullets as it
  * stops the server's; a target crouching or going prone is hit over its box
@@ -224,7 +224,7 @@ static void Run( const run_t *r ) {
 	for ( k = 0, t = BS_START_TIME; k < r->commands; k++ ) {
 		usercmd_t c;
 		t += CMD_MSEC;
-		if ( r->victimStance ) {	/* the target's own command first, in this think */
+		if ( r->victimStance ) {	/* the target's own command first, then the shooter's */
 			usercmd_t v;
 			memset( &v, 0, sizeof( v ) );
 			v.serverTime = t; v.weapon = BS_PlayerState( VICTIM )->weapon;
@@ -274,7 +274,7 @@ static void Run( const run_t *r ) {
 
 	/* the damage is the server's and unchanged: each hit's own amount */
 	CHECK( bs_markCount < BW_MAX_MARKS && bc_markCount < BW_MAX_MARKS );	/* every mark recorded */
-	if ( !r->victimStance ) {	/* a target that thinks counts its health down above the maximum (ClientTimerActions) */
+	if ( !r->victimStance ) {	/* a target that runs commands counts its health down above the maximum (ClientTimerActions) */
 		CHECK( health - BS_Health( VICTIM ) == FleshOn( VICTIM ) * Damage( r->weapon, r->gametype ) );
 	}
 	if ( r->weapon != WP_RAILGUN && r->weapon != WP_LIGHTNING && r->weapon != WP_ROCKET_LAUNCHER ) {
@@ -490,7 +490,7 @@ static void TestOverTheBox( void ) {
 
 /* The drop shot: firing while going prone. Others draw it from the eye the
  * shooter's entity carries (origin2[2], the server's muzzle eye) on every
- * think of both legs, and then from the prone eye; the shooter's own screen
+ * command of both legs, and then from the prone eye; the shooter's own screen
  * from its recorded float eye, standing still and moving. */
 static void TestDropShot( void ) {
 	static const int viewers[] = { WATCHER, VICTIM, SHOOTER };

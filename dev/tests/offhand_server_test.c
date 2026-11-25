@@ -8,7 +8,7 @@
  * the thrower's velocity along the throw, looking level, up and down, standing,
  * running and backpedalling), every fuse (the frag's what its cook left, the
  * rest their fuseTime from the throw), the cook timeline end to end (thrown
- * late, run out in hand, a release on the think it runs out, god mode and a
+ * late, run out in hand, a release on the command it runs out, god mode and a
  * death the server refuses, and a cook-out on one step of a command Pmove
  * chops into several), and MW2's death drop (5df920) of every class held at
  * death, the frag cooking, one let go on the command a fall kills its holder,
@@ -277,7 +277,7 @@ static int Spawned(int from, gentity_t **last) {
  return n;
 }
 /* pressed, then `buttons` until it is in hand and ready (MW2's HOLD): the time
- * of the think that entered it. With a holdFireTime of 0 (the throwing knife)
+ * of the command that entered it. With a holdFireTime of 0 (the throwing knife)
  * that is the press. */
 static int PullOut(int row, int buttons) {
  int t, press;
@@ -287,7 +287,7 @@ static int PullOut(int row, int buttons) {
   Frame(buttons);
  }
  CHECK(t<10000 && !(ps->weaponAction&WA_FIRED) && ps->grenadeTimeLeft==mw2[row].fuse);
- /* the gun's quick drop and the prepare, a think each at a time */
+ /* the gun's quick drop and the prepare, a command each at a time */
  if(BG_OffhandPreparesAtOnce(mw2[row].weapon)) CHECK(level.time==press);
  else CHECK(level.time-press==CMD_MSEC*((BG_WeaponQuickDropTime(WP_SHOTGUN)+CMD_MSEC-1)/CMD_MSEC)+
   CMD_MSEC*((mw2[row].holdFireTime+CMD_MSEC-1)/CMD_MSEC));
@@ -334,7 +334,7 @@ static void TestThrow(void) {
   from=level.num_entities;
   entry=PullOut(row,0);	/* a tap, queued through the drop and the prepare */
   CHECK(!Spawned(from,NULL) && ps->ammo[weapon]==count);
-  /* HOLD's first think throws it */
+  /* HOLD's first command throws it */
   Command(0);
   CHECK((ps->weaponAction&WA_FIRED) && ps->weaponstate==WEAPON_FIRING && ps->ammo[weapon]==count-1);
   CHECK(!ps->grenadeTimeLeft);	/* the server's throw spent it (5e944c) */
@@ -371,8 +371,8 @@ static void TestThrow(void) {
 
 /* The frag's cook (cookOffHold 1). Let go late, the fuse in flight is what
  * HOLD left it, so it still goes off fuseTime after HOLD entry. Held to the end
- * it is MW2's grenade suicide: the think it runs out on (a release on that
- * think included) sends EV_GRENADE_SUICIDE, spends the frag, and the server
+ * it is MW2's grenade suicide: the command it runs out on (a release on that
+ * command included) sends EV_GRENADE_SUICIDE, spends the frag, and the server
  * kills its holder as a suicide; the death drop sets the frag off at once, at
  * the hand, hurting who stands there. A holder the server does not kill (god
  * mode, S&D between rounds) loses the frag and gets the gun back on its quick
@@ -392,12 +392,12 @@ static void TestCook(void) {
   CHECK(boomTime[m->s.number]>=entry+fuse && boomTime[m->s.number]<entry+fuse+CMD_MSEC);
   CHECK(cl[THROWER].ps.stats[STAT_HEALTH]>0 && ps->pm_type==PM_NORMAL);
  }
- /* held, or let go on the very think it runs out: the suicide */
+ /* held, or let go on the very command it runs out: the suicide */
  for(k=0;k<2;k++) {
   int i, end, out;
   Reset(FRAG); count=ps->ammo[WP_FRAG]; from=level.num_entities;
   entry=PullOut(FRAG,BUTTON_LETHAL);
-  out=entry+CMD_MSEC*((fuse+CMD_MSEC-1)/CMD_MSEC);	/* the think its msec takes it to 0 or past */
+  out=entry+CMD_MSEC*((fuse+CMD_MSEC-1)/CMD_MSEC);	/* the command its msec takes it to 0 or past */
   while(level.time+CMD_MSEC<out) Frame(BUTTON_LETHAL);
   CHECK(ps->grenadeTimeLeft>0 && ps->grenadeTimeLeft<=CMD_MSEC && !Spawned(from,NULL));
   end=level.num_entities;
@@ -424,7 +424,7 @@ static void TestCook(void) {
   while(ps->grenadeTimeLeft>0) Frame(BUTTON_LETHAL);
   CHECK(ps->grenadeTimeLeft==-1 && ps->weapon==WP_FRAG && ps->ammo[WP_FRAG]==count-1);
   CHECK(g_entities[THROWER].health==100 && ps->pm_type==PM_NORMAL && !Spawned(from,NULL));
-  /* the next think ends it: the gun's quick raise, as after a cancel */
+  /* the next command ends it: the gun's quick raise, as after a cancel */
   Frame(BUTTON_LETHAL);
   CHECK(ps->weapon==WP_SHOTGUN && ps->weaponstate==WEAPON_RAISING && ps->grenadeTimeLeft==-1);
   CHECK(ps->weaponTime==BG_WeaponQuickRaiseTime(WP_SHOTGUN) && (ps->weaponAction&WA_FIRED));
@@ -446,7 +446,7 @@ static void TestCook(void) {
 /* A command Pmove chops into steps - pmove_fixed's pmove_msec each, or 66 at
  * most without it (a frame hitch) - all run before ClientEvents reads the
  * command's events. A cook-out on any step but the last is followed on the
- * same command by the next think's OffHandEnd: the gun (or the empty hand) is
+ * same command by the next Pmove step's OffHandEnd: the gun (or the empty hand) is
  * back before the server sees the suicide. Its event names the frag (MW2's
  * parm, 577c37) and the -1 survives the end, so the holder still dies and the
  * frag still goes off at the hand at once, whatever the command's length and
@@ -472,7 +472,7 @@ static void TestChoppedCookOut(void) {
   while(!(ps->weapon==WP_FRAG && ps->weaponstate==WEAPON_READY)) Frame(BUTTON_LETHAL);
   CHECK(!empty || (ps->weaponAction&WA_LEFT_EMPTY));
   /* to `left`: 8ms commands, then 1ms ones (never needed with pmove_fixed,
-   * whose 8ms thinks reach every `left` here) */
+   * whose 8ms Pmove steps reach every `left` here) */
   while(ps->grenadeTimeLeft>left) {
    CommandMsec(BUTTON_LETHAL,ps->grenadeTimeLeft-left>=CMD_MSEC ? CMD_MSEC : 1); World();
   }
@@ -481,7 +481,7 @@ static void TestChoppedCookOut(void) {
   steps=(len+step-1)/step;
   end=level.num_entities;
   CommandMsec(BUTTON_LETHAL,len);
-  /* the step it cooked out on was the last only if no step's think followed */
+  /* the step it cooked out on was the last only if no Pmove step followed it */
   if((left+step-1)/step<steps) CHECK(ps->weapon==(empty ? WP_NONE : WP_SHOTGUN));
   CHECK(g_entities[THROWER].health<=0 && ps->pm_type==PM_DEAD && ps->ammo[WP_FRAG]==count-1 && !ps->grenadeTimeLeft);
   CHECK(Spawned(from,&m)==1 && !strcmp(m->classname,"grenade") && m->nextthink==level.time-1 && m->s.pos.trTime==level.time);
@@ -628,7 +628,7 @@ static void TestDeathDrop(void) {
  * (579168), OffHandInit's EV_WEAPON_SWITCH_STARTED and EV_RESET_ADS (578e10,
  * 578e5e) unless the offhand comes straight out (5791ce), and OffHandPrepare's
  * EV_PREP_OFFHAND (5778e6) when the pull begins - for the throwing knife on the
- * press think (578eec). Each parm is the offhand, the ADS reset's 0. The
+ * press command (578eec). Each parm is the offhand, the ADS reset's 0. The
  * entity's ring gets everything but MW2's serverOnly and singleClient events
  * (56eab0): of the press, only the pullback. */
 static int psSeq, esSeq;
@@ -679,7 +679,7 @@ static void TestEventRing(void) {
  CHECK(n==4 && ev[0]==EV_SWITCH_OFFHAND && ev[1]==EV_WEAPON_SWITCH_STARTED && ev[2]==EV_RESET_ADS && ev[3]==EV_PREP_OFFHAND);
  CHECK(parm[0]==WP_THROWING_KNIFE && parm[1]==WP_THROWING_KNIFE && parm[2]==0 && parm[3]==WP_THROWING_KNIFE);
  CHECK(ps->weapon==WP_THROWING_KNIFE && ps->weaponstate==WEAPON_READY);
- /* four on one think: the playerstate's ring holds nothing of the shot now,
+ /* four on one command: the playerstate's ring holds nothing of the shot now,
   * as MW2's archived playerstate does not */
  for(i=0;i<MAX_PS_EVENTS;i++) CHECK(ps->events[i]!=EV_FIRE_WEAPON);
  /* but everyone else keeps it: the entity holds the shot, naming the gun,
@@ -704,7 +704,7 @@ static void TestEventRing(void) {
  for(i=0;i<MAX_ENTITY_EVENTS;i++) CHECK(!g_entities[THROWER].s.events[i] && !g_entities[THROWER].s.eventParms[i]);
  CHECK(g_entities[THROWER].s.eventSequence==k);
 
- /* frag, flash and Semtex: three on the press think, nothing for anyone
+ /* frag, flash and Semtex: three on the press command, nothing for anyone
   * else, and no weapon-change event (OffHandInit's drop raises none); the
   * pullback comes when the quick drop is over and the pull begins */
  for(row=FRAG;row<=SEMTEX;row++) {
@@ -725,7 +725,7 @@ static void TestEventRing(void) {
 
  /* straight out (MW2's direct OffHandPrepare, 5791b0-5791ce): no use hint,
   * the gun's quick raise after equipment. Two events: the switch and the
-  * pullback, both on the press think, for the knife and a frag alike. With a
+  * pullback, both on the press command, for the knife and a frag alike. With a
   * hint the same press is OffHandInit's: four for the knife. */
  for(k=0;k<2;k++) {
   Reset(TKNIFE); Frames(0,100); FlashToOffhandEnd();

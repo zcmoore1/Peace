@@ -269,7 +269,7 @@ typedef enum {
 } bg_fireType_t;
 #define BG_SHOT_COUNT_MAX         4
 // MW2's burst cooldown, the dvar player_burstFireCooldown (registered 44921b,
-// default 0.2s, which no rawfile changes; read only at 578981): on the think a
+// default 0.2s, which no rawfile changes; read only at 578981): on the command a
 // burst gun's shot runs out with no burst pending, the gun is READY with this
 // much on its time (PM_Weapon_WeaponTimeAdjust, 578939-5789cd), whatever the
 // trigger does.
@@ -429,7 +429,7 @@ typedef struct {
 #define PMF_FOLLOW			4096	// spectate following another player
 #define PMF_SCOREBOARD		8192	// spectate as a scoreboard
 #define PMF_INVULEXPAND		16384	// invulnerability sphere set to full size
-#define PMF_PENDING_MAG		32768	// WNOTE_MAG_IN fired and the clip fill is queued for later this think. If a holster finishes first the fill never happens - that is the NAC. bit 15
+#define PMF_PENDING_MAG		32768	// WNOTE_MAG_IN fired and the clip fill is queued for later this command. If a holster finishes first the fill never happens - that is the NAC. bit 15
 #define PMF_PRONE			(1<<16)	// MW2's PMF_PRONE (0x1): lying down; follows viewHeightTarget, as PMF_DUCKED does
 #define PMF_PRONEMOVE_OVERRIDDEN (1<<17)	// MW2's 0x200: a weapon action stopped the crawl until a new stick push
 // MW2's PMF_FROZEN (0x800), which its script's freezeControls sets through the
@@ -804,7 +804,7 @@ void BG_BeginWeaponDraw(playerState_t *ps);
 // MW2's pending trigger pull, weapState[hand].weapHandFlags bit 0 (ps+0x1fc,
 // 1 bit on its wire): a fresh press of the trigger with a burst gun
 // (PM_Weapon_UpdatePendingTriggerPull, 576ad0). A set bit keeps the held
-// trigger's lock off and starts a new pull on the think the gun's time runs
+// trigger's lock off and starts a new pull on the command the gun's time runs
 // out (PM_Weapon_WeaponTimeAdjust, 5789dd, 578b55); only the first shot of a
 // pull clears it (PM_Weapon_StartFiring, 576fb0).
 #define PWF_PENDING_PULL 16

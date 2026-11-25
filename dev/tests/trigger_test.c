@@ -1,7 +1,7 @@
 /* MW2's trigger, held against pressed, through the real code: the real full
  * Pmove, the real CG_EntityEvent for the player's own out-of-ammo events and
  * the real selection handlers (cg_weapons.c), in empty_switch_test.c's frame
- * order (a frame's bound commands, its command, the server's think, then the
+ * order (a frame's bound commands, its command, the server running it, then the
  * draw that plays the new events and sets the next command's weapon).
  *
  * MW2's fire is a level test of the trigger (ShouldBeFiring, iw4x 0x576CC0).
@@ -10,7 +10,7 @@
  * trigger down and the pull's shots all fired (ShotLimitReached 0x5769E0, the
  * shots counted by StartFiring 0x576F93-0x576FC5): weaponTime 1, the gun READY
  * at a shot's, an action's or the knife's end, any other state kept, asked
- * again every think until the trigger is let go. The SPAS, the M300 (as the
+ * again every command until the trigger is let go. The SPAS, the M300 (as the
  * Intervention) and the Masterkey are single shot in MW2's files; the
  * machinegun (m4_mp) is full auto, each shot given its whole time (0x576E9C,
  * the overshoot dropped at 0x578B71). The M16 rifle is m16_shotgun_mp's
@@ -219,7 +219,7 @@ static void Cycle(const gun_t *g) {
 	fire_ = BG_WeaponFireLength(g->weapon);
 	CHECK(0 < open_ && open_ < close_ && close_ < fire_);
 	/* the close note, which gives the action's lock away, never shares a
-	   think with the action's end, where the held trigger's lock goes on:
+	   Pmove step with the action's end, where the held trigger's lock goes on:
 	   their gap is longer than Pmove's longest step */
 	CHECK(fire_ - close_ > 66);
 	CHECK(BG_ShotLimitReached(BG_WeaponFireType(g->weapon), 1));	/* MW2's single shot */
@@ -344,7 +344,7 @@ static void TestShotCountCap(void) {
 			for (f = 0; f < 5000 && !(PS->weaponstate == WEAPON_READY && PS->weaponTime == 1 && !Owes(&spas)); f++)
 				Frame(BUTTON_ATTACK, 0);
 			CHECK(f < 5000 && shots == n && PS->weaponShotCount == (n < BG_SHOT_COUNT_MAX ? n : BG_SHOT_COUNT_MAX));
-			/* YY, the trigger still down: the gun fires on the YY think */
+			/* YY, the trigger still down: the gun fires on the YY command */
 			Frame(BUTTON_ATTACK, IN_Y);
 			Frame(BUTTON_ATTACK, IN_Y);
 			CHECK(PS->weapon == WP_SHOTGUN && PS->weaponstate == WEAPON_DROPPING && shots == n);
@@ -361,7 +361,7 @@ static void TestShotCountCap(void) {
 /* (2) Full auto keeps firing while held: the machinegun (m4_mp), which does
  * not count its shots (MW2's StartFiring counts every type but full auto,
  * 0x576F93). Each shot is given
- * its whole time (MW2's StartFiring, 0x576E9C-0x576E9F) on the think the last
+ * its whole time (MW2's StartFiring, 0x576E9C-0x576E9F) on the command the last
  * one's ran out, what that overshot by dropped (0x578B71): a shot every
  * Frames(fire time) commands. (The M16 rifle was held here too while it was
  * Peace's placeholder automatic; it is MW2's 3-round burst now, 0x576A70 and
@@ -413,7 +413,7 @@ static void TestLockReleases(void) {
 		CHECK(PS->weapon == WP_SHOTGUN && PS->weaponstate == WEAPON_FIRING && shots == 2);
 
 		/* let go: the lock's 1 runs out unlocked, and the crossing leaves the
-		   READY gun at 0, not 1 less a think (578b71) */
+		   READY gun at 0, not 1 less a command (578b71) */
 		Setup(&spas); Cycle(&spas);
 		Frame(BUTTON_ATTACK, 0); Hold(EndFrom(shotEnd) + 2);
 		CHECK(PS->weaponstate == WEAPON_READY && PS->weaponTime == 1 && shots == 1);
@@ -637,7 +637,7 @@ static void TestKnifeEnd(void) {
  * knife is the gun's own MELEE states, 0x578B2A-0x578B39), and there is none,
  * the hand was empty (PM_LockGun, WA_LEFT_EMPTY): nothing is locked, though
  * the active slot's gun is commanded, loaded and its pull spent. The knife
- * goes back to the empty hand and the gun is drawn on the next think (the
+ * goes back to the empty hand and the gun is drawn on the next command (the
  * knife stamps no delay to wait out, MeleeEnd 0x578D80), where its raise ends
  * under the lock, the count being the hand's. The hand is emptied as a
  * pickup's take leaves it (the test sets it). */

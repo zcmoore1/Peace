@@ -23,11 +23,11 @@
   `PM_Weapon_Idle`).
 - The SPAS is single shot (`spas12_mp`'s fireType): it fires once a pull of
   the trigger. Held through the shot, MW2's lock (`PM_Weapon_WeaponTimeAdjust`)
-  makes it READY on the shot's last think and the pump starts there, a think
+  makes it READY on the shot's last command and the pump starts there, a command
   sooner than with the trigger let go, and nothing fires until the trigger is
   let go; let go on the pump's last command and pulled on the next, it fires
   where a let-go trigger would. Held through its last shell with a reserve, it
-  reloads on that think, out of the shot, the pump owed; with nothing anywhere
+  reloads on that command, out of the shot, the pump owed; with nothing anywhere
   and nowhere to go, it dry-fires there and never pumps (MW2's
   `PM_Weapon_CheckFiringAmmo` forgives the action, 0x577094). A knife pressed
   in the shot and still held at its end leaves the SPAS READY there, with no
@@ -57,17 +57,17 @@
   sprint (MW2), and a held sprint button sprints again once jump is let go.
 - Sprint never lowers the gun in the middle of the shot or the pump (MW2's
   `PM_Weapon_CheckForSprint` returns on FIRING/RECHAMBERING). The shot's last
-  think (the fire clock reaches its open note) ends READY owing the pump, as
-  MW2's, and a sprint on by the next think, MW2's READY think, lowers the gun
+  command (the fire clock reaches its open note) ends READY owing the pump, as
+  MW2's, and a sprint on by the next command, MW2's READY command, lowers the gun
   there before the pump starts: the pump stays owed, and once the gun is back
   up it works the whole pump, from its open note, before the next shot. A sprint begun once
   the pump is under way waits for it: you run while it finishes and the gun
-  goes into the carry the think after, chambered. There is no "bolt NAC into a
-  sprint": a sprint pressed on the bolt-close think waits for the pump like one
+  goes into the carry the command after, chambered. There is no "bolt NAC into a
+  sprint": a sprint pressed on the bolt-close command waits for the pump like one
   pressed at any other point of it.
-- A swap or ladder grab on the exact bolt-close think keeps the instant
+- A swap or ladder grab on the exact bolt-close command keeps the instant
   transition but abandons chamber completion. Returning requires the **entire
-  pump**, from its open note (never the shot again). Going one think late
+  pump**, from its open note (never the shot again). Going one command late
   keeps the completed chambering.
 - Aim progress survives a weapon change while the outgoing ADS permission is
   still live. An instantaneous aimed SPAS-to-M300 swap (the NAC off the pump)
@@ -131,7 +131,7 @@ rig, taking its direction from the requested MW2 SPAS/Intervention carry.
 
 Entry and exit follow the existing predicted weapon timers. A short sprint
 tap reverses the partial transition; a sprint pressed again during the exit
-lets the exit finish and starts the entry from rest the think after (MW2's
+lets the exit finish and starts the entry from rest the command after (MW2's
 sprint check does nothing in its sprint-out, iw4x 0x5780F4-0x578107); ending
 the sprint (it latches: a fresh
 press, aiming or letting go of forward) does not wait for a whole carry loop

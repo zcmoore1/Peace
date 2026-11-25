@@ -45,11 +45,11 @@ static void TestCatalog(void) {
 }
 static void TestCycle(void) {
  int open=Note(ASEQ_FIRE,WNOTE_BOLT_OPEN), close=Note(ASEQ_FIRE,WNOTE_BOLT_CLOSED), end=BG_WeaponFireLength(WP_M40A3);
- /* MW2's cycle at 1ms thinks, the trigger let go: the shot, whose last think
+ /* MW2's cycle at 1ms commands, the trigger let go: the shot, whose last command
   * ends READY owing the bolt (ShouldBeFiring, 576d99-576da3); the bolt from
   * READY on the next, at the open note (CheckForRechamber, 575b77-575c03),
-  * its close on the think its clock crosses the close note, and a trigger
-  * pulled again fires on the think it ends. */
+  * its close on the command its clock crosses the close note, and a trigger
+  * pulled again fires on the command it ends. */
  Ready(); move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0;
  CHECK(shots==1 && ps.ammo[WP_M40A3]==BG_WeaponMagSize(WP_M40A3)-1);
  CHECK(ps.stats[STAT_UNCHAMBERED]&(1<<WP_M40A3) && ps.weaponShotCount==1);
@@ -63,9 +63,9 @@ static void TestCycle(void) {
  CHECK(!(ps.stats[STAT_UNCHAMBERED]&(1<<WP_M40A3)));
  Run(end-close-1); CHECK(shots==1); Step(1); CHECK(shots==2);
  /* The trigger held from the shot: the M300 is single shot (cheytac_mp), so
-  * MW2's lock makes it READY on the shot's last think with weaponTime 1
+  * MW2's lock makes it READY on the shot's last command with weaponTime 1
   * (WeaponTimeAdjust 5789dd-578ae6) and the bolt starts from that READY on
-  * that same think (575b07-575ba9), a think sooner; the bolt ends READY under
+  * that same command (575b07-575ba9), a command sooner; the bolt ends READY under
   * the lock, and nothing fires until the trigger is let go. */
  Ready(); move.cmd.buttons=BUTTON_ATTACK; Step(1);
  Run(open-1); CHECK(ps.weaponstate==WEAPON_FIRING && shots==1);
@@ -81,7 +81,7 @@ static void TestCycle(void) {
  move.cmd.buttons=BUTTON_ATTACK; Step(1); CHECK(shots==2 && ps.weaponstate==WEAPON_FIRING);
  move.cmd.buttons=0;
  /* Miss the close note: stowing cannot forgive chamber debt. Asked for on
-  * the shot's READY think, the swap takes the READY gun before its bolt. */
+  * the shot's READY command, the swap takes the READY gun before its bolt. */
  Ready(); move.cmd.buttons=BUTTON_ATTACK; Step(1); move.cmd.buttons=0; Run(open);
  CHECK(BG_ShotAwaitsAction(&ps));
  move.cmd.weapon=BG_SLOT_COMMAND+1; Step(1);

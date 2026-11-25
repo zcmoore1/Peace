@@ -186,7 +186,7 @@ See `dev/SEARCH_AND_DESTROY.md` for multiplayer and solo objective practice.
   lock, so the hands are empty on that command, and the mode is not committed
   (the ladder's block ends the command before step 4's commit, as it leaves a
   pump owed). Grabbed after the click, the mode is the new one already and
-  stays.
+  stays. The owner has confirmed all three for the ladder.
 - The original reload helpers, swap helpers, note runner and their non-ladder
   ordering are unchanged. A ladder just owns the weapon while the hands are busy.
   Leaving with the drop ended (`WEAPON_LADDER`) raises the selected weapon using

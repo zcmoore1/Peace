@@ -144,6 +144,15 @@ lowers. Swapping on the command that crosses the click takes the next gun out
 immediately and keeps the old mode. An earlier or later swap uses the normal
 holster. Returning to the G19 starts the next SF from the beginning.
 
+A trigger pressed again inside an M16 burst and held through Y to the G19,
+the Y first seen by the command the rifle's cooldown runs out on, is one pull
+on the G19, as MW2's pending pull is on any gun it comes to (MW2's rule,
+which the owner chose): in semi the G19 fires one shot on the command after
+its raise, and MW2's lock then holds it until the trigger is let go
+(`burst_test.c`'s `TestG19`). A Y seen later comes after the rifle's next
+burst, which the held trigger starts as the cooldown runs out, and the semi
+G19's raise then hangs under the lock until the trigger is let go.
+
 The SF is worked like a pump or a bolt (the owner's rule, the SF NAC; MW2
 has no selector, so this is Peace's own; `dev/MW2_DIFFERENCES.md`). It is
 `WEAPON_BOLTING` playing the SF's own segment (game -24, protocol 94
@@ -170,8 +179,9 @@ SF allows or refuses the same way, by the same code:
   in its old mode (no SF worked again, where a pump would be), after it
   in the new one. A **knife** waits for the click (pressed before it, or on
   it, it is lost; after it, it cuts the rest short). A **reload** is taken at
-  once, as out of a pump; before the click the SF is lost, on or after it
-  the new mode is kept. (A pump or bolt left owed by an early reload is paid
+  once and cancels the SF, as it cancels a pump (the owner's rule);
+  before the click the SF is lost, on or after it the new mode is
+  kept. (A pump or bolt left owed by an early reload is paid
   partway through the reload, by the reload's delayed action: the gun's own
   action length on the reload clock, capped by the first round or the end of
   the reload's start segment (CLAUDE.md, "The reload's delayed action is
@@ -187,13 +197,17 @@ SF allows or refuses the same way, by the same code:
 - **Its edges.** An empty G19 with rounds in reserve, its selector pressed on
   the command its last shot's lock runs out, starts the SF and is reloaded
   out of it on the next command, as an empty SPAS is reloaded out of its pump:
-  the SF is lost and the mode unchanged. A selector pressed again on the
-  SF's last command starts the next SF there, as a trigger tapped
-  there fires.
+  the SF is lost and the mode unchanged. So one frame of the SF's animation
+  shows before the reload starts; the reload still starts on time, on the
+  command it would have without the press. The owner has left this as it is
+  for now (a known item, kept here and in `dev/MW2_DIFFERENCES.md`, "SF
+  NAC"). A selector pressed again on the SF's last command starts the next
+  SF there, as a trigger tapped there fires.
 - **The picture.** The SF's clip runs on its segment's length, as the
   fire clip does, so it reaches its last pose about 17 ms before the SF
-  ends and holds it; the mode, the fitted semi/auto model and the HUD still
-  change on the click's command.
+  ends and holds it, and the art's click shows about 10 ms before the real
+  one (the owner accepted both); the mode, the fitted semi/auto model and
+  the HUD still change on the click's command.
 
 `dev/tests/sf_test.c` runs the SPAS's pump, the M300's bolt and the G19's
 SF through the same inputs at 8, 16 and 33 ms commands and requires the
@@ -203,9 +217,10 @@ picture to the pump's at 8, 16 and 33 ms,
 `ladder_test.c`'s `TestSFLadderLikePump` the ladder, and
 `fake_reload_test.c`'s `TestSFOutOfAShot` an SF prediction was
 corrected away from (played through, never snapped). Played through, that
-picture's own run commits the mode at the click, so the fitted semi/auto model
-shows the new mode from the click until the picture hands back at the SF's
-end, while the HUD keeps the mode the server has (an open question for the
+picture's own run commits the mode at the click, so when the server never
+started the SF the fitted semi/auto model shows the new mode from the click
+until the picture hands back at the SF's end (the server's mode after it),
+while the HUD keeps the mode the server has (an open question for the
 owner; a pump played through has no visible commit).
 
 ## YY behavior

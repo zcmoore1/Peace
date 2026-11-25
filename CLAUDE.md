@@ -161,7 +161,8 @@ source for MW2 behaviour; the owner rejects it.
   its close note is the click, and what that note closes is the slot's mode,
   committed in step 4 beside the chambering. Nothing is owed by an SF: one
   taken out of the gun's hands before the click is lost, and step 4d never
-  starts one, so nothing of it is worked again. It cannot fire, it cannot be
+  starts one, so nothing of it is worked again. A reload cancels it at once,
+  as it cancels a pump (owner's rule). It cannot fire, it cannot be
   sprinted out of, and it CAN be holstered out of. Sprint is MW2's `PM_Weapon_CheckForSprint` (iw4x
   0x578060), which does nothing while the gun is FIRING or RECHAMBERING;
   the sprint flag, speed and meter run as usual (MW2's sprint gates never
@@ -281,7 +282,13 @@ source for MW2 behaviour; the owner rejects it.
   `pm->ps`): the G19's selector makes it Single Shot or Full Auto, neither a
   burst type, so it latches nothing, has no cooldown and is never pending,
   and a pending pull left over from the rifle is to it what MW2's is to any
-  gun (read at every crossing, cleared by a pull's first counted shot). The M16 rifle is the one burst gun (`m16_shotgun_mp`,
+  gun (read at every crossing, cleared by a pull's first counted shot; the
+  owner chose MW2's rule here: pressed again inside a burst and held, with Y
+  first seen by the command the cooldown runs out on, a G19 in semi fires one
+  shot on the command after its raise, then the lock holds it until the
+  trigger is let go; a Y seen later comes after the rifle's next burst, which
+  the held trigger starts as the cooldown runs out, and the semi G19's raise
+  hangs under the lock). The M16 rifle is the one burst gun (`m16_shotgun_mp`,
   `fire_type` "3-Round Burst", 64ms a shot): shots on commands 0, 8, 16 at
   8ms (0, 4, 8 at 16ms; 0, 2, 4 at 33ms), the cooldown from 24 (12, 6), free
   or the next burst on 49 (25, 13). Bots work the trigger as a player must:
@@ -1618,13 +1625,15 @@ of it, with Sleight of Hand too. Back on the G19 after an SF NAC the SF is lost
 (rule (e)): its mode as it was, nothing worked again, a new press a whole
 SF from 0 (where the pump is owed and worked from its open note).
 `TestSFEdges` pins the SF's own press: on an empty G19's last command it
-is reloaded out of on the next (step 4e), and pressed again on its end it
-starts the next. `weapon_pose_test.c`'s `TestSFPicture` holds its picture
-to the pump's at 8, 16 and 33ms: released into a drop, carried by a sprint,
-kept through the sprint swap's holster, eased home from YY, taking over a
-sprint YY's ease home at the move layer's crossfade (beside the SPAS's shot),
-never snapping, and the idle at rest after it, though `weaponAnimSeq` still
-names the SF (after it played out, after YY lost it, on the next gun).
+is reloaded out of on the next (step 4e: one frame of the SF shows first,
+the reload on time; the owner has left it as it is for now), and pressed
+again on its end it starts the next. `weapon_pose_test.c`'s `TestSFPicture`
+holds its picture to the pump's at 8, 16 and 33ms: released into a drop,
+carried by a sprint, kept through the sprint swap's holster, eased home from
+YY, taking over a sprint YY's ease home at the move layer's crossfade
+(beside the SPAS's shot), never snapping, and the idle at rest after it,
+though `weaponAnimSeq` still names the SF (after it played out, after YY
+lost it, on the next gun).
 
 `dev/tests/burst_test.c` (in `run-masterkey`) drives MW2's burst fire on the
 M16 rifle through the real `Pmove` and the client's selection at 8, 16 and

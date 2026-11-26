@@ -31,3 +31,14 @@ int FakeReloadPicture(playerState_t *ps, int now, int msec) {
 	return cg_weapLayers[LAYER_BASE].weight > .5f ? cg_weapLayers[LAYER_BASE].clip : -1;
 }
 int FakeReloadIsReloadClip(int clip) { return clip >= WANIM_RELOAD_START && clip <= WANIM_RELOAD_END; }
+/* The move layer drawn this frame (a draw, a drop or a cancel's return): is it
+ * the drop clip, a draw clip, easing home; where it is in its clip and how much
+ * of the picture it is; and the gun's whole drop clip, in clip ms. */
+void FakeReloadMove(int weapon, int *drop, int *draw, int *ret, float *time, float *weight, float *dropLength) {
+	const animLayer_t *move = &cg_weapLayers[LAYER_MOVE];
+	*drop = move->clip == WANIM_DROP; *draw = CG_WeapAnim_IsDrawClip(move->clip); *ret = move->fit == MOVE_FIT_RETURN;
+	*time = move->time; *weight = move->weight;
+	*dropLength = weapon > WP_NONE && weapon < WP_NUM_WEAPONS ? CG_WeapAnim_ClipLength(&bg_weapAnimDefs[weapon], WANIM_DROP) : 0;
+}
+/* Every run starts with no picture of its own (CG_WeapAnim_Reset). */
+void FakeReloadPictureReset(void) { CG_WeapAnim_Reset(); }

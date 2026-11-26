@@ -30,15 +30,15 @@ scripts do every one of these with `+usereload`.
 - **Skree** (the owner's name). In a bolt, a pump or the G19's SF, press X a
   frame or more before the Y that NACs it (Y first seen on the close note's
   command). The NAC shows: the next gun comes up at once. Then the old gun is
-  back on screen going down, and the swap is an ordinary one: the bolt or
-  pump still owed, the SF lost, nothing reloaded. The next gun shows for
-  16-64ms on your own host at 125 and 62 fps, 33-66ms at 30 fps, and about
-  70-200ms at 100ms of ping. X with Y (the same frame) or after it is a real
-  NAC. X much earlier (from about 25-100ms before Y on your own host,
-  depending on the frame rate and the snapshot phase; more online) shows no
-  flash, just a plain swap, with the reload starting first once X is earlier
-  still. A G19 with a full magazine has nothing to reload, so every X and Y
-  there is a real SF NAC.
+  back on screen going down, its drop starting over from the top as MW2 draws
+  it, and the swap is an ordinary one: the bolt or pump still owed, the SF
+  lost, nothing reloaded. The next gun shows for 16-64ms on your own host
+  at 125 and 62 fps, 33-66ms at 30 fps, and about 70-200ms at 100ms of ping.
+  X with Y (the same frame) or after it is a real NAC. X much earlier (from
+  about 25-100ms before Y on your own host, depending on the frame rate and
+  the snapshot phase; more online) shows no flash, just a plain swap, with
+  the reload starting first once X is earlier still. A G19 with a full
+  magazine has nothing to reload, so every X and Y there is a real SF NAC.
 - **Wild scope.** With a scoped gun (the M300), hold aim, do the fake reload,
   and knife straight after. The knife plays while you stay scoped (a fake
   knife).
@@ -107,7 +107,8 @@ scripts do every one of these with `+usereload`.
    lost with it. The client, without the bit, predicts the close note and the
    NAC, and draws the next gun until a snapshot taken after the server ran
    X's command is its base; then prediction is the old gun going down, and
-   the picture follows it at once. X with Y or after it is a real NAC on both
+   the picture follows it at once, cutting that drop in from its first frame
+   (rule 4). X with Y or after it is a real NAC on both
    sides: the change check runs before the reload check (MW2 0x44C4D7,
    0x44C4DE), and a gun going down or coming up takes no reload. X early
    enough for its snapshot to be the base before Y's command shows the reload
@@ -126,8 +127,25 @@ scripts do every one of these with `+usereload`.
    A shot's pump or bolt is the same action as the shot, across the READY
    command between them (`BG_ShotAwaitsAction`), so a shot you were shown is
    drawn to the end of its action. A correction that only removes a swap is
-   followed at once. A corrected snapshot keeps the action you were shown
-   only if the server's state in it shows the same kind of action: a reload
+   followed at once. When the gun that corrected prediction is putting down
+   is not the one you were shown (the skree; or a knife or equipment you were
+   shown taken back, with Y pressed behind it), the picture is showing another
+   gun, with no pose of this one to flow from, and its drop is drawn as MW2
+   draws it (the owner's choice, for these corrections only): MW2's viewmodel
+   follows the predicted state, and starts a drop at its first frame at full
+   weight with no transition (`StartWeaponAnim`, 0x59B3C0-0x59B40B), played
+   at the rate that stretches the clip over the state's whole time
+   (`GetWeaponAnimRate`, 0x59B1F0). So the gun's drop clip is cut in from its
+   start, however much of the drop
+   the server has run, and the next gun's draw cuts it short where prediction
+   ends the drop (`CG_WeapPicture_FollowCorrection`, `CG_WeapAnim_CutIn`).
+   Every other drop and raise still flows from the pose on screen. And the
+   G19's fitted semi/auto model is never the run's own: it is the gun's real
+   mode, prediction's, the HUD's (`CG_WeapPicture_Auto`; MW2 draws its weapon
+   model from the predicted state, 0x47F555), so an SF the server never began
+   plays through in the mode the gun is really in. A corrected snapshot keeps
+   the action you were shown only if the server's state in it shows the same
+   kind of action: a reload
    is kept only by a server that is reloading. (So the last shot of a burst,
    which the server is still in when your burstload's reload begins, does
    not un-play that reload.) Once detached, the picture goes back to
@@ -399,6 +417,17 @@ Y, and Y alone are a real NAC on both sides at every phase. The next gun
 there has rounds to load, so what refuses the reload during its raise is the
 raise itself, not a full magazine.
 
+The old gun coming back is MW2's picture (`SkreeCut`, every run that drew the
+next gun): on the frame its base has run X's command the drop clip is at its
+first frame, the whole picture with no blend, though the server's holster is
+already under way (15–66 ms into it on your own host at 125 fps, 16–66 at 62,
+32–67 at 30; at 100 ms of ping 104–200, 95–194 and 65–166), and from there it
+runs at the rate that stretches it over the gun's whole drop time, until
+prediction ends the drop, before the clip's end, and the next gun's draw
+takes the picture. Where
+the next gun was not drawn first, the old gun was on screen, and its drop
+fades in from where it was as any drop does (`SkreeFlows`).
+
 X earlier: on your own host the next gun is no longer drawn for X from 24–72
 ms before Y at 125 fps, 32–80 at 62 and 33–99 at 30, depending on the phase
 (and at that phase never again for any earlier X); X more than the base is
@@ -542,12 +571,13 @@ delays (cheats; the dev autoexec sets `sv_cheats 1`).
 
 ## Where Peace and MW2 still differ
 
-- **The skree's picture.** What the suite pins is gameplay, MW2's as read from
-  its code: the server's whole drop with the pump or bolt owed (the SF lost),
-  the client's NAC until it learns of the reload, and the old gun drawn going
-  down from that frame on. How the old gun's drop is drawn as it comes back
-  (whether its clip starts part-way or from its start) is Peace's picture, not
-  watched in MW2; the owner may change it, and the suite leaves it free.
+- **The skree's picture** is MW2's as read from its code (the owner's
+  choice): the old gun's drop cut in from its first frame at the rate of the
+  whole drop. MW2's start of a drop (`StartWeaponAnim`) and its rate
+  (`GetWeaponAnimRate`) were read, not watched in play. Peace keeps its own
+  flowing picture for every other raise and drop (YY, the ladder, equipment's
+  and the knife's returns, a swap from rest), though MW2 starts every drop
+  from its clip's first frame the same way.
 
 - **Whether a burstload's reload plays out** is read from MW2's viewmodel
   code (above), not watched in MW2. If MW2 in fact kept the reload when the

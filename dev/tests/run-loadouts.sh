@@ -46,5 +46,5 @@ ${CC:-cc} $flags dev/tests/missile_draw_test.c code/cgame/cg_weapons.c code/game
 out/tests/missile-draw-test
 # Linked without dead-section removal: the test defines every symbol cg_weapons.c
 # names, as MSVC needs (it resolves symbols before it discards unreferenced functions).
-${CC:-cc} $flags dev/tests/equipment_view_test.c code/cgame/cg_anim.c dev/tests/pickup_pmove_driver.c $game $common -lm -o out/tests/equipment-view-test
+${CC:-cc} $flags dev/tests/equipment_view_test.c code/cgame/cg_anim.c code/cgame/cg_weappicture.c dev/tests/pickup_pmove_driver.c $game $common -lm -o out/tests/equipment-view-test
 out/tests/equipment-view-test

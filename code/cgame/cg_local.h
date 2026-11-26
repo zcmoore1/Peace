@@ -1460,6 +1460,7 @@ float    CG_WeapAnim_LadderLower( void );
 qboolean CG_WeapAnim_LadderStowed( const playerState_t *ps );
 qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec );
 qboolean CG_WeapAnim_Apply( playerState_t *ps, refEntity_t *entity, int msec );
+void     CG_WeapAnim_CutIn( const playerState_t *ps );
 
 //
 // cg_weappicture.c -- the player state the viewmodel draws (picture only)
@@ -1471,6 +1472,7 @@ void CG_WeapPicture_ReplayStep( const playerState_t *before, const playerState_t
 void CG_WeapPicture_Update( const playerState_t *predicted, const pmove_t *model,
 	int first, int last, qboolean (*getCmd)( int, usercmd_t * ) );
 const playerState_t *CG_WeapPicture_State( const playerState_t *predicted );
+qboolean CG_WeapPicture_Auto( const playerState_t *picture, const playerState_t *predicted );
 void     CG_WeapAnim_RegisterClips( int weapon, qhandle_t hModel, const char *cfgPath );
 qboolean CG_WeapAnim_ActionFrame( const playerState_t *ps, refEntity_t *entity );
 

@@ -59,6 +59,7 @@ Each layer has:
 #define MOVE_FIT_FORWARD     1   // clip runs to its end over the gameplay lock
 #define MOVE_FIT_REVERSE     2   // a draw a holster interrupted runs back to its start
 #define MOVE_FIT_RETURN      3   // a cancelled transition eases back to the ready pose
+#define MOVE_FIT_CUT         4   // a drop cut in from its first frame at the whole drop's rate (MW2's)
 
 typedef struct {
 	int     firstFrame;
@@ -80,6 +81,7 @@ typedef struct {
 	float   blendSpeed;     // weight units per ms
 	int     fit;            // MOVE_FIT_* (move layer only)
 	float   returnFrom, returnTo, returnTime, returnLength;	// MOVE_FIT_RETURN, in clip ms / real ms
+	float   cutTime, cutLength;	// MOVE_FIT_CUT: real ms since the cut, and the drop's whole time
 } animLayer_t;
 
 // Per-weapon animation definitions.
@@ -110,6 +112,11 @@ static qboolean      cg_previousBaseAction;
 static float         cg_returnTime;
 static qboolean      cg_animTimeValid;
 static int           cg_animUpdateTime;
+// A correction that puts down a gun other than the one you were shown
+// (cg_weappicture.c): the state it asked a cut for, and whether the frame
+// being built draws it.
+static qboolean      cg_cutPending, cg_cutNow;
+static int           cg_cutCommandTime, cg_cutWeapon, cg_cutSlot;
 
 static qboolean CG_WeapAnim_SampleLayers(const weapAnimDef_t *def, refEntity_t *entity);
 
@@ -178,6 +185,7 @@ void CG_WeapAnim_Reset( void ) {
 	cg_dropLock = cg_dropDuration = 0;
 	cg_ladderLower = cg_ladderLowerFrom = cg_ladderLowerStart = 0.0f;
 	cg_ladderHolster = cg_ladderStowed = qfalse;
+	cg_cutPending = cg_cutNow = qfalse;
 	CG_WeapAnim_ResetReturn();
 }
 
@@ -298,6 +306,32 @@ static void CG_WeapAnim_BeginHolster(const weapAnimDef_t *def, animLayer_t *move
 		move->fit = MOVE_FIT_FORWARD;
 	}
 	move->targetWeight = 1.0f;
+}
+
+// MW2 draws its viewmodel from the predicted state every frame
+// (WeaponRunXModelAnims, 0x59B5E0, on cg.predictedPlayerState). A drop starts
+// where prediction starts one: from the clip's first frame, at full weight
+// with no transition and every other animation let go (StartWeaponAnim,
+// 0x59B3C0-0x59B40B), played at the rate that stretches the clip over the
+// state's whole time (GetWeaponAnimRate, 0x59B1F0), however much of it the
+// server has already run. Peace's picture flows instead (BeginHolster above)
+// and keeps MW2's start for one case only, the owner's choice: prediction
+// corrected so that it puts down a gun other than the one you were shown (a
+// gun change, or a knife or equipment, taken back), so that no pose of that
+// gun is on screen to flow from (cg_weappicture.c). Pmove ends the drop
+// where it ends, and the next gun's draw then cuts the clip short.
+static void CG_WeapAnim_CutToDrop(const playerState_t *ps, animLayer_t *move) {
+	int i;
+	for (i = LAYER_MOVE; i < ANIM_LAYER_COUNT; i++) {
+		cg_weapLayers[i].weight = cg_weapLayers[i].targetWeight = 0.0f;
+	}
+	cg_retainedActive = cg_retainedDrop = qfalse;
+	move->clip = WANIM_DROP;
+	move->time = move->startFraction = 0.0f;
+	move->weight = move->targetWeight = 1.0f;
+	move->fit = MOVE_FIT_CUT;
+	move->cutTime = 0.0f;
+	move->cutLength = (float)BG_HolsterTime(ps);
 }
 
 // BG_HolsterTime handed the running drop to another rule (a grenade keeping a
@@ -565,7 +599,11 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 			CG_WeapAnim_PlayLayer( move, CG_WeapAnim_DrawClip(def, ps) );
 			move->fit = MOVE_FIT_FORWARD;
 		} else if ( ps->weaponstate == WEAPON_DROPPING ) {
-			if ( move->fit != MOVE_FIT_REVERSE &&
+			if ( cg_cutNow ) {
+				CG_WeapAnim_CutToDrop( ps, move );
+			} else if ( move->fit == MOVE_FIT_CUT && move->clip == WANIM_DROP ) {
+				// a drop cut in runs on at its own rate (below)
+			} else if ( move->fit != MOVE_FIT_REVERSE &&
 			     ( move->fit != MOVE_FIT_FORWARD || move->clip != WANIM_DROP ) ) {
 				CG_WeapAnim_BeginHolster( def, move );
 			} else if ( ps->weaponTime > cg_dropLock || BG_HolsterTime( ps ) != cg_dropDuration ) {
@@ -682,6 +720,12 @@ static void CG_WeapAnim_UpdateLayers( const weapAnimDef_t *def, playerState_t *p
 		               BG_HolsterTime( ps );	// the same rule pmove stamped with
 		float fraction = CG_WeapAnim_DropFit( move, duration > 0 ? 1.0f - (float)ps->weaponTime / duration : 1.0f );
 		move->time = fraction * CG_WeapAnim_ClipLength( def, move->clip );
+	} else if ( ps->weaponstate == WEAPON_DROPPING && move->fit == MOVE_FIT_CUT ) {
+		// The cut's own frame draws the clip's first frame; from the next on
+		// it runs at the whole drop's rate (CG_WeapAnim_CutToDrop).
+		if ( !cg_cutNow ) move->cutTime += (float)msec;
+		move->time = move->cutLength > 0.0f ? move->cutTime / move->cutLength *
+			CG_WeapAnim_ClipLength( def, WANIM_DROP ) : CG_WeapAnim_ClipLength( def, WANIM_DROP );
 	} else if ( move->fit == MOVE_FIT_RETURN ) {
 		float s, eased;
 		move->returnTime += (float)msec;
@@ -918,6 +962,13 @@ qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec ) 
 
 	def = &bg_weapAnimDefs[ps->weapon];
 
+	// A cut asked for the state drawn now (CG_WeapAnim_CutIn) is made by the
+	// frame that draws it, once: a stereo pair's second eye finds it made.
+	cg_cutNow = cg_cutPending && ps->commandTime == cg_cutCommandTime && ps->weapon == cg_cutWeapon &&
+		ps->stats[STAT_ACTIVE_SLOT] == cg_cutSlot && ps->weaponstate == WEAPON_DROPPING &&
+		CG_WeapAnim_ClipLength( def, WANIM_DROP ) > 0.0f;
+	cg_cutPending = qfalse;
+
 	// Both stereo eyes share one cosmetic clock. State changes still apply.
 	timeStep = cg_animTimeValid && cg_animUpdateTime == cg.time ? 0 : msec;
 	if (timeStep < 0) timeStep = 0;
@@ -925,7 +976,7 @@ qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec ) 
 	cg_animUpdateTime = cg.time;
 	CG_WeapAnim_UpdateReturn(ps, timeStep);
 	CG_WeapAnim_UpdateLayers( def, ps, timeStep );
-	if (cg_retainedActive || ps->weaponstate == WEAPON_LADDER ||
+	if (cg_retainedActive || cg_cutNow || ps->weaponstate == WEAPON_LADDER ||
 		(ps->weaponAction & WA_TYPE_MASK) || BG_IsActionWeapon(ps->weapon) ||
 		ps->stats[STAT_HEALTH] <= 0) cg_returnTime = RETURN_BLEND_MSEC;
 
@@ -961,7 +1012,19 @@ qboolean CG_WeapAnim_BuildPose( playerState_t *ps, qhandle_t hModel, int msec ) 
 	}
 	cg_lastPoseValid = anyLayer;
 	cg_lastFrameValid = CG_WeapAnim_SampleLayers(def, &cg_lastFrame);
+	cg_cutNow = qfalse;
 	return anyLayer;
+}
+
+// The picture now draws a corrected prediction that puts down a gun other
+// than the one you were shown (cg_weappicture.c): the frame that draws this
+// state starts its drop as MW2 starts one (CG_WeapAnim_CutToDrop). Only that
+// frame: a frame that draws no gun, or another state, lets the request go.
+void CG_WeapAnim_CutIn( const playerState_t *ps ) {
+	cg_cutPending = qtrue;
+	cg_cutCommandTime = ps->commandTime;
+	cg_cutWeapon = ps->weapon;
+	cg_cutSlot = ps->stats[STAT_ACTIVE_SLOT];
 }
 
 // Apply the pose to the actual IQM entity. Both renderers skin from the

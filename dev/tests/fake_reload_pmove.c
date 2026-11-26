@@ -23,3 +23,9 @@ void FakeReloadModel(pmove_t *move) {
 	move->pmove_msec = 8;
 }
 void FakeReloadPmove(pmove_t *move) { FakeReloadModel(move); Pmove(move); }
+/* Where a note sits on a gun's segment, read from the game's own table (-1: none). */
+int FakeReloadNoteTime(int weapon, int seq, int kind) {
+	const bg_weaponNote_t *note = PM_SegNotes(weapon, seq);
+	for (; note && note->note != WNOTE_NONE; note++) if (note->note == kind) return note->time;
+	return -1;
+}

@@ -1908,6 +1908,76 @@ static void TestSFPicture(void) {
  CG_WeapAnim_RegisterClips(WP_G19,0,NULL);
 }
 
+/* MW2's start of a drop, kept for a correction that puts down a gun other than
+ * the one you were shown (cg_weappicture.c asks it with CG_WeapAnim_CutIn): the
+ * frame that draws the state asked for puts the drop clip's first frame on
+ * screen as the whole picture, every other layer let go (a retained clip and
+ * the sprint included) and no release eased over it, then runs the clip at the
+ * rate of the whole drop, whatever the lock says. The cut is made once: a
+ * stereo pair's second eye finds it made, and so does a later frame that draws
+ * the same command again. A sprint after it carries the drop on at the same
+ * rate (the holster's ordinary retention); a request for another state (a
+ * later command, another gun) is let go, and that drop flows in as any does. */
+static float CutDropTime(void) {
+ int i;
+ for(i=LAYER_MOVE;i<ANIM_LAYER_COUNT;i++)
+  if(cg_weapLayers[i].clip==WANIM_DROP && cg_weapLayers[i].weight==1) return cg_weapLayers[i].time;
+ return -1;
+}
+static void TestCutIn(weapAnimDef_t *def) {
+ playerState_t ps,other; modelPose_t pose; refEntity_t entity;
+ animLayer_t *move=&cg_weapLayers[LAYER_MOVE];
+ static const int lengths[]={8,16,33};
+ float len=CG_WeapAnim_ClipLength(def,WANIM_DROP); int drop,i,l,msec;
+ for(l=0;l<3;l++) {
+  msec=lengths[l];
+  Ready(&ps,WP_SHOTGUN); ps.commandTime=1000; ps.weaponstate=WEAPON_READY;
+  Picture(&ps,msec,&pose);
+  /* a clip retained over a sprint's, and a release under way */
+  cg_retainedActive=qtrue; cg_retainedDrop=qfalse;
+  cg_weapLayers[LAYER_RETAINED].clip=WANIM_FIRE; cg_weapLayers[LAYER_RETAINED].weight=cg_weapLayers[LAYER_RETAINED].targetWeight=1;
+  cg_weapLayers[LAYER_SPRINT].clip=WANIM_SPRINT_LOOP; cg_weapLayers[LAYER_SPRINT].weight=cg_weapLayers[LAYER_SPRINT].targetWeight=1;
+  cg_returnTime=0; cg_returnPoseValid=qtrue;
+  ps.weaponstate=WEAPON_DROPPING; drop=BG_HolsterTime(&ps); ps.weaponTime=drop/2; ps.commandTime+=msec;
+  CG_WeapAnim_CutIn(&ps);
+  Picture(&ps,msec,&pose);
+  CHECK(move->clip==WANIM_DROP && move->fit==MOVE_FIT_CUT && move->time==0 && move->weight==1);
+  CHECK(!cg_retainedActive && cg_weapLayers[LAYER_RETAINED].weight==0 && cg_weapLayers[LAYER_SPRINT].weight==0);
+  CHECK(CG_WeapAnim_ReturnWeight()==0);
+  /* the second eye: same frame, the cut made */
+  memset(&entity,0,sizeof(entity)); entity.hModel=1; CHECK(CG_WeapAnim_Apply(&ps,&entity,msec));
+  CHECK(move->fit==MOVE_FIT_CUT && move->time==0 && move->weight==1);
+  /* a later frame drawing the same command: the cut is not made again */
+  Picture(&ps,msec,&pose);
+  CHECK(move->fit==MOVE_FIT_CUT && move->weight==1 && fabs(move->time-(float)msec*len/drop)<.01f);
+  for(i=1;i<5;i++) {
+   ps.commandTime+=msec; ps.weaponTime-=msec;
+   Picture(&ps,msec,&pose);
+   CHECK(move->clip==WANIM_DROP && move->fit==MOVE_FIT_CUT && move->weight==1 && fabs(move->time-(float)(i+1)*msec*len/drop)<.01f);
+  }
+  /* sprinting on from there: the drop on screen runs on at the same rate */
+  ps.pm_flags|=PMF_SPRINTING;
+  for(;i<9;i++) {
+   ps.commandTime+=msec; ps.weaponTime-=msec;
+   Picture(&ps,msec,&pose);
+   CHECK(fabs(CutDropTime()-(float)(i+1)*msec*len/drop)<.01f);
+  }
+  /* a request for another state is let go: the drop of a gun at rest flows in */
+  Ready(&ps,WP_SHOTGUN); ps.commandTime=1000; ps.weaponstate=WEAPON_READY;
+  Picture(&ps,msec,&pose);
+  other=ps; other.weaponstate=WEAPON_DROPPING; other.weaponTime=drop-msec; other.commandTime+=msec;
+  CG_WeapAnim_CutIn(&other);
+  other.commandTime+=msec; other.weaponTime-=msec;
+  Picture(&other,msec,&pose);
+  CHECK(move->clip==WANIM_DROP && move->fit==MOVE_FIT_FORWARD && move->weight>0 && move->weight<1);
+  Ready(&ps,WP_SHOTGUN); ps.commandTime=1000; ps.weaponstate=WEAPON_READY;
+  Picture(&ps,msec,&pose);
+  other=ps; other.weaponstate=WEAPON_DROPPING; other.weaponTime=drop-msec; other.commandTime+=msec;
+  other.weapon=WP_M40A3; CG_WeapAnim_CutIn(&other); other.weapon=WP_SHOTGUN;
+  Picture(&other,msec,&pose);
+  CHECK(move->clip==WANIM_DROP && move->fit==MOVE_FIT_FORWARD && move->weight>0 && move->weight<1);
+ }
+}
 int main(void) {
  playerState_t ps;
  const int states[]={WEAPON_READY,WEAPON_FIRING,WEAPON_BOLTING};
@@ -1936,7 +2006,7 @@ int main(void) {
  TestOwnership(def); TestExclusions(def); TestRelease(def); TestContext(def);
  TestFirstDraw(def,WP_SHOTGUN);
  TestReloadPerk(def,WP_SHOTGUN);
- TestFlow(def); TestKnifePicture(def); TestKeptHolster(def);
+ TestFlow(def); TestCutIn(def); TestKnifePicture(def); TestKeptHolster(def);
  TestLadderKeepsDrop(def,WP_SHOTGUN); TestRetainedKeptHolster(); TestSnapshotRestamp(def);
  TestLadderHeldPicture(def,WP_SHOTGUN);
  TestShortDropKept();

@@ -58,12 +58,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 void FakeReloadModel(pmove_t *move);
 void FakeReloadPmove(pmove_t *move);
 void FakeReloadPictureInit(void);
 int  FakeReloadPicture(playerState_t *ps, int now, int msec);
 int  FakeReloadIsReloadClip(int clip);
+void FakeReloadMove(int weapon, int *drop, int *draw, int *ret, float *time, float *weight, float *dropLength);
+void FakeReloadPictureReset(void);
+int  FakeReloadNoteTime(int weapon, int seq, int kind);
 void CG_WeapPicture_Reset(void);
 int  CL_TimeDeltaGap(int delta, int newest, int prev, int realtime);
 int  CL_DriftTimeDelta(int delta, int newest, int prev, int realtime, qboolean *extrapolated);
@@ -72,6 +76,7 @@ void CG_WeapPicture_ReplayStep(const playerState_t *before, const playerState_t 
 void CG_WeapPicture_Update(const playerState_t *predicted, const pmove_t *model, int first, int last,
 	qboolean (*getCmd)(int, usercmd_t *));
 const playerState_t *CG_WeapPicture_State(const playerState_t *predicted);
+qboolean CG_WeapPicture_Auto(const playerState_t *picture, const playerState_t *predicted);
 
 static int checks;
 #define CHECK(x) do { checks++; if (!(x)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); exit(1); } } while (0)
@@ -174,7 +179,11 @@ static int otherPartial;				/* the slot-1 gun's magazine is not full (the skree)
  * (prediction, the picture, and the time of the last command its base had
  * run). */
 typedef struct { int ran, weapon, state, closed, ammo; } svCmd_t;
-typedef struct { int predWeapon, predState, picWeapon, picState, detached, baseTime; } clFrame_t;
+typedef struct {
+	int predWeapon, predState, predTime, picWeapon, picState, detached, baseTime;
+	int moveDrop, moveDraw, moveReturn;	/* the move layer drawn: the drop clip, a draw clip, easing home */
+	float moveTime, moveWeight, dropLength;	/* where in its clip, how much of the picture; the drop clip's length */
+} clFrame_t;
 static svCmd_t svAt[MAXQ];
 static clFrame_t clAt[MAXQ];
 /* What the gun's action closes is closed: its pump or bolt paid, or, with
@@ -393,6 +402,9 @@ static int ClientFrame(int now) {
 	clAt[numCmds - 1].predWeapon = clPred.weapon; clAt[numCmds - 1].predState = clPred.weaponstate;
 	clAt[numCmds - 1].picWeapon = pic->weapon; clAt[numCmds - 1].picState = pic->weaponstate;
 	clAt[numCmds - 1].detached = pic != &clPred; clAt[numCmds - 1].baseTime = clBase->commandTime;
+	clAt[numCmds - 1].predTime = clPred.weaponTime;
+	FakeReloadMove(pic->weapon, &clAt[numCmds - 1].moveDrop, &clAt[numCmds - 1].moveDraw, &clAt[numCmds - 1].moveReturn,
+		&clAt[numCmds - 1].moveTime, &clAt[numCmds - 1].moveWeight, &clAt[numCmds - 1].dropLength);
 	if (getenv("FAKERELOAD_TRACE") && base != NONE && now >= base - 120 && now <= base + 400)
 		printf("t%+5d st%d b%06x | cl w%2d s%2d A%d act%03x ws%d | pic w%2d s%2d %s | sv w%2d s%2d A%d act%03x wf%d | snap ct%d\n",
 			now - base, c->serverTime, Buttons(now), clPred.weapon, clPred.weaponstate, !!(clPred.pm_flags & PMF_ADS), clPred.weaponAction & 0x107,
@@ -511,7 +523,7 @@ static void Run1(int rtt, const script_t *sc, int at) {
 	clExtrap = qfalse; rsLatest = cgProcessed = cgSnap = cgNext = 0; clBase = NULL;
 	clk.leadMin = clk.ageMin = clk.intervalMin = 1 << 30; clk.leadMax = clk.ageMax = clk.intervalMax = -(1 << 30);
 	pictureDetached = sawGunActionInPicture = 0;
-	CG_WeapPicture_Reset();
+	CG_WeapPicture_Reset(); FakeReloadPictureReset();
 	memset(svAt, 0, sizeof(svAt)); memset(clAt, 0, sizeof(clAt));
 	memset(&svPs, 0, sizeof(svPs)); memset(&svUse, 0, sizeof(svUse));
 	cl.slot[0] = GUN; cl.slot[1] = OTHER_GUN;
@@ -987,21 +999,253 @@ static void TestPictureFinishesTheAction(void) {
 	CHECK(handed && sawReady && sawAction && pred.ammo[GUN] == rest.ammo[GUN]);
 }
 
+/* Driving the picture directly, a command a frame (cmds[]): prediction is
+ * `base` run over the client's commands up to `last`, as CG_PredictPlayerState
+ * runs them; then the picture rule, and cg_anim draws the picture, `msec` on.
+ * The frame is recorded in clAt[last]; prediction is returned. */
+static int directNow;
+static playerState_t DirectFrame(const playerState_t *base, int last, int msec) {
+	playerState_t pred = *base, before, copy;
+	pmove_t pm, model;
+	clFrame_t *f = &clAt[last];
+	int j;
+	CG_WeapPicture_BeginReplay(base);
+	for (j = 0; j <= last; j++) {
+		if (cmds[j].serverTime <= pred.commandTime) continue;
+		before = pred; memset(&pm, 0, sizeof(pm)); pm.ps = &pred; pm.cmd = cmds[j]; FakeReloadPmove(&pm);
+		CG_WeapPicture_ReplayStep(&before, &pred, NULL);
+	}
+	memset(&model, 0, sizeof(model)); FakeReloadModel(&model);
+	numCmds = last + 1;
+	CG_WeapPicture_Update(&pred, &model, 0, last, GetCmd);
+	copy = *CG_WeapPicture_State(&pred);
+	f->predWeapon = pred.weapon; f->predState = pred.weaponstate; f->predTime = pred.weaponTime;
+	f->picWeapon = copy.weapon; f->picState = copy.weaponstate; f->detached = CG_WeapPicture_State(&pred) != &pred;
+	f->baseTime = base->commandTime;
+	directNow += msec;
+	FakeReloadPicture(&copy, directNow, msec);
+	FakeReloadMove(copy.weapon, &f->moveDrop, &f->moveDraw, &f->moveReturn, &f->moveTime, &f->moveWeight, &f->dropLength);
+	return pred;
+}
+/* The gun (now GUN) at rest in slot 0, OTHER_GUN in slot 1, a command every
+ * `msec` from it. */
+static playerState_t DirectRest(int gun, int attachment, int msec) {
+	bg_class_t cl = *BG_Class(0);
+	playerState_t rest;
+	int i;
+	GUN = gun;
+	memset(&rest, 0, sizeof(rest));
+	cl.slot[0] = gun; cl.slot[1] = OTHER_GUN; cl.attachments[0] = attachment; cl.attachments[1] = 0;
+	cl.lethal = WP_FRAG; cl.lethalCount = BG_ClassEquipmentCount(WP_FRAG);
+	CHECK(BG_ValidateClass(&cl));
+	BG_ApplyClass(&rest, &cl);
+	rest.stats[STAT_HEALTH] = 100; rest.pm_type = PM_NORMAL; rest.weapon = gun;
+	rest.weaponstate = WEAPON_READY; rest.weaponAnimTime = -1; rest.commandTime = 1000;
+	rest.viewheight = DEFAULT_VIEWHEIGHT; rest.origin[2] = 24.125f; rest.groundEntityNum = ENTITYNUM_WORLD;
+	rest.ammo[OTHER_GUN] = rest.slotAmmo[SLOT_SECONDARY] = BG_WeaponMagSize(OTHER_GUN);
+	CHECK(GunAtRest(&rest));
+	memset(cmds, 0, sizeof(cmds)); memset(clAt, 0, sizeof(clAt));
+	for (i = 0; i < MAXQ; i++) { cmds[i].serverTime = rest.commandTime + msec * (i + 1); cmds[i].weapon = BG_SLOT_COMMAND; }
+	CG_WeapPicture_Reset(); FakeReloadPictureReset();
+	return rest;
+}
+/* Y on command `at`: its command carries the swap button, the ones after it
+ * the other slot (cg_weapons.c); back to slot 0 (the second Y) from `back`. */
+static void DirectY(const playerState_t *rest, int at, int back) {
+	int i;
+	cmds[at].buttons |= BUTTON_WEAPON_SWAP;
+	for (i = at + 1; i < MAXQ; i++) cmds[i].weapon = i < back ? BG_WeaponCommand(rest, SLOT_SECONDARY, qfalse) : BG_SLOT_COMMAND;
+	if (back < MAXQ) cmds[back - 1].buttons |= BUTTON_WEAPON_SWAP;
+}
+
+/* The server's run of the client's commands through `through`, had it seen
+ * Y (DirectY at 0) `late` commands after the client did. */
+static playerState_t LateServer(const playerState_t *rest, int late, int through) {
+	playerState_t sv = *rest;
+	int j;
+	for (j = 0; j <= through; j++) {
+		pmove_t pm; usercmd_t c = cmds[j];
+		if (j < late) { c.buttons &= ~BUTTON_WEAPON_SWAP; c.weapon = BG_SLOT_COMMAND; }
+		if (j == late) c.buttons |= BUTTON_WEAPON_SWAP;
+		memset(&pm, 0, sizeof(pm)); pm.ps = &sv; pm.cmd = c; FakeReloadPmove(&pm);
+	}
+	return sv;
+}
+
+/* Prediction corrected so that it takes back a gun change you were shown:
+ * the picture drew the next gun coming up, and the server's snapshot has the
+ * old gun still going down. The next gun is OTHER_GUN, or with `twin` another
+ * gun of the same kind in slot 1 (a pickup's): a gun change all the same. MW2 draws its viewmodel from the predicted state
+ * (owner's choice, 1b): the old gun's drop is cut in from its first frame, the
+ * whole picture, at the rate of the whole drop, however much of it the server
+ * has run, and the next gun's draw takes over where prediction ends the drop.
+ * And a correction that takes nothing back (the same gun going down, its drop
+ * restamped later by the server) flows on from the pose on screen: the cut is
+ * for a gun the picture was not showing. The server here saw Y `late`
+ * commands after the client did; nothing else differs. Driven directly, every
+ * command `msec` long, the SPAS and the M300. */
+static void TestCorrectionCut(int gun, int twin, int msec) {
+	playerState_t rest = DirectRest(gun, 0, msec), sv, pred;
+	int drop = BG_WeaponDropTime(gun), n = drop / msec, i, j, k, late, other = 0;
+	if (twin) {
+		rest.stats[STAT_SLOT_SECONDARY] = gun; rest.slotAttachments[SLOT_SECONDARY] = rest.slotAttachments[SLOT_PRIMARY];
+		rest.slotAmmo[SLOT_SECONDARY] = BG_WeaponMagSize(gun); rest.slotReserve[SLOT_SECONDARY] = rest.ammoReserve[gun];
+	}
+	DirectY(&rest, 0, MAXQ);
+	/* frames until the client has drawn the next gun coming up for two */
+	for (i = 0; i < 4 * n + 20 && other < 2; i++) {
+		pred = DirectFrame(&rest, i, msec);
+		CHECK(!clAt[i].detached && clAt[i].picWeapon == pred.weapon);
+		if (pred.stats[STAT_ACTIVE_SLOT] == SLOT_SECONDARY) {
+			CHECK(pred.weapon == (twin ? gun : OTHER_GUN) && pred.weaponstate == WEAPON_RAISING); other++;
+		}
+	}
+	CHECK(other == 2);
+	k = i;
+	/* the server saw Y `late` commands after the client did: at k its drop
+	 * is about half run; the snapshot is a command into it */
+	late = k - n / 2;
+	sv = LateServer(&rest, late, late + 1);
+	CHECK(sv.weapon == gun && sv.stats[STAT_ACTIVE_SLOT] == SLOT_PRIMARY && sv.weaponstate == WEAPON_DROPPING);
+	for (i = k; i < 4 * n + 40 + k; i++) {
+		pred = DirectFrame(&sv, i, msec);
+		if (pred.stats[STAT_ACTIVE_SLOT] != SLOT_PRIMARY) break;
+		CHECK(pred.weapon == gun && pred.weaponstate == WEAPON_DROPPING && !clAt[i].detached);
+	}
+	CHECK(i > k + 1 && pred.weapon == (twin ? gun : OTHER_GUN) && pred.weaponstate == WEAPON_RAISING);
+	/* the cut: at k the drop's first frame, though the server's drop is under way */
+	CHECK(clAt[k].predTime < drop && clAt[k].moveDrop && clAt[k].moveTime == 0 && clAt[k].moveWeight == 1);
+	for (j = k + 1; j < i; j++)
+		CHECK(clAt[j].moveDrop && clAt[j].moveWeight == 1 &&
+			fabs(clAt[j].moveTime - (float)(j - k) * msec * clAt[k].dropLength / drop) < .01f);
+	/* prediction ends the drop before the clip; the next gun's draw takes over */
+	CHECK(clAt[i - 1].moveTime < clAt[k].dropLength && clAt[i].moveDraw);
+
+	if (twin) return;
+	/* The same gun corrected: the client shown its drop, the server's later. */
+	rest = DirectRest(gun, 0, msec);
+	DirectY(&rest, 0, MAXQ);
+	k = n / 2;
+	for (i = 0; i < k; i++) {
+		pred = DirectFrame(&rest, i, msec);
+		CHECK(pred.weapon == gun && (i < 2 || pred.weaponstate == WEAPON_DROPPING));
+	}
+	CHECK(clAt[k - 1].moveDrop && clAt[k - 1].moveTime > 2.0f * msec * clAt[k - 1].dropLength / drop);
+	sv = LateServer(&rest, 4, 5);
+	pred = DirectFrame(&sv, k, msec);
+	CHECK(pred.weapon == gun && pred.weaponstate == WEAPON_DROPPING && pred.weaponTime > clAt[k - 1].predTime);
+	/* no cut: the drop flows on from where it was drawn */
+	CHECK(clAt[k].moveDrop && fabs(clAt[k].moveTime - clAt[k - 1].moveTime) <= (float)msec * clAt[k].dropLength / drop + .01f);
+}
+
+/* The same rule for a knife or equipment you were shown and the server never
+ * began, with Y pressed behind it (`button`, the weapon it shows `quick`): the
+ * corrected prediction has the gun going down for the swap while the picture
+ * was showing the knife or the frag, so that drop is cut in from its first
+ * frame at the whole drop's rate, as after a gun change taken back, and the
+ * next gun's draw takes over where prediction ends it. Nothing in the rule
+ * names a knife or equipment: it reads only what was shown and what
+ * prediction puts down. Driven directly, every command `msec` long. */
+static void TestCorrectionCutAfterQuick(int button, int quick, int msec) {
+	playerState_t rest = DirectRest(WP_SHOTGUN, 0, msec), sv, pred;
+	int drop = BG_WeaponDropTime(WP_SHOTGUN), n = drop / msec, first = -1, i, j, k;
+	cmds[0].buttons |= button;
+	DirectY(&rest, 3, MAXQ);
+	/* the client shows the knife, or the frag once the gun's quick drop is
+	 * over, for a few frames */
+	for (i = 0; i < 4 * n && (first < 0 || i < first + 4 || i < 8); i++) {
+		pred = DirectFrame(&rest, i, msec);
+		CHECK(!clAt[i].detached && clAt[i].picWeapon == pred.weapon);
+		if (first < 0 && pred.weapon == quick) first = i;
+		if (first >= 0) CHECK(pred.weapon == quick);
+	}
+	CHECK(first >= 0);
+	k = i;
+	/* the server never began it: its snapshot, three commands back, has run Y
+	 * alone, and the gun is going down for the swap */
+	sv = rest;
+	for (j = 0; j <= k - 3; j++) {
+		pmove_t pm; usercmd_t c = cmds[j];
+		c.buttons &= ~button;
+		memset(&pm, 0, sizeof(pm)); pm.ps = &sv; pm.cmd = c; FakeReloadPmove(&pm);
+	}
+	CHECK(sv.weapon == WP_SHOTGUN && sv.weaponstate == WEAPON_DROPPING);
+	for (i = k; i < 4 * n + 40 + k; i++) {
+		pred = DirectFrame(&sv, i, msec);
+		if (pred.stats[STAT_ACTIVE_SLOT] != SLOT_PRIMARY) break;
+		CHECK(pred.weapon == WP_SHOTGUN && pred.weaponstate == WEAPON_DROPPING && !clAt[i].detached);
+	}
+	CHECK(i > k + 1 && pred.weapon == OTHER_GUN && pred.weaponstate == WEAPON_RAISING);
+	/* the cut: at k the drop's first frame, the whole picture, though the
+	 * server's drop is under way */
+	CHECK(clAt[k - 1].picWeapon == quick && clAt[k].picWeapon == WP_SHOTGUN);
+	CHECK(clAt[k].predTime < drop && clAt[k].moveDrop && clAt[k].moveTime == 0 && clAt[k].moveWeight == 1);
+	for (j = k + 1; j < i; j++)
+		CHECK(clAt[j].moveDrop && clAt[j].moveWeight == 1 &&
+			fabs(clAt[j].moveTime - (float)(j - k) * msec * clAt[k].dropLength / drop) < .01f);
+	CHECK(clAt[i - 1].moveTime < clAt[k].dropLength && clAt[i].moveDraw);
+}
+
+/* No correction, no cut: a swap from rest, YY and equipment's drop through the
+ * real picture rule, every command `msec` long. The gun at rest fades into its
+ * drop (it was on screen), YY brings it home up the drop, the next gun's draw
+ * follows the drop, and a frag's quick drop fades in the same way. */
+static void TestDropsFlow(int gun, int msec) {
+	playerState_t rest = DirectRest(gun, 0, msec), pred;
+	int i, first = -1, y2 = -1;
+	/* a swap, played out */
+	DirectY(&rest, 0, MAXQ);
+	for (i = 0; i < 400; i++) {
+		pred = DirectFrame(&rest, i, msec);
+		CHECK(!clAt[i].detached);
+		if (pred.weaponstate == WEAPON_DROPPING && first < 0) {
+			first = i;
+			CHECK(clAt[i].moveDrop && clAt[i].moveWeight > 0 && clAt[i].moveWeight < 1);
+		}
+		if (pred.weapon == OTHER_GUN) break;
+	}
+	CHECK(first >= 0 && i < 400 && clAt[i].moveDraw);
+	/* YY: the second Y two commands into the drop */
+	rest = DirectRest(gun, 0, msec);
+	for (i = 0; i < 400; i++) {
+		if (i == 0) DirectY(&rest, 0, MAXQ);
+		pred = DirectFrame(&rest, i, msec);
+		if (y2 < 0 && pred.weaponstate == WEAPON_DROPPING && pred.weaponTime <= BG_WeaponDropTime(gun) - 2 * msec) {
+			y2 = i + 2;
+			DirectY(&rest, 0, y2);
+		}
+		if (y2 >= 0 && i >= y2) break;
+	}
+	CHECK(y2 >= 0 && pred.weapon == gun && pred.weaponstate == WEAPON_READY);
+	CHECK(clAt[i].moveDrop && clAt[i].moveReturn && clAt[i].moveWeight > 0 && clAt[i].moveTime > 0);
+	/* a frag's quick drop */
+	rest = DirectRest(gun, 0, msec);
+	CHECK(rest.ammo[WP_FRAG] > 0);
+	cmds[0].buttons |= BUTTON_LETHAL;
+	for (i = 0; i < 40; i++) {
+		pred = DirectFrame(&rest, i, msec);
+		if (pred.weaponstate == WEAPON_DROPPING) break;
+	}
+	CHECK(i < 40 && pred.weapon == gun && clAt[i].moveDrop && clAt[i].moveWeight > 0 && clAt[i].moveWeight < 1);
+}
+
 /* The SF (the G19's select-fire switch) is worked as a bolt (WEAPON_BOLTING,
  * owner's rule), so the picture treats it as an action of the gun: one begun
  * on the command a G19 shot's time runs out, straight out of FIRING, is a new
  * action, not that shot's pump. A correction whose server fired but never
  * started the SF (the selector's press never reached it) then plays the SF you
  * were shown through, its own clip, to its end, and hands back at rest; it
- * never snaps it away because the shot was kept. Driven directly, as
- * TestPictureFinishesTheAction: frame 1 predicts the shot and the SF; frame
- * 2's snapshot is older than the shot, and its replay has the shot and no
- * SF. */
-static void TestSFOutOfAShot(void) {
+ * never snaps it away because the shot was kept. The fitted mode model is the
+ * gun's real mode (CG_WeapPicture_Auto, MW2's rule, the owner's choice): the
+ * server's semi-automatic all through, though the picture's own run clicks to
+ * automatic. Driven directly, as TestPictureFinishesTheAction: frame 1
+ * predicts the shot and the SF; frame 2's snapshot is older than the shot, and
+ * its replay has the shot and no SF. Every command `msec` long. */
+static void TestSFOutOfAShot(int msec) {
 	bg_class_t cl = *BG_Class(0);
 	playerState_t rest, pred, before;
 	pmove_t pm, model;
-	int i, j, k = -1, m, keep = GUN, sawSF = 0, handed = 0;
+	int i, j, k = -1, m, keep = GUN, sawSF = 0, handed = 0, picAuto = 0;
 	GUN = WP_G19;
 	memset(&rest, 0, sizeof(rest));
 	cl.slot[0] = WP_G19; cl.slot[1] = WP_MACHINEGUN;
@@ -1013,7 +1257,7 @@ static void TestSFOutOfAShot(void) {
 	rest.viewheight = DEFAULT_VIEWHEIGHT; rest.origin[2] = 24.125f; rest.groundEntityNum = ENTITYNUM_WORLD;
 	CHECK(GunAtRest(&rest) && BG_HasSelector(&rest, WP_G19) && !(rest.slotFlags[SLOT_PRIMARY] & BG_GUN_AUTO));
 	memset(cmds, 0, sizeof(cmds));
-	for (i = 0; i < 600; i++) { cmds[i].serverTime = rest.commandTime + 8 * (i + 1); cmds[i].weapon = BG_SLOT_COMMAND; }
+	for (i = 0; i < 600; i++) { cmds[i].serverTime = rest.commandTime + msec * (i + 1); cmds[i].weapon = BG_SLOT_COMMAND; }
 	cmds[0].buttons = BUTTON_ATTACK;
 	memset(&model, 0, sizeof(model)); FakeReloadModel(&model);
 	/* the command the shot's time runs out on, the trigger let go */
@@ -1024,7 +1268,7 @@ static void TestSFOutOfAShot(void) {
 	}
 	CHECK(k > 0);
 	cmds[k].buttons = BUTTON_SELECTFIRE;
-	m = k + 6;
+	m = k + (48 + msec - 1) / msec;
 	/* frame 1: prediction fires, and starts the SF straight out of the shot */
 	CG_WeapPicture_Reset();
 	numCmds = m + 1;
@@ -1039,6 +1283,7 @@ static void TestSFOutOfAShot(void) {
 	CG_WeapPicture_Update(&pred, &model, 0, m, GetCmd);
 	CG_WeapPicture_Update(&pred, &model, 0, m, GetCmd);
 	CHECK(pred.weaponstate == WEAPON_BOLTING && CG_WeapPicture_State(&pred) == &pred);
+	CHECK(!CG_WeapPicture_Auto(&pred, &pred));	/* before its click */
 	/* then the server's: it fired and never started the SF */
 	cmds[k].buttons = 0;
 	for (i = m + 1; i < 600 && !handed; i++) {
@@ -1053,16 +1298,47 @@ static void TestSFOutOfAShot(void) {
 		CG_WeapPicture_Update(&pred, &model, 0, i, GetCmd);
 		pic = CG_WeapPicture_State(&pred);
 		CHECK(pred.weaponstate != WEAPON_BOLTING && !(pred.slotFlags[SLOT_PRIMARY] & BG_GUN_AUTO));
+		/* the model the view draws: the server's mode, all through */
+		CHECK(!CG_WeapPicture_Auto(pic, &pred));
 		if (pic != &pred) {
 			CHECK(pic->weaponstate == WEAPON_BOLTING || GunAtRest(pic));
 			if (pic->weaponstate == WEAPON_BOLTING) { CHECK(pic->weaponAnimSeq == ASEQ_SELECT_AUTO); sawSF = 1; }
+			if (pic->slotFlags[SLOT_PRIMARY] & BG_GUN_AUTO) picAuto = 1;
 		} else {
 			CHECK(i > m + 1);	/* never snapped away on the correction */
 			handed = 1;
 		}
 	}
-	CHECK(sawSF && handed);
+	/* the picture's own run did click: its own mode would have drawn automatic */
+	CHECK(sawSF && handed && picAuto);
 	GUN = keep;
+}
+
+/* A real SF, nothing corrected: the fitted model is prediction's mode, and so
+ * changes on the click's command, the one whose clock crosses the close note
+ * (the click), where pmove commits the mode; semi before it, automatic from
+ * it. Every command `msec` long, the picture drawn every frame. */
+static void TestSFModel(int msec) {
+	playerState_t rest = DirectRest(WP_G19, BG_ATTACHMENT_SWITCH, msec), pred, prev;
+	int click = FakeReloadNoteTime(WP_G19, ASEQ_SELECT_AUTO, WNOTE_BOLT_CLOSED), i, flip = -1;
+	CHECK(click > 0 && !(rest.slotFlags[SLOT_PRIMARY] & BG_GUN_AUTO));
+	cmds[0].buttons = BUTTON_SELECTFIRE;
+	prev = rest;
+	for (i = 0; i < 200; i++) {
+		int shown;
+		pred = DirectFrame(&rest, i, msec);
+		shown = CG_WeapPicture_Auto(CG_WeapPicture_State(&pred), &pred);
+		CHECK(!clAt[i].detached && shown == !!(pred.slotFlags[SLOT_PRIMARY] & BG_GUN_AUTO));
+		if (shown && flip < 0) {
+			flip = i;
+			CHECK(prev.weaponstate == WEAPON_BOLTING && prev.weaponAnimSeq == ASEQ_SELECT_AUTO && prev.weaponAnimTime < click);
+			CHECK(pred.weaponstate != WEAPON_BOLTING || pred.weaponAnimTime >= click);
+		}
+		if (flip >= 0) CHECK(shown);
+		if (GunAtRest(&pred) && flip >= 0) break;
+		prev = pred;
+	}
+	CHECK(flip > 0 && i < 200);
 }
 
 /* The shot's READY command is still the shot (BG_ShotAwaitsAction): a correction
@@ -1616,8 +1892,9 @@ static void BurstloadTable(void) {
  * Counted as the burstload is: every command from the action's own (the
  * trigger's, the selector's for the SF) at that snapshot phase, Y first seen
  * on its close note's command C, found by running the phase once with the
- * action alone. What is pinned is gameplay; how the old gun's picture comes
- * back (where its drop clip starts) is the owner's to change.
+ * action alone. How the old gun's picture comes back is MW2's (the owner's
+ * choice): its drop cut in from its first frame, at the whole drop's rate
+ * (SkreeCut).
  *
  * FAKERELOAD_SKREE=check runs these checks alone. */
 static const struct { int weapon, attachment, full; const char *name; } skreeGuns[] = {
@@ -1691,7 +1968,35 @@ static skreePhase_t SkreePhase(int r, int shift) {
 	}
 	return p;
 }
-typedef struct { int nac, flash, shownMs, reloadShown; } skree_t;
+typedef struct { int nac, flash, shownMs, reloadShown, cutIn; } skree_t;
+/* The old gun coming back after the next gun was drawn, from frame k on: MW2
+ * draws it (owner's choice, 1b). On the frame prediction takes the next gun
+ * back, the old gun's drop clip is at its first frame, the whole picture, with
+ * no blend, though the server's holster is already under way; from there it
+ * runs at the rate that stretches it over the gun's whole drop time, as if the
+ * drop began on that frame, until prediction ends the drop, before the clip
+ * does, and the next gun's draw takes the picture. */
+static void SkreeCut(int k) {
+	int i, drop = BG_WeaponDropTime(GUN);
+	float len = clAt[k].dropLength;
+	CHECK(len > 0 && clAt[k].predTime < drop);
+	CHECK(clAt[k].moveDrop && clAt[k].moveTime == 0 && clAt[k].moveWeight == 1);
+	for (i = k + 1; i < numCmds && clAt[i].picWeapon == GUN; i++) {
+		CHECK(clAt[i].picState == WEAPON_DROPPING && clAt[i].moveDrop && clAt[i].moveWeight == 1);
+		CHECK(fabs(clAt[i].moveTime - (float)(i - k) * CL_FRAME * len / drop) < .01f);
+	}
+	CHECK(i < numCmds && clAt[i].picWeapon == OTHER_GUN && clAt[i].picState == WEAPON_RAISING);
+	CHECK(clAt[i].moveDraw && clAt[i - 1].moveTime < len);
+}
+/* The old gun going down with no next gun drawn first (prediction knew of X
+ * by Y's command, or showed the reload): it was on screen, so the drop flows
+ * from its pose, faded in from the gun at rest as any drop is. */
+static void SkreeFlows(int y) {
+	int i;
+	for (i = y; i < numCmds && !(clAt[i].picWeapon == GUN && clAt[i].picState == WEAPON_DROPPING); i++)
+		CHECK(clAt[i].picWeapon == GUN);
+	CHECK(i < numCmds && clAt[i].moveDrop && clAt[i].moveWeight > 0 && clAt[i].moveWeight < 1);
+}
 /* What every run with Y first seen on the close note's command obeys (y =
  * a + C, Y's first command; x, X's one command, or NONE):
  *  - Y is a swap: the next gun is in hand at the end, both sides agree, and
@@ -1746,9 +2051,12 @@ static skree_t SkreeRules(const skreePhase_t *p, int x) {
 		q.shownMs = (k - y) * CL_FRAME;
 		/* prediction learned of the reload only once Y's command was made */
 		CHECK(!O.predReload);
+		SkreeCut(k);
+		q.cutIn = BG_WeaponDropTime(GUN) - clAt[k].predTime;	/* how far into it the server's holster was */
 	} else {
 		q.reloadShown = clAt[y - 1].baseTime >= xTime;
 		CHECK(q.reloadShown == O.predReload);
+		SkreeFlows(y);
 	}
 	return q;
 }
@@ -1761,9 +2069,9 @@ static skree_t SkreeRules(const skreePhase_t *p, int x) {
  * backoff, a snapshot interval, and the round trip, or on your own host the
  * frame the host holds its snapshot. Returns how many phases drew it, and the
  * shortest and longest it was drawn. */
-static int TestSkreeXAFrameBeforeY(int r, int *shownMin, int *shownMax, int *phases) {
+static int TestSkreeXAFrameBeforeY(int r, int *shownMin, int *shownMax, int *phases, int *cutMin, int *cutMax) {
 	int shift, n = 0, flashes = 0, span = BurstSpan(r), step = BurstStep(r);
-	*shownMin = 1 << 30; *shownMax = -1;
+	*shownMin = *cutMin = 1 << 30; *shownMax = *cutMax = -1;
 	for (shift = 0; shift < span; shift += step) {
 		skreePhase_t p = SkreePhase(r, shift);
 		int y = p.a + p.C;
@@ -1779,6 +2087,8 @@ static int TestSkreeXAFrameBeforeY(int r, int *shownMin, int *shownMax, int *pha
 		CHECK(q.shownMs <= CL_TIME_BACKOFF + SnapInterval(rtts[r]) + (rtts[r] ? rtts[r] : hostHold));
 		if (q.shownMs < *shownMin) *shownMin = q.shownMs;
 		if (q.shownMs > *shownMax) *shownMax = q.shownMs;
+		if (q.cutIn < *cutMin) *cutMin = q.cutIn;
+		if (q.cutIn > *cutMax) *cutMax = q.cutIn;
 	}
 	startShift = 0;
 	*phases = n;
@@ -1882,7 +2192,7 @@ static void SkreesAt(int frame) {
 		int r, ownMin = 0, ownMax = 0;
 		GUN = skreeGuns[g].weapon; gunAttachment = skreeGuns[g].attachment; fullMag = skreeGuns[g].full;
 		for (r = 0; r <= 2; r += 2) {
-			int flashes, phases, shownMin, shownMax, far = 0, farPhases, clearMin, clearMax;
+			int flashes, phases, shownMin, shownMax, far = 0, farPhases, clearMin, clearMax, cutMin, cutMax;
 			ForgetSkrees();
 			if (fullMag) {
 				TestSkreeFullMagazineSF(r);
@@ -1890,7 +2200,7 @@ static void SkreesAt(int frame) {
 					skreeGuns[g].name, CL_FRAME, r ? "RTT 100" : "own host");
 				continue;
 			}
-			flashes = TestSkreeXAFrameBeforeY(r, &shownMin, &shownMax, &phases);
+			flashes = TestSkreeXAFrameBeforeY(r, &shownMin, &shownMax, &phases, &cutMin, &cutMax);
 			TestSkreeXWithOrAfterY(r);
 			farPhases = TestSkreeXLongBeforeY(r, !r, &far, &clearMin, &clearMax);
 			/* X a frame before Y draws the next gun at every phase online
@@ -1904,8 +2214,9 @@ static void SkreesAt(int frame) {
 			if (!r || GUN == WP_M40A3) CHECK(farPhases == phases);
 			if (!r) { ownMin = shownMin; ownMax = shownMax; }
 			else CHECK(shownMin > ownMin && shownMax > ownMax);	/* longer online */
-			printf("  skree, %-21s %2dms commands, %s: X a frame before Y draws the next gun at %3d%% of phases for %3d..%3dms",
-				skreeGuns[g].name, CL_FRAME, r ? "RTT 100" : "own host", Pct(flashes, phases), shownMin, shownMax);
+			printf("  skree, %-21s %2dms commands, %s: X a frame before Y draws the next gun at %3d%% of phases for %3d..%3dms,"
+				" then the old gun's drop from its first frame (the server's %3d..%3dms into it)",
+				skreeGuns[g].name, CL_FRAME, r ? "RTT 100" : "own host", Pct(flashes, phases), shownMin, shownMax, cutMin, cutMax);
 			if (!r) printf("; none for X from %d..%dms before Y, by phase", clearMin, clearMax);
 			if (farPhases) printf("; X %dms before, the reload, then a plain holster%s\n", far,
 				farPhases < phases ? " (at the phases where that is inside the action)" : "");
@@ -1976,7 +2287,19 @@ int main(void) {
 	TestPictureHandsBack();
 	TestPictureFinishesTheAction();
 	TestCorrectionOnTheReadyCommand();
-	TestSFOutOfAShot();
+	{
+		static const int lengths[] = { 8, 16, 33 };
+		int l, keep = GUN;
+		for (l = 0; l < 3; l++) {
+			TestSFOutOfAShot(lengths[l]); TestSFModel(lengths[l]);
+			TestCorrectionCut(WP_SHOTGUN, 0, lengths[l]); TestCorrectionCut(WP_M40A3, 0, lengths[l]);
+			TestCorrectionCut(WP_SHOTGUN, 1, lengths[l]);
+			TestCorrectionCutAfterQuick(BUTTON_MELEE, WP_KNIFE, lengths[l]);
+			TestCorrectionCutAfterQuick(BUTTON_LETHAL, WP_FRAG, lengths[l]);
+			TestDropsFlow(WP_SHOTGUN, lengths[l]); TestDropsFlow(WP_M40A3, lengths[l]);
+		}
+		GUN = keep;
+	}
 	Windows();
 	FakeReloads(); FakeBullets(); FakeBulletWindows();
 	GUN = WP_M40A3; MeasureAnchors();

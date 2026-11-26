@@ -56,7 +56,7 @@ rem Not run here: knife_corpse_test, body_ring_test and offhand_server_test (run
 rem They compile whole server files (g_client.c, g_active.c, ...) and lean on the GNU linker's
 rem dead-section removal for the symbols those name (34, 48 and 11 undefined without it);
 rem MSVC resolves symbols before it discards unreferenced functions.
-cl %test_flags% /Feout\build\loadout-tests\equipment-view.exe dev\tests\equipment_view_test.c code\cgame\cg_anim.c dev\tests\pickup_pmove_driver.c %test_game% %test_common% /link /OPT:REF
+cl %test_flags% /Feout\build\loadout-tests\equipment-view.exe dev\tests\equipment_view_test.c code\cgame\cg_anim.c code\cgame\cg_weappicture.c dev\tests\pickup_pmove_driver.c %test_game% %test_common% /link /OPT:REF
 if errorlevel 1 goto fail
 out\build\loadout-tests\equipment-view.exe
 if errorlevel 1 goto fail

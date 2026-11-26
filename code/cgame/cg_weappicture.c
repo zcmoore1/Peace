@@ -17,7 +17,15 @@ back to prediction.
 
 A correction that only removes a swap (a knife or a grenade you never really
 got out) is followed at once: a weapon you never held is never shown on its
-own, only as the continuation of a gun action already playing.
+own, only as the continuation of a gun action already playing. When the gun
+a corrected prediction puts down is not the one you were shown (a gun change
+taken back, or a knife or equipment taken back with the gun then going
+down), that drop is drawn as MW2 draws it, from its first frame
+(CG_WeapAnim_CutIn; the owner's choice): the picture was showing another
+gun, so there is no pose of this one to flow from.
+
+The G19's fitted mode model is the one thing the picture never takes from its
+own run: it is the gun's real mode, prediction's (CG_WeapPicture_Auto).
 
 Nothing here names a trick. Whatever a real desync does to the weapon, this
 draws the same way.
@@ -95,6 +103,22 @@ static void CG_WeapPicture_Follow( const playerState_t *predicted ) {
 	} else if ( replayShot >= 0 ) {
 		picShot = replayShot;
 	}
+}
+
+// The picture leaves what it was drawing ('shown', last frame's picture) for
+// a corrected prediction. When that prediction is putting down a gun other
+// than the one you were shown, it took back what you saw happen (a gun
+// change, or a knife or equipment with the gun then going down), and there is
+// no pose of that gun on screen: its drop is cut in as MW2 starts one, from
+// its first frame at the whole drop's rate (CG_WeapAnim_CutIn), not fitted to
+// the part of it the server has already run. Every other drop flows from the
+// pose on screen.
+static void CG_WeapPicture_FollowCorrection( const playerState_t *shown, const playerState_t *predicted ) {
+	if ( predicted->weaponstate == WEAPON_DROPPING && ( shown->weapon != predicted->weapon ||
+		shown->stats[STAT_ACTIVE_SLOT] != predicted->stats[STAT_ACTIVE_SLOT] ) ) {
+		CG_WeapAnim_CutIn( predicted );
+	}
+	CG_WeapPicture_Follow( predicted );
 }
 
 void CG_WeapPicture_Reset( void ) {
@@ -225,7 +249,7 @@ void CG_WeapPicture_Update( const playerState_t *predicted, const pmove_t *model
 			picBegan = qfalse;
 			CG_WeapPicture_Advance( model, first, last, getCmd );
 		} else {
-			CG_WeapPicture_Follow( predicted );
+			CG_WeapPicture_FollowCorrection( &start, predicted );
 		}
 	}
 
@@ -235,7 +259,7 @@ void CG_WeapPicture_Update( const playerState_t *predicted, const pmove_t *model
 		if ( ( CG_WeapPicture_AtRest( &pic ) && pic.weapon == predicted->weapon ) ||
 			predicted->weaponstate != WEAPON_READY || picBegan ||
 			predicted->commandTime - picDetachTime > PICTURE_MAX_DETACH ) {
-			CG_WeapPicture_Follow( predicted );
+			CG_WeapPicture_FollowCorrection( &start, predicted );
 		}
 	}
 }
@@ -243,4 +267,32 @@ void CG_WeapPicture_Update( const playerState_t *predicted, const pmove_t *model
 // The state the viewmodel draws this frame.
 const playerState_t *CG_WeapPicture_State( const playerState_t *predicted ) {
 	return picValid && picDetached ? &pic : predicted;
+}
+
+/*
+=================
+CG_WeapPicture_Auto
+
+Which fitted mode model a select-fire gun is drawn with (the G19's semi.iqm
+or auto.iqm): the gun's real mode, the one the HUD shows, read from
+prediction for the slot of the gun the picture draws. MW2 draws its weapon
+model from the predicted state every frame (BG_GetViewmodelWeaponIndex on
+cg.predictedPlayerState, 0x47F555); only the animation runs on here. So an
+SF the server never began plays through to its end (the gun never un-plays
+an action it showed) in the mode the gun is really in, and a real one
+changes the model on its click's command, where prediction commits the mode.
+The owner's choice: MW2's rule, for now. If prediction has since put another
+gun in that slot, the picture keeps its own gun's mode.
+=================
+*/
+qboolean CG_WeapPicture_Auto( const playerState_t *picture, const playerState_t *predicted ) {
+	int slot = picture->stats[STAT_ACTIVE_SLOT];
+	if ( slot < 0 || slot >= SLOT_COUNT ) {
+		return qfalse;
+	}
+	if ( predicted->stats[STAT_SLOT_PRIMARY + slot] != picture->stats[STAT_SLOT_PRIMARY + slot] ||
+		( ( predicted->slotFlags[slot] ^ picture->slotFlags[slot] ) & BG_GUN_GENERATION ) ) {
+		predicted = picture;
+	}
+	return ( predicted->slotFlags[slot] & BG_GUN_AUTO ) != 0;
 }

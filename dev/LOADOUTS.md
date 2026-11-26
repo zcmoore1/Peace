@@ -217,11 +217,18 @@ picture to the pump's at 8, 16 and 33 ms,
 `ladder_test.c`'s `TestSFLadderLikePump` the ladder, and
 `fake_reload_test.c`'s `TestSFOutOfAShot` an SF prediction was
 corrected away from (played through, never snapped). Played through, that
-picture's own run commits the mode at the click, so when the server never
-started the SF the fitted semi/auto model shows the new mode from the click
-until the picture hands back at the SF's end (the server's mode after it),
-while the HUD keeps the mode the server has (an open question for the
-owner; a pump played through has no visible commit).
+picture's own run commits the mode at the click, but the fitted semi/auto
+model is not the run's: it is the gun's real mode, prediction's, the one the
+HUD shows (`CG_WeapPicture_Auto`). The owner chose MW2's rule for this, for
+now: MW2 draws its weapon model from the predicted state every frame
+(`BG_GetViewmodelWeaponIndex` on `cg.predictedPlayerState`, 0x47F555). So
+when the server never started the SF, its clip still plays through to its
+end (the gun never un-plays an action it showed), and the model stays in the
+server's mode all through it, as the HUD does; in a real SF the picture and
+prediction commit at the same click command, so the model changes there as
+before (`TestSFOutOfAShot` and `TestSFModel` at 8, 16 and 33 ms;
+`equipment_view_test.c`'s `TestSelectorModel` through the real
+`CG_AddViewWeapon`).
 
 ## YY behavior
 

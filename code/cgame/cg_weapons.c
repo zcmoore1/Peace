@@ -1621,7 +1621,9 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		refEntity_t flash;
 		hand.hModel = weapon->viewModel;
 		if (BG_HasSelector(ps, ps->weapon)) {
-			qhandle_t fitted = weapon->selectorModel[!!(ps->slotFlags[ps->stats[STAT_ACTIVE_SLOT]] & BG_GUN_AUTO)];
+			// The fitted mode is the gun's real one, prediction's, as the HUD
+			// shows it; only the clips come from the picture's own state.
+			qhandle_t fitted = weapon->selectorModel[CG_WeapPicture_Auto(ps, &cg.predictedPlayerState)];
 			if (fitted) hand.hModel = fitted;
 		}
 		hand.renderfx = RF_DEPTHHACK | RF_FIRST_PERSON | RF_MINLIGHT;

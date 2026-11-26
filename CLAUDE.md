@@ -125,6 +125,12 @@ source for MW2 behaviour; the owner rejects it.
   the 40ms crossfade a draw ends on. A shot cuts the return immediately, and a
   returning cancel is never a retained sprint source. It holds no lock and is
   not a gameplay state. `TestFlow` drives it through the real `PM_Weapon`.
+  The one drop that does not flow is MW2's, kept for a correction after
+  which prediction puts down a gun other than the one you were shown (a gun
+  change taken back, as in the skree, or a knife or equipment taken back with
+  the gun then going down; owner's choice 1b; "The gun never un-plays an
+  action it showed", below): the picture is showing another gun, so there is
+  no pose of this one to flow from.
 - **Sprint cancellation returns along the visible transition.** Sprint, Y,
   end the sprint (it latches: a fresh press, aim, letting go of forward), Y
   transfers the retained sprint entry, carry or exit into the existing
@@ -1182,8 +1188,26 @@ source for MW2 behaviour; the owner rejects it.
   something new, never detaches into an action it began itself, and follows
   prediction again when it comes to rest or prediction starts a real action. A
   correction that only removes a swap is followed at once, so a lone knife is
-  never a fake knife. A corrected snapshot keeps the action you were shown
-  only when the server's own state there shows the same kind of action: a
+  never a fake knife. When the gun a corrected prediction is putting down is
+  not the one you were shown (the skree: the next gun drawn, then the old
+  gun going down; or a knife or equipment you were shown taken back with the
+  gun going down behind it), that drop is drawn as MW2 draws it, MW2's
+  viewmodel following the predicted state (owner's choice 1b, for these
+  corrections only): cut in on that frame at the drop clip's first frame, the
+  whole picture with no blend and every other layer let go (`StartWeaponAnim`,
+  0x59B3C0-0x59B40B), then played at the rate that stretches the clip over
+  the gun's whole drop (`GetWeaponAnimRate`, 0x59B1F0), never fitted to the
+  part the server has already run; prediction ends the drop and the next
+  gun's draw cuts the clip short (`CG_WeapPicture_FollowCorrection`,
+  `CG_WeapAnim_CutIn`). Every other drop and raise flows. The G19's fitted
+  mode model is never the picture's own: it is the gun's real mode,
+  prediction's, the one the HUD shows (`CG_WeapPicture_Auto`; MW2 draws its
+  weapon model from the predicted state, `BG_GetViewmodelWeaponIndex`,
+  0x47F555; the owner's choice, MW2's rule for now), so an SF the server
+  never began plays through in the mode the gun is really in, and a real one
+  changes the model on its click's command. A corrected snapshot keeps the
+  action you were shown only when the server's own state there shows the
+  same kind of action: a
   reload is kept only by a server that is reloading, so a server still in a
   shot when your reload began (the burstload) does not un-play it; a
   detached picture goes back to prediction as soon as prediction is not
@@ -1195,7 +1219,15 @@ source for MW2 behaviour; the owner rejects it.
   hands back to prediction, and that a shot the server never fired is drawn
   through its READY command and its whole pump or bolt, one fire clip, before
   the picture comes to rest (the shot's READY command, `BG_ShotAwaitsAction`,
-  is neither rest nor a new action).
+  is neither rest nor a new action); that a taken-back gun change cuts the old
+  gun's drop in from its first frame at the whole drop's rate, at 8, 16 and
+  33ms and at 100ms of ping (`SkreeCut`, `TestCorrectionCut`, a twin gun in
+  the other slot included), as does a knife or a frag taken back with the gun
+  going down behind it (`TestCorrectionCutAfterQuick`), and that no other
+  drop is cut (`SkreeFlows`, `TestDropsFlow`: a swap, YY and a frag's quick
+  drop); and that the fitted
+  model keeps the server's mode through a played-through SF and changes on a
+  real SF's click (`TestSFOutOfAShot`, `TestSFModel`).
   Aim, camera and HUD always read the predicted state. Run
   `dev/tests/run-fakereload.sh`; `dev/FAKE_RELOAD.md` has the measured windows.
 - **The game pad moves and aims the MW2 way (owner's rule: do what MW2 does).**
@@ -1720,7 +1752,12 @@ with the trigger up) it goes down from the lowering and the pose on screen, and
 the raise after `WEAPON_LADDER` carries no lowering. `TestLadderKeepsDrop`
 (which pinned the old ladder restamp of a running drop as `TestRestampLower`)
 is a swap's drop, or the draw it reversed, running on at its own fit across a
-ladder grab. `equipment_view_test.c`'s
+ladder grab. `TestCutIn` is the correction's cut on its own: the drop clip's
+first frame at full weight over a retained clip, a sprint and a release, the
+whole drop's rate after it (a sprint on from there carries it on at that
+rate), the cut made once (a stereo second eye, a later frame on the same
+command), and a request for another command or gun let go.
+`equipment_view_test.c`'s
 `TestLadderView` draws the same through the real `CG_AddViewWeapon`: lowered
 24 units over the holster, not drawn in `WEAPON_LADDER` or hung, the layers
 running on under it, the two ways grabbed again and the raise after the empty
@@ -1728,7 +1765,11 @@ hands; `TestLadderViewEdges` is the holster's last millisecond at 11ms commands
 (drawn with the trigger up or let go inside it, stowed under the lock), the
 frag pressed on the leaving command out of a hang (no gun drawn) and an
 ordinary swap's drop at weaponTime 1 (drawn); `TestLadderPlainGun` is a gun
-with no view model (eased home, grabbed again from where it is). That test
+with no view model (eased home, grabbed again from where it is);
+`TestSelectorModel` is the G19's fitted mode model, prediction's mode
+whatever the picture's, read for the slot of the gun the picture draws
+wherever prediction's hand is (the picture's own where prediction has another
+gun in that slot). That test
 defines every symbol `cg_weapons.c` names and is linked without
 `-Wl,--gc-sections`, as MSVC needs.
 The glide return is compared frame by frame with the ordinary sprint exit
@@ -1830,14 +1871,23 @@ the G19's SF it checks the owner's skree (`Skrees`) at 8, 16 and 33ms commands
 over every snapshot phase, Y first seen on the close note's command: X a frame
 before Y is a whole holster on the server, the pump or bolt owed (the SF lost)
 and the reload lost, while the client draws the next gun until its base has
-run X's command and then the old gun going down (longer at 100ms of ping); X
+run X's command and then the old gun going down (longer at 100ms of ping),
+its drop cut in from the clip's first frame at the whole drop's rate until
+prediction ends it (`SkreeCut`; MW2's picture, owner's choice 1b); X
 with Y or after it is a real NAC on both sides; X long before it draws the
 reload start, then a plain holster; and a G19 with a full magazine is a real
 SF NAC whatever X does. `FAKERELOAD_SKREE=check` runs its checks alone. It
 also drives the picture directly where no modelled lag reaches: a correction
 whose snapshot lands exactly on the shot's READY command keeps the shot the
 picture began (`TestCorrectionOnTheReadyCommand`: `BG_ShotAwaitsAction` is a
-gun action to `CG_WeapPicture_PredictionKept`).
+gun action to `CG_WeapPicture_PredictionKept`); at 8, 16 and 33ms commands, a
+correction that takes back a gun change cuts the old gun's drop in, one that
+only moves the same gun's drop flows on (`TestCorrectionCut`), one that takes
+back a knife or a frag with the gun going down behind it cuts that drop in
+(`TestCorrectionCutAfterQuick`), no drop
+without a correction is cut (`TestDropsFlow`), and the G19's fitted model is
+prediction's mode, through a played-through SF and on a real SF's click
+(`TestSFOutOfAShot`, `TestSFModel`).
 `FAKERELOAD_PROBE=1` prints every tap timing; `FAKERELOAD_SVFPS` changes the
 server rate; `FAKERELOAD_BULLETS=1` prints the fake bullet over every phase
 (`FAKERELOAD_CLFRAME`, `FAKERELOAD_ONLINEGAME=0` for 50ms snapshots online,

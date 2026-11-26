@@ -492,6 +492,55 @@ static void TestLadderPlainGun(void) {
  CHECK(ViewStepMs(11)==-1 && viewPs.weaponstate==WEAPON_LADDER);
  viewGun=WP_SHOTGUN; viewHandle=VIEW_GUN;
 }
+/* The G19's fitted mode model, drawn by the real CG_AddViewWeapon: the gun's
+ * real mode, prediction's (cg.predictedPlayerState, the HUD's), whatever mode
+ * the state the picture draws is in (MW2 reads its viewmodel weapon from the
+ * predicted state, 0x47F555; owner's choice). A slot prediction has filled
+ * with another gun keeps the picture's own mode. The slot read is the one of
+ * the gun the picture draws, wherever prediction's hand is. */
+#define VIEW_SEMI 6
+#define VIEW_AUTO 7
+static void TestSelectorModel(void) {
+ bg_class_t cl=*BG_Class(0); playerState_t picture; int shown,real,other;
+ memset(cg_weapons,0,sizeof(cg_weapons));
+ cg_weapons[WP_G19].registered=qtrue; cg_weapons[WP_G19].viewModel=VIEW_GUN;
+ cg_weapons[WP_G19].selectorModel[0]=VIEW_SEMI; cg_weapons[WP_G19].selectorModel[1]=VIEW_AUTO;
+ CG_WeapAnim_RegisterClips(WP_G19,VIEW_GUN,"assets/baseq3/models/weapons2/g19/view.cfg");
+ cg_drawGun.integer=1; VectorClear(cg.refdef.vieworg); AxisClear(cg.refdef.viewaxis);
+ cl.slot[0]=WP_G19; cl.slot[1]=WP_M40A3; cl.attachments[0]=BG_ATTACHMENT_SWITCH; cl.attachments[1]=0;
+ CHECK(BG_ValidateClass(&cl));
+ memset(&picture,0,sizeof(picture)); BG_ApplyClass(&picture,&cl);
+ picture.stats[STAT_HEALTH]=100; picture.weapon=WP_G19; picture.weaponstate=WEAPON_READY;
+ CHECK(BG_HasSelector(&picture,WP_G19));
+ CG_WeapAnim_Reset();
+ for(other=0;other<3;other++) for(shown=0;shown<2;shown++) for(real=0;real<2;real++) {
+  playerState_t before;
+  picture.slotFlags[SLOT_PRIMARY]=shown ? picture.slotFlags[SLOT_PRIMARY]|BG_GUN_AUTO : picture.slotFlags[SLOT_PRIMARY]&~BG_GUN_AUTO;
+  cg.predictedPlayerState=picture;
+  cg.predictedPlayerState.slotFlags[SLOT_PRIMARY]=real ? picture.slotFlags[SLOT_PRIMARY]|BG_GUN_AUTO : picture.slotFlags[SLOT_PRIMARY]&~BG_GUN_AUTO;
+  /* 1: prediction has another gun in the slot; 2: another instance (a pickup) */
+  if(other==1) cg.predictedPlayerState.stats[STAT_SLOT_PRIMARY]=WP_M16;
+  if(other==2) cg.predictedPlayerState.slotFlags[SLOT_PRIMARY]^=BG_GUN_GENERATION;
+  before=picture; cg.time+=8; cg.frametime=8; draws=0; CG_AddViewWeapon(&picture);
+  CHECK(draws==1 && !memcmp(&before,&picture,sizeof(before)));
+  CHECK(rendered[0].hModel==((other ? shown : real) ? VIEW_AUTO : VIEW_SEMI));
+  CHECK(CG_WeapPicture_Auto(&picture,&cg.predictedPlayerState)==(other ? shown : real));
+ }
+ /* prediction's hand in the other slot: the G19's own slot is read, not
+  * prediction's active one */
+ for(real=0;real<2;real++) {
+  playerState_t before;
+  picture.slotFlags[SLOT_PRIMARY]&=~BG_GUN_AUTO;
+  cg.predictedPlayerState=picture;
+  cg.predictedPlayerState.weapon=WP_M40A3; cg.predictedPlayerState.stats[STAT_ACTIVE_SLOT]=SLOT_SECONDARY;
+  if(real) cg.predictedPlayerState.slotFlags[SLOT_PRIMARY]|=BG_GUN_AUTO;
+  before=picture; cg.time+=8; cg.frametime=8; draws=0; CG_AddViewWeapon(&picture);
+  CHECK(draws==1 && !memcmp(&before,&picture,sizeof(before)));
+  CHECK(rendered[0].hModel==(real ? VIEW_AUTO : VIEW_SEMI));
+  CHECK(CG_WeapPicture_Auto(&picture,&cg.predictedPlayerState)==real);
+ }
+ memset(&cg.predictedPlayerState,0,sizeof(cg.predictedPlayerState));
+}
 int main(void) {
  FILE *file=fopen("assets/baseq3/models/weapons2/throwingknife/knife_hand.md3","rb");
  char name[64];int offset,i;
@@ -506,7 +555,7 @@ int main(void) {
  CG_WeapAnim_RegisterClips(WP_THROWING_KNIFE,2,"assets/baseq3/models/weapons2/throwingknife/throw.cfg");
  CG_WeapAnim_RegisterClips(WP_KNIFE,2,"assets/baseq3/models/weapons2/throwingknife/melee.cfg");
  TestHeld(WP_THROWING_KNIFE);TestHeld(WP_SEMTEX);TestSlash();TestGameplay();
- TestLadderView(); TestLadderViewEdges(); TestLadderPlainGun();
- printf("PASS: %i equipment/slash pose, tag, hit/release/cancel, ladder view and gameplay-immutability checks\n",checks);
+ TestLadderView(); TestLadderViewEdges(); TestLadderPlainGun(); TestSelectorModel();
+ printf("PASS: %i equipment/slash pose, tag, hit/release/cancel, ladder view, fitted mode model and gameplay-immutability checks\n",checks);
  return 0;
 }
